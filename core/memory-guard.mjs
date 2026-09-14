@@ -153,6 +153,14 @@ export function canStartHeavy(state, {
     if (projectedMiB < floorMiB) {
       return { ok: false, reason: "memory-reserve-floor" };
     }
+    // A heavy starter must not itself push the host into the level that
+    // refuses pane wakes; pane wakes keep the floor-only rule above.
+    if (heavyClass !== "pane-revive") {
+      const projected = classifyMemory({ ...state.sample, memAvailableKb: state.sample.memAvailableKb - reserveMiB * 1024 }, t);
+      if (projected === "blocked" || projected === "critical") {
+        return { ok: false, reason: `memory-projected-${projected}` };
+      }
+    }
   }
   return { ok: true, reason: state.level === "warn" ? "memory-warn-allowed" : "ok" };
 }
@@ -182,13 +190,24 @@ export function pollMemoryGuardOnce({
   return { state, previousLevel: prev?.level || null, changed: prev?.level !== state.level };
 }
 
-/** WHAT: Schedules the guard and alarms on transitions only. WHY: Keeps alarms as events, separate from a polling drip. */
+function scheduleInterval(tick, intervalMs) {
+  const timer = setInterval(tick, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
+/** WHAT: Schedules the guard, alarms on transitions and asks for relief under pressure. WHY: Keeps alarms as events and relief throttled, separate from a polling drip. */
 export function startMemoryGuard({
   intervalMs = 30_000,
+  pressureIntervalMs = 5 * 60_000,
   onTransition = () => {},
+  onPressure = () => {},
   log = (message) => console.warn(message),
+  clock = () => Date.now(),
+  schedule = scheduleInterval,
   ...pollOptions
 } = {}) {
+  let lastPressureAt = null;
   const tick = () => {
     try {
       const { state, previousLevel, changed } = pollMemoryGuardOnce(pollOptions);
@@ -199,12 +218,18 @@ export function startMemoryGuard({
         Promise.resolve(onTransition({ from: previousLevel, to: state.level, state }))
           .catch((error) => log(`memory-guard alarm failed: ${error.message}`));
       }
+      // Relief follows the live sample, not the hysteresis-held level: with
+      // memory already back, stopping daemons would free nothing anyone needs.
+      const underPressure = state.classified === "blocked" || state.classified === "critical";
+      if (underPressure && (lastPressureAt === null || clock() - lastPressureAt >= pressureIntervalMs)) {
+        lastPressureAt = clock();
+        Promise.resolve(onPressure({ state }))
+          .catch((error) => log(`memory-guard relief failed: ${error.message}`));
+      }
     } catch (error) {
       log(`memory-guard poll failed: ${error.message}`);
     }
   };
   tick();
-  const timer = setInterval(tick, intervalMs);
-  timer.unref?.();
-  return () => clearInterval(timer);
+  return schedule(tick, intervalMs);
 }

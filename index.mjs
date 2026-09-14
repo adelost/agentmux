@@ -40,7 +40,7 @@ import { createPermissionWatchdog } from "./channels/permission-watchdog.mjs";
 import { parsePermissionWatchdogConfig } from "./core/permission-watchdog.mjs";
 import { notifyUser as notifyUserDm } from "./cli/send-notify.mjs";
 import { startHeartbeat } from "./core/heartbeat.mjs";
-import { startMemoryGuard } from "./core/memory-guard.mjs";
+import { startBridgeMemoryGuard } from "./core/memory-relief.mjs";
 import { blockedDeliveryNotice } from "./core/delivery-notices.mjs";
 import { readReleaseManifest } from "./core/release-identity.mjs";
 import { resolveConfigSources } from "./core/config-sources.mjs";
@@ -198,22 +198,9 @@ function stampChannelMirror(channelId) {
 
 const discord = TOKEN ? createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror }) : null;
 
-// Memory admission guard (T1): classifies host memory pressure into a
-// durable state file and alarms on transitions only. It never kills or
-// restarts anything — automatic heavy starters (post-boot revive first)
-// consult it before launching. Alarms go to AMUX_MEMORY_ALERT_CHANNEL when
-// configured, otherwise to the bridge log.
-const memoryAlertChannel = process.env.AMUX_MEMORY_ALERT_CHANNEL || null;
-startMemoryGuard({
-  onTransition: async ({ from, to, state }) => {
-    const text = `🧠 Minnesvakt: ${from} → ${to} (MemAvailable ${Math.round((state.sample?.memAvailableKb || 0) / 1024 / 1024 * 10) / 10} GiB, SwapFree ${Math.round((state.sample?.swapFreeKb || 0) / 1024 / 1024 * 10) / 10} GiB): nya tunga automatjobb ${to === "blocked" || to === "critical" ? "stoppas" : "tillåts"}.`;
-    console.warn(`[memory-guard] ${text}`);
-    if (memoryAlertChannel && discord) {
-      await discord.send(memoryAlertChannel, text).catch((error) =>
-        console.warn(`[memory-guard] Discord alarm failed: ${error.message}`));
-    }
-  },
-});
+// Memory admission guard: classifies pressure, alarms on transitions, and
+// frees IDLE Gradle daemons while blocked (core/memory-relief.mjs).
+startBridgeMemoryGuard({ discord, alertChannel: process.env.AMUX_MEMORY_ALERT_CHANNEL || null });
 
 const resolveSleepPane = (agentName, pane) => {
   const configured = listAgents(AGENTS_YAML).find((entry) => entry.name === agentName);

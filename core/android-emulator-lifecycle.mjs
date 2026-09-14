@@ -11,6 +11,8 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { canStartHeavy, classifyMemory, parseMeminfo } from "./memory-guard.mjs";
+import { formatMemoryRelief, relieveIdleGradleDaemons } from "./memory-relief.mjs";
 
 /** WHAT: Defines the default guest-idle budget. WHY: Keeps headless emulators from consuming RAM indefinitely. */
 export const DEFAULT_ANDROID_EMULATOR_IDLE_MS = 60 * 60_000;
@@ -20,6 +22,22 @@ export const DEFAULT_ANDROID_EMULATOR_CONFIRM_MS = 5 * 60_000;
 export const DEFAULT_ANDROID_EMULATOR_STATE = join(homedir(), ".agentmux", "android-emulator-guard.json");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// One headless guest measured 3.0-3.9 GiB on 2026-09-14.
+const EMULATOR_BOOT_RESERVE_MIB = 4096;
+
+/** WHAT: Checks a cold boot against a live memory sample. WHY: Prevents a new guest from pushing the host into the level that refuses pane wakes. */
+export async function admitEmulatorBootFromMeminfo({ readMeminfo = () => readFileSync("/proc/meminfo", "utf8") } = {}) {
+  const sample = parseMeminfo(readMeminfo());
+  const verdict = canStartHeavy({ observedAt: Date.now(), level: classifyMemory(sample), sample }, {
+    class: "emulator", reserveMiB: EMULATOR_BOOT_RESERVE_MIB, bootId: null,
+  });
+  const gib = (kb) => (kb / 1024 / 1024).toFixed(1);
+  return { ...verdict, detail: `MemAvailable ${gib(sample.memAvailableKb)} GiB, swap free ${gib(sample.swapFreeKb || 0)} GiB` };
+}
+
+async function relieveIdleBuildDaemons() {
+  return formatMemoryRelief(await relieveIdleGradleDaemons());
+}
 
 /** WHAT: Parses stable ps columns. WHY: Keeps discovery independent of locale-sensitive process formatting. */
 export function parseProcessRows(text) {
@@ -296,6 +314,8 @@ export async function ensureAndroidEmulator(avd, {
   wait = sleep,
   now = Date.now(),
   logPath = null,
+  admitBoot = admitEmulatorBootFromMeminfo,
+  relieve = relieveIdleBuildDaemons,
 } = {}) {
   if (!/^[A-Za-z0-9._-]+$/u.test(String(avd || ""))) throw new Error("AVD name must contain only letters, digits, dot, underscore or dash");
   const state = readAndroidEmulatorState(statePath);
@@ -327,6 +347,14 @@ export async function ensureAndroidEmulator(avd, {
   const avds = String(exec(tools.emulator, ["-list-avds"], { encoding: "utf8", timeout: 10_000 }))
     .split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
   if (!avds.includes(avd)) throw new Error(`AVD ${avd} is not installed`);
+  let admission = await admitBoot();
+  if (!admission.ok) {
+    const relief = await relieve();
+    admission = await admitBoot();
+    if (!admission.ok) {
+      throw new Error(`memory guard refused booting ${avd}: ${admission.reason}${admission.detail ? ` (${admission.detail})` : ""}; relief: ${relief}. Stop an emulator you are done with (amux emulator reap) or retry after builds finish.`);
+    }
+  }
 
   if (!existsSync(tools.emulator)) throw new Error(`Android emulator executable not found at ${tools.emulator}`);
   const outputPath = logPath || join(homedir(), ".agentmux", `android-emulator-${selectedPort}.log`);
