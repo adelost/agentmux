@@ -8,10 +8,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.RingIcons
@@ -24,6 +27,8 @@ import com.adelost.ringkit.ui.RingPressLifecycle
 import com.adelost.ringkit.ui.RingPressLifecycleSpec
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.VoiceUploadPolicy
+import io.agentmux.wakeword.WakePhase
+import io.agentmux.wakeword.WakeStatus
 import kotlinx.coroutines.delay
 
 /** Why the same recorder control is ready, recoverable, or unavailable. */
@@ -55,6 +60,8 @@ data class LinkCaptureSpec(
     val startedAtMs: Long,
     val availability: LinkCaptureAvailability,
     val byteLimit: Long? = null,
+    /** The hands-free loop; OFF on hosts without a wake word. */
+    val wake: WakeStatus = WakeStatus(),
 )
 
 /**
@@ -76,22 +83,27 @@ fun LinkCaptureControl(
     var elapsedMs by remember { mutableLongStateOf(0L) }
     var bytes by remember { mutableLongStateOf(0L) }
     val levels = remember { mutableStateListOf<Float>() }
-    LaunchedEffect(spec.phase, spec.startedAtMs) {
-        while (spec.phase == CapturePhase.LISTENING) {
-            elapsedMs = (System.currentTimeMillis() - spec.startedAtMs).coerceAtLeast(0L)
-            bytes = recordedBytes()
+    val handsFree = linkHandsFreeTalk(spec.wake)
+        ?.takeIf { spec.phase == CapturePhase.IDLE && spec.availability == LinkCaptureAvailability.Ready }
+    val handsFreeRecording = handsFree?.recording == true
+    val latestWake by rememberUpdatedState(spec.wake)
+    val haptics = LocalHapticFeedback.current
+    LaunchedEffect(spec.phase, spec.startedAtMs, handsFreeRecording) {
+        if (handsFreeRecording) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        val startedAtMs = if (handsFreeRecording) System.currentTimeMillis() else spec.startedAtMs
+        while (spec.phase == CapturePhase.LISTENING || handsFreeRecording) {
+            elapsedMs = (System.currentTimeMillis() - startedAtMs).coerceAtLeast(0L)
+            if (!handsFreeRecording) bytes = recordedBytes()
             if (levels.size == AUDIO_LEVEL_COUNT) levels.removeAt(0)
-            levels += recordedLevel().coerceIn(0f, 1f)
+            levels += (if (handsFreeRecording) latestWake.hearing?.level ?: 0f else recordedLevel()).coerceIn(0f, 1f)
             delay(AUDIO_LEVEL_SAMPLE_MS)
         }
-        if (spec.phase != CapturePhase.LISTENING) {
-            elapsedMs = 0L
-            bytes = 0L
-            levels.clear()
-        }
+        elapsedMs = 0L
+        bytes = 0L
+        levels.clear()
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
-        val recording = spec.phase == CapturePhase.LISTENING
+        val recording = spec.phase == CapturePhase.LISTENING || handsFreeRecording
         // Keep the atom's measured space, including font metrics. Inserting it
         // at BEGIN moves the held control away from the original finger.
         RingAudioCaptureFeedback(
@@ -115,7 +127,7 @@ fun LinkCaptureControl(
             else -> RingPressLifecycle(
                 spec = RingPressLifecycleSpec(
                     holdMs = 0L,
-                    label = when (spec.phase) {
+                    label = handsFree?.label ?: when (spec.phase) {
                         CapturePhase.LISTENING -> "RELEASE TO SEND"
                         CapturePhase.FINALIZING -> "SENDING"
                         CapturePhase.FAILED -> "TRY AGAIN"
@@ -125,16 +137,18 @@ fun LinkCaptureControl(
                             is LinkCaptureAvailability.Recoverable -> error("handled above")
                         }
                     },
-                    active = spec.phase == CapturePhase.LISTENING,
+                    active = recording,
                     enabled = availability == LinkCaptureAvailability.Ready,
-                    sub = when (availability) {
+                    centerValue = handsFree?.centerValue,
+                    sub = handsFree?.sub ?: when (availability) {
                         LinkCaptureAvailability.Ready -> VoiceUploadPolicy.warning(bytes, spec.byteLimit)
                             ?.let { if (bytes > (spec.byteLimit ?: Long.MAX_VALUE)) "OVER 5 MB" else "5 MB SOON" }
                             ?: if (recording) "SLIDE AWAY TO CANCEL" else ""
                         is LinkCaptureAvailability.Blocked -> availability.detail
                         is LinkCaptureAvailability.Recoverable -> availability.detail
                     },
-                    onBegin = onBegin,
+                    // While hands-free hears or sends a question, holding would fight it for the microphone.
+                    onBegin = { spec.wake.phase !in HANDS_FREE_OWNS_MICROPHONE && onBegin() },
                     onRelease = onRelease,
                     onCancel = onCancel,
                 ),
@@ -144,5 +158,6 @@ fun LinkCaptureControl(
     }
 }
 
+private val HANDS_FREE_OWNS_MICROPHONE = setOf(WakePhase.CAPTURING, WakePhase.FOLLOW_UP, WakePhase.SENDING)
 private const val AUDIO_LEVEL_COUNT = 24
 private const val AUDIO_LEVEL_SAMPLE_MS = 100L

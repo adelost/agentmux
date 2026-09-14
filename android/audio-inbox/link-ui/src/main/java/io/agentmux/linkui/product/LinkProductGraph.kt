@@ -83,25 +83,18 @@ open class LinkProductGraph(
     val activePage: StateFlow<LinkRoute>
 
     /** The capture control's host-neutral spec, derived beside the talk model. */
-    val captureSpec: StateFlow<LinkCaptureSpec> = combine(
-        state,
-        microphoneGranted,
-    ) { current, granted ->
-        LinkCaptureSpec(
-            phase = current.capture,
-            startedAtMs = current.captureStartedAtMs,
-            availability = current.captureAvailability(granted),
-            byteLimit = captureByteLimit(),
-        )
-    }.hot {
-        state.value.let {
+    val captureSpec: StateFlow<LinkCaptureSpec> = run {
+        // Hands-free drives the same talk control as holding it, so both kinds of listening look alike.
+        val specOf = { current: LinkState, granted: Boolean, wake: WakeStatus ->
             LinkCaptureSpec(
-                phase = it.capture,
-                startedAtMs = it.captureStartedAtMs,
-                availability = it.captureAvailability(microphoneGranted.value),
+                phase = current.capture,
+                startedAtMs = current.captureStartedAtMs,
+                availability = current.captureAvailability(granted),
                 byteLimit = captureByteLimit(),
+                wake = wake,
             )
         }
+        combine(state, microphoneGranted, wakeStatus, specOf).hot { specOf(state.value, microphoneGranted.value, wakeStatus.value) }
     }
 
     val inspections: Flow<List<com.adelost.ringkit.ports.CirclePortInspection>> = runtime.inspectionFlow()

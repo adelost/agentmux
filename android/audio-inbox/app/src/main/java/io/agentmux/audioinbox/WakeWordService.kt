@@ -13,6 +13,7 @@ import io.agentmux.wakeword.TurnStage
 import io.agentmux.wakeword.UtteranceEnd
 import io.agentmux.wakeword.WAKE_SAMPLE_RATE
 import io.agentmux.wakeword.WakeEvent
+import io.agentmux.wakeword.WakeHearing
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakeWordDetector
 import io.agentmux.wakeword.WakeWordModels
@@ -131,6 +132,8 @@ class WakeWordService : Service(), WakeLoopListener {
         earcons?.heard()
     }
 
+    override fun onHearing(hearing: WakeHearing) = MainThread.run { LinkWakeStatus.apply(WakeEvent.Heard(hearing)) }
+
     override fun onQuestion(end: UtteranceEnd, pcm: ShortArray, startedAtMs: Long) {
         if (end == UtteranceEnd.NO_SPEECH) {
             MainThread.run {
@@ -185,7 +188,8 @@ class WakeWordService : Service(), WakeLoopListener {
 
     private fun observeStatus() {
         scope.launch {
-            LinkWakeStatus.status.collect { status ->
+            // The voice level changes 12 times a second; the notification only needs the phase and detail.
+            LinkWakeStatus.status.map { it.copy(hearing = null) }.distinctUntilChanged().collect { status ->
                 if (micThread != null) WakeNotifications.update(this@WakeWordService, status)
             }
         }

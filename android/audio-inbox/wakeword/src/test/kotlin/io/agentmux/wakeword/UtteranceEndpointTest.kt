@@ -22,10 +22,22 @@ class UtteranceEndpointTest {
         assertEquals(UtteranceEnd.NO_SPEECH to 5_040, run(List(100) { 0f }))
     }
 
+    // Mattias 2026-09-14: 1.2 s was "alldeles för het på gröten"; he asked for two to three seconds.
     @Test
-    fun aPauseAfterSpeechFinishesTheQuestion() {
+    fun aPauseOfTwoAndAHalfSecondsAfterSpeechFinishesTheQuestion() {
         val spoken = List(10) { 0f } + List(25) { 0.9f } + List(40) { 0f }
-        assertEquals(UtteranceEnd.COMPLETE to (35 * 80 + 1_200), run(spoken))
+        assertEquals(UtteranceEnd.COMPLETE to (35 * 80 + 32 * 80), run(spoken))
+        assertEquals(UtteranceEnd.NONE, run(List(25) { 0.9f } + List(25) { 0f }).first)
+    }
+
+    @Test
+    fun aPauseCountsDownToSendingAndSpeakingAgainResetsIt() {
+        fun after(probabilities: List<Float>) =
+            probabilities.fold(UtteranceProgress()) { progress, probability -> progress.advance(probability, policy) }
+        assertEquals(null, after(List(10) { 0f }).sendsInMs(policy))
+        assertEquals(null, after(List(10) { 0.9f }).sendsInMs(policy))
+        assertEquals(2_500 - 10 * 80, after(List(10) { 0.9f } + List(10) { 0f }).sendsInMs(policy))
+        assertEquals(null, after(List(10) { 0.9f } + List(10) { 0f } + List(1) { 0.9f }).sendsInMs(policy))
     }
 
     @Test

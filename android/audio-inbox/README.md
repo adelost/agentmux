@@ -45,11 +45,13 @@ remains a separate user-requested channel.
 **Wake word** is off by default and phone-only. When turned on, the foreground
 `WakeWordService` owns one microphone, shows an ongoing notification with Stop,
 and runs `computer` detection on device. After the word it records the question
-until 1.2 s of silence (Silero VAD, 30 s cap), encodes the same AAC/MPEG-4 file
+until 2.5 s of silence (Silero VAD, 30 s cap), encodes the same AAC/MPEG-4 file
 as push-to-talk and submits it through the shared conversation owner to the
 selected target. It plays short tones while waiting, reads the reply aloud with
 `POST /api/tts` and then listens again. Every stop reason is shown in the
-notification and the Settings status row. Turning it on asks for Unrestricted
+notification and the Settings status row. On the home screen the talk ring shows
+it like holding HOLD TO TALK: listening, live voice level and the countdown
+before a paused question is sent. Turning it on asks for Unrestricted
 battery use so the phone does not stop the listening service; Stop in the
 notification turns the preference off. Without the toggle Link never opens a
 background microphone.

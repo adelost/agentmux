@@ -5,6 +5,7 @@ import io.agentmux.wakeword.SileroSpeechProbability
 import io.agentmux.wakeword.UtteranceEnd
 import io.agentmux.wakeword.UtteranceProgress
 import io.agentmux.wakeword.WAKE_CHUNK_SAMPLES
+import io.agentmux.wakeword.WakeHearing
 import io.agentmux.wakeword.WakeWordDetector
 
 // The phrase's last syllable and the confirmation beep: neither is part of the question.
@@ -13,6 +14,8 @@ private const val WAKE_TAIL_CHUNKS = 4
 /** What the microphone thread reports to the service's main-thread reducer. */
 internal interface WakeLoopListener {
     fun onDetected(score: Float)
+    /** Every captured chunk of a question: its voice level and the countdown to sending. */
+    fun onHearing(hearing: WakeHearing)
     fun onQuestion(end: UtteranceEnd, pcm: ShortArray, startedAtMs: Long)
     fun onSourceStopped()
 }
@@ -50,7 +53,9 @@ internal class WakeListeningLoop(
             }
             val capturing = question
             if (capturing != null) {
-                if (capturing.accept(chunk)) {
+                val finished = capturing.accept(chunk)
+                capturing.hearing?.let(listener::onHearing)
+                if (finished) {
                     listener.onQuestion(capturing.end, capturing.pcm(), capturing.startedAtMs)
                     question = null
                     detector.reset()
@@ -62,6 +67,7 @@ internal class WakeListeningLoop(
                 lastFollowUp = window
                 vad.reset()
                 question = QuestionCapture(vad, followUpPolicy, skipChunks = 0).also { it.accept(chunk) }
+                question.hearing?.let(listener::onHearing)
                 continue
             }
             if (!detectionAllowed()) continue
@@ -86,6 +92,9 @@ private class QuestionCapture(
     private var progress = UtteranceProgress()
     var end = UtteranceEnd.NONE
         private set
+    /** Null until the first chunk after the wake phrase's tail. */
+    var hearing: WakeHearing? = null
+        private set
 
     /** True once the question is finished. */
     fun accept(chunk: ShortArray): Boolean {
@@ -96,6 +105,7 @@ private class QuestionCapture(
         chunks += chunk.copyOf()
         progress = progress.advance(vad.probability(chunk), policy)
         end = progress.end(policy)
+        hearing = WakeHearing(peakLevel(chunk), progress.speechMs > 0, progress.sendsInMs(policy))
         return end != UtteranceEnd.NONE
     }
 
@@ -106,3 +116,7 @@ private class QuestionCapture(
         return all
     }
 }
+
+/** The same 0..1 meter scale as holding HOLD TO TALK, from the chunk's loudest sample. */
+private fun peakLevel(chunk: ShortArray): Float =
+    normalizeAmplitude(chunk.maxOf { kotlin.math.abs(it.toInt()) }.coerceAtMost(32_767))
