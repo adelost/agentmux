@@ -24,6 +24,23 @@ function tailLines(text, n) {
   return text.split("\n").map((l) => l.trimEnd()).filter(Boolean).slice(-n);
 }
 
+// Claude Code's current workspace trust menu. It preselects "No, exit", so a
+// bare Enter closes the pane instead of starting it. Match only while the menu
+// is the last thing on screen, and return which option the cursor is on.
+function activeWorkspaceTrustCursor(text) {
+  const lines = tailLines(text, 14);
+  if (!/^Enter to confirm\s*·\s*Esc to cancel$/u.test(lines.at(-1)?.trim() || "")) return null;
+  const block = lines.join("\n");
+  if (!/Is this a project you created or one you trust\?/u.test(block)) return null;
+  const options = lines.map((line) => line.trim()).filter((line) => /(?:^|❯\s*)(?:No, exit|Yes, I trust this folder)$/u.test(line));
+  const exit = options.findIndex((line) => line.endsWith("No, exit"));
+  const trust = options.findIndex((line) => line.endsWith("Yes, I trust this folder"));
+  if (options.length !== 2 || exit < 0 || trust < 0) return null;
+  const cursor = options.findIndex((line) => line.startsWith("❯"));
+  if (cursor === trust) return "trust";
+  return cursor === exit && trust === exit + 1 ? "exit-above-trust" : null;
+}
+
 export const BLOCKING_PROMPTS = [
   {
     name: "trust-directory",
@@ -39,6 +56,20 @@ export const BLOCKING_PROMPTS = [
           && /do you trust the contents of this directory/i.test(last8)
           && /1\.\s*yes,\s*continue/i.test(last8);
     },
+    keys: "Enter",
+    waitMs: 2000,
+  },
+  {
+    name: "workspace-trust",
+    // A configured pane always starts in agentmux's own .agents/N directory, so
+    // trusting that folder is the launch the operator already chose.
+    match: (text) => activeWorkspaceTrustCursor(text) === "exit-above-trust",
+    keys: "Down Enter",
+    waitMs: 2000,
+  },
+  {
+    name: "workspace-trust",
+    match: (text) => activeWorkspaceTrustCursor(text) === "trust",
     keys: "Enter",
     waitMs: 2000,
   },
