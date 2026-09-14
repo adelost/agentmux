@@ -55,6 +55,21 @@ without the model, and answers an unknown `//command` with the list instead of s
   then reads status again and answers `WSL är omstartat: boot A -> B` or
   `WSL startades INTE om: samma boot A`. A trailing `--receipt ID` is accepted and not checked.
 
+Every order runs at most once. A Discord message is consumed in the same state write that accepts
+it, before any tool runs, so a reply that fails to send is kept in `pendingReplies` and retried
+as a message on the next polls (up to 12 attempts) while new orders wait behind it. It is never
+re-executed. Tools that change Windows or WSL (`start_bridge`, `start_wsl`, `recover`,
+`restart_wsl`) are also recorded per order in `managerOrders` before they run, so a redelivered
+phone or Link message is refused with `refused:already-executed`.
+
+Once a minute the manager checks `wsl.exe --list --running` and reads the boot ID only from a
+distro that is already running, so the watch never starts a WSL someone shut down. A boot change
+the manager did not order (a manual `wsl --shutdown`, a Windows reboot, a crash) posts
+`WSL har startat om (inte via //restart-wsl): boot A -> B.` once. The last boot is persisted, so
+a manager restart neither repeats nor misses it. A turn that already reported its own restart
+stays silent; if WSL came back only after that answer, the watch posts
+`WSL är uppe igen efter //restart-wsl: boot A -> B.`
+
 Create the receipt immediately before a planned restart:
 
 ```bash

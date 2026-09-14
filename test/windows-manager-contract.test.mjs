@@ -8,6 +8,7 @@ const MGR = readFileSync(join(ROOT, "bin", "windows-manager.mjs"), "utf8");
 const RESCUE = readFileSync(join(ROOT, "bin", "windows-rescue-tool.ps1"), "utf8");
 const CORE = readFileSync(join(ROOT, "core", "windows-manager.mjs"), "utf8");
 const DISCORD = readFileSync(join(ROOT, "core", "windows-manager-discord.mjs"), "utf8");
+const BOOT = readFileSync(join(ROOT, "core", "windows-manager-boot.mjs"), "utf8");
 const TURN = MGR.slice(
   MGR.indexOf("export async function runManagerTurn"),
   MGR.indexOf("export async function pollManagerChannel"),
@@ -158,7 +159,9 @@ feature("windows manager source contract", () => {
       expect(CORE).toContain("planRescueCommand");
       expect(MGR).toContain("planRescueCommand({ name, beforeBootId })");
       expect(MGR).toContain("mapRecoveryChainResults");
-      expect(MGR).toContain("trackManagerBootId(state, observation)");
+      // Turn observations track boot ids through the boot watch helper, which also announces unordered reboots.
+      expect(MGR).toContain("noteBootObservation(state, observation");
+      expect(BOOT).toContain("trackManagerBootId(state, observation)");
       expect(MGR).toContain("beforeBootId: state.prevBootId || null");
       expect(MGR).toContain("skipped:before-boot-unknown");
       expect(MGR).toContain('"-BeforeBootId", plan.beforeBootId');

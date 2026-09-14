@@ -177,6 +177,7 @@ if ($Install) {
     @{ from = (Join-Path $repoRoot "core\windows-manager-commands.mjs"); name = "core/windows-manager-commands.mjs" },
     @{ from = (Join-Path $repoRoot "core\runtime-defaults.mjs"); name = "core/runtime-defaults.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-discord.mjs"); name = "core/windows-manager-discord.mjs" },
+    @{ from = (Join-Path $repoRoot "core\windows-manager-boot.mjs"); name = "core/windows-manager-boot.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-input.mjs"); name = "core/windows-manager-input.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-phone.mjs"); name = "core/windows-manager-phone.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-phone-runtime.mjs"); name = "core/windows-manager-phone-runtime.mjs" },
