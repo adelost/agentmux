@@ -20,6 +20,8 @@ import io.agentmux.wakeword.WakeWordDetector
 import io.agentmux.wakeword.WakeWordModels
 import io.agentmux.wakeword.listensForWakeWord
 import io.agentmux.wakeword.questionCancellable
+import io.agentmux.wakeword.acceptsCapture
+import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -76,7 +78,7 @@ class WakeWordService : Service(), WakeLoopListener {
         LinkWakePhraseChoice.restore(this)
         val status = LinkWakeStatus.apply(WakeEvent.Start)
         try {
-            startForeground(WAKE_NOTIFICATION_ID, WakeNotifications.build(this, status), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            ServiceCompat.startForeground(this, WAKE_NOTIFICATION_ID, WakeNotifications.build(this, status), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         } catch (error: RuntimeException) {
             stop("Android refused the microphone service · ${error.message.orEmpty().take(80)}")
             return
@@ -168,10 +170,11 @@ class WakeWordService : Service(), WakeLoopListener {
     }
 
     override fun onQuestion(end: UtteranceEnd, pcm: ShortArray, startedAtMs: Long) {
+        val detection = LinkWakeStatus.status.value.detections
         if (end == UtteranceEnd.NO_SPEECH) {
             MainThread.run {
-                val afterWakePhrase = LinkWakeStatus.status.value.phase == WakePhase.CAPTURING
-                LinkWakeStatus.apply(WakeEvent.CaptureEnded(end, null))
+                val afterWakePhrase = LinkWakeStatus.status.value.acceptsCapture(detection)
+                LinkWakeStatus.apply(WakeEvent.CaptureEnded(end, null, detection))
                 if (afterWakePhrase) earcons?.failed()
             }
             return
@@ -180,14 +183,14 @@ class WakeWordService : Service(), WakeLoopListener {
             val turnId = UUID.randomUUID().toString()
             val file = File(cacheDir, "wake-$turnId.m4a")
             val encoded = runCatching { PcmAacEncoder.encode(pcm, WAKE_SAMPLE_RATE, file) }
-            MainThread.run { submit(end, PushToTalkRecorder.Capture(turnId, file, startedAtMs), encoded.exceptionOrNull()) }
+            MainThread.run { submit(end, PushToTalkRecorder.Capture(turnId, file, startedAtMs), detection, encoded.exceptionOrNull()) }
         }
     }
 
-    private fun submit(end: UtteranceEnd, capture: PushToTalkRecorder.Capture, encodingError: Throwable?) {
-        val held = coordinator ?: return
+    private fun submit(end: UtteranceEnd, capture: PushToTalkRecorder.Capture, detection: Int, encodingError: Throwable?) {
+        val held = coordinator
         // Cancelled while it was being encoded: the question never becomes a turn.
-        if (!LinkWakeStatus.status.value.questionCancellable()) {
+        if (held == null || !LinkWakeStatus.status.value.acceptsCapture(detection)) {
             capture.file.delete()
             return
         }
@@ -198,7 +201,7 @@ class WakeWordService : Service(), WakeLoopListener {
             else -> null
         }
         if (failure != null) capture.file.delete()
-        LinkWakeStatus.apply(WakeEvent.CaptureEnded(end, capture.turnId.takeIf { failure == null }, failure ?: ""))
+        LinkWakeStatus.apply(WakeEvent.CaptureEnded(end, capture.turnId.takeIf { failure == null }, detection, failure ?: ""))
         if (failure == null) earcons?.sent() else earcons?.failed()
     }
 

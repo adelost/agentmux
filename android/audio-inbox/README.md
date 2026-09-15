@@ -24,9 +24,10 @@ local history and signed updates are under Link settings.
 
 ## Conversation and audio behavior
 
-Text and voice turns share the same idempotent conversation model. Recording
-exists only while the foreground push-to-talk control is held; release submits
-one turn. Link stores a bounded local projection so a restarted Activity can
+Text and voice turns share the same idempotent conversation model. Push-to-talk
+records while its foreground control is held; release submits one turn.
+The optional wake word starts a separate hands-free question as described below.
+Link stores a bounded local projection so a restarted Activity can
 show recent turns without making that projection the server authority.
 
 **Read replies** is off by default. When enabled, Link requests an MP3 from
@@ -49,7 +50,11 @@ in Settings). After the phrase it records the question
 until 2.5 s of silence (Silero VAD, 30 s cap), encodes the same AAC/MPEG-4 file
 as push-to-talk and submits it through the shared conversation owner to the
 selected target. It plays short tones while waiting, reads the reply aloud with
-`POST /api/tts` and then listens again. Every stop reason is shown in the
+`POST /api/tts` and then waits for the next wake phrase. Speech without that phrase
+does not start another question. The phrase can interrupt reply playback and start
+the next question. Tapping the talk ring while it says LISTENING cancels that
+question; its audio is discarded, including an encoding result that arrives late.
+Every stop reason is shown in the
 notification and the Settings status row. On the home screen the talk ring shows
 it like holding HOLD TO TALK: listening, live voice level and the countdown
 before a paused question is sent. Turning it on asks for Unrestricted

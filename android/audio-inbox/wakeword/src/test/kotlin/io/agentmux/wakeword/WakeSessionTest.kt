@@ -7,7 +7,7 @@ class WakeSessionTest {
     private fun sent(): WakeStatus = WakeStatus()
         .reduce(WakeEvent.Start)
         .reduce(WakeEvent.Detected(0.97f))
-        .reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t1"))
+        .reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t1", detection = 1))
 
     private fun WakeStatus.after(stage: TurnStage, error: String = "") =
         reduce(WakeEvent.TurnChanged(TurnProgress(stage, error)))
@@ -39,8 +39,8 @@ class WakeSessionTest {
         assertEquals(null, listening.reduce(WakeEvent.Heard(heard)).hearing)
         val capturing = listening.reduce(WakeEvent.Detected(0.97f)).reduce(WakeEvent.Heard(heard))
         assertEquals(heard, capturing.hearing)
-        assertEquals(null, capturing.reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t1")).hearing)
-        assertEquals(null, capturing.reduce(WakeEvent.CaptureEnded(UtteranceEnd.NO_SPEECH, null)).hearing)
+        assertEquals(null, capturing.reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t1", detection = 1)).hearing)
+        assertEquals(null, capturing.reduce(WakeEvent.CaptureEnded(UtteranceEnd.NO_SPEECH, null, detection = 1)).hearing)
     }
 
     @Test
@@ -65,8 +65,8 @@ class WakeSessionTest {
     fun afterASpokenReplyNothingIsSentUntilTheWakeWordIsHeardAgain() {
         val waiting = sent().after(TurnStage.SPOKEN)
         assertEquals(WakePhase.LISTENING to "", waiting.phase to waiting.detail)
-        assertEquals(waiting, waiting.reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t2")))
-        val asked = waiting.reduce(WakeEvent.Detected(0.9f)).reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t2"))
+        assertEquals(waiting, waiting.reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t2", detection = 1)))
+        val asked = waiting.reduce(WakeEvent.Detected(0.9f)).reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t2", detection = 2))
         assertEquals(WakePhase.SENDING to "t2", asked.phase to asked.turnId)
     }
 
@@ -74,7 +74,17 @@ class WakeSessionTest {
     fun aQuestionCancelledWhileHeardIsNeverSent() {
         val cancelled = WakeStatus().reduce(WakeEvent.Start).reduce(WakeEvent.Detected(0.9f)).reduce(WakeEvent.QuestionCancelled)
         assertEquals(WakePhase.LISTENING to QUESTION_CANCELLED, cancelled.phase to cancelled.detail)
-        assertEquals(cancelled, cancelled.reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t1")))
+        assertEquals(cancelled, cancelled.reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t1", detection = 1)))
+    }
+
+    @Test
+    fun anOldEncodedQuestionCannotReplaceTheQuestionStartedAfterCancellation() {
+        val first = WakeStatus().reduce(WakeEvent.Start).reduce(WakeEvent.Detected(0.9f))
+        val oldCompletion = WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "cancelled-question", detection = first.detections)
+        val second = first.reduce(WakeEvent.QuestionCancelled).reduce(WakeEvent.Detected(0.95f))
+        assertEquals(false, second.acceptsCapture(first.detections))
+        assertEquals(true, second.acceptsCapture(second.detections))
+        assertEquals(second, second.reduce(oldCompletion))
     }
 
     @Test
@@ -94,7 +104,7 @@ class WakeSessionTest {
     @Test
     fun silenceAfterTheWakeWordSendsNothing() {
         val status = WakeStatus().reduce(WakeEvent.Start).reduce(WakeEvent.Detected(0.9f))
-            .reduce(WakeEvent.CaptureEnded(UtteranceEnd.NO_SPEECH, null))
+            .reduce(WakeEvent.CaptureEnded(UtteranceEnd.NO_SPEECH, null, detection = 1))
         assertEquals(WakeStatus(WakePhase.LISTENING, null, "Heard the wake word but no question", 0.9f, 1), status)
     }
 }

@@ -54,6 +54,7 @@ sealed interface WakeEvent {
     data class CaptureEnded(
         val end: UtteranceEnd,
         val turnId: String?,
+        val detection: Int,
         val failure: String = "Could not send the question",
     ) : WakeEvent
     data class TurnChanged(val progress: TurnProgress) : WakeEvent
@@ -94,7 +95,7 @@ private fun WakeStatus.tracksTurn(): Boolean =
     turnId != null && (phase == WakePhase.SENDING || phase == WakePhase.THINKING || phase == WakePhase.SPEAKING)
 
 private fun WakeStatus.captureEnded(event: WakeEvent.CaptureEnded): WakeStatus {
-    if (phase != WakePhase.CAPTURING) return this
+    if (!acceptsCapture(event.detection)) return this
     return when {
         event.end == UtteranceEnd.NO_SPEECH -> listening("Heard the wake word but no question")
         event.turnId == null -> listening(event.failure)
@@ -118,6 +119,9 @@ const val QUESTION_CANCELLED = "Cancelled"
 
 /** A capture may still be dropped until the host has submitted it; after SENDING the turn exists. */
 fun WakeStatus.questionCancellable(): Boolean = phase == WakePhase.CAPTURING
+
+/** Encoding may finish after cancellation and another wake phrase. Only its own capture may be submitted. */
+fun WakeStatus.acceptsCapture(detection: Int): Boolean = questionCancellable() && detections == detection
 
 private fun WakeStatus.listening(detail: String): WakeStatus =
     copy(phase = WakePhase.LISTENING, turnId = null, detail = detail, hearing = null)
