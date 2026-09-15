@@ -96,6 +96,11 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
       throw new Error(`agentmux.yaml: agent '${name}' has invalid kimiModel '${kimiModel}'`);
     }
     const codingPaneCount = claudeCount + codexCount + kimiCount;
+    const orchestrator = config.orchestrator;
+    if (orchestrator !== undefined
+        && (!Number.isSafeInteger(orchestrator) || orchestrator < 0 || orchestrator >= codingPaneCount)) {
+      throw new Error(`agentmux.yaml: agent '${name}' has invalid orchestrator pane`);
+    }
     if (backend === "native" && kimiCount > 0) {
       throw new Error(`agentmux.yaml: native agent '${name}' cannot define Kimi tmux panes`);
     }
@@ -128,6 +133,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
       layout: resolveTmuxLayout(config.layout),
       labels,
       interAgentSend: config.interAgentSend,
+      orchestrator: orchestrator ?? null,
       backend,
       runtimeUrl: backend === "native"
         ? String(config.runtime || "http://127.0.0.1:8811").replace(/\/+$/, "")
@@ -359,6 +365,7 @@ export function generateAgentsYaml(
       id: agentIds.get(name) || randomUUID(),
     };
     if (typeof config.interAgentSend === "boolean") entry.interAgentSend = config.interAgentSend;
+    if (Number.isSafeInteger(config.orchestrator)) entry.orchestrator = config.orchestrator;
     if (config.backend === "native") {
       entry.backend = "native";
       entry.runtimeUrl = config.runtimeUrl;

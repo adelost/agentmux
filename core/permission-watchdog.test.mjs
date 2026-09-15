@@ -117,6 +117,13 @@ describe("detectPermissionPrompt, boxed reason", () => {
     expect(p.command).toContain("ls reply-audio | wc -l");
     expect(p.command).not.toContain("Dangerous rm operation");
   });
+
+  it("uses only the latest live modal when an older modal remains in scrollback", () => {
+    const prompt = detectPermissionPrompt(`${LSRC0_SCREEN}\n${CLAW0_SCREEN}`);
+    expect(prompt.reason).toContain("/home/adelost/.openclaw/workspace/.agents/0/reply-audio/*");
+    expect(prompt.command).toBe('open("prefs.xml","w").write(prefs)\nEOF\nls reply-audio | wc -l');
+    expect(prompt.command).not.toContain("modal_gemma.py");
+  });
 });
 
 describe("classifyPermissionPrompt", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../cli/config.mjs", () => ({
-  listAgents: () => [{ name: "lsrc", panes: [{}, {}] }],
+  listAgents: () => [{ name: "lsrc", dir: "/tmp/lsrc", panes: [{}, {}], orchestrator: 0 }],
   findChannelForPane: () => "chan-1",
 }));
 
@@ -24,11 +24,12 @@ const PROMPT = `
 const UNSAFE = PROMPT.replace('Q=/mnt/q/Chathelper-traningsdata-2026-09-10/GEMMA-4-TEST/TRANINGSDATA; ', "");
 const IDLE = "● Bash\n  done\n\n❯ ";
 
-function harness({ screens, autoAnswer = true }) {
+function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" } }) {
   const agent = {
     capturePane: vi.fn(async (_n, pane) => screens[pane] ?? IDLE),
     typeLiteral: vi.fn(async () => {}),
     sendEnter: vi.fn(async () => {}),
+    sendOnly: vi.fn(async () => ({ submitted: true })),
   };
   const discord = { send: vi.fn(async () => {}) };
   const notifyUser = vi.fn(async () => ({ sent: true }));
@@ -36,8 +37,9 @@ function harness({ screens, autoAnswer = true }) {
   let t = 0;
   const wd = createPermissionWatchdog({
     agent, discord, notifyUser, deliveryBroker, agentsYamlPath: "x.yaml",
-    config: { enabled: true, autoAnswer, pollMs: 1, answerAgeMs: 10_000, promptAgeMs: 120_000 },
+    config: { enabled: true, autoAnswer, pollMs: 1, answerAgeMs: 10_000, promptAgeMs: 120_000, humanAgeMs: 600_000 },
     holdsKeptFiles: () => false,
+    sessionIdentity: (_agentConfig, pane) => sessionIds[pane] ?? null,
     log: () => {}, now: () => t,
   });
   return { wd, agent, discord, notifyUser, advance: (ms) => { t += ms; } };
@@ -65,21 +67,55 @@ describe("permission watchdog", () => {
     expect(await h.wd.tick()).toEqual([]);
   });
 
-  it("alerts the human instead of answering an unsafe prompt", async () => {
+  it("routes an unsafe prompt to the configured orchestrator, then alerts the human if it remains open", async () => {
     const h = harness({ screens: { 1: UNSAFE } });
     await h.wd.tick(); h.advance(121_000);
-    expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:1", action: "alerted" }]);
+    expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:1", action: "orchestrated" }]);
+    expect(h.agent.sendOnly).toHaveBeenCalledWith("lsrc", expect.stringContaining("lsrc:1"), 0);
     expect(h.agent.typeLiteral).not.toHaveBeenCalled();
+    expect(h.notifyUser).not.toHaveBeenCalled();
+    h.advance(60_000);
+    expect(await h.wd.tick()).toEqual([]);
+    expect(h.agent.sendOnly).toHaveBeenCalledTimes(1);
+    h.advance(420_000);
+    expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:1", action: "alerted" }]);
     expect(h.notifyUser).toHaveBeenCalledTimes(1);
     expect(h.notifyUser.mock.calls[0][0]).toContain("lsrc:1");
     expect(h.notifyUser.mock.calls[0][0]).toContain("amux lsrc -p 1 -- 1");
   });
 
-  it("only alerts when auto-answer is switched off", async () => {
+  it("routes instead of answering when auto-answer is switched off", async () => {
     const h = harness({ screens: { 0: PROMPT }, autoAnswer: false });
     await h.wd.tick(); h.advance(121_000);
     expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:0", action: "alerted" }]);
     expect(h.agent.typeLiteral).not.toHaveBeenCalled();
+  });
+
+  it("refuses to answer when the prompt changes under the delivery lock", async () => {
+    const screens = { 0: PROMPT };
+    const h = harness({ screens });
+    await h.wd.tick(); h.advance(11_000);
+    h.agent.capturePane.mockImplementationOnce(async () => PROMPT)
+      .mockImplementationOnce(async () => UNSAFE);
+    expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:0", action: "stale" }]);
+    expect(h.agent.typeLiteral).not.toHaveBeenCalled();
+    expect(h.agent.sendEnter).not.toHaveBeenCalled();
+  });
+
+  it("refuses to answer when the pane session changes under the delivery lock", async () => {
+    const sessionIds = { 0: "session-a", 1: "session-1" };
+    const h = harness({ screens: { 0: PROMPT }, sessionIds });
+    let paneZeroCaptures = 0;
+    h.agent.capturePane.mockImplementation(async (_name, pane) => {
+      if (pane !== 0) return IDLE;
+      paneZeroCaptures += 1;
+      if (paneZeroCaptures === 3) sessionIds[0] = "session-b";
+      return PROMPT;
+    });
+    await h.wd.tick(); h.advance(11_000);
+    expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:0", action: "stale" }]);
+    expect(h.agent.typeLiteral).not.toHaveBeenCalled();
+    expect(h.agent.sendEnter).not.toHaveBeenCalled();
   });
 
   it("forgets a prompt that disappears and restarts the clock if it returns", async () => {

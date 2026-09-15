@@ -36,11 +36,22 @@ Var 10:e sekund läser den varje tmux-panels skärm. Frågan måste ligga i skä
 
 Svaret skickas som `1` och Enter under deliveryBroker-lås, och en rad postas i panelens Discord-kanal.
 
-**Larm efter två minuter** för allt annat: kommandosubstitution, variabler som inte kan lösas, skyddade platser och alla frågor som inte gäller rm. Larmet går som DM till Mattias via `notifyUser` med panel, skäl och kommandorader, en gång per fråga. Ingen tangent skickas.
+**Ägarrouting efter två minuter** för allt annat: kommandosubstitution, variabler som inte kan lösas, skyddade platser och alla frågor som inte gäller rm. Om projektet deklarerar en annan `orchestrator`-panel skickas frågan dit en gång. Om ingen sådan panel finns eller leveransen nekas går frågan direkt till människan. Om ägaren inte löser frågan går ett DM via `notifyUser` efter totalt tio minuter. Ingen tangent skickas för dessa frågor.
+
+Varje auto-svar kontrollerar under samma delivery-broker-lås att pane-sessionen och den hashade fullständiga prompten fortfarande är exakt de observerade. Ett sessionsbyte, en ändrad fråga eller en osäker session stoppar svaret. Ett påbörjat svar upprepas aldrig.
+
+Projektets ägarpanel deklareras i den användarägda `agentmux.yaml`:
+
+```yaml
+agents:
+  skyvw:
+    orchestrator: 5
+```
 
 Miljövariabler:
 - `AMUX_PERMISSION_WATCHDOG_ENABLED=false` stänger av vakten.
 - `AMUX_PERMISSION_WATCHDOG_AUTO_ANSWER=false` gör den till enbart larm.
 - `AMUX_PERMISSION_WATCHDOG_ANSWER_AGE_MS` (10000) styr väntan före auto-svar.
 - `AMUX_PERMISSION_WATCHDOG_PROMPT_AGE_MS` (120000) styr väntan före larm.
+- `AMUX_PERMISSION_WATCHDOG_HUMAN_AGE_MS` (600000) styr väntan före DM när en ägarpanel har fått frågan.
 - `AMUX_PERMISSION_WATCHDOG_POLL_MS` (10000) styr hur ofta skärmarna läses.

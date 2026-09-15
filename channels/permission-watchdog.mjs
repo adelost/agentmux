@@ -1,5 +1,11 @@
-import { classifyPermissionPrompt, detectPermissionPrompt, formatPermissionAlert } from "../core/permission-watchdog.mjs";
+import {
+  classifyPermissionPrompt,
+  detectPermissionPrompt,
+  formatPermissionAlert,
+  nextPromptStep,
+} from "../core/permission-watchdog.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
+import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import { execFileSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -40,11 +46,14 @@ export function createPermissionWatchdog({
   now = Date.now,
   home = homedir(),
   holdsKeptFiles = gitKeepsFilesUnder,
+  sessionIdentity = (agentConfig, paneIdx) => {
+    const paneDir = agent.paneDirectory(agentConfig.dir, paneIdx);
+    return latestClaudeSessionIdentity(paneDir)?.sessionId || null;
+  },
 }) {
   // Safe rm prompts are answered after config.answerAgeMs, every other prompt
   // alerts the human after config.promptAgeMs.
-  const seen = new Map();     // paneKey -> { signature, firstSeenAt }
-  const handled = new Map();  // paneKey -> signature already answered/alerted
+  const seen = new Map();
   let intervalId = null;
 
   async function post(agentName, paneIdx, text) {
@@ -53,13 +62,33 @@ export function createPermissionWatchdog({
     try { await discord.send(channelId, text); } catch (err) { log(`discord send failed for ${agentName}:${paneIdx}: ${err.message}`); }
   }
 
-  async function answer(agentName, paneIdx, keys) {
+  async function answerIfCurrent(agentConfig, paneIdx, expected, state, keys) {
     const run = async () => {
-      await agent.typeLiteral(agentName, keys, paneIdx);
-      await agent.sendEnter(agentName, paneIdx);
+      const content = await agent.capturePane(agentConfig.name, paneIdx, 120);
+      const current = detectPermissionPrompt(content);
+      const currentSessionId = sessionIdentity(agentConfig, paneIdx);
+      if (!current || current.signature !== expected.signature
+          || !currentSessionId || currentSessionId !== expected.sessionId) return false;
+      state.answered = true;
+      await agent.typeLiteral(agentConfig.name, keys, paneIdx);
+      await agent.sendEnter(agentConfig.name, paneIdx);
+      return true;
     };
-    if (deliveryBroker) await deliveryBroker.runExclusive(agentName, paneIdx, run);
-    else await run();
+    return deliveryBroker
+      ? deliveryBroker.runExclusive(agentConfig.name, paneIdx, run)
+      : run();
+  }
+
+  async function routeToOrchestrator(agentConfig, paneIdx, prompt, ageMs) {
+    const ownerPane = agentConfig.orchestrator;
+    const text = formatPermissionAlert({
+      paneKey: `${agentConfig.name}:${paneIdx}`,
+      ageMs,
+      reason: prompt.reason,
+      command: prompt.command,
+      why: "kräver ägarbeslut",
+    });
+    await agent.sendOnly(agentConfig.name, text, ownerPane);
   }
 
   async function inspectPane(agentConfig, paneIdx, at) {
@@ -68,38 +97,69 @@ export function createPermissionWatchdog({
     try {
       content = await agent.capturePane(agentConfig.name, paneIdx, 120);
     } catch {
-      seen.delete(paneKey); handled.delete(paneKey);
+      seen.delete(paneKey);
       return null;
     }
     // detectPermissionPrompt is the gate on its own: it requires the question,
     // its numbered options and "Esc to cancel" in the last lines with no
     // composer below, so a footer-less capture is still recognised.
     const prompt = detectPermissionPrompt(content);
-    if (!prompt) { seen.delete(paneKey); handled.delete(paneKey); return null; }
+    if (!prompt) { seen.delete(paneKey); return null; }
+    const sessionId = sessionIdentity(agentConfig, paneIdx);
 
     const prev = seen.get(paneKey);
-    if (!prev || prev.signature !== prompt.signature) {
-      seen.set(paneKey, { signature: prompt.signature, firstSeenAt: at });
-      handled.delete(paneKey);
+    if (!prev || prev.signature !== prompt.signature || prev.sessionId !== sessionId) {
+      seen.set(paneKey, {
+        signature: prompt.signature,
+        sessionId,
+        firstSeenAt: at,
+        answered: false,
+        orchestratorNotified: false,
+        humanNotified: false,
+      });
       return null;
     }
     const ageMs = at - prev.firstSeenAt;
-    if (handled.get(paneKey) === prompt.signature) return null;
     const decision = classifyPermissionPrompt(prompt, { home, holdsKeptFiles });
-    const answerable = decision.action === "answer" && config.autoAnswer;
-    if (ageMs < (answerable ? config.answerAgeMs : config.promptAgeMs)) return null;
-    handled.set(paneKey, prompt.signature);
+    const answerable = decision.action === "answer" && config.autoAnswer && Boolean(prev.sessionId);
+    const ownerPane = agentConfig.orchestrator;
+    const hasOrchestrator = Number.isSafeInteger(ownerPane)
+      && ownerPane >= 0
+      && ownerPane < agentConfig.panes.length
+      && ownerPane !== paneIdx
+      && typeof agent.sendOnly === "function";
+    const step = nextPromptStep({ ageMs, answerable, hasOrchestrator, state: prev, config });
+    if (!step) return null;
 
-    if (answerable) {
+    if (step === "answer") {
       try {
-        await answer(agentConfig.name, paneIdx, decision.keys);
+        const answered = await answerIfCurrent(agentConfig, paneIdx, prev, prev, decision.keys);
+        if (!answered) {
+          seen.delete(paneKey);
+          log(`stale prompt refused in ${paneKey}: session or signature changed before answer`);
+          return { paneKey, action: "stale" };
+        }
         log(`answered "${decision.keys}" in ${paneKey} after ${Math.round(ageMs / 1000)}s: ${decision.why}`);
         await post(agentConfig.name, paneIdx, `Permission watchdog: svarade ja i ${paneKey} efter ${Math.round(ageMs / 1000)} s. ${decision.why}. Skäl i frågan: ${prompt.reason}`);
         return { paneKey, action: "answered" };
       } catch (err) {
         log(`answer failed for ${paneKey}: ${err.message}`);
+        return { paneKey, action: "answer-uncertain" };
       }
     }
+
+    if (step === "orchestrator") {
+      prev.orchestratorNotified = true;
+      try {
+        await routeToOrchestrator(agentConfig, paneIdx, prompt, ageMs);
+        log(`routed prompt ${prompt.signature.slice(0, 12)} from ${paneKey} to ${agentConfig.name}:${ownerPane}`);
+        return { paneKey, action: "orchestrated" };
+      } catch (err) {
+        log(`orchestrator route failed for ${paneKey}: ${err.message}`);
+      }
+    }
+
+    prev.humanNotified = true;
     const text = formatPermissionAlert({ paneKey, ageMs, reason: prompt.reason, command: prompt.command, why: decision.action === "answer" ? "auto-svar avstängt" : decision.why });
     log(`alert for ${paneKey}: ${decision.why}`);
     await post(agentConfig.name, paneIdx, text);
@@ -130,7 +190,7 @@ export function createPermissionWatchdog({
   function start() {
     if (!config.enabled) { log("disabled (AMUX_PERMISSION_WATCHDOG_ENABLED=false)"); return; }
     if (intervalId) return;
-    log(`enabled | answer-age=${Math.round(config.answerAgeMs / 1000)}s prompt-age=${Math.round(config.promptAgeMs / 1000)}s poll=${Math.round(config.pollMs / 1000)}s auto-answer=${config.autoAnswer}`);
+    log(`enabled | answer-age=${Math.round(config.answerAgeMs / 1000)}s prompt-age=${Math.round(config.promptAgeMs / 1000)}s human-age=${Math.round(config.humanAgeMs / 1000)}s poll=${Math.round(config.pollMs / 1000)}s auto-answer=${config.autoAnswer}`);
     tick().catch((err) => log(`initial tick failed: ${err.message}`));
     intervalId = setInterval(() => { tick().catch((err) => log(`tick failed: ${err.message}`)); }, config.pollMs);
   }
