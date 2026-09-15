@@ -37,6 +37,22 @@ class LinkPttGestureTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val round get() = InstrumentationRegistry.getArguments().getString("host") == "round"
 
+    @Test fun aTapCancelsHandsFreeWithoutStartingOrSendingPushToTalk() = withCapture { fixture ->
+        compose.runOnUiThread {
+            fixture.wake.value = io.agentmux.wakeword.WakeStatus(phase = io.agentmux.wakeword.WakePhase.CAPTURING)
+        }
+        val listening = compose.onNodeWithContentDescription("LISTENING")
+        listening.assertExists()
+        listening.performTouchInput { down(center); advanceEventTime(80); up() }
+        compose.waitUntil(3000) { fixture.handsFreeCancels == 1 }
+        compose.onNodeWithContentDescription("HOLD TO TALK").assertExists()
+        assertEquals(0, fixture.begins)
+        assertEquals(0, fixture.releases)
+        assertEquals(0, fixture.cancels)
+        assertTrue(fixture.delivered.isEmpty())
+        shot("hands-free-cancelled")
+    }
+
     @Test fun sameFingerReleaseSubmitsOnceAcrossRecordingRecomposition() = withCapture { fixture ->
         val before = compose.onNodeWithContentDescription("HOLD TO TALK").fetchSemanticsNode().boundsInRoot
         compose.onRoot().performTouchInput { down(before.center) }
@@ -136,7 +152,8 @@ class LinkPttGestureTest {
                             else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 val spec by fixture.graph.captureSpec.collectAsState()
                                 LinkCaptureControl(spec, fixture.recorder::currentBytes, fixture.recorder::currentLevel,
-                                    fixture.graph::beginCapture, fixture.graph::releaseCapture, fixture.graph::cancelCapture)
+                                    fixture.graph::beginCapture, fixture.graph::releaseCapture, fixture.graph::cancelCapture,
+                                    onCancelHandsFree = fixture::cancelHandsFree)
                             }
                             }
                         }
@@ -173,13 +190,19 @@ private class CaptureFixture(activity: MainActivity, round: Boolean) {
     var releases = 0
     var cancels = 0
     var payloadBytes = 0L
+    val wake = MutableStateFlow(io.agentmux.wakeword.WakeStatus())
+    var handsFreeCancels = 0
+    fun cancelHandsFree() {
+        handsFreeCancels++
+        wake.value = io.agentmux.wakeword.WakeStatus(phase = io.agentmux.wakeword.WakePhase.LISTENING)
+    }
     val delivered = mutableListOf<LinkCapturedTurn>()
     private val captured = MutableSharedFlow<LinkCapturedTurn>(extraBufferCapacity = 1)
     val graph = LinkProductGraph(
         processScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), state = state,
         updateState = MutableStateFlow(UpdateState.UpToDate("test", publishedAtEpochMillis = null)),
         microphoneGranted = MutableStateFlow(true), speakReplies = MutableStateFlow(false),
-        wakeWordEnabled = MutableStateFlow(false), wakeStatus = MutableStateFlow(io.agentmux.wakeword.WakeStatus()),
+        wakeWordEnabled = MutableStateFlow(false), wakeStatus = wake,
         publicLinkActive = { false }, targetKindOf = { null },
         captureByteCount = recorder::currentBytes, captureByteLimit = { null }, capturedTurns = captured,
         navigation = LinkNavigationController(if (round) GeneratedLinkArtifactRef.WEAR_FULL_UI else GeneratedLinkArtifactRef.PHONE_FULL_UI),

@@ -8,10 +8,13 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 
+import androidx.annotation.OptIn;
 import androidx.media3.common.Player;
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.session.MediaSession;
 
 /** Foreground and lock-screen media controls for the long-lived audio service. */
+@OptIn(markerClass = UnstableApi.class)
 final class AudioServiceNotifier {
     private static final String CHANNEL = "agent-audio-inbox-status";
     private static final int ID = 7301;

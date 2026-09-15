@@ -480,8 +480,8 @@ internal class LinkCoordinator(
     }
 
     private fun syncConnection() {
-        val raw = preferences.getString(AppContract.KEY_CONNECTION, null) ?: return
-        dispatch(LinkAction.Connection(connectionStateOfReceipt(raw), raw, System.currentTimeMillis()))
+        val (state, raw) = preferences.announcementFeedReceipt() ?: return
+        dispatch(LinkAction.Connection(state, raw, System.currentTimeMillis()))
     }
 
     private fun syncPlayback(key: String) {

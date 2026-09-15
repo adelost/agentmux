@@ -83,7 +83,7 @@ internal class MicrophonePcmSource private constructor(
 /**
  * Debug QA only: plays local 16 kHz mono WAV clips in real time with silence between them.
  * A spec is `clip.wav` or `PHASE@clip.wav|PHASE@clip.wav`; each clip waits until the loop reaches
- * that phase, so a follow-up or an interruption lands at the right moment however slow the server is.
+ * that phase, so a question after a reply or an interruption lands at the right moment however slow the server is.
  */
 internal class WavFixturePcmSource(spec: String, private val phase: () -> WakePhase) : WakePcmSource {
     private val steps = spec.split("|").map { step ->

@@ -2426,7 +2426,6 @@
         "sending",
         "thinking",
         "speaking",
-        "follow-up",
         "blocked"
       ]
     },
@@ -8962,9 +8961,6 @@
           "capturing": {
             "phase": "capturing"
           },
-          "follow-up": {
-            "phase": "follow-up"
-          },
           "listening": {
             "phase": "listening"
           },
@@ -9012,7 +9008,6 @@
                 "sending",
                 "thinking",
                 "speaking",
-                "follow-up",
                 "blocked"
               ]
             }
@@ -9070,7 +9065,6 @@
             "sending",
             "thinking",
             "speaking",
-            "follow-up",
             "blocked"
           ]
         }

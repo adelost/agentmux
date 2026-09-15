@@ -49,6 +49,8 @@ internal class PhoneLinkProductGraph private constructor(
     sinks: LinkProductSinks,
     private val composer: ComposerDraftStore,
     private val releaseCaptureFiles: () -> Unit,
+    /** Drops a hands-free question before it is sent; a no-op where no wake word runs. */
+    val cancelHandsFreeQuestion: () -> Unit,
 ) : LinkProductGraph(
     processScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     state = state,
@@ -121,6 +123,7 @@ internal class PhoneLinkProductGraph private constructor(
                 ),
                 composer = composer,
                 releaseCaptureFiles = captures::clear,
+                cancelHandsFreeQuestion = wakeWord::cancelQuestion,
             )
         }
 
@@ -175,6 +178,7 @@ internal class PhoneLinkProductGraph private constructor(
                 ),
                 composer = composer,
                 releaseCaptureFiles = { },
+                cancelHandsFreeQuestion = { },
             )
         }
 

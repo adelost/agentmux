@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego port registry
-// Product declarations SHA-256: b03ca0945d7a024db68c3153b48b9b0c90e4e7670ca11b7b6216ef62be196c26
+// Product declarations SHA-256: 7461121287f15473522451e0bb481b7da336e51a72705924288272bd79a012ce
 package io.agentmux.linkui.product.generated
 
 internal object GeneratedLinkNativeLegoPortData {

@@ -1,12 +1,10 @@
 package io.agentmux.audioinbox
 
 import io.agentmux.wakeword.EndpointPolicy
-import io.agentmux.wakeword.SileroSpeechProbability
 import io.agentmux.wakeword.UtteranceEnd
 import io.agentmux.wakeword.UtteranceProgress
 import io.agentmux.wakeword.WAKE_CHUNK_SAMPLES
 import io.agentmux.wakeword.WakeHearing
-import io.agentmux.wakeword.WakeWordDetector
 
 // The phrase's last syllable and the confirmation beep: neither is part of the question.
 private const val WAKE_TAIL_CHUNKS = 4
@@ -20,36 +18,59 @@ internal interface WakeLoopListener {
     fun onSourceStopped()
 }
 
+/** The wake-word model as the loop needs it: a score per chunk and a reset between questions. */
+internal interface WakeChunkScorer {
+    fun score(chunk: ShortArray): Float
+    fun reset()
+}
+
+/** The voice-activity model as the loop needs it. */
+internal interface SpeechChunkProbability {
+    fun probability(chunk: ShortArray): Float
+    fun reset()
+}
+
 /**
  * WHAT: One microphone thread: score each chunk for the wake word, then capture the question until the VAD says it ended.
  * WHY: A single AudioRecord owner avoids the busy-microphone gap between detection and recording.
+ * A question only ever starts from a detection (Mattias 2026-09-15: "vill man ha nåt mer så säger man ... wake up-ordet igen").
  */
 internal class WakeListeningLoop(
     private val source: WakePcmSource,
-    private val detector: WakeWordDetector,
-    private val vad: SileroSpeechProbability,
+    private val detector: WakeChunkScorer,
+    private val vad: SpeechChunkProbability,
     private val threshold: Float,
     private val policy: EndpointPolicy,
     private val detectionAllowed: () -> Boolean,
-    /** The open follow-up window's number, or null when none is open. */
-    private val followUpWindow: () -> Int?,
-    private val followUpPolicy: EndpointPolicy,
     private val listener: WakeLoopListener,
 ) {
     @Volatile private var running = true
+    @Volatile private var cancelRequested = false
 
     fun stop() {
         running = false
     }
 
+    /** Drops the question being heard at the next chunk; nothing of it reaches [WakeLoopListener.onQuestion]. */
+    fun cancelQuestion() {
+        cancelRequested = true
+    }
+
     fun run() {
         val chunk = ShortArray(WAKE_CHUNK_SAMPLES)
         var question: QuestionCapture? = null
-        var lastFollowUp = followUpWindow() ?: 0
         while (running) {
             if (!source.read(chunk)) {
                 if (running) listener.onSourceStopped()
                 return
+            }
+            if (cancelRequested) {
+                cancelRequested = false
+                if (question != null) {
+                    question = null
+                    detector.reset()
+                    vad.reset()
+                }
             }
             val capturing = question
             if (capturing != null) {
@@ -60,14 +81,6 @@ internal class WakeListeningLoop(
                     question = null
                     detector.reset()
                 }
-                continue
-            }
-            val window = followUpWindow()
-            if (window != null && window > lastFollowUp) {
-                lastFollowUp = window
-                vad.reset()
-                question = QuestionCapture(vad, followUpPolicy, skipChunks = 0).also { it.accept(chunk) }
-                question.hearing?.let(listener::onHearing)
                 continue
             }
             if (!detectionAllowed()) continue
@@ -83,7 +96,7 @@ internal class WakeListeningLoop(
 
 /** The PCM of one spoken question and its end-of-speech counters. */
 private class QuestionCapture(
-    private val vad: SileroSpeechProbability,
+    private val vad: SpeechChunkProbability,
     private val policy: EndpointPolicy,
     private var skipChunks: Int,
 ) {

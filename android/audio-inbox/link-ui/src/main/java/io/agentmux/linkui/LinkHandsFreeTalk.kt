@@ -18,8 +18,9 @@ fun linkHandsFreeTalk(wake: WakeStatus): LinkHandsFreeTalk? {
         WakePhase.LISTENING, WakePhase.THINKING, WakePhase.SPEAKING ->
             LinkHandsFreeTalk("HOLD TO TALK", "\"${wake.phrase.spoken.uppercase()}\"", null, recording = false)
         // The silence ran out: the question is being packed for sending, so never show a 0.
-        WakePhase.CAPTURING, WakePhase.FOLLOW_UP -> if (secondsLeft == 0) sending
-        else LinkHandsFreeTalk("LISTENING", "", secondsLeft?.toString(), recording = true)
+        // Mattias 2026-09-15: no way to stop a question before it was sent. A tap on the ring drops it.
+        WakePhase.CAPTURING -> if (secondsLeft == 0) sending
+        else LinkHandsFreeTalk("LISTENING", "TAP TO CANCEL", secondsLeft?.toString(), recording = true)
         WakePhase.SENDING -> sending
     }
 }

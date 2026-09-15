@@ -2,11 +2,14 @@ package io.agentmux.audioinbox;
 
 import android.os.Bundle;
 
+import androidx.annotation.OptIn;
 import androidx.media3.common.Player;
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.session.CommandButton;
 import androidx.media3.session.MediaSession;
 import androidx.media3.session.SessionCommand;
 import androidx.media3.session.SessionCommands;
+import androidx.media3.session.SessionError;
 import androidx.media3.session.SessionResult;
 
 import com.google.common.util.concurrent.Futures;
@@ -15,6 +18,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import java.util.List;
 
 /** Makes Stop an honest MediaSession command instead of a raw player reset. */
+@OptIn(markerClass = UnstableApi.class)
 final class AudioSessionCallback implements MediaSession.Callback {
     private static final SessionCommand STOP =
         new SessionCommand("io.agentmux.audioinbox.STOP_PLAYBACK", Bundle.EMPTY);
@@ -54,7 +58,7 @@ final class AudioSessionCallback implements MediaSession.Callback {
     ) {
         if (command != Player.COMMAND_STOP) return SessionResult.RESULT_SUCCESS;
         stop.run();
-        return SessionResult.RESULT_INFO_SKIPPED;
+        return SessionError.INFO_CANCELLED;
     }
 
     @Override
@@ -66,7 +70,7 @@ final class AudioSessionCallback implements MediaSession.Callback {
     ) {
         if (!STOP.equals(command)) {
             return Futures.immediateFuture(
-                new SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED)
+                new SessionResult(SessionError.ERROR_NOT_SUPPORTED)
             );
         }
         stop.run();

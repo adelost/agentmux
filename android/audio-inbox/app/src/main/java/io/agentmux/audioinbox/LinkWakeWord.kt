@@ -80,6 +80,11 @@ internal class LinkWakeWordControl(
         }
     }
 
+    /** Drops the hands-free question still being heard; the service ignores it once the question is sending. */
+    fun cancelQuestion() {
+        context.startService(Intent(context, WakeWordService::class.java).setAction(WakeWordService.ACTION_CANCEL_QUESTION))
+    }
+
     /** Restores listening after the process was gone; the Activity is visible, so the start is allowed. */
     fun resume() {
         mutableEnabled.value = preferences.getBoolean(KEY_WAKE_WORD, false)

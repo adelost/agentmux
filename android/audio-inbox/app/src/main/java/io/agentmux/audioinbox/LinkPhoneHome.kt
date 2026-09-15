@@ -169,6 +169,7 @@ internal fun LinkPhoneHome(
                         onRelease = graph::releaseCapture,
                         onCancel = graph::cancelCapture,
                         onRecover = onRequestMicrophone,
+                        onCancelHandsFree = graph.cancelHandsFreeQuestion,
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
                 }

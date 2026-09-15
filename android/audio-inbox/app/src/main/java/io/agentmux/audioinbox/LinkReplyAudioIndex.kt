@@ -78,5 +78,11 @@ internal fun landedReply(before: LinkState, after: LinkState, action: LinkAction
 }
 
 private fun mediaDurationMs(file: File): Long = runCatching {
-    MediaMetadataRetriever().use { it.setDataSource(file.absolutePath); it.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() }
+    val retriever = MediaMetadataRetriever()
+    try {
+        retriever.setDataSource(file.absolutePath)
+        retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong()
+    } finally {
+        retriever.release()
+    }
 }.getOrNull() ?: 0L

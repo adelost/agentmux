@@ -14,26 +14,37 @@ class LinkHandsFreeTalkTest {
     @Test
     fun theTalkRingWalksThroughArmedListeningCountdownAndSendingWithOneWordEach() {
         assertEquals(LinkHandsFreeTalk("HOLD TO TALK", "\"HEY JARVIS\"", null, recording = false), talk(WakePhase.LISTENING))
-        assertEquals(LinkHandsFreeTalk("LISTENING", "", null, recording = true), talk(WakePhase.CAPTURING))
+        assertEquals(LinkHandsFreeTalk("LISTENING", "TAP TO CANCEL", null, recording = true), talk(WakePhase.CAPTURING))
         assertEquals(
-            LinkHandsFreeTalk("LISTENING", "", null, recording = true),
+            LinkHandsFreeTalk("LISTENING", "TAP TO CANCEL", null, recording = true),
             talk(WakePhase.CAPTURING, WakeHearing(0.7f, heardSpeech = true, sendsInMs = null)),
         )
         assertEquals(
-            LinkHandsFreeTalk("LISTENING", "", "2", recording = true),
+            LinkHandsFreeTalk("LISTENING", "TAP TO CANCEL", "2", recording = true),
             talk(WakePhase.CAPTURING, WakeHearing(0.1f, heardSpeech = true, sendsInMs = 1_900)),
         )
         assertEquals(
             LinkHandsFreeTalk("SENDING", "", null, recording = false),
             talk(WakePhase.CAPTURING, WakeHearing(0f, heardSpeech = true, sendsInMs = 0)),
         )
-        assertEquals(LinkHandsFreeTalk("LISTENING", "", null, recording = true), talk(WakePhase.FOLLOW_UP))
         assertEquals(LinkHandsFreeTalk("SENDING", "", null, recording = false), talk(WakePhase.SENDING))
     }
 
     @Test
     fun theArmedHintNamesTheChosenPhrase() {
         assertEquals("\"ALEXA\"", linkHandsFreeTalk(WakeStatus(phase = WakePhase.LISTENING, phrase = WakePhrases.ALEXA))?.sub)
+    }
+
+    // Mattias 2026-09-15: he could not stop a hands-free question before it was sent.
+    @Test
+    fun aTapWhileAQuestionIsHeardCancelsItAndNeverBeginsHoldToTalk() {
+        var cancelled = 0
+        assertEquals(false, handsFreeTap(WakeStatus(phase = WakePhase.CAPTURING)) { cancelled += 1 })
+        assertEquals(1, cancelled)
+        assertEquals(false, handsFreeTap(WakeStatus(phase = WakePhase.SENDING)) { cancelled += 1 })
+        assertEquals(1, cancelled)
+        assertEquals(null, handsFreeTap(WakeStatus(phase = WakePhase.LISTENING)) { cancelled += 1 })
+        assertEquals(1, cancelled)
     }
 
     @Test
