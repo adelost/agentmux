@@ -957,6 +957,37 @@ agents:
   });
 });
 
+feature("parseConfig: prompt orchestrator", () => {
+  component("carries the project's orchestrator pane into runtime config", {
+    given: ["a source fleet where skyvw:0 orchestrates", () => `
+guild: guild-1
+agents:
+  skyvw:
+    dir: /tmp/skyvw
+    claude: 3
+    orchestrator: 0
+`],
+    when: ["parsing and regenerating", (source) => {
+      const parsed = parseConfig(source);
+      return yaml.load(generateAgentsYaml(parsed.agents, new Map(), new Map())).skyvw;
+    }],
+    then: ["the watchdog can read the orchestrator pane", (generated) => expect(generated.orchestrator).toBe(0)],
+  });
+
+  component("rejects an orchestrator outside the coding panes", {
+    given: ["an orchestrator index past the configured panes", () => `
+guild: guild-1
+agents:
+  skyvw:
+    dir: /tmp/skyvw
+    claude: 1
+    orchestrator: 4
+`],
+    when: ["parsing", (source) => () => parseConfig(source)],
+    then: ["fails loudly", (action) => expect(action).toThrow("orchestrator")],
+  });
+});
+
 feature("parseConfig: inter-agent send policy", () => {
   component("round-trips an explicit fleet freeze into generated runtime config", {
     given: ["a source fleet with inter-agent sends disabled", () => `
