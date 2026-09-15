@@ -118,6 +118,25 @@ describe("permission watchdog", () => {
     expect(h.agent.sendEnter).not.toHaveBeenCalled();
   });
 
+  it("never auto-answers when the current pane session is unknown", async () => {
+    const h = harness({ screens: { 0: PROMPT }, sessionIds: {} });
+    await h.wd.tick(); h.advance(11_000);
+    expect(await h.wd.tick()).toEqual([]);
+    expect(h.agent.typeLiteral).not.toHaveBeenCalled();
+    h.advance(110_000);
+    expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:0", action: "alerted" }]);
+    expect(h.notifyUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the human when the configured owner cannot receive the prompt", async () => {
+    const h = harness({ screens: { 1: UNSAFE } });
+    h.agent.sendOnly.mockRejectedValueOnce(new Error("owner quota stopped"));
+    await h.wd.tick(); h.advance(121_000);
+    expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:1", action: "alerted" }]);
+    expect(h.agent.sendOnly).toHaveBeenCalledTimes(1);
+    expect(h.notifyUser).toHaveBeenCalledTimes(1);
+  });
+
   it("forgets a prompt that disappears and restarts the clock if it returns", async () => {
     const screens = { 0: PROMPT };
     const h = harness({ screens });
