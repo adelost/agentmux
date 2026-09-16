@@ -40,6 +40,14 @@ export function operatorName(env = process.env) {
   return value || DEFAULT_OPERATOR_NAME;
 }
 
+/**
+ * WHAT: Expands a leading ~ to the user's home directory.
+ * WHY: Keeps configured paths usable without a shell to expand them.
+ */
+export function expandTilde(path, home = homedir()) {
+  return String(path).startsWith("~/") ? String(path).replace("~", home) : path;
+}
+
 /** WHAT: Resolves standalone AMUX memory. WHY: Keeps optional OpenClaw compatibility separate from core storage. */
 export function defaultWorkspace(home = homedir()) {
   return join(home, ".agentmux", "workspace");

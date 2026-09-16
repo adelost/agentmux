@@ -57,6 +57,7 @@ try {
     await (await import("../cli/restart-ready.mjs")).cmdRestartReady(argv.slice(1), ctx);
   }
   else if (argv[0] === "emulator") await (await import("../cli/emulator.mjs")).cmdEmulator(argv.slice(1));
+  else if (argv[0] === "prompts") await (await import("../cli/prompts.mjs")).cmdPrompts(argv.slice(1), ctx);
   else if (argv[0] === "work") await (await import("../cli/work.mjs")).cmdWork(argv.slice(1));
   else await (await import("../cli/commands.mjs")).dispatch(argv, ctx);
 } catch (err) {

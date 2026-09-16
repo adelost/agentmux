@@ -6,6 +6,8 @@
 // mode still asks for that one, the pane cannot answer itself and nothing in
 // amux read the screen. Mattias: "får inte hända igen".
 
+import { createHash } from "node:crypto";
+
 /**
  * WHAT: Defines watchdog timing: fast answers for safe rm, slow human alerts.
  * WHY: Keeps a safe prompt from blocking a pane while a real decision waits for Mattias.
@@ -16,6 +18,7 @@ export const DEFAULT_PERMISSION_WATCHDOG_CONFIG = {
   pollMs: 10_000,
   answerAgeMs: 10_000,
   promptAgeMs: 120_000,
+  humanAgeMs: 600_000,
 };
 
 /**
@@ -31,6 +34,7 @@ export function parsePermissionWatchdogConfig(env = process.env) {
     pollMs: int(env.AMUX_PERMISSION_WATCHDOG_POLL_MS, d.pollMs),
     answerAgeMs: int(env.AMUX_PERMISSION_WATCHDOG_ANSWER_AGE_MS, d.answerAgeMs),
     promptAgeMs: int(env.AMUX_PERMISSION_WATCHDOG_PROMPT_AGE_MS, d.promptAgeMs),
+    humanAgeMs: int(env.AMUX_PERMISSION_WATCHDOG_HUMAN_AGE_MS, d.humanAgeMs),
   };
 }
 
@@ -56,22 +60,82 @@ export function detectPermissionPrompt(paneText) {
   const lastOptionIdx = Math.max(...tail.filter((x) => /^\s*(?:❯\s*)?\d+\.\s+\S/u.test(x.l)).map((x) => x.i));
   if (lines.slice(lastOptionIdx + 1).some((l) => /^\s*[❯›>]\s*$/u.test(l) || /^\s*[❯›>]\s+\S/u.test(l))) return null;
 
-  const askIdx = lines.findIndex((l, i) => i <= lastOptionIdx && /Do you want to proceed\?/u.test(l));
+  const askIdx = lines.findLastIndex((l, i) => i <= lastOptionIdx && /Do you want to proceed\?/u.test(l));
   const unbox = (l) => l.replace(/^\s*│\s?/u, "").trim();
   // Newer Claude Code draws the reason inside the box and wraps its target onto
   // the next box line; older builds print it as a plain line under the box.
-  const boxedReasonIdx = lines.findIndex((l, i) => i < askIdx && /^\s*│\s*Dangerous rm operation/u.test(l));
+  const boxedReasonIdx = lines.findLastIndex((l, i) => i < askIdx && /^\s*│\s*Dangerous rm operation/u.test(l));
   const bodyEnd = boxedReasonIdx >= 0 ? boxedReasonIdx : askIdx;
   // Command box: lines starting with "│" above the question; the box may carry
   // a trailing description line ("Relaunch the v8 training ...").
-  const command = lines.slice(0, bodyEnd).filter((l) => /^\s*│/u.test(l)).map((l) => l.replace(/^\s*│\s?/u, "")).join("\n").trim();
+  const commandLines = [];
+  for (let i = bodyEnd - 1, found = false; i >= 0; i--) {
+    if (/^\s*│/u.test(lines[i])) {
+      found = true;
+      commandLines.unshift(lines[i].replace(/^\s*│\s?/u, ""));
+    } else if (found) {
+      break;
+    }
+  }
+  const command = commandLines.join("\n").trim();
   // Reason: the boxed reason with its wrapped lines, else the last non-empty,
   // non-box, non-title line before the question.
   const reason = boxedReasonIdx >= 0
     ? lines.slice(boxedReasonIdx, askIdx).filter((l) => /^\s*│/u.test(l)).map(unbox).filter(Boolean).join(" ")
     : lines.slice(0, askIdx).map((l) => l.trim()).filter((l) => l && !/^│/u.test(l) && !/^Bash command$/u.test(l) && !/^[─┌┐└┘]+$/u.test(l)).at(-1) || "";
-  const signature = `${reason}\n${command}`.slice(0, 600);
+  const signature = createHash("sha256")
+    .update(JSON.stringify({ reason, command, options }))
+    .digest("hex");
   return { signature, reason, command, options };
+}
+
+/**
+ * WHAT: Resolves the one step a blocking prompt has earned at its current age.
+ * WHY: Keeps a prompt from reaching Mattias before its owner has had the chance.
+ */
+export function nextPromptStep({ ageMs, answerable, hasOrchestrator, state, config }) {
+  if (answerable && !state.answered && ageMs >= config.answerAgeMs) return "answer";
+  if (!state.orchestratorNotified && !state.humanNotified && ageMs >= config.promptAgeMs) {
+    return hasOrchestrator ? "orchestrator" : "human";
+  }
+  if (state.orchestratorNotified && !state.humanNotified && ageMs >= config.humanAgeMs) return "human";
+  return null;
+}
+
+/**
+ * WHAT: Formats one durable line about what the watchdog did with a prompt.
+ * WHY: Keeps "did it answer, or is it still waiting?" answerable from a file.
+ */
+export function permissionDecisionLine({ at, paneKey, sessionId = null, signature, action, reason = "", why = "" }) {
+  return `${JSON.stringify({
+    ts: new Date(at).toISOString(),
+    pane: paneKey,
+    sessionId,
+    signature: String(signature || "").slice(0, 16),
+    action,
+    reason: String(reason).slice(0, 300),
+    why: String(why).slice(0, 300),
+  })}\n`;
+}
+
+/**
+ * WHAT: Formats the currently blocked panes as a snapshot for `amux prompts`.
+ * WHY: Keeps a prompt's real age readable outside the bridge process.
+ */
+export function openPromptsSnapshot(at, open) {
+  return `${JSON.stringify({
+    ts: new Date(at).toISOString(),
+    prompts: open.map((p) => ({
+      pane: p.paneKey,
+      signature: String(p.signature || "").slice(0, 16),
+      firstSeenAt: new Date(p.firstSeenAt).toISOString(),
+      reason: p.reason,
+      decision: p.decision,
+      orchestratorNotified: p.orchestratorNotified,
+      humanNotified: p.humanNotified,
+      answered: p.answered,
+    })),
+  }, null, 2)}\n`;
 }
 
 const RM_REASON = /^Dangerous rm operation on (possibly-empty variable path(?: inside command substitution)?|statically-unresolvable target):\s*(.+)$/u;
@@ -136,6 +200,10 @@ function unsafeRmPath(path, home, holdsKeptFiles) {
   return null;
 }
 
+/**
+ * WHAT: Formats the message a pane's owner or Mattias gets about a stuck prompt.
+ * WHY: Keeps the reader from having to open tmux to see what is being asked.
+ */
 export function formatPermissionAlert({ paneKey, ageMs, reason, command, why }) {
   const cmd = String(command || "").split("\n").slice(0, 8).join("\n");
   return [

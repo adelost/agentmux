@@ -22,6 +22,14 @@ amux läste skärmen. Frågan stod obesvarad till 17:09.
 
 claw:0 stod ungefär tio minuter på "Dangerous rm operation on statically-unresolvable target: /home/adelost/.openclaw/workspace/.agents/0/reply-audio/*". Vakten kände bara igen varianten "possibly-empty variable path", så den larmade i stället för att svara. I nyare Claude Code står dessutom skälet inne i ramen, uppdelat på två rader. Claude Code skriver själv att frågan "cannot be auto-allowed by permission rules", så det går inte att lösa i settings.json.
 
+## Beställning 3 (Mattias, röst 2026-09-15 01:04, ordagrant, via skyvw:0)
+
+> och prata ettan om de har fastnat på en RM-fråga eller inte. Jag har ju sagt att detta måste in i amux så många gånger. Finns det inte där fortfarande? Behöver vi starta om det eller vad vad fan är problemet? Annars så måste ni själva trigga den på något sätt eller lägga till så att det är möjligt att trigga den. Ta inte och var så hjälplösa utan fixa istället.
+
+Frågor som vakten inte kan svara på nådde bara Mattias, och ingen orkestrerare
+kunde se eller agera på dem. Vaktens beslut syntes dessutom bara i bryggans
+egen terminal.
+
 ## Vad vakten gör
 
 Var 10:e sekund läser den varje tmux-panels skärm. Frågan måste ligga i skärmens sista rader med numrerade alternativ och "Esc to cancel", utan en composer-prompt under sig. Då startar en klocka för frågan, och frågans text är dess signatur.
@@ -36,11 +44,36 @@ Var 10:e sekund läser den varje tmux-panels skärm. Frågan måste ligga i skä
 
 Svaret skickas som `1` och Enter under deliveryBroker-lås, och en rad postas i panelens Discord-kanal.
 
-**Larm efter två minuter** för allt annat: kommandosubstitution, variabler som inte kan lösas, skyddade platser och alla frågor som inte gäller rm. Larmet går som DM till Mattias via `notifyUser` med panel, skäl och kommandorader, en gång per fråga. Ingen tangent skickas.
+**Ägarrouting efter två minuter** för allt annat: kommandosubstitution, variabler som inte kan lösas, skyddade platser och alla frågor som inte gäller rm. Om projektet deklarerar en annan `orchestrator`-panel skickas frågan dit en gång. Om ingen sådan panel finns eller leveransen nekas går frågan direkt till människan. Om ägaren inte löser frågan går ett DM via `notifyUser` efter totalt tio minuter. Ingen tangent skickas för dessa frågor.
+
+Varje auto-svar kontrollerar under samma delivery-broker-lås att pane-sessionen och den hashade fullständiga prompten fortfarande är exakt de observerade. Ett sessionsbyte, en ändrad fråga eller en osäker session stoppar svaret. Ett påbörjat svar upprepas aldrig.
+
+Projektets ägarpanel deklareras i den användarägda `agentmux.yaml`:
+
+```yaml
+agents:
+  skyvw:
+    orchestrator: 5
+```
+
+**Vad vakten gjorde går att läsa i efterhand.** Varje beslut skrivs som en rad i
+`~/.agentmux/permission-watchdog.jsonl` (`ts`, `pane`, `sessionId`, `signature`,
+`action`, `reason`, `why`). Åtgärderna är `answered`, `stale`,
+`answer-uncertain`, `escalated-orchestrator` och `escalated-human`. De frågor som
+blockerar paneler just nu ligger i `~/.agentmux/permission-prompts.json`.
+
+**`amux prompts`** listar varje panel som står på en fråga: väntetid, skäl,
+kommandorad, vaktens bedömning, ägarpanel och de kommandon som avslutar frågan.
+**`amux prompts answer <agent> [-p N] <val>`** läser om panelen, kräver att
+samma dialog fortfarande står där och att valet finns, skickar först då
+tangenten och rapporterar om dialogen försvann. Det är därför inte samma sak som
+`amux select`, som skickar Up×20 och Enter blint och kan skicka iväg en gammal
+prompt om frågan hunnit stängas.
 
 Miljövariabler:
 - `AMUX_PERMISSION_WATCHDOG_ENABLED=false` stänger av vakten.
 - `AMUX_PERMISSION_WATCHDOG_AUTO_ANSWER=false` gör den till enbart larm.
 - `AMUX_PERMISSION_WATCHDOG_ANSWER_AGE_MS` (10000) styr väntan före auto-svar.
 - `AMUX_PERMISSION_WATCHDOG_PROMPT_AGE_MS` (120000) styr väntan före larm.
+- `AMUX_PERMISSION_WATCHDOG_HUMAN_AGE_MS` (600000) styr väntan före DM när en ägarpanel har fått frågan.
 - `AMUX_PERMISSION_WATCHDOG_POLL_MS` (10000) styr hur ofta skärmarna läses.

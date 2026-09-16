@@ -2,6 +2,8 @@
 // generate legacy agents.yaml. Pure functions, no Discord API calls.
 
 import yaml from "js-yaml";
+import { expandTilde } from "./core/runtime-defaults.mjs";
+export { expandTilde };
 import { randomUUID } from "crypto";
 import { resolveTmuxLayout } from "./core/layout.mjs";
 import { resolveClaudeModel } from "./core/claude-model.mjs";
@@ -30,12 +32,6 @@ function paneCount(value, label, agentName) {
     throw new Error(`agentmux.yaml: agent '${agentName}' has invalid ${label} count`);
   }
   return value;
-}
-
-/** Expand ~ to $HOME in paths */
-export function expandTilde(p) {
-  if (p.startsWith("~/")) return p.replace("~", process.env.HOME);
-  return p;
 }
 
 /** WHAT: Parses source configuration. WHY: Keeps generated pane metadata normalized across engines. */
@@ -96,6 +92,11 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
       throw new Error(`agentmux.yaml: agent '${name}' has invalid kimiModel '${kimiModel}'`);
     }
     const codingPaneCount = claudeCount + codexCount + kimiCount;
+    const orchestrator = config.orchestrator;
+    if (orchestrator !== undefined
+        && (!Number.isSafeInteger(orchestrator) || orchestrator < 0 || orchestrator >= codingPaneCount)) {
+      throw new Error(`agentmux.yaml: agent '${name}' has invalid orchestrator pane`);
+    }
     if (backend === "native" && kimiCount > 0) {
       throw new Error(`agentmux.yaml: native agent '${name}' cannot define Kimi tmux panes`);
     }
@@ -128,6 +129,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
       layout: resolveTmuxLayout(config.layout),
       labels,
       interAgentSend: config.interAgentSend,
+      orchestrator: orchestrator ?? null,
       backend,
       runtimeUrl: backend === "native"
         ? String(config.runtime || "http://127.0.0.1:8811").replace(/\/+$/, "")
@@ -359,6 +361,7 @@ export function generateAgentsYaml(
       id: agentIds.get(name) || randomUUID(),
     };
     if (typeof config.interAgentSend === "boolean") entry.interAgentSend = config.interAgentSend;
+    if (Number.isSafeInteger(config.orchestrator)) entry.orchestrator = config.orchestrator;
     if (config.backend === "native") {
       entry.backend = "native";
       entry.runtimeUrl = config.runtimeUrl;

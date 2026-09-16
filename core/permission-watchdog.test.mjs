@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPermissionPrompt, detectPermissionPrompt, parsePermissionWatchdogConfig } from "./permission-watchdog.mjs";
+import { classifyPermissionPrompt, detectPermissionPrompt, nextPromptStep, parsePermissionWatchdogConfig } from "./permission-watchdog.mjs";
 
 // The screen lsrc:0 sat on for 21 minutes on 2026-09-12 (captured with amux log --tmux).
 const LSRC0_SCREEN = `
@@ -64,6 +64,51 @@ const untracked = { home: HOME, holdsKeptFiles: () => false };
 const rm = (target, command = "") => ({ reason: `Dangerous rm operation on statically-unresolvable target: ${target}`, command });
 const varRm = (target, command) => ({ reason: `Dangerous rm operation on possibly-empty variable path: ${target}`, command });
 
+// skyvw:2 on 2026-09-13 13:18: the command is verbatim from its transcript, the
+// frame is reconstructed in the boxed layout (no screen capture was kept).
+const SKYVW2_SEP13_SCREEN = `
+   │ ADB=/home/adelost/android-dev/sdk/platform-tools/adb; S="-s emulator-5556";
+   │ D=/home/adelost/lsrc/.artifacts/home-reach-2026-09-13/conservative; rm -f $D/*.png
+   │ $ADB $S shell am broadcast -a com.adelost.skydivealtimeter.QAWEATHER --es command refresh >/dev/null
+   Run shell command
+ │ Dangerous rm operation on possibly-empty variable path: $D/*.png
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+ Esc to cancel · Tab to amend`;
+
+describe("the 13 Sep artifact rm", () => {
+  it("answers a glob under a variable assigned a literal artifact folder in the same command", () => {
+    const prompt = detectPermissionPrompt(SKYVW2_SEP13_SCREEN);
+    expect(prompt.reason).toBe("Dangerous rm operation on possibly-empty variable path: $D/*.png");
+    expect(classifyPermissionPrompt(prompt, { home: "/home/adelost", holdsKeptFiles: () => false }))
+      .toMatchObject({ action: "answer", keys: "1" });
+  });
+});
+
+describe("nextPromptStep", () => {
+  const config = { autoAnswer: true, answerAgeMs: 10_000, promptAgeMs: 120_000, humanAgeMs: 600_000 };
+  const open = { answered: false, orchestratorNotified: false, humanNotified: false };
+
+  it("hands an unsafe prompt to the orchestrator first and to the human only after the human delay", () => {
+    const step = (ageMs, state = open) => nextPromptStep({ ageMs, answerable: false, hasOrchestrator: true, state, config });
+    expect(step(119_000)).toBeNull();
+    expect(step(121_000)).toBe("orchestrator");
+    expect(step(300_000, { ...open, orchestratorNotified: true })).toBeNull();
+    expect(step(601_000, { ...open, orchestratorNotified: true })).toBe("human");
+    expect(step(900_000, { ...open, orchestratorNotified: true, humanNotified: true })).toBeNull();
+  });
+
+  it("goes straight to the human after the prompt delay when no orchestrator can take it", () => {
+    expect(nextPromptStep({ ageMs: 121_000, answerable: false, hasOrchestrator: false, state: open, config })).toBe("human");
+  });
+
+  it("answers a safe prompt once after the answer delay", () => {
+    expect(nextPromptStep({ ageMs: 11_000, answerable: true, hasOrchestrator: true, state: open, config })).toBe("answer");
+    expect(nextPromptStep({ ageMs: 11_000, answerable: true, hasOrchestrator: true, state: { ...open, answered: true }, config })).toBeNull();
+  });
+});
+
 describe("detectPermissionPrompt, boxed reason", () => {
   it("reads the reason and its wrapped target from inside the box", () => {
     const p = detectPermissionPrompt(CLAW0_SCREEN);
@@ -71,6 +116,13 @@ describe("detectPermissionPrompt, boxed reason", () => {
     expect(p.reason).toBe("Dangerous rm operation on statically-unresolvable target: /home/adelost/.openclaw/workspace/.agents/0/reply-audio/*");
     expect(p.command).toContain("ls reply-audio | wc -l");
     expect(p.command).not.toContain("Dangerous rm operation");
+  });
+
+  it("uses only the latest live modal when an older modal remains in scrollback", () => {
+    const prompt = detectPermissionPrompt(`${LSRC0_SCREEN}\n${CLAW0_SCREEN}`);
+    expect(prompt.reason).toContain("/home/adelost/.openclaw/workspace/.agents/0/reply-audio/*");
+    expect(prompt.command).toBe('open("prefs.xml","w").write(prefs)\nEOF\nls reply-audio | wc -l');
+    expect(prompt.command).not.toContain("modal_gemma.py");
   });
 });
 
@@ -133,7 +185,8 @@ describe("classifyPermissionPrompt", () => {
 
 describe("parsePermissionWatchdogConfig", () => {
   it("reads env with safe defaults", () => {
-    expect(parsePermissionWatchdogConfig({})).toEqual({ enabled: true, autoAnswer: true, pollMs: 10_000, answerAgeMs: 10_000, promptAgeMs: 120_000 });
+    // humanAgeMs: skyvw:0's order for Mattias 2026-09-15, "Mattias gets the DM only if the prompt is still open N minutes later (default 10)".
+    expect(parsePermissionWatchdogConfig({})).toEqual({ enabled: true, autoAnswer: true, pollMs: 10_000, answerAgeMs: 10_000, promptAgeMs: 120_000, humanAgeMs: 600_000 });
     expect(parsePermissionWatchdogConfig({ AMUX_PERMISSION_WATCHDOG_AUTO_ANSWER: "false", AMUX_PERMISSION_WATCHDOG_PROMPT_AGE_MS: "5000" })).toMatchObject({ autoAnswer: false, promptAgeMs: 5000 });
   });
 });

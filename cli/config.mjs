@@ -116,6 +116,7 @@ export function listAgents(configPath) {
       discord: conf.discord,
       backend: conf.backend || "tmux",
       runtimeUrl: conf.runtimeUrl || null,
+      orchestrator: Number.isSafeInteger(conf.orchestrator) ? conf.orchestrator : null,
     }));
 }
 
