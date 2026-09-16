@@ -174,6 +174,19 @@ export function commitDirectories(command, cwd, home) {
   return [...new Set(directories)];
 }
 
+/**
+ * Function keys a shell command records verdicts for before it commits, e.g.
+ * `amux churn verdict 'a.js::step' KEEP "..." && git commit`. The hook sees the command before it runs,
+ * so without this a verdict chained ahead of its commit would be held as missing.
+ */
+export function verdictKeysInCommand(command) {
+  const keys = new Set();
+  for (const match of String(command || "").matchAll(/\bchurn\s+verdict\s+("[^"]+"|'[^']+'|\S+)/gu)) {
+    keys.add(match[1].replace(/^(['"])(.*)\1$/u, "$2"));
+  }
+  return keys;
+}
+
 /** The brief an agent reads when a commit is held for reflection. */
 export function formatReflectionBrief(due, policy = DEFAULT_HOTSPOT_POLICY) {
   const lines = [

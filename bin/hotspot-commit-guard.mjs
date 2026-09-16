@@ -36,14 +36,16 @@ try {
 if (payload.tool_name !== "Bash") process.exit(0);
 
 try {
-  const { commitDirectories, formatReflectionBrief } = await import("../core/hotspots.mjs");
+  const { commitDirectories, formatReflectionBrief, functionKey, verdictKeysInCommand } = await import("../core/hotspots.mjs");
   const { changedHotspotsDue, hotspotRepo } = await import("../core/hotspots-repo.mjs");
-  const directories = commitDirectories(payload.tool_input?.command, payload.cwd || process.cwd(), homedir());
+  const command = payload.tool_input?.command;
+  const directories = commitDirectories(command, payload.cwd || process.cwd(), homedir());
+  const chainedVerdicts = verdictKeysInCommand(command);
   const briefs = [];
   for (const directory of directories) {
     const repo = hotspotRepo(directory);
     if (!repo) continue;
-    const due = await changedHotspotsDue(repo);
+    const due = (await changedHotspotsDue(repo)).filter(({ hotspot }) => !chainedVerdicts.has(functionKey(hotspot)));
     if (due.length) briefs.push(`${repo.root}\n${formatReflectionBrief(due, repo.policy)}`);
   }
   if (briefs.length) block(briefs.join("\n\n"));

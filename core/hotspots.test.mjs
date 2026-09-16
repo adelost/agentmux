@@ -1,6 +1,6 @@
 import { expect, feature, unit } from "bdd-vitest";
 import {
-  commitDirectories, functionChurn, parseChangedRanges, reflectionDue, touchedFunctions, verdictEntry,
+  commitDirectories, functionChurn, parseChangedRanges, reflectionDue, touchedFunctions, verdictEntry, verdictKeysInCommand,
 } from "./hotspots.mjs";
 
 const hot = (churn) => ({ path: "src/camera.js", name: "update", start: 10, end: 40, nloc: 30, churn, fixes: 2, history: [] });
@@ -76,6 +76,16 @@ feature("hotspot reflection rules", () => {
       expect(dirs.plain).toEqual(["/work/pane"]);
       expect(dirs.plumbing).toEqual([]);
       expect(dirs.unrelated).toEqual([]);
+    }],
+  });
+
+  // Live 2026-09-16: `amux churn verdict ... && git commit` was held, because the hook runs before the verdict does.
+  unit("a verdict chained ahead of the commit in one command counts for that function", {
+    given: ["a command recording two verdicts and committing", () =>
+      `cd ~/x && amux churn verdict 'cli/commands.mjs::dispatch' KEEP "flag arms" && amux churn verdict "src/a.js::step" SPLIT "x y z" && git commit -m y`],
+    when: ["reading the verdict keys", (command) => verdictKeysInCommand(command)],
+    then: ["both keys are found, unquoted", (keys) => {
+      expect([...keys]).toEqual(["cli/commands.mjs::dispatch", "src/a.js::step"]);
     }],
   });
 
