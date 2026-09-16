@@ -3,13 +3,15 @@ import {
   detectPermissionPrompt,
   formatPermissionAlert,
   nextPromptStep,
+  openPromptsSnapshot,
+  permissionDecisionLine,
 } from "../core/permission-watchdog.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import { execFileSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 /**
  * WHAT: Checks whether git keeps a file at or under a literal rm prefix.
@@ -32,6 +34,28 @@ export function gitKeepsFilesUnder(path) {
 }
 
 /**
+ * WHAT: Resolves the file that records every watchdog decision.
+ * WHY: Keeps "did it answer?" answerable without the bridge's own terminal.
+ */
+export function permissionDecisionLogPath(env = process.env, home = homedir()) {
+  return env.AMUX_PERMISSION_WATCHDOG_LOG || join(home, ".agentmux", "permission-watchdog.jsonl");
+}
+
+/**
+ * WHAT: Resolves the file that holds the prompts blocking panes right now.
+ * WHY: Keeps `amux prompts` able to show how long a pane has waited.
+ */
+export function openPromptsPath(env = process.env, home = homedir()) {
+  return env.AMUX_PERMISSION_PROMPTS_PATH || join(home, ".agentmux", "permission-prompts.json");
+}
+
+function writeFile(path, text, { append }) {
+  mkdirSync(dirname(path), { recursive: true });
+  if (append) appendFileSync(path, text);
+  else writeFileSync(path, text);
+}
+
+/**
  * WHAT: Schedules pane scans that answer safe rm prompts and alert on the rest.
  * WHY: Keeps a pane from waiting on a prompt it cannot answer itself.
  */
@@ -46,6 +70,8 @@ export function createPermissionWatchdog({
   now = Date.now,
   home = homedir(),
   holdsKeptFiles = gitKeepsFilesUnder,
+  recordDecision = (line) => writeFile(permissionDecisionLogPath(), line, { append: true }),
+  publishOpenPrompts = (text) => writeFile(openPromptsPath(), text, { append: false }),
   sessionIdentity = (agentConfig, paneIdx) => {
     const paneDir = agent.paneDirectory(agentConfig.dir, paneIdx);
     return latestClaudeSessionIdentity(paneDir)?.sessionId || null;
@@ -55,6 +81,7 @@ export function createPermissionWatchdog({
   // alerts the human after config.promptAgeMs.
   const seen = new Map();
   let intervalId = null;
+  let publishedPrompts = null;
 
   async function post(agentName, paneIdx, text) {
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
@@ -112,6 +139,8 @@ export function createPermissionWatchdog({
       seen.set(paneKey, {
         signature: prompt.signature,
         sessionId,
+        reason: prompt.reason,
+        decision: null,
         firstSeenAt: at,
         answered: false,
         orchestratorNotified: false,
@@ -121,6 +150,17 @@ export function createPermissionWatchdog({
     }
     const ageMs = at - prev.firstSeenAt;
     const decision = classifyPermissionPrompt(prompt, { home, holdsKeptFiles });
+    prev.decision = decision.action === "answer" ? "auto-answer" : `needs-owner: ${decision.why}`;
+    const decided = (action, why) => {
+      try {
+        recordDecision(permissionDecisionLine({
+          at, paneKey, sessionId: prev.sessionId, signature: prompt.signature, action, reason: prompt.reason, why,
+        }));
+      } catch (err) {
+        log(`decision log write failed for ${paneKey}: ${err.message}`);
+      }
+      return { paneKey, action };
+    };
     const answerable = decision.action === "answer" && config.autoAnswer && Boolean(prev.sessionId);
     const ownerPane = agentConfig.orchestrator;
     const hasOrchestrator = Number.isSafeInteger(ownerPane)
@@ -137,14 +177,14 @@ export function createPermissionWatchdog({
         if (!answered) {
           seen.delete(paneKey);
           log(`stale prompt refused in ${paneKey}: session or signature changed before answer`);
-          return { paneKey, action: "stale" };
+          return decided("stale", "session or signature changed before the answer");
         }
         log(`answered "${decision.keys}" in ${paneKey} after ${Math.round(ageMs / 1000)}s: ${decision.why}`);
         await post(agentConfig.name, paneIdx, `Permission watchdog: svarade ja i ${paneKey} efter ${Math.round(ageMs / 1000)} s. ${decision.why}. Skäl i frågan: ${prompt.reason}`);
-        return { paneKey, action: "answered" };
+        return decided("answered", decision.why);
       } catch (err) {
         log(`answer failed for ${paneKey}: ${err.message}`);
-        return { paneKey, action: "answer-uncertain" };
+        return decided("answer-uncertain", err.message);
       }
     }
 
@@ -153,7 +193,7 @@ export function createPermissionWatchdog({
       try {
         await routeToOrchestrator(agentConfig, paneIdx, prompt, ageMs);
         log(`routed prompt ${prompt.signature.slice(0, 12)} from ${paneKey} to ${agentConfig.name}:${ownerPane}`);
-        return { paneKey, action: "orchestrated" };
+        return decided("escalated-orchestrator", `${agentConfig.name}:${ownerPane} owns the decision`);
       } catch (err) {
         log(`orchestrator route failed for ${paneKey}: ${err.message}`);
       }
@@ -167,7 +207,7 @@ export function createPermissionWatchdog({
       try { await notifyUser(text, { idempotencyKey: `permission-watchdog:${paneKey}:${prompt.signature.slice(0, 80)}` }); }
       catch (err) { log(`notifyUser failed for ${paneKey}: ${err.message}`); }
     }
-    return { paneKey, action: "alerted" };
+    return decided("escalated-human", decision.action === "answer" ? "auto-svar avstängt" : decision.why);
   }
 
   async function tick() {
@@ -184,7 +224,21 @@ export function createPermissionWatchdog({
         if (r) results.push(r);
       }
     }
+    publishOpen(at);
     return results;
+  }
+
+  function publishOpen(at) {
+    const open = [...seen.entries()].map(([paneKey, state]) => ({ paneKey, ...state }));
+    const text = openPromptsSnapshot(at, open);
+    const shape = text.replace(/"ts": "[^"]*"/u, "");
+    if (shape === publishedPrompts) return;
+    try {
+      publishOpenPrompts(text);
+      publishedPrompts = shape;
+    } catch (err) {
+      log(`open-prompt snapshot write failed: ${err.message}`);
+    }
   }
 
   function start() {

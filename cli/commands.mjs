@@ -3008,6 +3008,7 @@ Usage:
   agent clearline <name|:nr> [-p N]
                                   Clear composer with Escape,C-a,C-k
   agent esc <name|:nr> [-p N]     Escape, or close a detected Codex pager
+  amux prompts [answer <agent> [-p N] <N>]  Blocked permission prompts; answer one
   agent ps                        Show all running agents + status + context%
   agent top [--sort tokens] [-n N] Cross-session context leaderboard
   agent timeline [-n N]           Cross-pane event stream (kronologisk)

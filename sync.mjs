@@ -2,6 +2,8 @@
 // generate legacy agents.yaml. Pure functions, no Discord API calls.
 
 import yaml from "js-yaml";
+import { expandTilde } from "./core/runtime-defaults.mjs";
+export { expandTilde };
 import { randomUUID } from "crypto";
 import { resolveTmuxLayout } from "./core/layout.mjs";
 import { resolveClaudeModel } from "./core/claude-model.mjs";
@@ -30,12 +32,6 @@ function paneCount(value, label, agentName) {
     throw new Error(`agentmux.yaml: agent '${agentName}' has invalid ${label} count`);
   }
   return value;
-}
-
-/** Expand ~ to $HOME in paths */
-export function expandTilde(p) {
-  if (p.startsWith("~/")) return p.replace("~", process.env.HOME);
-  return p;
 }
 
 /** WHAT: Parses source configuration. WHY: Keeps generated pane metadata normalized across engines. */

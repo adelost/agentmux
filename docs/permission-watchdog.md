@@ -22,6 +22,14 @@ amux läste skärmen. Frågan stod obesvarad till 17:09.
 
 claw:0 stod ungefär tio minuter på "Dangerous rm operation on statically-unresolvable target: /home/adelost/.openclaw/workspace/.agents/0/reply-audio/*". Vakten kände bara igen varianten "possibly-empty variable path", så den larmade i stället för att svara. I nyare Claude Code står dessutom skälet inne i ramen, uppdelat på två rader. Claude Code skriver själv att frågan "cannot be auto-allowed by permission rules", så det går inte att lösa i settings.json.
 
+## Beställning 3 (Mattias, röst 2026-09-15 01:04, ordagrant, via skyvw:0)
+
+> och prata ettan om de har fastnat på en RM-fråga eller inte. Jag har ju sagt att detta måste in i amux så många gånger. Finns det inte där fortfarande? Behöver vi starta om det eller vad vad fan är problemet? Annars så måste ni själva trigga den på något sätt eller lägga till så att det är möjligt att trigga den. Ta inte och var så hjälplösa utan fixa istället.
+
+Frågor som vakten inte kan svara på nådde bara Mattias, och ingen orkestrerare
+kunde se eller agera på dem. Vaktens beslut syntes dessutom bara i bryggans
+egen terminal.
+
 ## Vad vakten gör
 
 Var 10:e sekund läser den varje tmux-panels skärm. Frågan måste ligga i skärmens sista rader med numrerade alternativ och "Esc to cancel", utan en composer-prompt under sig. Då startar en klocka för frågan, och frågans text är dess signatur.
@@ -47,6 +55,20 @@ agents:
   skyvw:
     orchestrator: 5
 ```
+
+**Vad vakten gjorde går att läsa i efterhand.** Varje beslut skrivs som en rad i
+`~/.agentmux/permission-watchdog.jsonl` (`ts`, `pane`, `sessionId`, `signature`,
+`action`, `reason`, `why`). Åtgärderna är `answered`, `stale`,
+`answer-uncertain`, `escalated-orchestrator` och `escalated-human`. De frågor som
+blockerar paneler just nu ligger i `~/.agentmux/permission-prompts.json`.
+
+**`amux prompts`** listar varje panel som står på en fråga: väntetid, skäl,
+kommandorad, vaktens bedömning, ägarpanel och de kommandon som avslutar frågan.
+**`amux prompts answer <agent> [-p N] <val>`** läser om panelen, kräver att
+samma dialog fortfarande står där och att valet finns, skickar först då
+tangenten och rapporterar om dialogen försvann. Det är därför inte samma sak som
+`amux select`, som skickar Up×20 och Enter blint och kan skicka iväg en gammal
+prompt om frågan hunnit stängas.
 
 Miljövariabler:
 - `AMUX_PERMISSION_WATCHDOG_ENABLED=false` stänger av vakten.

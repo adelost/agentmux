@@ -89,6 +89,10 @@ export function detectPermissionPrompt(paneText) {
   return { signature, reason, command, options };
 }
 
+/**
+ * WHAT: Resolves the one step a blocking prompt has earned at its current age.
+ * WHY: Keeps a prompt from reaching Mattias before its owner has had the chance.
+ */
 export function nextPromptStep({ ageMs, answerable, hasOrchestrator, state, config }) {
   if (answerable && !state.answered && ageMs >= config.answerAgeMs) return "answer";
   if (!state.orchestratorNotified && !state.humanNotified && ageMs >= config.promptAgeMs) {
@@ -96,6 +100,42 @@ export function nextPromptStep({ ageMs, answerable, hasOrchestrator, state, conf
   }
   if (state.orchestratorNotified && !state.humanNotified && ageMs >= config.humanAgeMs) return "human";
   return null;
+}
+
+/**
+ * WHAT: Formats one durable line about what the watchdog did with a prompt.
+ * WHY: Keeps "did it answer, or is it still waiting?" answerable from a file.
+ */
+export function permissionDecisionLine({ at, paneKey, sessionId = null, signature, action, reason = "", why = "" }) {
+  return `${JSON.stringify({
+    ts: new Date(at).toISOString(),
+    pane: paneKey,
+    sessionId,
+    signature: String(signature || "").slice(0, 16),
+    action,
+    reason: String(reason).slice(0, 300),
+    why: String(why).slice(0, 300),
+  })}\n`;
+}
+
+/**
+ * WHAT: Formats the currently blocked panes as a snapshot for `amux prompts`.
+ * WHY: Keeps a prompt's real age readable outside the bridge process.
+ */
+export function openPromptsSnapshot(at, open) {
+  return `${JSON.stringify({
+    ts: new Date(at).toISOString(),
+    prompts: open.map((p) => ({
+      pane: p.paneKey,
+      signature: String(p.signature || "").slice(0, 16),
+      firstSeenAt: new Date(p.firstSeenAt).toISOString(),
+      reason: p.reason,
+      decision: p.decision,
+      orchestratorNotified: p.orchestratorNotified,
+      humanNotified: p.humanNotified,
+      answered: p.answered,
+    })),
+  }, null, 2)}\n`;
 }
 
 const RM_REASON = /^Dangerous rm operation on (possibly-empty variable path(?: inside command substitution)?|statically-unresolvable target):\s*(.+)$/u;
@@ -160,6 +200,10 @@ function unsafeRmPath(path, home, holdsKeptFiles) {
   return null;
 }
 
+/**
+ * WHAT: Formats the message a pane's owner or Mattias gets about a stuck prompt.
+ * WHY: Keeps the reader from having to open tmux to see what is being asked.
+ */
 export function formatPermissionAlert({ paneKey, ageMs, reason, command, why }) {
   const cmd = String(command || "").split("\n").slice(0, 8).join("\n");
   return [
