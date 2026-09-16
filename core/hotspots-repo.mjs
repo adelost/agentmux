@@ -12,6 +12,7 @@ import {
   DEFAULT_HOTSPOT_POLICY, functionChurn, isFunctionSource, parseChangedRanges, parseLizardCsv,
   reflectionDue, touchedFunctions,
 } from "./hotspots.mjs";
+import { isJsSource, jsFunctions } from "./js-functions.mjs";
 
 const execFileAsync = promisify(execFile);
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -82,16 +83,25 @@ export function appendLedger(repo, entry) {
   appendFileSync(path, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
 }
 
-/** Function spans at HEAD for the given repo-relative paths. Lizard runs on HEAD blobs, never on uncommitted edits. */
+/**
+ * Function spans at HEAD for the given repo-relative paths, read from HEAD blobs, never uncommitted edits.
+ * JS and TS go through a real parser; lizard mis-nests their modern syntax. Other languages use lizard.
+ */
 export function headFunctions(repo, paths) {
   const sources = paths.filter(isFunctionSource);
-  if (!sources.length) return [];
+  const blobs = sources
+    .map((path) => ({ path, blob: git(repo.root, ["show", `HEAD:${path}`], { allowFailure: true }) }))
+    .filter(({ blob }) => blob !== null);
+  const js = blobs.filter(({ path }) => isJsSource(path)).flatMap(({ path, blob }) => jsFunctions(path, blob));
+  return [...js, ...lizardFunctions(blobs.filter(({ path }) => !isJsSource(path)))];
+}
+
+function lizardFunctions(blobs) {
+  if (!blobs.length) return [];
   const scratch = mkdtempSync(join(tmpdir(), "amux-hotspots-"));
   try {
     const present = [];
-    for (const path of sources) {
-      const blob = git(repo.root, ["show", `HEAD:${path}`], { allowFailure: true });
-      if (blob === null) continue;
+    for (const { path, blob } of blobs) {
       mkdirSync(dirname(join(scratch, path)), { recursive: true });
       writeFileSync(join(scratch, path), blob);
       present.push(path);

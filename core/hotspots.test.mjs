@@ -69,8 +69,17 @@ feature("hotspot reflection rules", () => {
       plain: commitDirectories("git commit --amend --no-edit", cwd, home),
       plumbing: commitDirectories("git commit-tree HEAD^{tree} -m x", cwd, home),
       unrelated: commitDirectories("git status && npm test", cwd, home),
+      // claw:1 on 1.25.67: a heredoc that only wrote a file was held because its text mentioned a commit.
+      heredocText: commitDirectories("cat > notes.md <<'EOF'\nthen git commit -am wip\nEOF", cwd, home),
+      quotedText: commitDirectories('echo "later: git commit -am wip" && ls', cwd, home),
+      messageHeredoc: commitDirectories("git commit -F - <<'EOF'\nfix: a && git commit\nEOF", cwd, home),
+      quotedDirectory: commitDirectories('cd "/tmp/a b" && git commit -m "x; git commit"', cwd, home),
     })],
     then: ["commits resolve to their directories, the rest to nothing", (dirs) => {
+      expect(dirs.heredocText).toEqual([]);
+      expect(dirs.quotedText).toEqual([]);
+      expect(dirs.messageHeredoc).toEqual(["/work/pane"]);
+      expect(dirs.quotedDirectory).toEqual(["/tmp/a b"]);
       expect(dirs.cdChain).toEqual(["/home/me/lsrc/game"]);
       expect(dirs.dashC).toEqual(["/repos/app"]);
       expect(dirs.plain).toEqual(["/work/pane"]);
