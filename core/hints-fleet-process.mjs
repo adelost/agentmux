@@ -226,9 +226,11 @@ worthwhile rewrite from noise.
    manager's memory, and do not call silence or an unstarted owner clock a
    worker failure. When a board is enabled, use its typed states rather than
    encoding state as prose in a private note.
-10. **Human direction is authoritative and remains direct.** If relaying is
-    genuinely necessary, preserve the human quote byte-for-byte and include
-    provenance. No manager, memory note or older topology rule may narrow,
+10. **Human direction is authoritative and remains direct.** A decision relayed
+    as authority (a GO, a price, a name) keeps the human quote byte-for-byte with
+    provenance. A work brief is the orchestrator's interpretation: numbered
+    executable steps, not the human's text (see the amux-orchestrator skill).
+    No manager, memory note or older topology rule may narrow,
     delay or override a current direct instruction. Human language stays UTF-8
     end to end: preserve literal \`åäö\` and quoted text byte-for-byte. Board
     mutations containing human text use the canonical \`amux-suggest\` body-file
