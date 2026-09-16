@@ -31,16 +31,34 @@ the list exists to provide.
 
 ## Exact algorithm
 
-1. Read bounded journal tails from configured Claude, Codex and Kimi panes.
-   Only turns newer than each pane's successful Dream receipt are eligible.
-   Dream prompts, compact commands and system plumbing are excluded.
-   If Codex's normal 8 MiB adaptive tail cannot attribute any work, reuse the
-   search JSONL stream over at most 64 MiB of disk history, retaining at most
-   8 MiB of authored/lifecycle events. Known oversized compact/tool-output
-   records are not conversation input; oversized unclassified records still
-   fail explicitly. No journal is changed and model input budgets do not grow.
-2. Keep at most eight turns and 5 KiB per pane, at most 48 panes, and at most
-   96 KiB total input. Every omission and unreadable journal remains explicit.
+1. Read configured Claude, Codex and Kimi journals back to each pane's window
+   start: its successful Dream receipt, or 24 hours before the scheduled
+   invocation when it has none. A receipt older than seven days before that
+   point starts the window at seven days, so a failed night's work reaches the
+   next digest instead of falling behind a fixed 24-hour window. Dream prompts,
+   compact commands and system plumbing are excluded.
+   Tails start at 512 KiB and double until they reach the window start, not
+   until any work is visible: on 2026-09-16 one 0.52 MiB tool output hid 20 of
+   skyvw:5's 21 turns. Claude reads up to 64 MiB in each of at most six rotated
+   sessions. Codex grows to 8 MiB, then reuses the search JSONL stream over at
+   most 64 MiB of disk history, retaining at most 8 MiB of authored/lifecycle
+   events. Known oversized compact/tool-output records are not conversation
+   input. An oversized unclassified record fails the pane only when the tail
+   holds no attributable work; otherwise the tail's turns are used and the
+   unread earlier history is marked `historyComplete: false`, because a
+   journal only grows and a failed pane would never be read again. No journal
+   is changed.
+2. Show at most 24 turns per pane, 640 B per turn within 5 to 16 KiB per pane,
+   at most 48 panes, and at most 96 KiB total input. When a pane has more
+   settled turns, prompts a person wrote come first, then turns whose final
+   text opens with SUMMARY, DONE or BLOCKED, then the newest; the rest are
+   counted as `omittedTurns`. The receipt still advances to the newest settled
+   turn. Holding older turns back instead never catches up: on 2026-09-16
+   skyvw:0 had 103 work turns in one day, 70 of them background-task
+   notifications. A newest turn without a completion marker whose journal
+   changed within ten minutes is still running, is counted as `deferredTurns`
+   and waits for the next night. Every omission and unreadable journal remains
+   explicit.
 3. Require the owner pane to be idle. The first candidate keeps the full grace
    period, since a pane that is merely mid-turn is still the preferred curator;
    any further candidate only has to be idle right now, so one stuck pane cannot
@@ -93,9 +111,10 @@ not call a model, reindex search, notify repeatedly, or start engines.
 
 Both entrypoints use one workspace/date intent, claimed inside the same
 kernel-backed controller lock as manual Dream. Source cursors and history are
-read after acquiring that lock. A missed attempt reads from 24 hours before
-the scheduled invocation, not 24 hours before a late startup. Only the current
-scheduled day is eligible; this is not an automatic rewrite of missed old days.
+read after acquiring that lock. A missed attempt measures its 24 hours from
+the scheduled invocation, not from a late startup, and panes with a receipt
+read from that receipt. Only the current scheduled day is written: a failed
+night's work lands in the next digest, never in a rewrite of the old day.
 All existing curator and idle/queue/quality/compact fences still apply.
 
 The controller and delivery queue share the same `flock`-backed lease primitive.
@@ -160,5 +179,6 @@ fails closed before touching git or memory if asked to rewrite files.
   insert is narrower and auditable.
 - Treating command delivery as proof of compaction risks summarizing stale
   context. The engine journal boundary is the receipt.
-- Silent truncation creates a false receipt. Omitted material stays explicit
-  and is never receipted.
+- Silent truncation creates a false receipt. Omitted panes stay explicit and
+  are never receipted; omitted turns inside an included pane are counted in
+  the input so the curator can say what it did not see.

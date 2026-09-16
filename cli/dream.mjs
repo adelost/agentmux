@@ -301,7 +301,9 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     console.log(`Dream would verify /compact, then send one visible prompt for ${batch.included.length} pane(s).`);
     console.log(`Input packet: ${Buffer.byteLength(JSON.stringify(batch.payload))} bytes; no hidden model process.`);
     for (const source of batch.included) {
-      console.log(`- ${source.agent}:${source.pane} ${source.engine}, ${source.turns} recent real turn(s), cursor ${source.activityCursor}`);
+      const waiting = `${source.omittedTurns ? `, ${source.omittedTurns} omitted` : ""}${source.deferredTurns ? ", 1 still running" : ""}`;
+      const gap = source.historyComplete === false ? ", history before the window start unread" : "";
+      console.log(`- ${source.agent}:${source.pane} ${source.engine}, ${source.turns} real turn(s)${waiting}${gap}, cursor ${source.activityCursor}`);
     }
     for (const source of batch.omitted) console.log(`- OMIT ${source.agent}:${source.pane}: ${source.omitReason}`);
     for (const source of observed.unreadable) console.log(`- UNREADABLE ${source.agent}:${source.pane}: ${source.reason}`);
