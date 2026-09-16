@@ -27,6 +27,7 @@ amux lint
 | `amux search` | Search memory, sessions, and the durable delivery ledger |
 | `amux lint` | Run default repo linters, starting with WHAT/WHY/DTO/debt contracts |
 | `amux churn` | Show WARN-only young-test and rewrite-hotspot signals from git history |
+| `amux churn functions\|check\|verdict` | Function hotspots (6+ trunk commits in 60 days); a commit to one needs a recorded REWRITE/SPLIT/KEEP verdict (Claude panes are held by a PreToolUse hook) |
 
 ## Bridge Lifecycle
 

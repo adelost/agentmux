@@ -132,6 +132,20 @@ For missing dependencies in an authorized checkout, follow the repo's setup
 instructions; \`amux --help\` documents \`worktree-deps\`. Bootstrap success
 does not replace the scoped verification in staffing rule 6.
 
+## Hotspot reflection
+
+A function with 6+ trunk commits among its lines in 60 days is a hotspot.
+Before committing a change to one, read it and its fix diffs and record
+\`amux churn verdict '<path>::<name>' REWRITE|SPLIT|KEEP "<why>"\`.
+Claude panes are held at \`git commit\` until the verdict exists; other
+engines run \`amux churn check\` before committing. The verdict demands
+reflection, not a rewrite: KEEP when the fixes came from constants, copy,
+upstream values or features; SPLIT or REWRITE when they came from the
+function's own branching or state. Do a small split in the same change.
+Why: measured 2026-09-16, churn predicted fixes (odds x2 per doubling after
+size) and complexity scores did not; only reading the fix history told a
+worthwhile rewrite from noise.
+
 ## Kommunikationsdisciplin
 
 1. **Prata bara när (a) en STÖRRE uppgift är KLAR, (b) du genuint behöver

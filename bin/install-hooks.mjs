@@ -29,11 +29,16 @@ const CLIENT_LINK = join(homedir(), ".local", "bin", "amux-suggest");
 // pay a node startup per turn boundary. Path is quoted (spaces-safe).
 const HOOK_CMD = `[ -n "$TMUX_PANE" ] || exit 0; exec node "${join(__dir, "amux-hook.mjs")}"`;
 const SUGGESTIONS_GUARD_CMD = `exec node "${INSTALLED_GUARD}"`;
+// Hotspot reflection runs from the package like the event hook. The shell pre-filter keeps every other
+// Bash call free of a node start: only payloads that mention commit reach the guard.
+export const HOTSPOT_GUARD_CMD = `p=$(cat); case "$p" in *commit*) printf '%s' "$p" | exec node "${join(__dir, "hotspot-commit-guard.mjs")}";; esac`;
 const SETTINGS = join(homedir(), ".claude", "settings.json");
 
 const isAmuxHook = (h) => h?.type === "command" && /amux-hook\.mjs/.test(h?.command || "");
 const isSuggestionsGuard = (h) => h?.type === "command"
   && /suggestions-write-guard\.mjs/.test(h?.command || "");
+const isHotspotGuard = (h) => h?.type === "command"
+  && /hotspot-commit-guard\.mjs/.test(h?.command || "");
 
 function without(entries, predicate) {
   return (entries || [])
@@ -130,10 +135,13 @@ function main() {
     if (kept.length) hooks[event] = kept;
     else delete hooks[event];
   }
-  const preToolUse = without(hooks.PreToolUse, isSuggestionsGuard);
+  const preToolUse = without(without(hooks.PreToolUse, isSuggestionsGuard), isHotspotGuard);
   if (!remove) {
     preToolUse.push({ matcher: "Bash", hooks: [{
       type: "command", command: SUGGESTIONS_GUARD_CMD, timeout: 5,
+    }] });
+    preToolUse.push({ matcher: "Bash", hooks: [{
+      type: "command", command: HOTSPOT_GUARD_CMD, timeout: 60,
     }] });
   }
   if (preToolUse.length) hooks.PreToolUse = preToolUse;
@@ -156,6 +164,7 @@ function main() {
   console.log(`${remove ? "removed amux hooks from" : "installed amux hooks in"} ${SETTINGS}`);
   console.log(`events: ${HOOK_EVENTS.join(", ")} -> ${HOOK_CMD}`);
   console.log(`Suggestions mutations: PreToolUse/Bash -> ${SUGGESTIONS_GUARD_CMD}`);
+  console.log(`Hotspot reflection on git commit: PreToolUse/Bash -> ${HOTSPOT_GUARD_CMD}`);
 }
 
 // Only run when executed, never on import. This file now exports a helper, and
