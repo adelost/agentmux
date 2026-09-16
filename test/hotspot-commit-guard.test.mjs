@@ -76,6 +76,20 @@ feature("hotspot commit guard", () => {
     }],
   }, { timeout: 60_000 });
 
+  integration("a verdict recorded earlier in the same shell command releases that commit", {
+    given: ["the hot step trunk and a working edit inside step", () => {
+      const repo = repoWithHotStep();
+      writeFileSync(join(repo.clone, "flight.js"), source(6).replace('v: 3 }', 'v: 33 }'));
+      return repo;
+    }],
+    when: ["committing in a chain that records the verdict first", ({ clone, ledger }) =>
+      guard(clone, ledger, `amux churn verdict 'flight.js::step' KEEP "velocity constants only" && git commit -am tune`)],
+    then: ["the guard lets the chain run", (result, { root }) => {
+      expect(result.status, result.stderr).toBe(0);
+      rmSync(root, { recursive: true, force: true });
+    }],
+  }, { timeout: 60_000 });
+
   integration("a commit touching only a cold function passes without a brief", {
     given: ["the same trunk and a working edit inside idle only", () => {
       const repo = repoWithHotStep();
