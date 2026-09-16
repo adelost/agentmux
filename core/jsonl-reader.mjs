@@ -17,8 +17,8 @@ const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024; // hard cap, well under the st
  * Claude Code's path encoding: every `/` and `.` becomes a `-`.
  * Example: /home/user/lsrc/.agents/1 → -home-user-lsrc--agents-1
  */
-/** List jsonl files in a project dir, newest-first. */
-function listJsonlFiles(projectDir) {
+/** WHAT: Returns a project's session journals newest first. WHY: Keeps every Claude history reader from guessing which session is current. */
+export function listJsonlFiles(projectDir) {
   if (!existsSync(projectDir)) return [];
   try {
     return readdirSync(projectDir)
@@ -577,8 +577,10 @@ function itemIdFor(uuid, blockIndex) {
  *   include the turn's FINAL text, are dropped and never mirrored. Opt-in so
  *   only the watcher sees headless turns (userPrompt=null); other readers are
  *   unchanged. Items still carry stable ids so the engine dedupes them exactly.
+ * WHAT: Builds turns from ordered Claude events.
+ * WHY: Keeps readers from pairing prompts and replies differently.
  */
-function groupIntoTurns(events, { headless = false } = {}) {
+export function groupIntoTurns(events, { headless = false } = {}) {
   const turns = [];
   let current = null;
   const startHeadless = (e) => {
@@ -700,28 +702,6 @@ export function readLastTurns(paneDir, opts = {}) {
   if (turns.length > limit) turns = turns.slice(-limit);
 
   return { turns, compactions, jsonlFile: files[0].path };
-}
-
-/** WHAT: Reads bounded recent turns across compact-rotated Claude sessions. WHY: Keeps compact rotation from hiding recent work. */
-export function readRecentTurnsAcrossClaudeSessions(paneDir, opts = {}) {
-  const { since = null, limit = 8, maxFiles = 6, tailBytes = 512 * 1024 } = opts;
-  const files = listJsonlFiles(claudeProjectDir(paneDir));
-  const sinceMs = since ? new Date(since).getTime() : null;
-  const recent = files.filter((file, index) => index === 0
-    || !Number.isFinite(sinceMs) || file.mtime >= sinceMs);
-  const selected = recent.slice(0, Math.max(1, maxFiles));
-  const turns = selected.flatMap(({ path }) =>
-    groupIntoTurns(parseJsonlTail(path, Math.max(1024, tailBytes)), { headless: true }))
-    .filter((turn) => {
-      const timestamp = Date.parse(turn.timestamp || "");
-      return Number.isFinite(timestamp) && (!Number.isFinite(sinceMs) || timestamp >= sinceMs);
-    })
-    .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
-  const unique = [...new Map(turns.map((turn) => [
-    `${turn.timestamp}\u0000${turn.userPrompt}`, turn,
-  ])).values()];
-  return { turns: unique.slice(-Math.max(1, limit)), filesRead: selected.length,
-    filesOmitted: Math.max(0, recent.length - selected.length) };
 }
 
 /** Project dir for a pane (where Claude Code stores the session jsonl). */

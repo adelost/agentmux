@@ -178,6 +178,8 @@ export function dreamOwnerPrompt({
     "- En noggrann svensk sammanfattning i högst 60 icke-tomma rader.",
     "- Prioritera beslut, genomförda och verifierade resultat, blockerare, oavslutat arbete och återanvändbara lärdomar.",
     "- Slå ihop relaterat arbete men behåll pane-ID när proveniens behövs. Utelämna småprat och repetitiv status.",
+    "- Om paneler motsäger varandra, skriv att uppgifterna går isär och ange båda källorna. Redovisa dem aldrig som två fakta.",
+    "- Upprepa inte det som dagsfilens manuella avsnitt redan säger. Ange datum för arbete från ett tidigare dygn.",
     "",
     "Skriv inga reserverade amux-markörer i resultatet. AMUX validerar filen och skriver själv det enda tillåtna Dream-blocket atomiskt i dagens minne.",
     `När ${input.memoryFormat === 2 ? "resultatfilen är durabelt skriven" : "blocket är durabelt skrivet"}: svara exakt \`DREAM_OK ${dateKey} ${input.runId}\` och inget mer.`,

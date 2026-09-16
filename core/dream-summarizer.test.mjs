@@ -1,8 +1,4 @@
-import { feature, component, unit, expect } from "bdd-vitest";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
-import { readRecentTurnsAcrossClaudeSessions } from "./jsonl-reader.mjs";
+import { feature, unit, expect } from "bdd-vitest";
 import {
   buildDreamBatch, collectDreamSources, dreamPaneEngine, upsertDreamSummary,
   validateDreamSummary,
@@ -76,42 +72,6 @@ feature("bounded fleet dream input", () => {
     }],
   });
 
-  component("reads work before and after a Claude compact rotation", {
-    given: ["two recently modified session files for one pane", () => {
-      const root = mkdtempSync(join(tmpdir(), "amux-dream-rotated-"));
-      const previousHome = process.env.HOME;
-      process.env.HOME = root;
-      const paneDir = "/workspace/ai/.agents/0";
-      const project = join(root, ".claude", "projects", paneDir.replace(/[\/.]/g, "-"));
-      mkdirSync(project, { recursive: true });
-      const before = join(project, "before-compact.jsonl");
-      const after = join(project, "after-compact.jsonl");
-      writeFileSync(before, `${JSON.stringify({
-        type: "user", timestamp: "2026-07-21T10:00:00Z",
-        message: { role: "user", content: "important work before compact" },
-      })}\n`);
-      writeFileSync(after, `${JSON.stringify({
-        type: "user", timestamp: "2026-07-21T11:00:00Z",
-        message: { role: "user", content: "follow-up after compact" },
-      })}\n`);
-      utimesSync(before, new Date("2026-07-21T10:01:00Z"), new Date("2026-07-21T10:01:00Z"));
-      utimesSync(after, new Date("2026-07-21T11:01:00Z"), new Date("2026-07-21T11:01:00Z"));
-      return { root, previousHome, paneDir };
-    }],
-    when: ["reading the bounded multi-session window", ({ paneDir }) =>
-      readRecentTurnsAcrossClaudeSessions(paneDir, {
-        since: new Date("2026-07-21T09:00:00Z"), limit: 8, maxFiles: 6,
-      })],
-    then: ["both sides of compact are present", (result, fx) => {
-      expect(result.turns.map((item) => item.userPrompt)).toEqual([
-        "important work before compact", "follow-up after compact",
-      ]);
-      expect(result.filesRead).toBe(2);
-      process.env.HOME = fx.previousHome;
-      rmSync(fx.root, { recursive: true, force: true });
-    }],
-  });
-
   unit("fixed limits omit explicitly and never advance data silently", {
     given: ["three active sources", () => [
       source("ai", 0, 3_000), source("lsrc", 2, 2_000), source("sky", 1, 1_000),
@@ -151,6 +111,98 @@ feature("bounded fleet dream input", () => {
       expect(memory).toContain("\nnew\n");
       expect(memory).not.toContain("\nold\n");
       expect(memory.match(/amux-dream-summary:2026-07-21/g)).toHaveLength(2);
+    }],
+  });
+});
+
+feature("Dream receipts never pass work the digest did not show", () => {
+  const pane = [{ name: "skyvw", dir: "/work", panes: [{ cmd: "codex" }] }];
+  const sinceMs = Date.parse("2026-09-15T02:00:00Z");
+  const complete = (timestamp, userPrompt) => ({ ...turn(timestamp, userPrompt), isComplete: true });
+  const minutes = (count) => count * 60_000;
+
+  unit("a failed night's work reaches the next digest", {
+    given: ["a receipt from before the failed night and work on both days", () => ({
+      receipts: { schemaVersion: 1, panes: {
+        "skyvw:0": { activityCursor: "2026-09-14T01:00:00Z", dreamedAt: "2026-09-14T02:00:00Z" },
+      } },
+      history: [
+        complete("2026-09-14T10:00:00Z", "work during the failed night"),
+        complete("2026-09-15T10:00:00Z", "work after it"),
+      ],
+    })],
+    when: ["collecting the night after the failure", ({ receipts, history }) => {
+      const asked = [];
+      const result = collectDreamSources(pane, sinceMs, {
+        receipts, now: Date.parse("2026-09-16T04:10:00Z"),
+        readHistory: (_engine, _dir, options) => { asked.push(options.since.toISOString()); return { turns: history }; },
+      });
+      return { result, asked };
+    }],
+    then: ["the window starts at the receipt, not 24 hours back", ({ result, asked }) => {
+      expect(asked).toEqual(["2026-09-14T01:00:00.000Z"]);
+      expect(result.sources[0].entries.map((item) => item.userPrompt))
+        .toEqual(["work during the failed night", "work after it"]);
+    }],
+  });
+
+  unit("a busy pane shows its decisions and reports and counts the rest", {
+    given: ["thirty finished turns, mostly background-task notifications", () => Array.from({ length: 30 }, (_, index) => {
+      const at = new Date(sinceMs + minutes(10 * (index + 1))).toISOString();
+      if (index === 2) return complete(at, "skyvw 0 ska ta över som orkestrerare");
+      const notification = { ...complete(at, `<task-notification>\ntask ${index} finished`) };
+      const report = index === 9 ? "SUMMARY: row 47 released in v0.5.1351" : `checked task ${index}`;
+      return { ...notification, items: [{ type: "text", content: report }] };
+    })],
+    when: ["collecting", (history) => collectDreamSources(pane, sinceMs, {
+      now: Date.parse("2026-09-16T04:10:00Z"), readHistory: () => ({ turns: history }),
+    })],
+    then: ["the human decision and the report stay, the oldest chatter is counted, the receipt passes all", ({ sources }) => {
+      const [source] = sources;
+      const shown = source.entries.map((item) => item.userPrompt);
+      expect(shown).toHaveLength(24);
+      expect(shown[0]).toBe("skyvw 0 ska ta över som orkestrerare");
+      expect(shown).toContain("<task-notification>\ntask 9 finished");
+      expect(shown).not.toContain("<task-notification>\ntask 0 finished");
+      expect(source.omittedTurns).toBe(6);
+      expect(source.activityCursor).toBe(new Date(sinceMs + minutes(300)).toISOString());
+    }],
+  });
+
+  unit("a turn still running is left for the next night", {
+    given: ["a finished turn and an open one", () => [
+      complete("2026-09-16T03:00:00Z", "finished order"),
+      turn("2026-09-16T04:05:54Z", "order just sent", ""),
+    ]],
+    when: ["collecting while the journal is fresh, and after it went quiet", (history) => {
+      const now = Date.parse("2026-09-16T04:10:00Z");
+      const collect = (lastWriteMs) => collectDreamSources(pane, sinceMs, {
+        now, readHistory: () => ({ turns: history, lastWriteMs }),
+      }).sources[0];
+      return { fresh: collect(now - minutes(2)), quiet: collect(now - minutes(30)) };
+    }],
+    then: ["only a quiet journal lets the open turn be receipted", ({ fresh, quiet }) => {
+      expect(fresh.entries.map((item) => item.userPrompt)).toEqual(["finished order"]);
+      expect(fresh.activityCursor).toBe("2026-09-16T03:00:00Z");
+      expect(fresh.deferredTurns).toBe(1);
+      expect(quiet.entries).toHaveLength(2);
+    }],
+  });
+
+  unit("a busy pane's outcomes stay readable within the fleet budget", {
+    given: ["twenty-four turns with long final reports", () => {
+      const entries = Array.from({ length: 24 }, (_, index) => turn(
+        new Date(sinceMs + minutes(index + 1)).toISOString(), `[from skyvw:0] row ${index}`,
+        `SUMMARY: row ${index} released. ${"evidence ".repeat(300)}`));
+      return [{ ...source("skyvw", 5, sinceMs + minutes(24)), turns: 24, entries }];
+    }],
+    when: ["building the batch", (sources) => buildDreamBatch(sources, "2026-09-16")],
+    then: ["each report keeps a useful share and the pane stays bounded", (batch) => {
+      const [pane] = batch.payload.panes;
+      expect(pane.turns).toHaveLength(24);
+      for (const item of pane.turns) expect(Buffer.byteLength(item.assistant)).toBeGreaterThanOrEqual(300);
+      expect(Buffer.byteLength(JSON.stringify(pane))).toBeLessThanOrEqual(16 * 1024);
+      expect(Buffer.byteLength(batch.sourceText)).toBeLessThanOrEqual(96 * 1024);
     }],
   });
 });

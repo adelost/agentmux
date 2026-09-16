@@ -1,18 +1,17 @@
 // Bounded journal input for the operator-selected nightly Dream pane.
 
-import { statSync } from "node:fs";
-import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
-import { readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
-import {
-  panePathFor, readRecentTurnsAcrossClaudeSessions,
-} from "./jsonl-reader.mjs";
-import { isDreamActivityTurn, validDreamCursor } from "./dream-eligibility.mjs";
-import { CODEX_DREAM_SCAN_BYTES } from "./codex-dream-history.mjs";
+import { panePathFor } from "./jsonl-reader.mjs";
+import { readDreamPaneHistory } from "./dream-history.mjs";
+import { dreamWindowStartMs, selectDreamTurns } from "./dream-turn-selection.mjs";
 
-/** WHAT: Defines the per-pane turn ceiling. WHY: Prevents old chatter from dominating the summary. */
-export const DREAM_SOURCE_TURNS = 8;
-/** WHAT: Defines the per-pane byte ceiling. WHY: Prevents one pane from consuming the fleet budget. */
+/** WHAT: Defines how many turns one pane may show. WHY: Keeps one busy pane from crowding the others out of a batch. */
+export const DREAM_SOURCE_TURNS = 24;
+/** WHAT: Defines one turn's byte share. WHY: Keeps a busy pane's outcomes readable instead of clipped to their first words. */
+export const DREAM_TURN_BYTES = 640;
+/** WHAT: Defines the per-pane byte floor. WHY: Keeps a quiet pane's few turns from being clipped harder than before. */
 export const DREAM_SOURCE_BYTES = 5 * 1024;
+/** WHAT: Defines the per-pane byte ceiling. WHY: Prevents one pane from consuming the fleet budget. */
+export const DREAM_SOURCE_MAX_BYTES = 16 * 1024;
 /** WHAT: Defines the complete prompt ceiling. WHY: Keeps nightly model cost bounded as the fleet grows. */
 export const DREAM_PROMPT_BYTES = 96 * 1024;
 /** WHAT: Defines the pane-count ceiling. WHY: Keeps pathological configurations from expanding one run forever. */
@@ -30,38 +29,12 @@ export function dreamPaneEngine(pane = {}) {
   return match[1].startsWith("kimi") ? "kimi" : match[1];
 }
 
-function readPaneHistory(engine, paneDir, { since, limit }) {
-  if (engine === "claude") {
-    return readRecentTurnsAcrossClaudeSessions(paneDir, { since, limit });
-  }
-  const reader = engine === "codex" ? readLastTurnsCodex : readLastTurnsKimi;
-  // A compact event can alone exceed the small watcher tail. Grow only until
-  // an attributable work turn is visible; never read an unbounded journal.
-  const maxBytes = 8 * 1024 * 1024;
-  for (let tailBytes = 512 * 1024; tailBytes <= maxBytes; tailBytes *= 2) {
-    const result = reader(paneDir, { limit, tailBytes, headless: true }) || { turns: [] };
-    if (engine !== "codex" || !result.jsonlFile) return result;
-    const stat = statSync(result.jsonlFile);
-    const work = result.turns.filter((turn) => isDreamActivityTurn(turn.userPrompt));
-    if (work.length || stat.size <= tailBytes || stat.mtimeMs <= since.getTime()) return result;
-    if (tailBytes === maxBytes) {
-      const recovered = reader(paneDir, { limit, dreamHistory: true });
-      if (recovered.turns.some((turn) => isDreamActivityTurn(turn.userPrompt)) || stat.size <= CODEX_DREAM_SCAN_BYTES) return recovered;
-      throw new Error("dream-history-window-exhausted: no attributable work in bounded 64MiB recovery");
-    }
-  }
-}
-
-function afterCursor(turn, cursorMs) {
-  const timestamp = Date.parse(turn?.timestamp || "");
-  return Number.isFinite(timestamp) && timestamp > cursorMs;
-}
-
 /** WHAT: Collects journal-backed work without touching runtimes. WHY: Prevents Dream from waking or interrupting panes. */
 export function collectDreamSources(agents, sinceMs, options = {}) {
   const receipts = options.receipts || { panes: {} };
-  const readHistory = options.readHistory || readPaneHistory;
+  const readHistory = options.readHistory || readDreamPaneHistory;
   const limit = options.limit || DREAM_SOURCE_TURNS;
+  const nowMs = options.now || Date.now();
   const sources = [];
   const unreadable = [];
   const skipped = [];
@@ -75,32 +48,30 @@ export function collectDreamSources(agents, sinceMs, options = {}) {
     for (let pane = 0; pane < (agent.panes || []).length; pane++) {
       const engine = dreamPaneEngine(agent.panes[pane]);
       if (!engine) continue;
-      const key = `${agent.name}:${pane}`;
-      const receiptCursor = receipts.panes[key]?.activityCursor;
-      const receiptMs = validDreamCursor(receiptCursor) ? Date.parse(receiptCursor) : 0;
-      const cutoffMs = Math.max(sinceMs, receiptMs);
+      const cutoffMs = dreamWindowStartMs(receipts.panes[`${agent.name}:${pane}`], sinceMs);
       let result;
       try {
-        result = readHistory(engine, panePathFor(agent, pane), {
-          since: new Date(cutoffMs), limit,
-        });
+        result = readHistory(engine, panePathFor(agent, pane), { since: new Date(cutoffMs) });
       } catch (error) {
         unreadable.push({ agent: agent.name, pane, engine, reason: error.message });
         continue;
       }
-      const turns = (result?.turns || [])
-        .filter((turn) => afterCursor(turn, cutoffMs) && isDreamActivityTurn(turn.userPrompt))
-        .slice(-limit);
-      if (!turns.length) continue;
+      const { entries, omittedTurns, deferredTurns, activityCursor } = selectDreamTurns(result?.turns || [], {
+        cursorMs: cutoffMs, limit, lastWriteMs: result?.lastWriteMs, nowMs,
+      });
+      if (!entries.length) continue;
       sources.push({
         agent: agent.name,
         pane,
         engine,
-        turns: turns.length,
-        activityCursor: turns.at(-1).timestamp,
-        latestMs: Date.parse(turns.at(-1).timestamp),
+        turns: entries.length,
+        omittedTurns,
+        deferredTurns,
+        historyComplete: result?.reachedSince !== false,
+        activityCursor,
+        latestMs: Date.parse(activityCursor),
         filesOmitted: result?.filesOmitted || 0,
-        entries: turns,
+        entries,
       });
     }
   }
@@ -141,15 +112,23 @@ function sourcePayload(source, maxBytes) {
     pane: `${source.agent}:${source.pane}`,
     engine: source.engine,
     filesOmitted: source.filesOmitted,
+    ...(source.omittedTurns ? { omittedTurns: source.omittedTurns } : {}),
+    ...(source.deferredTurns ? { deferredTurns: source.deferredTurns } : {}),
+    ...(source.historyComplete === false ? { historyComplete: false } : {}),
     turns,
   };
+}
+
+/** WHAT: Calculates one pane's share of a batch. WHY: Keeps a busy pane readable without letting it take the fleet budget. */
+export function dreamSourceBytes(source) {
+  const wanted = source.entries.length * DREAM_TURN_BYTES;
+  return Math.min(DREAM_SOURCE_MAX_BYTES, Math.max(DREAM_SOURCE_BYTES, wanted));
 }
 
 /** WHAT: Builds a batch within fixed source budgets. WHY: Prevents fleet growth from flooding the curator pane. */
 export function buildDreamBatch(sources, dateKey, options = {}) {
   const maxPanes = options.maxPanes || DREAM_MAX_PANES;
   const maxPromptBytes = options.maxPromptBytes || DREAM_PROMPT_BYTES;
-  const maxSourceBytes = options.maxSourceBytes || DREAM_SOURCE_BYTES;
   const included = [];
   const omitted = [];
   const panes = [];
@@ -158,6 +137,7 @@ export function buildDreamBatch(sources, dateKey, options = {}) {
       omitted.push({ ...source, omitReason: "pane-limit" });
       continue;
     }
+    const maxSourceBytes = options.maxSourceBytes || dreamSourceBytes(source);
     let pane = sourcePayload(source, maxSourceBytes);
     const raw = JSON.stringify(pane);
     if (Buffer.byteLength(raw) > maxSourceBytes) {
