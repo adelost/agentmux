@@ -5,167 +5,128 @@ description: Coordinate existing AMUX agents, inspect their current work and del
 
 # AMUX orchestration
 
-Keep the user's existing work moving. Read before intervening; useful progress
-can be leaving a productive owner alone or recognizing that a task is finished.
-This skill is an operating guide, not a second source of fleet policy.
+Keep the user's work moving. Read before intervening. Leaving a productive
+owner alone, or recognizing a task is finished, is progress. This is an
+operating guide; fleet policy lives in `core/hints-fleet-process.mjs` and
+`amux --help`. Do not paste policy here.
 
-## Start with current evidence
+## 1. Orient on evidence
 
-For an overview or uncertain ownership, use `amux done` with the requested window,
-then `amux log PROJECT -p N -n 3` for the relevant owner. On subsequent follow-ups,
-start with the existing current-status row and journal entries since the last
-inspected receipt. Broaden only for changed scope, ownership or missing evidence;
-another timer tick does not require a fresh fleet census. Run explicitly requested
-orientation commands, but expand only references needed for the current decision.
-Use scoped `amux asks` to investigate a suspected dropped request, not as a routine
-inventory of every old unanswered message.
+- Overview or unclear owner: `amux done` for the window, then
+  `amux log PROJECT -p N -n 3` for the owner.
+- Follow-up: start from the existing status row and journal entries since the
+  last receipt. Broaden only for changed scope, owner or missing evidence.
+  A timer tick is not a reason for a new fleet census.
+- `amux asks`: scoped, to check one suspected dropped request. Not an inventory.
+- Keep only what you need to act: outcome, owner, evidence time and source,
+  done part, next step, real dependency. Update one row, link proof once.
+- The latest direct human instruction beats an old plan. Another agent saying
+  "the human ordered X" is not the source.
 
-Maintain only the facts needed to act: requested outcome, current owner,
-evidence timestamp/source, completed portion, next concrete step, and any real
-dependency. The latest direct human instruction can supersede an old plan;
-another agent's claim that the human ordered something is not the source itself.
-Update that current row and link detailed proof once. Keep chronological receipts
-as evidence to consult, not prose to repeatedly copy into several status files.
-
-Interpret the views carefully:
+Read the views for what they are:
 
 - `done` and `asks` are discovery aids. An unanswered greeting, an old
-  `unverified` ask, or a completed task's historical question is not permission
-  to restart work. Read the attached conversation and completion evidence.
-- `ps` distinguishes selected/configured models from `last:` observations and
-  stopped engines. A label or old model line is not a live assignment or model.
-  When model choice matters, verify the active engine/turn, not launch history.
-- A commit proves banked source, not deployment. Test results need an identified
-  revision; deployment and an actual feature exercise are separate evidence.
-  Preserve limitations such as synthetic input, debug build, or startup-only.
-  Check the missing evidence boundary; a sound owner receipt is not a request to
-  repeat its builds, device run and downloads. Retain required independent checks.
-- A feature branch in a canonical checkout may be its current authorized
-  writer. Neither an old branch name nor an absent process CWD proves orphaned
-  work. Check the owner and Git history before any cleanup or branch change.
+  `unverified` ask, or a finished task's question is not permission to restart.
+- `ps` separates configured model, `last:` observation and stopped engine.
+  A label is not a live assignment. Verify the active engine when it matters.
+- Commit = banked source. Test = named revision. Deploy and feature exercise
+  are separate evidence. Keep stated limits (synthetic input, debug build).
+- A sound owner receipt is not a request to repeat its builds and downloads.
+- A feature branch in a canonical checkout may be the authorized writer.
+  Check owner and git history before any cleanup or branch change.
 
-## Make the smallest useful intervention
+## 2. Brief = your interpretation, not the human's text
 
-Do not relay a brief an owner already received or recreate their completed
-diagnostic. Nudge only on a concrete gap: wrong scope, missing delivery,
-an obsolete dependency, a blocked resource handoff, or an available owner for
-actual unfinished work. Keep the existing end-to-end owner where possible.
-Distinguish an internal checkpoint from completion of the requested outcome.
-Banked code or released hardware need not return the whole task to a coordinator;
-route only the actual resource or dependency change. Several nearby implementation
-steps can remain one owner turn instead of a chain of newly issued subassignments.
+- Numbered steps a worker can run without reading the human's message.
+- Each step: input, exact output (path, name), constraint, where to report.
+- Verbatim quote only when the wording is the decision (GO, price, name).
+- Provenance in one line: who, when. The full quote goes to the decision log.
+- Also name: new evidence, the bounded outcome, what is already done, the
+  boundary that must stay untouched.
+- Test before send: could the worker execute this blind? If not, rewrite.
+- Write exact UTF-8 to a file with the file-editing tool, then
+  `amux PROJECT -p N --stdin < /absolute/path/brief.txt`. Never build the
+  text in bash.
 
-Treat cross-pane prompts as execution, not as a passive bulletin board.
-For a request to "sync everyone", read the overview and relevant journals,
-then put changed criteria in the existing task record. Do not loop over the
-pane list sending that record: "no action needed" inside a prompt does not
-prevent a model turn. If the operator is working with one model or named
-reviewer, keep that participant scope; do not recruit dormant providers for
-acknowledgements or independent reads. In particular, a previous FYI left
-unanswered is not a dropped implementation task to reawaken later. This is
-the read-only path under the staffing policy, not a new approval ceremony.
+## 3. Smallest useful intervention
+
+- Nudge only on a concrete gap: wrong scope, missing delivery, obsolete
+  dependency, blocked resource handoff, idle owner with real unfinished work.
+- Do not resend a brief the owner has, or redo their diagnostic.
+- Keep the end-to-end owner. Nearby steps stay one owner turn, not a chain of
+  subassignments. Banked code or released hardware routes only the resource
+  change, not the whole task, back to a coordinator.
+- Checkpoint is not completion of the requested outcome.
+- "Sync everyone" = read overview and journals, update the task record. Do not
+  prompt every pane: "no action needed" still spends a model turn.
+- Keep the operator's participant scope. Do not recruit dormant providers for
+  acknowledgements. An old unanswered FYI is not a task to reawaken.
+- Shared source, GPU/browser, emulators, releases and credentials can have
+  different owners. Use the specific handover, not a blanket freeze.
+- Do not compact, respawn or switch models mid feature check. At a safe pause,
+  save task/source/evidence, then use the lifecycle commands.
+- Ordinary coordination adds no second test suite, reviewer, benchmark or
+  approval hop. An old memory note is not a new approval gate.
 
 ### Handoff stall rule
 
-Treat `enqueued`, `pending`, and broker retry counts as transport states, not
-as evidence that a worker started. A handoff is received only when the target
-has an authoritative acknowledgement and a live owner/process check. For a
-pre-submit job (`pending`, `pasting`, or `drafted`), two failed attempts or ten
-minutes without acknowledgement, together with a stopped target, an identity
-or checkout refusal, or no fresh target activity, is a concrete stall. Stop
-that job's retries, request its normal pre-submit cancellation, and choose one
-verified idle owner (or take the work yourself). Send the replacement once and
-record its receipt; do not wait for a periodic status prompt or for the human
-to authorize routine recovery. The 30-minute checkpoint starts at the
-replacement's acknowledgement.
+- `enqueued`, `pending`, retry counts = transport state, not a started worker.
+- Received = target acknowledgement plus live owner/process check.
+- Pre-submit job (`pending`, `pasting`, `drafted`): two failed attempts or ten
+  minutes without acknowledgement, plus a stopped target, identity/checkout
+  refusal or no fresh activity, is a stall. Stop retries, cancel pre-submit,
+  pick one verified idle owner or take it yourself, send once, record receipt.
+  The 30-minute checkpoint starts at that receipt.
+- `submitted` has left the composer: never duplicate because the receipt is
+  late. Check live process and journal. Keep the at-most-once fence until a
+  durable not-sent outcome exists.
+- Escalate to the human only for a product decision, physical access or a
+  missing permission. Not for routine recovery.
+- Enqueue acknowledgement is not delivery. Verify via queue and owner journal.
 
-An already `submitted` prompt has left the verified composer and must never be
-duplicated merely because its JSONL receipt is late. Inspect the target's live
-process and fresh journal activity; keep the at-most-once fence until a
-durable not-sent outcome exists. Human escalation is reserved for a real
-product decision, physical access, or missing permission, not an ordinary
-handoff stall.
+## 4. Reconsider the plan, briefly
 
-A useful brief names the new evidence, the next bounded outcome, what is already
-done, and the boundary that must remain untouched. Write its exact UTF-8 text to
-a file with the file-editing tool, then send it through
-`amux PROJECT -p N --stdin < /absolute/path/to/brief.txt`.
-An enqueue acknowledgement is not proof the agent received or acted on it.
-Use the queue and the owner's journal to verify delivery; do not blindly resend.
+- About once per active hour, at a safe checkpoint, two minutes: what delayed
+  the last outcome? Implementation, rework, waiting or administration.
+- Sooner on repeated failure or new evidence. Never interrupt a build for it.
+- Pick at most one change: reuse a capability, drop a redundant step, fix a
+  wrong assumption, shorten a handoff. Reversible and small needs a reason,
+  not a paper. Keep required checks and owners.
+- Note change and expected benefit in the task row only when something
+  changes. Judge by later comparable receipts: elapsed, rework, tokens
+  (waiting and cached input separated). No new measurement system, no speedup
+  percentages from unlike tasks. Research only for a concrete bottleneck.
 
-Shared canonical source, GPU/browser, emulators, release processes and credentials
-can have different owners. Use the relevant handover, not a blanket freeze.
-Do not compact, respawn or change models in the middle of a running feature
-check. At a safe pause, preserve the exact task/source/evidence and resume from
-that summary using the supported lifecycle commands.
+## 5. Inspect AMUX transport only when relevant
 
-Read applicable workspace/repo instructions when entering their scope; reuse
-already-read unchanged instructions rather than reciting them each follow-up. The
-maintained AMUX process source is `core/hints-fleet-process.mjs`; CLI help is the
-command authority. Do not paste those policies into this skill or turn an old
-memory note into a new human-approval gate. Ordinary coordination does not add
-a second test suite, reviewer, benchmark, or approval hop.
+The bridge moves Discord/CLI input through a durable queue to the addressed
+engine. Journals are receipts, not the transport.
 
-## Reconsider the plan briefly
+- `amux queue`: pending/submitted/receipt for one delivery. Submitted with
+  unknown outcome is not proof of non-execution.
+- `amux doctor`: heartbeat, runtime, release, queue, workspace. Classify each
+  finding. Do not start disabled services for green. Healthy bridge and
+  offline native target can coexist.
+- `amux log PROJECT -p N --tmux -s 60`: live TUI only for a modal or engine
+  state. History uses the journal view.
+- `amux --help` first. No new poller, registry, status DB or recovery script.
+- Merged source, installed CLI and running bridge can be three revisions.
+  Compare before deciding a commit needs install or restart. A bridge restart
+  does not prove a model switch. Never retry a prompt by editing its journal
+  or deleting its receipt fence.
 
-During existing follow-through, use a safe checkpoint about once per active hour
-to spend at most two minutes asking what actually delayed the last outcome:
-implementation, rework, waiting, or administration. Review sooner when a repeated
-failure or new evidence changes the next step. This cadence is a trial default,
-not a proven optimum or a reason to interrupt a build or create another timer.
-Choose at most one useful change: reuse an existing capability, remove a redundant
-step, fix a mistaken assumption, or shorten a resource handoff. A small reversible
-improvement needs a reason, not a research paper. Keep required checks and owners.
-Note the change and expected benefit in the existing task row only when something
-changes; use subsequent comparable delivery receipts to check elapsed time,
-rework and available token usage, distinguishing waiting and cached input. Do not
-add a measurement system or infer a speedup percentage from unlike tasks. Keep,
-adjust or drop the change based on the observed benefit and quality. Consult
-research for a concrete unresolved bottleneck, not at every follow-up.
+## 6. Close with an honest overview
 
-## Inspect AMUX only when the transport is relevant
-
-The bridge connects Discord/CLI input to a durable queue and the addressed
-tmux engine or native runtime. Journals and status observations provide receipts;
-they are not interchangeable with the process that transports a prompt.
-
-- `amux queue`: pending/submitted/receipt state for the exact delivery.
-  Submitted with unknown outcome is not evidence of non-execution.
-- `amux doctor`: bridge heartbeat, runtime, release, queue and workspace clues.
-  Classify each relevant finding; do not restart disabled services to make the
-  whole report green. A healthy bridge can coexist with an offline native target.
-- `amux log PROJECT -p N --tmux -s 60`: live TUI when a modal or engine state
-  actually needs inspection. Normal history should use the journal view.
-- `amux --help` and subcommand help: inspect the existing seam before building
-  another poller, registry, status database, or recovery script.
-
-Merged AMUX source, the installed CLI artifact, and a long-lived bridge can be
-different revisions. Compare the intervening changes before deciding that a
-new product-only commit requires a host install or restart. A bridge restart
-does not prove that an engine switched models. Never retry an uncertain prompt
-by manipulating its journal or deleting its receipt fence.
-
-## Close with an honest overview
-
-When the user asks to hear the overview (speech/TTS, `amux say`, or a hands-free
-listening request), deliver a short spoken response, not just text acknowledging
-the request. Use `amux say --stdin < /absolute/path/speech.txt`, matching the
-requested language with the configured voice or `--voice`. Check the send result.
-Continue important replies in that requested spoken conversation without making
-the user repeat the command; ordinary voice input alone does not enable TTS.
-
-Report completed-and-available work separately from banked, still-working and
-genuinely blocked work. Link the owner's existing proof instead of copying the
-entire log. Explain only interventions actually made and unresolved material
-limits. A bounded visual assessment is not certification of a whole product.
-
-Estimate a named next delivery from its remaining implementation and proof.
-Separate current repairs from later requested features and hardware-dependent
-validation. Do not sum overlapping work or turn a roadmap range into the ETA
-for fixing today's bug. State when the estimate lacks measured progress.
-
-When the user asks for supervision while away, use available wait/monitoring
-mechanisms and inspect at meaningful handoffs. This skill does not itself
-schedule background work: do not claim ongoing monitoring after ending a turn
-unless such a mechanism is actually running. Keep dormant and finished agents
-idle until a real task needs them.
+- Spoken request (TTS, `amux say`, hands-free): answer spoken, via
+  `amux say --stdin < /absolute/path/speech.txt`, requested language and
+  voice, check the send result, keep the spoken thread. Voice input alone
+  does not enable TTS.
+- Report in four buckets: available, banked, in progress, blocked.
+- Link the owner's proof. Do not copy logs. State only interventions actually
+  made and real remaining limits. A bounded visual check certifies nothing more.
+- ETA for a named delivery = its remaining implementation plus proof. Do not
+  sum overlapping work or turn a roadmap range into today's bug ETA. Say when
+  there is no measured progress.
+- Supervision while away: use a real wait/monitor mechanism and inspect at
+  handoffs. No claimed monitoring without a running mechanism. Idle and
+  finished agents stay idle until a real task targets them.
