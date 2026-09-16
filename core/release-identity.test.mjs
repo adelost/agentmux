@@ -62,7 +62,10 @@ function fixture({ linkedCheckout = false } = {}) {
     Notification: [{ hooks: [{ type: "command", command: `exec node "${eventHook}"` }] }],
     UserPromptSubmit: [{ hooks: [{ type: "command", command: `exec node "${eventHook}"` }] }],
     SessionStart: [{ hooks: [{ type: "command", command: `exec node "${eventHook}"` }] }],
-    PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: `exec node "${guard}"` }] }],
+    PreToolUse: [
+      { matcher: "Bash", hooks: [{ type: "command", command: `exec node "${guard}"` }] },
+      { matcher: "Bash", hooks: [{ type: "command", command: `exec node "${join(actualRoot, "bin", "hotspot-commit-guard.mjs")}"` }] },
+    ],
   } };
   write(join(home, ".claude", "settings.json"), `${JSON.stringify(settings)}\n`);
   write(releaseReceiptPath(home), `${JSON.stringify({

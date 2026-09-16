@@ -56,6 +56,7 @@ feature("agentmux hook installer", () => {
       expect(settings.hooks.PreToolUse.find((row) => row.hooks.some(
         (hook) => hook.command.includes("suggestions-write-guard.mjs"),
       )).matcher).toBe("Bash");
+      expect(commands.filter((command) => command.includes("hotspot-commit-guard.mjs"))).toHaveLength(1);
       const installed = join(home, ".agentmux", "bin", "amux-suggest.mjs");
       const linked = join(home, ".local", "bin", "amux-suggest");
       expect(existsSync(installed)).toBe(true);

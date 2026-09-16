@@ -175,6 +175,12 @@ export function observeReleaseIdentity({
   )) {
     issues.push({ code: "hook-registration", detail: "PreToolUse does not execute the stable Suggestions guard" });
   }
+  // A reflection guard, not a safety boundary: its absence warns instead of blocking pane recovery.
+  if (packageRoot && !hookCommands(settings, "PreToolUse").some(
+    (command) => command.includes(`"${join(packageRoot, "bin", "hotspot-commit-guard.mjs")}"`),
+  )) {
+    warnings.push({ code: "hotspot-hook", detail: "PreToolUse does not run the hotspot reflection guard from this release" });
+  }
   const canary = expected.suggestionsGuard
     ? runGuardCanary(expected.suggestionsGuard)
     : { status: null, stderr: "" };
@@ -200,6 +206,7 @@ const INSTALL_MASTER_HINT = "install fetched master: node bin/install-release.mj
 const WARNING_HINTS = {
   "master-drift": INSTALL_MASTER_HINT,
   "master-unverified": "verify network access to remote master, then rerun amux doctor",
+  "hotspot-hook": "node bin/install-hooks.mjs from the installed package",
 };
 
 /** WHAT: Formats the first identity warning with its fix. WHY: Keeps doctor and the revive log on one repair text. */

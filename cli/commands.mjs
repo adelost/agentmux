@@ -3117,6 +3117,9 @@ Socket: ${ctx.socket || process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET}`;
 
 // --- Dispatch ---
 
+/** `amux churn` subcommands for function hotspots; anything else is the file-level WARN report. */
+const FUNCTION_CHURN_ACTIONS = new Set(["functions", "check", "verdict"]);
+
 const FLAG_SPECS = {
   send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number" },
   runtime: { port: "number", "data-dir": "string", "state-dir": "string", "no-legacy-migration": "boolean", force: "boolean" },
@@ -3555,7 +3558,9 @@ export async function dispatch(argv, ctx) {
     case "lint": {
       return cmdLint(rest, ctx);
     }
-    case "churn": return (await import("../core/churn.mjs")).runChurnCommand(rest);
+    case "churn": return FUNCTION_CHURN_ACTIONS.has(rest[0])
+      ? (await import("./hotspots.mjs")).cmdHotspots(rest)
+      : (await import("../core/churn.mjs")).runChurnCommand(rest);
     case "worktree-deps": {
       return cmdWorktreeDeps(rest);
     }
