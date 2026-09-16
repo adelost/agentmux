@@ -151,9 +151,32 @@ export function verdictEntry({ hotspot, verdict, reason, repo, headSha, by, at =
   };
 }
 
+/** Drops heredoc bodies, which are data such as file contents or commit messages, never commands. */
+function withoutHeredocBodies(command) {
+  const kept = [];
+  let terminator = null;
+  for (const line of String(command || "").split("\n")) {
+    if (terminator) {
+      if (line.replace(/^\t+/u, "") === terminator) terminator = null;
+      continue;
+    }
+    kept.push(line);
+    terminator = /<<-?\s*(['"]?)([A-Za-z_][\w-]*)\1/u.exec(line)?.[2] || null;
+  }
+  return kept.join("\n");
+}
+
+/** Replaces quoted strings with numbered placeholders, so `echo "git commit"` reads as an echo. */
+function maskQuotes(text) {
+  const quoted = [];
+  const masked = text.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/gu, (match) => `\u0000${quoted.push(match) - 1}\u0000`);
+  const restore = (value) => value.replace(/\u0000(\d+)\u0000/gu, (_, index) => quoted[Number(index)]);
+  return { masked, restore };
+}
+
 /**
  * Directories where a shell command runs `git commit`, resolved from `cd DIR &&` prefixes and `git -C DIR`.
- * Plumbing such as `git commit-tree` is not a commit a person reflects on.
+ * Plumbing such as `git commit-tree`, quoted text and heredoc bodies are not commits a person reflects on.
  */
 export function commitDirectories(command, cwd, home) {
   const expand = (path) => {
@@ -161,15 +184,16 @@ export function commitDirectories(command, cwd, home) {
     const tilde = unquoted.replace(/^~(?=\/|$)/u, home);
     return tilde.startsWith("/") ? tilde : `${cwd.replace(/\/$/u, "")}/${tilde}`;
   };
+  const { masked, restore } = maskQuotes(withoutHeredocBodies(command));
   const directories = [];
   let dir = cwd;
-  for (const segment of String(command || "").split(/&&|\|\||;|\n/u)) {
-    const cd = /^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*$/u.exec(segment);
-    if (cd) { dir = expand(cd[1]); continue; }
-    const commit = /(?:^|[\s(])git((?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+)|\s+-c\s+\S+)*)\s+commit(?![-\w])/u.exec(segment);
+  for (const segment of masked.split(/&&|\|\||;|\n|\|/u)) {
+    const cd = /^\s*cd\s+(\S+)\s*$/u.exec(segment);
+    if (cd) { dir = expand(restore(cd[1])); continue; }
+    const commit = /(?:^|[\s(])git((?:\s+-C\s+\S+|\s+-c\s+\S+)*)\s+commit(?![-\w])/u.exec(segment);
     if (!commit) continue;
-    const target = /-C\s+("[^"]+"|'[^']+'|\S+)/u.exec(commit[1]);
-    directories.push(target ? expand(target[1]) : dir);
+    const target = /-C\s+(\S+)/u.exec(commit[1]);
+    directories.push(target ? expand(restore(target[1])) : dir);
   }
   return [...new Set(directories)];
 }
