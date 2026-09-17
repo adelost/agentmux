@@ -14,6 +14,14 @@ import {
 } from "./link-connector.mjs";
 
 const NOW = Date.now();
+
+/** Row 186: the cycle hands each reply wait off and returns. A test that wants
+ *  the reply posted joins the waits that cycle started. */
+async function cycleWithReplies(deps) {
+  const result = await runLinkConnectorCycle(deps);
+  await Promise.all(result.started ?? []);
+  return result;
+}
 const message = (over = {}) => ({
   clientMessageId: "m-1",
   target: "lsrc:3",
@@ -62,6 +70,7 @@ function harness({ responses = {}, replyText = "svar från pane" } = {}) {
       },
       statePath,
       sleep: async () => {},
+      replyWaits: new Map(),
     },
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
@@ -108,13 +117,13 @@ feature("link connector cycle", () => {
       responses: { "/api/link/connector/poll?source=wsl": { messages: [message()] } },
     })],
     when: ["running the cycle twice (second one simulates a restart)", async (ctx) => {
-      const first = await runLinkConnectorCycle(ctx.deps);
-      const second = await runLinkConnectorCycle(ctx.deps);
+      const first = await cycleWithReplies(ctx.deps);
+      const second = await cycleWithReplies(ctx.deps);
       return { first, second, ctx };
     }],
     then: ["exactly one enqueue, one ack, one reply across both runs", (r) => {
-      expect(r.first).toEqual({ claimed: 1, handled: 1 });
-      expect(r.second).toEqual({ claimed: 1, handled: 0 });
+      expect(r.first).toMatchObject({ claimed: 1, handled: 1 });
+      expect(r.second).toMatchObject({ claimed: 1, handled: 0 });
       expect(r.ctx.calls.enqueued).toHaveLength(1);
       expect(r.ctx.calls.enqueued[0]).toMatchObject({
         agentName: "lsrc",
@@ -145,9 +154,9 @@ feature("link connector cycle", () => {
       }, null, 2));
       return ctx;
     }],
-    when: ["running the cycle", async (ctx) => runLinkConnectorCycle(ctx.deps)],
+    when: ["running the cycle", async (ctx) => cycleWithReplies(ctx.deps)],
     then: ["no second enqueue and no second ack, reply still lands exactly once", (result, ctx) => {
-      expect(result).toEqual({ claimed: 1, handled: 1 });
+      expect(result).toMatchObject({ claimed: 1, handled: 1 });
       expect(ctx.calls.enqueued).toHaveLength(0);
       expect(ctx.calls.posts.filter((p) => p.url.includes("/ack"))).toHaveLength(0);
       expect(ctx.calls.posts.filter((p) => p.url.includes("/reply"))).toHaveLength(1);
@@ -161,7 +170,7 @@ feature("link connector cycle", () => {
     })],
     when: ["running the cycle", async (ctx) => {
       try {
-        return await runLinkConnectorCycle(ctx.deps);
+        return await cycleWithReplies(ctx.deps);
       } catch (error) {
         return { error: String(error.message) };
       }
@@ -181,9 +190,9 @@ feature("link connector cycle", () => {
       ctx.deps.transcribe = async (bytes) => `transkript: ${bytes.length} bytes`;
       return ctx;
     }],
-    when: ["running the cycle", async (ctx) => runLinkConnectorCycle(ctx.deps)],
+    when: ["running the cycle", async (ctx) => cycleWithReplies(ctx.deps)],
     then: ["the pane gets the transcript, never the ref", (result, ctx) => {
-      expect(result).toEqual({ claimed: 1, handled: 1 });
+      expect(result).toMatchObject({ claimed: 1, handled: 1 });
       expect(ctx.calls.enqueued).toHaveLength(1);
       expect(ctx.calls.enqueued[0].text).toBe("[amux-link-turn:m-1]\ntranskript: 16 bytes");
       expect(ctx.calls.posts.some((p) => p.url.includes("/api/link/voice/voice/abc-123.m4a"))).toBe(true);
@@ -209,13 +218,13 @@ feature("link connector cycle", () => {
       return ctx;
     }],
     when: ["running the same claim twice", async (ctx) => {
-      const first = await runLinkConnectorCycle(ctx.deps);
-      const second = await runLinkConnectorCycle(ctx.deps);
+      const first = await cycleWithReplies(ctx.deps);
+      const second = await cycleWithReplies(ctx.deps);
       return { first, second, ctx };
     }],
     then: ["one fail is posted, nothing reaches a pane, and the journal prevents a loop", (result) => {
-      expect(result.first).toEqual({ claimed: 1, handled: 0 });
-      expect(result.second).toEqual({ claimed: 1, handled: 0 });
+      expect(result.first).toMatchObject({ claimed: 1, handled: 0 });
+      expect(result.second).toMatchObject({ claimed: 1, handled: 0 });
       expect(result.ctx.calls.enqueued).toHaveLength(0);
       expect(result.ctx.calls.posts.filter((post) => post.url.includes("/fail"))).toHaveLength(1);
       const journal = JSON.parse(readFileSync(result.ctx.statePath, "utf8"));
@@ -299,7 +308,7 @@ feature("redelivery dedup: a live broker job is never duplicated on reclaim", ()
 
   component("a pending first-attempt job keeps its key and its single pane write", {
     given: ["an existing pending job and a reclaimed message", () => reclaimHarness({ existingJob: { id: "job-1", status: "acknowledged", acknowledgedAt: 1 } })],
-    when: ["running the cycle", async (ctx) => runLinkConnectorCycle(ctx.deps)],
+    when: ["running the cycle", async (ctx) => cycleWithReplies(ctx.deps)],
     then: ["the stable key is reused and no rotated key is created", (result, ctx) => {
       expect(result.handled).toBe(1);
       expect(ctx.enqueued).toEqual(["link:m-dup"]);
@@ -310,7 +319,7 @@ feature("redelivery dedup: a live broker job is never duplicated on reclaim", ()
 
   component("only a cancelled job earns the rotated attempt key", {
     given: ["an existing cancelled job and a reclaimed message", () => reclaimHarness({ existingJob: { id: "job-1", status: "cancelled" } })],
-    when: ["running the cycle", async (ctx) => runLinkConnectorCycle(ctx.deps)],
+    when: ["running the cycle", async (ctx) => cycleWithReplies(ctx.deps)],
     then: ["rotation happens exactly once, for the terminal job", (result, ctx) => {
       expect(ctx.enqueued[0]).toBe("link:m-dup");
       expect(ctx.enqueued[1]).toBe("link:m-dup:attempt:2");

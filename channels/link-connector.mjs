@@ -46,6 +46,60 @@ function writeJournal(statePath, journal) {
   renameSync(tmp, statePath);
 }
 
+/**
+ * WHAT: Reads the journal, applies one change and writes it back.
+ * WHY: A reply wait now outlives the cycle that started it (row 186), so two
+ *      writers hold their own copy. Merging into a fresh read keeps a slow
+ *      task from restoring the state of a journal three cycles old.
+ */
+function updateJournal(statePath, id, patch) {
+  const journal = readJournal(statePath);
+  journal.messages = journal.messages || {};
+  journal.messages[id] = { ...journal.messages[id], ...patch };
+  writeJournal(statePath, journal);
+  return journal.messages[id];
+}
+
+/** The reply waits this process is running, keyed by clientMessageId. One per
+ *  message: the worker re-claims a delivered message every lease, and a second
+ *  wait would post a second reply for the same turn. */
+const runningReplyWaits = new Map();
+
+/** WHAT: The clientMessageIds this process is still waiting on. WHY: Lets the
+ *  bridge and its tests see the pending set without reaching into the map. */
+export function pendingReplyWaits(waits = runningReplyWaits) {
+  return [...waits.keys()];
+}
+
+/**
+ * WHAT: Waits for one pane's reply and reports it, as its own task.
+ * WHY: Row 186. While this waits, the cycle polls, beats and delivers to every
+ *      other pane; one silent pane used to hold the whole connector for the
+ *      full reply timeout. The give-up bound is unchanged, and so is what the
+ *      mailbox sees: a timeout reports nothing and the worker's own
+ *      REPLY_TIMEOUT_SECONDS returns the message to queued.
+ */
+async function awaitOneReply({
+  id, target, prompt, agent, post, connectorId, statePath, replyTimeoutMs, sleep, attempts, log, waits,
+}) {
+  try {
+    const replyText = await waitForLinkReply({ agent, target, prompt, replyTimeoutMs, sleep });
+    await post("/api/link/connector/reply", { clientMessageId: id, connectorId, body: replyText });
+    updateJournal(statePath, id, { stage: "replied", replyAt: Date.now() });
+    return true;
+  } catch (error) {
+    const { stage, terminal } = connectorFailureDisposition(error, attempts);
+    log(`link-connector ${id} failed:${stage} ${String(error?.message || error)}`);
+    if (terminal) {
+      await post("/api/link/connector/fail", { clientMessageId: id, connectorId, error: stage }).catch(() => {});
+      updateJournal(statePath, id, { stage: "failed", error: stage });
+    }
+    return false;
+  } finally {
+    waits.delete(id);
+  }
+}
+
 /** WHAT: Builds the pane prompt for one mailbox message. WHY: Keeps the reply correlation anchored to one exact marker. */
 export function linkTurnPrompt({ clientMessageId, body }) {
   return `[amux-link-turn:${clientMessageId}]\n${String(body || "").trim()}`;
@@ -99,6 +153,7 @@ export async function runLinkConnectorCycle({
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   transcribe = null,
   log = () => {},
+  replyWaits = runningReplyWaits,
 } = {}) {
   const serviceBase = normalizeServiceBaseUrl(linkBase, "Link base URL", { allowHttpLoopback: true });
   const journal = readJournal(statePath);
@@ -134,10 +189,13 @@ export async function runLinkConnectorCycle({
     // Recorded only after the worker accepted the poll, so a failed cycle
     // announces again instead of trusting an unsent list.
     journal.announce = { hash: announceHash, atMs: Date.now() };
-    writeJournal(statePath, journal);
+    const stamped = readJournal(statePath);
+    stamped.announce = journal.announce;
+    writeJournal(statePath, stamped);
   }
   const messages = Array.isArray(claimed.messages) ? claimed.messages : [];
   let handled = 0;
+  const started = [];
   for (const message of messages) {
     const id = String(message.clientMessageId || "");
     const plan = planClaimedMessage({ message, journalEntry: journal.messages[id] });
@@ -160,8 +218,9 @@ export async function runLinkConnectorCycle({
         const prompt = linkTurnPrompt({ clientMessageId: id, body });
         const leaseAttempt = Number.isSafeInteger(message.attempts) && message.attempts > 0
           ? message.attempts : 1;
-        journal.messages[id] = { stage: "claimed", at: Date.now(), target: message.target, prompt };
-        writeJournal(statePath, journal);
+        journal.messages[id] = updateJournal(statePath, id, {
+          stage: "claimed", at: Date.now(), target: message.target, prompt,
+        });
         // The stable key is the dedup: the durable queue atomically returns
         // the existing job for a reused key. Only a proven cancelled job
         // earns a rotated key; a live or unproven job keeps its single pane
@@ -182,8 +241,7 @@ export async function runLinkConnectorCycle({
           log(`link-connector ${id} not-delivered:enqueue-refused ${String(error?.message || error)}`);
           continue;
         }
-        journal.messages[id] = { ...journal.messages[id], stage: "enqueued", jobId: job?.id || null };
-        writeJournal(statePath, journal);
+        journal.messages[id] = updateJournal(statePath, id, { stage: "enqueued", jobId: job?.id || null });
         // A merely enqueued job is not delivered: ack only on the broker's
         // acknowledged ingest receipt. Cancelled or timed out stays leased,
         // so the reclaim path keeps it recoverable without a false ack.
@@ -200,20 +258,33 @@ export async function runLinkConnectorCycle({
           continue;
         }
         await post("/api/link/connector/ack", { clientMessageId: id, connectorId });
-        journal.messages[id] = { ...journal.messages[id], stage: "delivered" };
-        writeJournal(statePath, journal);
+        journal.messages[id] = updateJournal(statePath, id, { stage: "delivered" });
       }
-      const prompt = journal.messages[id]?.prompt || linkTurnPrompt(message);
-      const replyText = await waitForLinkReply({
-        agent,
+      // The reply is waited for beside the cycle, not inside it. A message the
+      // worker re-claims while its wait runs is already covered by that wait.
+      if (replyWaits.has(id)) continue;
+      const wait = awaitOneReply({
+        id,
         target: journal.messages[id]?.target || message.target,
-        prompt,
+        prompt: journal.messages[id]?.prompt || linkTurnPrompt(message),
+        agent,
+        post,
+        connectorId,
+        statePath,
         replyTimeoutMs,
         sleep,
+        attempts: Number(message.attempts || 1),
+        log,
+        waits: replyWaits,
+      // Nobody awaits this in production, so it must never reject: an unhandled
+      // rejection would take the bridge down for one pane's slow answer.
+      }).catch((error) => {
+        log(`link-connector ${id} reply-wait-crashed ${String(error?.message || error)}`);
+        replyWaits.delete(id);
+        return false;
       });
-      await post("/api/link/connector/reply", { clientMessageId: id, connectorId, body: replyText });
-      journal.messages[id] = { ...journal.messages[id], stage: "replied", replyAt: Date.now() };
-      writeJournal(statePath, journal);
+      replyWaits.set(id, wait);
+      started.push(wait);
       handled += 1;
     } catch (error) {
       const disposition = connectorFailureDisposition(error, Number(message.attempts || 1));
@@ -221,12 +292,13 @@ export async function runLinkConnectorCycle({
       log(`link-connector ${id} failed:${stage} ${String(error?.message || error)}`);
       if (disposition.terminal) {
         await post("/api/link/connector/fail", { clientMessageId: id, connectorId, error: stage }).catch(() => {});
-        journal.messages[id] = { ...journal.messages[id], stage: "failed", error: stage };
-        writeJournal(statePath, journal);
+        journal.messages[id] = updateJournal(statePath, id, { stage: "failed", error: stage });
       }
     }
   }
-  return { claimed: messages.length, handled };
+  // `started` is what this cycle handed off; production ignores it and the
+  // next poll follows in 15 s, tests await it to see the reply land.
+  return { claimed: messages.length, handled, started, pending: pendingReplyWaits(replyWaits) };
 }
 
 /** WHAT: Checks the durable broker until one job has an ingest outcome. WHY: Prevents a merely enqueued job from being reported as delivered. */
