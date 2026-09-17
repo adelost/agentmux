@@ -44,8 +44,7 @@ Read the views for what they are:
 - Also name: new evidence, the bounded outcome, what is already done, the
   boundary that must stay untouched.
 - Test before send: could the worker execute this blind? If not, rewrite.
-- Write exact UTF-8 to a file with the file-editing tool, then
-  `amux PROJECT -p N --stdin < /absolute/path/brief.txt`. Never build the
+- Send it as the amux layer says (a file, then `--stdin`); never build the
   text in bash.
 
 ## 3. Smallest useful intervention
@@ -117,16 +116,36 @@ engine. Journals are receipts, not the transport.
 
 ## 6. Close with an honest overview
 
-- Spoken request (TTS, `amux say`, hands-free): answer spoken, via
-  `amux say --stdin < /absolute/path/speech.txt`, requested language and
-  voice, check the send result, keep the spoken thread. Voice input alone
-  does not enable TTS.
+- Spoken request: answer spoken, as the amux layer's speech rule says.
 - Report in four buckets: available, banked, in progress, blocked.
 - Link the owner's proof. Do not copy logs. State only interventions actually
   made and real remaining limits. A bounded visual check certifies nothing more.
 - ETA for a named delivery = its remaining implementation plus proof. Do not
   sum overlapping work or turn a roadmap range into today's bug ETA. Say when
   there is no measured progress.
-- Supervision while away: use a real wait/monitor mechanism and inspect at
-  handoffs. No claimed monitoring without a running mechanism. Idle and
-  finished agents stay idle until a real task targets them.
+- Supervision while away: a running mechanism (section 7), never a claim.
+  Idle and finished agents stay idle until a real task targets them.
+
+## 7. Watch by script, wake on a named deviation, off when drained
+
+When a plan spans hours and the human is away, the orchestrator does not
+re-read the fleet every tick. Pattern, in force from 2026-09-17:
+
+- Write the deviations first, as rules a script can test, each with its
+  number: a pane quiet N minutes with unclosed rows in its lane; a pane's last
+  turn naming a row outside its lane; a release with no smoke result; a PR
+  older than N minutes waiting on a read; a row open past twice its box.
+- One read-only script composes existing views (`amux done`, the ledger,
+  `git tag`, `gh pr list`, the smoke folder) and prints either named
+  deviation lines or a single ON TRACK line. No new state, no daemon, no
+  poller: it runs only when the wake fires.
+- The wake is a session cron (or the engine's loop command) at the coarsest
+  interval the human accepts (hourly is enough when boxes are hours), whose
+  prompt says: run the script; no deviation, reply one line; a deviation,
+  read only what the line points at, act by the written rule, tell the human
+  in one line.
+- The script prints DRAINED when every lane is empty, and the prompt deletes
+  its own cron on that word. A watch that outlives its work is a cost and a
+  false signal.
+- Never wake a pane from the watch to ask for status; commits and the ledger
+  are the status. Example: `skydive-altimeter/.agents/0/fleet-check.py`.
