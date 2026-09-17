@@ -38,6 +38,7 @@ const TEST_ALIASES = {
   "core/jsonl-reader.mjs": ["core/dream-summarizer.test.mjs", "test/jsonl-reader.test.mjs"],
   "core/search-semantic.mjs": ["core/search.test.mjs"],
   "attachments.mjs": ["test/attachments.test.mjs"],
+  "core/delivery-assets.mjs": ["core/delivery-queue.test.mjs"],
   "bin/janitor.mjs": ["core/repo-hygiene-janitor.test.mjs"],
   "bin/janitor-cron.sh": ["core/repo-hygiene-janitor.test.mjs"],
   "core/repo-hygiene-facts.mjs": ["core/repo-hygiene-janitor.test.mjs"],

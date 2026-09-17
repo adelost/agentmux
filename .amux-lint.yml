@@ -8,7 +8,7 @@ fileSize:
     core/context.mjs: 635
     core/contract-lint.mjs: 640
     core/delivery-broker.mjs: 703
-    core/delivery-queue.mjs: 562
+    core/delivery-queue.mjs: 536
     core/jsonl-reader.mjs: 952
     core/native-runtime-client.mjs: 544
     core/suggestions-comment-bridge.mjs: 1131
