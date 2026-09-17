@@ -36,7 +36,12 @@ feature("Link connector starter", () => {
       expect(initial.delayMs).toBe(20_000);
       expect(ctx.seen).toHaveLength(1);
       expect(ctx.seen[0].transcribe).toBe(ctx.transcribe);
-      expect(ctx.seen[0].targets).toEqual(["lsrc:3", "lsrc:10"]);
+      // Row 184: the list is read per cycle, so a pane added to agents.yaml is
+      // announced without a restart. The configured ids stay its floor.
+      expect(ctx.seen[0].targets()).toEqual([
+        { id: "lsrc:3", label: "lsrc:3" },
+        { id: "lsrc:10", label: "lsrc:10" },
+      ]);
       expect(scheduled).toHaveLength(1);
       expect(scheduled[0].delayMs).toBe(15_000);
       for (const [key, value] of Object.entries({

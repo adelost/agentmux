@@ -106,6 +106,36 @@ export function createLinkStore(db) {
         connectorId, target, nowMs, source,
       ),
 
+    /** WHAT: Records what one connector says it can reach. WHY: Keeps the app's
+     *  target list in the fleet's own config instead of a Cloudflare variable. */
+    announceTargets: async ({ connectorId, source, targets, nowMs, keepMs }) => {
+      for (const entry of targets) {
+        await run(
+          `INSERT INTO connector_targets (connectorId, target, label, kind, source, seenAt)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (connectorId, target) DO UPDATE SET
+             label = excluded.label, kind = excluded.kind, source = excluded.source, seenAt = excluded.seenAt`,
+          connectorId, entry.id, entry.label, entry.kind, source, nowMs,
+        );
+      }
+      // A pane the fleet stopped announcing disappears from the app after the
+      // same window, so a removed pane does not linger as a dead row.
+      await run("DELETE FROM connector_targets WHERE seenAt < ?", nowMs - keepMs);
+    },
+
+    announcedTargets: (freshAfterMs) =>
+      all(
+        `SELECT target, label, kind, MAX(seenAt) AS seenAt FROM connector_targets
+         WHERE seenAt >= ? GROUP BY target ORDER BY target`,
+        freshAfterMs,
+      ),
+
+    announcedTargetsFor: (connectorId, freshAfterMs) =>
+      all(
+        "SELECT target FROM connector_targets WHERE connectorId = ? AND seenAt >= ?",
+        connectorId, freshAfterMs,
+      ),
+
     heartbeatStates: (staleMs, nowMs) =>
       all(
         `SELECT target, MAX(seenAt) AS seenAt,

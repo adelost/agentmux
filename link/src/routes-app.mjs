@@ -2,8 +2,21 @@
 
 import { requireSession } from "./auth.mjs";
 import { sendDecision } from "./mailbox.mjs";
-import { targetsForApp, privateDiscoveryUrlsForApp, requestRateLimited, UUID_RE } from "./config.mjs";
+import {
+  targetsForApp, privateDiscoveryUrlsForApp, requestRateLimited, UUID_RE,
+  mergeTargets, targetAnnounceTtlMs,
+} from "./config.mjs";
 import { json } from "./util.mjs";
+
+/** WHAT: The targets the app may see and address. WHY: The configured seed plus
+ *  every pane the fleet's connector announced, so one list answers both routes. */
+async function appTargets({ store, env, nowMs }) {
+  const announced = await store.announcedTargets(nowMs - targetAnnounceTtlMs(env));
+  return mergeTargets(
+    targetsForApp(env),
+    announced.map((row) => ({ id: row.target, label: row.label, kind: row.kind })),
+  );
+}
 
 async function deleteUnusedVoice(env, voiceRef, existing) {
   if (!voiceRef || existing?.voiceRef === voiceRef) return;
@@ -23,8 +36,9 @@ export async function handleAppRoutes({ request, env, store, url, nowMs }) {
     if (!session) return json(null, 401, { error: "session-required" });
     const beats = await store.heartbeatStates(90_000, nowMs);
     const online = Object.fromEntries(beats.map((row) => [row.target, row.online === 1]));
+    const targets = await appTargets({ store, env, nowMs });
     return json(null, 200, {
-      targets: targetsForApp(env).map((target) => ({ ...target, online: Boolean(online[target.id]) })),
+      targets: targets.map((target) => ({ ...target, online: Boolean(online[target.id]) })),
       privateDiscoveryUrls: privateDiscoveryUrlsForApp(env),
     });
   }
@@ -59,7 +73,7 @@ export async function handleAppRoutes({ request, env, store, url, nowMs }) {
         return json(null, 404, { error: "voice-not-found" });
       }
     }
-    const allowed = targetsForApp(env).some((entry) => entry.id === target);
+    const allowed = (await appTargets({ store, env, nowMs })).some((entry) => entry.id === target);
     const existing = await store.getMessageForApp(clientMessageId, session.identityId);
     const rejectInput = async (status, error) => {
       await deleteUnusedVoice(env, voiceRef, existing);

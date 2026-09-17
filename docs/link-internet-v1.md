@@ -64,6 +64,14 @@ heartbeats(connectorId TEXT, target TEXT, seenAt, source TEXT) -- wsl|windows
 - `POST /api/link/connector/poll` (connector-auth): claimar ägda targets
   atomiskt `UPDATE ... WHERE state='queued' AND leaseExpiresAt < now`
   med bounded lease (60 s); förlorad lease återgår till queued.
+- Samma poll ANNONSERAR flottans lista: `{targets:[{id,label}]}`. Worker sparar
+  den i `connector_targets` och `GET /api/link/targets` svarar med unionen av
+  `LINK_TARGETS` (seedet) och det annonserade, med online ur heartbeats. Send
+  accepterar varje id i unionen. Bara `agent:pane` får annonseras, så en
+  connector kan aldrig ta över en kind som `windows`; seedets etiketter vinner.
+  En pane som slutar annonseras faller ur listan efter `TARGET_ANNOUNCE_TTL_SECONDS`
+  (24 h som default). Varför: telefonens TALK TO visade tre ids ur en
+  Cloudflare-variabel medan flottan hade elva paneler (rad 184, 2026-09-17).
 - Connector journalför lokalt FÖRE `ack`. `ack` skickas först efter den
   durable amux-köns exakta ingest-kvitto; kö-cancel, vägrad enqueue eller
   kvittotimeout lämnar mailbox-leasen oackad och återvinningsbar. `ack` markerar delivered;

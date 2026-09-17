@@ -89,7 +89,16 @@ export async function runLinkConnectorCycle({
     return parsed;
   };
 
-  const claimed = await post("/api/link/connector/poll?source=wsl");
+  // Every poll announces what this fleet can reach, so the phone's TALK TO list
+  // is the fleet's own config and not a Cloudflare variable (row 184). A list
+  // function is read fresh each cycle: a pane added or relabelled in agents.yaml
+  // shows up on the next poll without a restart.
+  const announced = (typeof targets === "function" ? targets() : targets) || [];
+  const claimed = await post("/api/link/connector/poll?source=wsl", {
+    targets: announced.map((target) => (
+      typeof target === "string" ? { id: target, label: target } : { id: target.id, label: target.label }
+    )),
+  });
   const messages = Array.isArray(claimed.messages) ? claimed.messages : [];
   let handled = 0;
   for (const message of messages) {

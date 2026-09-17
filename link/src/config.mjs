@@ -61,6 +61,50 @@ export function targetsForApp(env) {
     });
 }
 
+/** WHAT: Defines the shape of a fleet pane address. WHY: Only `agent:pane` may
+ *  be announced, so a connector can never claim a privileged kind like windows. */
+export const AGENT_TARGET_RE = /^[a-z][a-z0-9_-]{0,31}:\d{1,3}$/u;
+const MAX_ANNOUNCED_TARGETS = 200;
+const MAX_LABEL_CHARS = 64;
+
+/** WHAT: How long an announced target stays listed after its last poll. WHY: A
+ *  bridge restart must not empty the phone's list, a removed pane must not linger. */
+export function targetAnnounceTtlMs(env) {
+  return (Number(env.TARGET_ANNOUNCE_TTL_SECONDS) || 24 * 3600) * 1000;
+}
+
+/** WHAT: Keeps only the announced entries this worker will store. WHY: An
+ *  announcement is connector input, so shape, kind and volume are bounded here. */
+export function announceableTargets(raw) {
+  const rows = Array.isArray(raw) ? raw : [];
+  const seen = new Set();
+  const targets = [];
+  for (const row of rows) {
+    const id = String(row?.id || "").trim();
+    if (!AGENT_TARGET_RE.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    const label = String(row?.label || "").replace(CONTROL_CHARS_RE, " ").trim().slice(0, MAX_LABEL_CHARS);
+    targets.push({ id, label: label || id, kind: "agent" });
+    if (targets.length >= MAX_ANNOUNCED_TARGETS) break;
+  }
+  return targets;
+}
+
+/** WHAT: Merges the configured seed with what the fleet announced. WHY: One
+ *  list for the app, with LINK_TARGETS still owning labels and foreign kinds. */
+export function mergeTargets(seed, announced) {
+  const merged = seed.map((target) => ({ ...target }));
+  const byId = new Map(merged.map((target) => [target.id, target]));
+  for (const row of announced) {
+    const existing = byId.get(row.id);
+    if (existing) continue; // the configured label wins: it is the operator's own wording
+    const target = { id: row.id, label: row.label || row.id, kind: row.kind || "agent" };
+    byId.set(target.id, target);
+    merged.push(target);
+  }
+  return merged;
+}
+
 /** WHAT: Resolves private Tailscale or LAN discovery URLs for the app. WHY: Keeps fallback transport hints server-driven and bounded. */
 export function privateDiscoveryUrlsForApp(env) {
   return String(env.LINK_PRIVATE_DISCOVERY_URLS || "")
