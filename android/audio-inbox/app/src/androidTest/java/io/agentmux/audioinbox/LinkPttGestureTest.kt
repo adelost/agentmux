@@ -1,5 +1,6 @@
 package io.agentmux.audioinbox
 
+import io.agentmux.linkui.product.generated.GeneratedLinkCapturedTurn
 import android.content.Intent
 import android.graphics.Bitmap
 import androidx.activity.compose.setContent
@@ -196,8 +197,8 @@ private class CaptureFixture(activity: MainActivity, round: Boolean) {
         handsFreeCancels++
         wake.value = io.agentmux.wakeword.WakeStatus(phase = io.agentmux.wakeword.WakePhase.LISTENING)
     }
-    val delivered = mutableListOf<LinkCapturedTurn>()
-    private val captured = MutableSharedFlow<LinkCapturedTurn>(extraBufferCapacity = 1)
+    val delivered = mutableListOf<GeneratedLinkCapturedTurn>()
+    private val captured = MutableSharedFlow<GeneratedLinkCapturedTurn>(extraBufferCapacity = 1)
     val graph = LinkProductGraph(
         processScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), state = state,
         updateState = MutableStateFlow(UpdateState.UpToDate("test", publishedAtEpochMillis = null)),
@@ -218,7 +219,7 @@ private class CaptureFixture(activity: MainActivity, round: Boolean) {
                     val audio = checkNotNull(recorder.release())
                     payloadBytes = audio.file.length()
                     state.update { it.copy(capture = CapturePhase.FINALIZING) }
-                    captured.tryEmit(LinkCapturedTurn(audio.turnId, "local:ptt", audio.file.absolutePath,
+                    captured.tryEmit(GeneratedLinkCapturedTurn(audio.turnId, "local:ptt", audio.file.absolutePath,
                         audio.turnId, audio.startedAtMs))
                     audio.file.delete()
                 }

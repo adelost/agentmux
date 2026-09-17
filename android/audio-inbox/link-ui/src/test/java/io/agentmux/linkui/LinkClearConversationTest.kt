@@ -5,7 +5,7 @@ import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.ReplyPhase
-import io.agentmux.linkui.product.LinkHistoryClearEvent
+import io.agentmux.linkui.product.generated.GeneratedLinkHistoryClear
 import io.agentmux.linkui.product.toHistoryPresentation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -23,7 +23,7 @@ class LinkClearConversationTest {
             selectedTargetId = "lsrc:3",
             turns = listOf(turn("a", "lsrc:3"), turn("b", "lsrc:3"), turn("c", "claw:1"), turn("d", "lsrc:3", ReplyPhase.THINKING)),
         )
-        val cleared = mutableListOf<LinkHistoryClearEvent>()
+        val cleared = mutableListOf<GeneratedLinkHistoryClear>()
 
         val row = requireNotNull(linkClearConversationRow(state.toHistoryPresentation(), icon = null) { cleared += it })
 
@@ -31,7 +31,7 @@ class LinkClearConversationTest {
         assertEquals("2 on this phone", row.sub)
         assertTrue(row.holdToConfirm)
         row.onTap!!.invoke()
-        assertEquals(listOf(LinkHistoryClearEvent("lsrc:3")), cleared)
+        assertEquals(listOf(GeneratedLinkHistoryClear("lsrc:3")), cleared)
     }
 
     @Test fun nothingToClearShowsNoControl() {

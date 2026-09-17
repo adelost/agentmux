@@ -1,5 +1,11 @@
 package io.agentmux.linkui.product
 
+import io.agentmux.linkui.product.generated.GeneratedLinkCapturedTurn
+import io.agentmux.linkui.product.generated.GeneratedLinkComposeTurn
+import io.agentmux.linkui.product.generated.GeneratedLinkHistoryClear
+import io.agentmux.linkui.product.generated.GeneratedLinkHistoryStatus
+import io.agentmux.linkui.product.generated.GeneratedLinkPreferencesStatus
+import io.agentmux.linkui.product.generated.GeneratedLinkTargetSelect
 import com.adelost.releasekit.UpdateState
 import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.CapturePhase
@@ -32,12 +38,12 @@ private const val MIN_CAPTURE_NANOS = 500_000_000L
 /** The host-supplied native sinks behind the generated effect-owning service inputs. */
 class LinkProductSinks(
     val captureCommand: (LinkCaptureCommandEvent) -> Unit,
-    val capturedTurn: (LinkCapturedTurn) -> Unit,
-    val compose: (LinkComposeEvent) -> Unit,
+    val capturedTurn: (GeneratedLinkCapturedTurn) -> Unit,
+    val compose: (GeneratedLinkComposeTurn) -> Unit,
     val playbackCommand: (LinkPlaybackCommandEvent) -> Unit,
-    val targetSelect: (LinkTargetSelectEvent) -> Unit,
+    val targetSelect: (GeneratedLinkTargetSelect) -> Unit,
     val preferenceToggle: (LinkPreferenceToggleEvent) -> Unit,
-    val historyClear: (LinkHistoryClearEvent) -> Unit,
+    val historyClear: (GeneratedLinkHistoryClear) -> Unit,
     val updateCommand: (LinkUpdateCommandEvent) -> Unit,
 )
 
@@ -62,7 +68,7 @@ open class LinkProductGraph(
     targetKindOf: (String) -> LinkTargetKind?,
     captureByteCount: () -> Long,
     captureByteLimit: () -> Long?,
-    capturedTurns: Flow<LinkCapturedTurn>,
+    capturedTurns: Flow<GeneratedLinkCapturedTurn>,
     val navigation: LinkNavigationController,
     private val sinks: LinkProductSinks,
     private val monotonicNanos: () -> Long = System::nanoTime,
@@ -77,8 +83,8 @@ open class LinkProductGraph(
     val activePlayback: StateFlow<LinkPlaybackPresentation>
     val connection: StateFlow<LinkSessionPresentation>
     val publicLink: StateFlow<LinkSessionPresentation>
-    val preferences: StateFlow<LinkPreferencesPresentation>
-    val localHistory: StateFlow<LinkHistoryPresentation>
+    val preferences: StateFlow<GeneratedLinkPreferencesStatus>
+    val localHistory: StateFlow<GeneratedLinkHistoryStatus>
     val updates: StateFlow<LinkUpdatePresentation>
     val recovery: StateFlow<LinkRecoveryPresentation>
     val wake: StateFlow<LinkWakePresentation>
@@ -102,11 +108,11 @@ open class LinkProductGraph(
     val inspections: Flow<List<com.adelost.ringkit.ports.CirclePortInspection>> = runtime.inspectionFlow()
 
     private val talkCommand: ProductComponentEventEmitter<LinkCaptureCommandEvent, Unit>
-    private val composerCompose: ProductComponentEventEmitter<LinkComposeEvent, Unit>
+    private val composerCompose: ProductComponentEventEmitter<GeneratedLinkComposeTurn, Unit>
     private val activePlaybackCommand: ProductComponentEventEmitter<LinkPlaybackCommandEvent, Unit>
-    private val targetSelect: ProductComponentEventEmitter<LinkTargetSelectEvent, Unit>
+    private val targetSelect: ProductComponentEventEmitter<GeneratedLinkTargetSelect, Unit>
     private val preferencesToggle: ProductComponentEventEmitter<LinkPreferenceToggleEvent, Unit>
-    private val localHistoryClear: ProductComponentEventEmitter<LinkHistoryClearEvent, Unit>
+    private val localHistoryClear: ProductComponentEventEmitter<GeneratedLinkHistoryClear, Unit>
     private val updatesCommand: ProductComponentEventEmitter<LinkUpdateCommandEvent, Unit>
     private val settingsActionOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
     private val devHostOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
@@ -352,7 +358,7 @@ open class LinkProductGraph(
         }
     }
 
-    fun onComposerCompose(event: LinkComposeEvent) {
+    fun onComposerCompose(event: GeneratedLinkComposeTurn) {
         composerCompose.emit(event)
     }
 
@@ -360,7 +366,7 @@ open class LinkProductGraph(
         activePlaybackCommand.emit(event)
     }
 
-    fun onTargetSelect(event: LinkTargetSelectEvent) {
+    fun onTargetSelect(event: GeneratedLinkTargetSelect) {
         targetSelect.emit(event)
     }
 
@@ -368,7 +374,7 @@ open class LinkProductGraph(
         preferencesToggle.emit(event)
     }
 
-    fun onLocalHistoryClear(event: LinkHistoryClearEvent) {
+    fun onLocalHistoryClear(event: GeneratedLinkHistoryClear) {
         localHistoryClear.emit(event)
     }
 

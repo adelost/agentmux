@@ -2,8 +2,8 @@ package io.agentmux.linkui
 
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.adelost.ringkit.ui.RowSpec
-import io.agentmux.linkui.product.LinkHistoryClearEvent
-import io.agentmux.linkui.product.LinkHistoryPresentation
+import io.agentmux.linkui.product.generated.GeneratedLinkHistoryClear
+import io.agentmux.linkui.product.generated.GeneratedLinkHistoryStatus
 
 /**
  * WHAT: The one control that forgets the selected conversation on this phone.
@@ -12,12 +12,12 @@ import io.agentmux.linkui.product.LinkHistoryPresentation
  *      Turns still sending, thinking or being read aloud stay (see LinkAction.ClearConversation).
  */
 fun linkClearConversationRow(
-    history: LinkHistoryPresentation,
+    history: GeneratedLinkHistoryStatus,
     icon: ImageVector?,
-    onClear: (LinkHistoryClearEvent) -> Unit,
+    onClear: (GeneratedLinkHistoryClear) -> Unit,
 ): RowSpec? {
     val targetId = history.targetId ?: return null
-    if (history.clearableTurns == 0) return null
+    if (history.clearableTurns == 0L) return null
     return RowSpec(
         key = "history.clear",
         title = "CLEAR $targetId",
@@ -25,6 +25,6 @@ fun linkClearConversationRow(
         icon = icon,
         hint = "Hold to remove this conversation from this phone. Agents and Discord keep theirs.",
         holdToConfirm = true,
-        onTap = { onClear(LinkHistoryClearEvent(targetId)) },
+        onTap = { onClear(GeneratedLinkHistoryClear(targetId)) },
     )
 }
