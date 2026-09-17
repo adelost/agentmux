@@ -1,6 +1,6 @@
 {
   "name": "agentmux",
-  "version": "1.25.69",
+  "version": "1.25.70",
   "description": "Local bridge and native workspace for coding agents (Claude Code, Codex, Kimi Code)",
   "license": "MIT",
   "repository": {
@@ -37,6 +37,7 @@
     "@babel/parser": "^7.29.8",
     "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.19.0",
+    "@v1d/product-spec": "https://circlekit.pages.dev/npm/v1d/product-spec/0.3.54/v1d-product-spec-0.3.54.tgz",
     "discord.js": "^14.18.0",
     "js-yaml": "^4.1.1"
   },
