@@ -79,6 +79,14 @@ heartbeats(connectorId TEXT, target TEXT, seenAt, source TEXT) -- wsl|windows
   En pane som slutar annonseras faller ur listan efter `TARGET_ANNOUNCE_TTL_SECONDS`
   (24 h som default). Varför: telefonens TALK TO visade tre ids ur en
   Cloudflare-variabel medan flottan hade elva paneler (rad 184, 2026-09-17).
+- Svarsväntan ligger BREDVID cykeln, en task per clientMessageId (rad 186). Cykeln
+  claimar, levererar, ackar och returnerar; pollen och heartbeaten håller sin 15 s-takt
+  medan en tyst panel tänker. Ett meddelande som claimas om medan dess task lever får
+  ingen andra task, och `REPLY_TIMEOUT_SECONDS` på workern äger uppgivandet: en task som
+  tar slut rapporterar ingenting, och reclaim-vägen lägger tillbaka meddelandet i queued.
+  En omstart adopterar delivered-men-obesvarade ur journalen precis som förut. Varför:
+  en obesvarad tur till en panel höll hela connectorn i 20 minuter, så alla andra paneler
+  väntade och heartbeaten dog under tiden (mätt 2026-09-17, 23:1x).
 - Connector journalför lokalt FÖRE `ack`. `ack` skickas först efter den
   durable amux-köns exakta ingest-kvitto; kö-cancel, vägrad enqueue eller
   kvittotimeout lämnar mailbox-leasen oackad och återvinningsbar. `ack` markerar delivered;
