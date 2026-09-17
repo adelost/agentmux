@@ -8,8 +8,6 @@
 
 import {
   chmodSync,
-  copyFileSync,
-  existsSync,
   linkSync,
   mkdirSync,
   readFileSync,
@@ -22,9 +20,10 @@ import {
 } from "fs";
 import { createHash, randomUUID } from "crypto";
 import { homedir } from "os";
-import { basename, dirname, join } from "path";
+import { join } from "path";
 import { appendAskLedger, captureDeliveryAsk, defaultAskLedgerPath } from "./ask-ledger.mjs";
 import { acquireFileLease } from "./file-lease.mjs";
+import { attachmentReplayConflict, persistAttachmentBackups, restoreAttachmentBackups } from "./delivery-assets.mjs";
 
 export * from "./delivery-queue-policy.mjs";
 import {
@@ -116,21 +115,6 @@ export function createDeliveryQueue({
     }
   }
 
-  function persistAssets(text, dir, id) {
-    const paths = [...String(text).matchAll(/\[(?:image|file) attached:\s+([^\]\n]+)\]/gi)]
-      .map((match) => match[1].trim());
-    if (!paths.length) return [];
-    const assetDir = join(dir, "assets", id);
-    ensurePrivateDir(assetDir);
-    return paths.flatMap((original, index) => {
-      if (!existsSync(original)) return [];
-      const backup = join(assetDir, `${String(index).padStart(2, "0")}-${basename(original)}`);
-      copyFileSync(original, backup);
-      try { chmodSync(backup, 0o600); } catch {}
-      return [{ original, backup }];
-    });
-  }
-
   function enqueue({
     agentName,
     pane = 0,
@@ -202,7 +186,7 @@ export function createDeliveryQueue({
       acknowledgedAt: null,
       terminalAt: null,
       metadata: metadata || {},
-      assets: persistAssets(text, dir, id),
+      assets: persistAttachmentBackups(text, join(dir, "assets", id), { ensureDir: ensurePrivateDir, uuid }),
     };
 
     // A fully-written temporary inode is hard-linked into its deterministic
@@ -216,7 +200,8 @@ export function createDeliveryQueue({
       return { ...job, path };
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
-      return { ...hydrateCancellation(parseJson(path)), path };
+      const existing = hydrateCancellation(parseJson(path));
+      return { ...existing, path, ...attachmentReplayConflict(existing.assets, job.assets) };
     } finally {
       try { unlinkSync(tmp); } catch {}
     }
@@ -419,17 +404,6 @@ export function createDeliveryQueue({
     return read(current.agentName, current.pane, current.id);
   }
 
-  function restoreAssets(job) {
-    let restored = 0;
-    for (const asset of job.assets || []) {
-      if (!asset?.original || !asset?.backup || existsSync(asset.original) || !existsSync(asset.backup)) continue;
-      mkdirSync(dirname(asset.original), { recursive: true });
-      copyFileSync(asset.backup, asset.original);
-      restored++;
-    }
-    return restored;
-  }
-
   function acquireTargetLease(agentName, pane) {
     const dir = dirFor(agentName, pane);
     ensurePrivateDir(dir);
@@ -491,7 +465,7 @@ export function createDeliveryQueue({
     rootDir, enqueue, read, update, list, next, nextForWrite, submitted,
     pendingTerminalNotices, pendingUnverifiedNotices, pendingCancellationRequests,
     requestCancellation, targets, allTargets, findById,
-    restoreAssets, acquireTargetLease, acquireSessionLease, prune,
+    restoreAssets: restoreAttachmentBackups, acquireTargetLease, acquireSessionLease, prune,
   };
 }
 

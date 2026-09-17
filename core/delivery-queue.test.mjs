@@ -2,7 +2,7 @@ import { feature, component, expect } from "bdd-vitest";
 import { mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { join } from "path";
+import { dirname, join } from "path";
 import { tmpdir } from "os";
 import { createDeliveryQueue, deliveryQueueStats, waitForDeliveryJob } from "./delivery-queue.mjs";
 import { validateAgentPane } from "../cli/config.mjs";
@@ -502,6 +502,62 @@ feature("durable delivery queue", () => {
     then: ["the exact original path and bytes are available to the agent", (count, ctx) => {
       expect(count).toBe(1);
       expect(readFileSync(ctx.imagePath, "utf-8")).toBe("fake-png-bytes");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+      rmSync(join(ctx.imagePath, ".."), { recursive: true, force: true });
+    }],
+  });
+
+  component("a replay with the same key and changed bytes keeps the first backup and names the conflict", {
+    given: ["one enqueued image whose file is then rewritten before the same key is replayed", () => {
+      const rootDir = tempRoot();
+      const imagePath = join(tempRoot(), "discord-image.png");
+      mkdirSync(join(imagePath, ".."), { recursive: true });
+      writeFileSync(imagePath, "first-bytes");
+      const request = { agentName: "ai", pane: 5, text: `inspect\n[image attached: ${imagePath}]`, idempotencyKey: "discord:ch:77" };
+      const queue = createDeliveryQueue({ rootDir });
+      const first = queue.enqueue(request);
+      writeFileSync(imagePath, "second-bytes");
+      return { rootDir, imagePath, queue, request, first };
+    }],
+    when: ["the replay is enqueued and the source is gone before restore", ({ queue, request, imagePath }) => {
+      const replay = queue.enqueue(request);
+      unlinkSync(imagePath);
+      return { replay, restored: queue.restoreAssets(replay) };
+    }],
+    then: ["the first job and its first bytes survive, and the replay says why it was not merged", ({ replay, restored }, ctx) => {
+      expect(restored).toBe(1);
+      expect(readFileSync(ctx.imagePath, "utf-8")).toBe("first-bytes");
+      expect(replay.id).toBe(ctx.first.id);
+      expect(replay.replayConflict).toBe("attachment_bytes_differ");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+      rmSync(join(ctx.imagePath, ".."), { recursive: true, force: true });
+    }],
+  });
+
+  component("two concurrent creators of one key leave one job with one backup", {
+    given: ["one shared spool and one image both producers attach", () => {
+      const rootDir = tempRoot();
+      const imagePath = join(tempRoot(), "discord-image.png");
+      mkdirSync(join(imagePath, ".."), { recursive: true });
+      writeFileSync(imagePath, "same-bytes");
+      return { rootDir, imagePath };
+    }],
+    when: ["Gateway and REST producers enqueue the same key concurrently", async ({ rootDir, imagePath }) => {
+      const moduleUrl = new URL("./delivery-queue.mjs", import.meta.url).href;
+      const producer = [
+        `import { createDeliveryQueue } from ${JSON.stringify(moduleUrl)};`,
+        "const [root, image] = process.argv.slice(1);",
+        "createDeliveryQueue({ rootDir: root }).enqueue({ agentName: 'api', pane: 4, text: `look\\n[image attached: ${image}]`, idempotencyKey: 'discord:ch:88' });",
+      ].join("\n");
+      await Promise.all([1, 2].map(() =>
+        execFileAsync(process.execPath, ["--input-type=module", "-e", producer, rootDir, imagePath])));
+      return createDeliveryQueue({ rootDir }).list("api", 4);
+    }],
+    then: ["exactly one job points at exactly one backup holding the bytes", (jobs, ctx) => {
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].assets).toHaveLength(1);
+      expect(readdirSync(dirname(jobs[0].assets[0].backup))).toHaveLength(1);
+      expect(readFileSync(jobs[0].assets[0].backup, "utf-8")).toBe("same-bytes");
       rmSync(ctx.rootDir, { recursive: true, force: true });
       rmSync(join(ctx.imagePath, ".."), { recursive: true, force: true });
     }],
