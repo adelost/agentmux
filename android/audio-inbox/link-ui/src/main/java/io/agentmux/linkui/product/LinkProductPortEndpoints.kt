@@ -1,5 +1,11 @@
 package io.agentmux.linkui.product
 
+import io.agentmux.linkui.product.generated.GeneratedLinkCapturedTurn
+import io.agentmux.linkui.product.generated.GeneratedLinkComposeTurn
+import io.agentmux.linkui.product.generated.GeneratedLinkHistoryClear
+import io.agentmux.linkui.product.generated.GeneratedLinkHistoryStatus
+import io.agentmux.linkui.product.generated.GeneratedLinkPreferencesStatus
+import io.agentmux.linkui.product.generated.GeneratedLinkTargetSelect
 import io.agentmux.linkui.product.generated.GeneratedLinkNativeLegoCatalog.PortIds
 
 /**
@@ -23,13 +29,13 @@ internal object CaptureStatusOutput :
     ProductOutputPort<LinkCapturePresentation>(PortIds.CAPTURE_SERVICE_STATUS)
 
 internal object CaptureCapturedOutput :
-    ProductOutputPort<LinkCapturedTurn>(PortIds.CAPTURE_SERVICE_CAPTURED)
+    ProductOutputPort<GeneratedLinkCapturedTurn>(PortIds.CAPTURE_SERVICE_CAPTURED)
 
 internal object ConversationTurnInput :
-    ProductDataInput<LinkCapturedTurn>(PortIds.CONVERSATION_SERVICE_TURN)
+    ProductDataInput<GeneratedLinkCapturedTurn>(PortIds.CONVERSATION_SERVICE_TURN)
 
 internal object ConversationComposeInput :
-    ProductInputPort<LinkComposeEvent, Unit>(PortIds.CONVERSATION_SERVICE_COMPOSE)
+    ProductInputPort<GeneratedLinkComposeTurn, Unit>(PortIds.CONVERSATION_SERVICE_COMPOSE)
 
 internal object ConversationStatusOutput :
     ProductOutputPort<LinkConversationPresentation>(PortIds.CONVERSATION_SERVICE_STATUS)
@@ -41,7 +47,7 @@ internal object PlaybackStatusOutput :
     ProductOutputPort<LinkPlaybackPresentation>(PortIds.PLAYBACK_SERVICE_STATUS)
 
 internal object TargetSelectInput :
-    ProductInputPort<LinkTargetSelectEvent, Unit>(PortIds.TARGET_SERVICE_SELECT)
+    ProductInputPort<GeneratedLinkTargetSelect, Unit>(PortIds.TARGET_SERVICE_SELECT)
 
 internal object TargetDirectoryOutput :
     ProductOutputPort<LinkTargetPresentation>(PortIds.TARGET_SERVICE_DIRECTORY)
@@ -50,16 +56,16 @@ internal object SessionStatusOutput :
     ProductOutputPort<LinkSessionPresentation>(PortIds.SESSION_SERVICE_STATUS)
 
 internal object HistoryClearInput :
-    ProductInputPort<LinkHistoryClearEvent, Unit>(PortIds.HISTORY_SERVICE_CLEAR)
+    ProductInputPort<GeneratedLinkHistoryClear, Unit>(PortIds.HISTORY_SERVICE_CLEAR)
 
 internal object HistoryStatusOutput :
-    ProductOutputPort<LinkHistoryPresentation>(PortIds.HISTORY_SERVICE_STATUS)
+    ProductOutputPort<GeneratedLinkHistoryStatus>(PortIds.HISTORY_SERVICE_STATUS)
 
 internal object PreferencesToggleInput :
     ProductInputPort<LinkPreferenceToggleEvent, Unit>(PortIds.PREFERENCES_SERVICE_TOGGLE)
 
 internal object PreferencesStatusOutput :
-    ProductOutputPort<LinkPreferencesPresentation>(PortIds.PREFERENCES_SERVICE_STATUS)
+    ProductOutputPort<GeneratedLinkPreferencesStatus>(PortIds.PREFERENCES_SERVICE_STATUS)
 
 internal object UpdatesCommandInput :
     ProductInputPort<LinkUpdateCommandEvent, Unit>(PortIds.UPDATES_SERVICE_COMMAND)
@@ -94,13 +100,13 @@ internal object SessionPresentationSourceInput :
 internal object SessionPresentationModelOutput :
     ProductOutputPort<LinkSessionPresentation>(PortIds.SESSION_PRESENTATION_MODEL)
 internal object HistoryPresentationSourceInput :
-    ProductDataInput<LinkHistoryPresentation>(PortIds.HISTORY_PRESENTATION_SOURCE)
+    ProductDataInput<GeneratedLinkHistoryStatus>(PortIds.HISTORY_PRESENTATION_SOURCE)
 internal object HistoryPresentationModelOutput :
-    ProductOutputPort<LinkHistoryPresentation>(PortIds.HISTORY_PRESENTATION_MODEL)
+    ProductOutputPort<GeneratedLinkHistoryStatus>(PortIds.HISTORY_PRESENTATION_MODEL)
 internal object PreferencesPresentationSourceInput :
-    ProductDataInput<LinkPreferencesPresentation>(PortIds.PREFERENCES_PRESENTATION_SOURCE)
+    ProductDataInput<GeneratedLinkPreferencesStatus>(PortIds.PREFERENCES_PRESENTATION_SOURCE)
 internal object PreferencesPresentationModelOutput :
-    ProductOutputPort<LinkPreferencesPresentation>(PortIds.PREFERENCES_PRESENTATION_MODEL)
+    ProductOutputPort<GeneratedLinkPreferencesStatus>(PortIds.PREFERENCES_PRESENTATION_MODEL)
 internal object UpdatesPresentationSourceInput :
     ProductDataInput<LinkUpdatePresentation>(PortIds.UPDATES_PRESENTATION_SOURCE)
 internal object UpdatesPresentationModelOutput :
@@ -119,7 +125,7 @@ internal object TargetModelInput :
     ProductComponentInput<LinkTargetPresentation>(PortIds.TARGET_PICKER_MODEL)
 
 internal object TargetSelectEvent :
-    ProductComponentEvent<LinkTargetSelectEvent, Unit>(PortIds.TARGET_PICKER_SELECT)
+    ProductComponentEvent<GeneratedLinkTargetSelect, Unit>(PortIds.TARGET_PICKER_SELECT)
 
 internal object TalkModelInput :
     ProductComponentInput<LinkCapturePresentation>(PortIds.CAPTURE_TALK_MODEL)
@@ -134,7 +140,7 @@ internal object ComposerModelInput :
     ProductComponentInput<LinkConversationPresentation>(PortIds.CONVERSATION_COMPOSER_MODEL)
 
 internal object ComposerComposeEvent :
-    ProductComponentEvent<LinkComposeEvent, Unit>(PortIds.CONVERSATION_COMPOSER_COMPOSE)
+    ProductComponentEvent<GeneratedLinkComposeTurn, Unit>(PortIds.CONVERSATION_COMPOSER_COMPOSE)
 
 internal object ActivePlaybackModelInput :
     ProductComponentInput<LinkPlaybackPresentation>(PortIds.PLAYBACK_CONTROLS_MODEL)
@@ -149,16 +155,16 @@ internal object PublicLinkModelInput :
     ProductComponentInput<LinkSessionPresentation>(PortIds.SESSION_PUBLIC_LINK_MODEL)
 
 internal object PreferencesModelInput :
-    ProductComponentInput<LinkPreferencesPresentation>(PortIds.PREFERENCES_TOGGLES_MODEL)
+    ProductComponentInput<GeneratedLinkPreferencesStatus>(PortIds.PREFERENCES_TOGGLES_MODEL)
 
 internal object PreferencesToggleEvent :
     ProductComponentEvent<LinkPreferenceToggleEvent, Unit>(PortIds.PREFERENCES_TOGGLES_TOGGLE)
 
 internal object LocalHistoryModelInput :
-    ProductComponentInput<LinkHistoryPresentation>(PortIds.HISTORY_LOCAL_MODEL)
+    ProductComponentInput<GeneratedLinkHistoryStatus>(PortIds.HISTORY_LOCAL_MODEL)
 
 internal object LocalHistoryClearEvent :
-    ProductComponentEvent<LinkHistoryClearEvent, Unit>(PortIds.HISTORY_LOCAL_CLEAR)
+    ProductComponentEvent<GeneratedLinkHistoryClear, Unit>(PortIds.HISTORY_LOCAL_CLEAR)
 
 internal object UpdatesModelInput :
     ProductComponentInput<LinkUpdatePresentation>(PortIds.UPDATES_PANEL_MODEL)

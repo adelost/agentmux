@@ -1,5 +1,7 @@
 package io.agentmux.linkui.product
 
+import io.agentmux.linkui.product.generated.GeneratedLinkHistoryStatus
+import io.agentmux.linkui.product.generated.GeneratedLinkPreferencesStatus
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakeStatus
@@ -37,15 +39,6 @@ data class LinkCapturePresentation(
     val byteCount: Long,
 )
 
-/** capture.service.captured — the service-internal edge into conversation.service.turn. */
-data class LinkCapturedTurn(
-    val turnId: String,
-    val targetId: String,
-    val payloadRef: String,
-    val idempotencyKey: String,
-    val createdAtMs: Long,
-)
-
 /** conversation.presentation.model — the latest-turn and composer components' model. */
 data class LinkConversationPresentation(
     val turnId: String?,
@@ -80,22 +73,6 @@ data class LinkSessionPresentation(
     val publicLinkActive: Boolean,
 )
 
-/** history.presentation.model — the local-history component's model. */
-data class LinkHistoryPresentation(
-    val retainedTurns: Int,
-    val maxTurns: Int,
-    /** The selected recipient, and how many of its turns a clear would remove. */
-    val targetId: String?,
-    val clearableTurns: Int,
-)
-
-/** preferences.presentation.model — the preferences component's model. */
-data class LinkPreferencesPresentation(
-    val handsFree: Boolean,
-    val speakReplies: Boolean,
-    val wakeWord: Boolean,
-)
-
 /** wake.presentation.model — the hands-free wake word status row's model. */
 data class LinkWakePresentation(
     val phase: WakePhase,
@@ -122,17 +99,8 @@ data class LinkCaptureCommandEvent(val operation: CaptureOperation)
 /** active-playback.command → playback.service.command. */
 data class LinkPlaybackCommandEvent(val operation: PlaybackOperation, val turnId: String)
 
-/** composer.compose → conversation.service.compose. */
-data class LinkComposeEvent(val text: String)
-
-/** target.select → target.service.select. */
-data class LinkTargetSelectEvent(val targetId: String)
-
 /** preferences.toggle → preferences.service.toggle. */
 data class LinkPreferenceToggleEvent(val key: LinkPreferenceKey, val enabled: Boolean)
-
-/** local-history.clear → history.service.clear. */
-data class LinkHistoryClearEvent(val targetId: String)
 
 /** updates.command → updates.service.command. */
 data class LinkUpdateCommandEvent(val operation: LinkUpdateOperation)
@@ -220,15 +188,15 @@ fun LinkState.toSessionPresentation(publicLinkActive: Boolean): LinkSessionPrese
         publicLinkActive = publicLinkActive,
     )
 
-fun LinkState.toHistoryPresentation(): LinkHistoryPresentation = LinkHistoryPresentation(
-    retainedTurns = turns.size,
-    maxTurns = LinkHistoryPolicy.MAX_LOCAL_TURNS,
+fun LinkState.toHistoryPresentation(): GeneratedLinkHistoryStatus = GeneratedLinkHistoryStatus(
+    retainedTurns = turns.size.toLong(),
+    maxTurns = LinkHistoryPolicy.MAX_LOCAL_TURNS.toLong(),
     targetId = selectedTargetId.takeIf { it.isNotBlank() },
-    clearableTurns = if (selectedTargetId.isBlank()) 0 else clearableTurns(selectedTargetId),
+    clearableTurns = if (selectedTargetId.isBlank()) 0L else clearableTurns(selectedTargetId).toLong(),
 )
 
-fun LinkState.toPreferencesPresentation(speakReplies: Boolean, wakeWord: Boolean): LinkPreferencesPresentation =
-    LinkPreferencesPresentation(
+fun LinkState.toPreferencesPresentation(speakReplies: Boolean, wakeWord: Boolean): GeneratedLinkPreferencesStatus =
+    GeneratedLinkPreferencesStatus(
         handsFree = handsFree,
         speakReplies = speakReplies,
         wakeWord = wakeWord,

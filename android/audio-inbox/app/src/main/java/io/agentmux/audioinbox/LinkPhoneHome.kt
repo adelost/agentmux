@@ -42,12 +42,12 @@ import io.agentmux.linkui.LinkRecipientPicker
 import io.agentmux.linkui.activeTurnId
 import io.agentmux.linkui.linkRecipientRow
 import io.agentmux.linkui.linkSettingsHeaderAction
-import io.agentmux.linkui.product.LinkComposeEvent
+import io.agentmux.linkui.product.generated.GeneratedLinkComposeTurn
 import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.LinkPlaybackCommandEvent
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.LinkRouteOpenEvent
-import io.agentmux.linkui.product.LinkTargetSelectEvent
+import io.agentmux.linkui.product.generated.GeneratedLinkTargetSelect
 import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponent
 import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponents
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
@@ -72,7 +72,7 @@ internal fun LinkPhoneHome(
         LinkRecipientPicker(
             target = target,
             onSelect = {
-                graph.onTargetSelect(LinkTargetSelectEvent(it))
+                graph.onTargetSelect(GeneratedLinkTargetSelect(it))
                 choosingRecipient = false
             },
             onBack = { choosingRecipient = false },
@@ -157,7 +157,7 @@ internal fun LinkPhoneHome(
                             enabled = selected?.acceptsMessages == true,
                             maxLength = io.agentmux.linkcore.LinkHistoryPolicy.MAX_COMPOSE_CHARS,
                             onValueChange = graph::onComposerEdited,
-                            onSubmit = { graph.onComposerCompose(LinkComposeEvent(composer.text)) },
+                            onSubmit = { graph.onComposerCompose(GeneratedLinkComposeTurn(composer.text)) },
                         ),
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                     )

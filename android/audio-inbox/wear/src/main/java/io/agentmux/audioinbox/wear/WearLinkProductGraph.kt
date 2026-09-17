@@ -9,7 +9,7 @@ import io.agentmux.linkcore.LinkPreferenceKey
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkUpdateOperation
 import io.agentmux.linkcore.PlaybackOperation
-import io.agentmux.linkui.product.LinkCapturedTurn
+import io.agentmux.linkui.product.generated.GeneratedLinkCapturedTurn
 import io.agentmux.linkui.product.LinkCaptureCommandEvent
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkProductGraph
@@ -34,7 +34,7 @@ internal class WearLinkProductGraph private constructor(
     state: StateFlow<LinkState>,
     updateState: StateFlow<UpdateState>,
     microphoneGranted: StateFlow<Boolean>,
-    capturedTurns: Flow<LinkCapturedTurn>,
+    capturedTurns: Flow<GeneratedLinkCapturedTurn>,
     captureByteCount: () -> Long,
     sinks: LinkProductSinks,
     private val releaseCaptureFiles: () -> Unit,
@@ -122,8 +122,8 @@ internal class WearLinkProductGraph private constructor(
 private class WearCaptureAdapter(
     private val controller: WearMailboxController,
 ) {
-    private var pending: Pair<WearVoiceRecorder.Capture, LinkCapturedTurn>? = null
-    val captured = MutableSharedFlow<LinkCapturedTurn>(extraBufferCapacity = 1)
+    private var pending: Pair<WearVoiceRecorder.Capture, GeneratedLinkCapturedTurn>? = null
+    val captured = MutableSharedFlow<GeneratedLinkCapturedTurn>(extraBufferCapacity = 1)
 
     fun command(event: LinkCaptureCommandEvent) {
         when (event.operation) {
@@ -139,7 +139,7 @@ private class WearCaptureAdapter(
         }
     }
 
-    fun deliver(turn: LinkCapturedTurn) {
+    fun deliver(turn: GeneratedLinkCapturedTurn) {
         val current = checkNotNull(pending) { "No native capture for ${turn.turnId}" }
         check(current.second == turn) { "Captured turn contract does not match native payload" }
         pending = null
@@ -164,7 +164,7 @@ private class WearCaptureAdapter(
             controller.failCapture()
             return
         }
-        val turn = LinkCapturedTurn(
+        val turn = GeneratedLinkCapturedTurn(
             turnId = capture.turnId,
             targetId = target.id,
             payloadRef = capture.file.absolutePath,

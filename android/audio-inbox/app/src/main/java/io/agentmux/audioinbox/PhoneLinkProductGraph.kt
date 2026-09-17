@@ -11,7 +11,7 @@ import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkui.LinkReplyAudio
 import io.agentmux.linkcore.LinkUpdateOperation
 import io.agentmux.linkcore.PlaybackOperation
-import io.agentmux.linkui.product.LinkCapturedTurn
+import io.agentmux.linkui.product.generated.GeneratedLinkCapturedTurn
 import io.agentmux.linkui.product.LinkCaptureCommandEvent
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkPlaybackCommandEvent
@@ -44,7 +44,7 @@ internal class PhoneLinkProductGraph private constructor(
     microphoneGranted: StateFlow<Boolean>,
     speakReplies: StateFlow<Boolean>,
     wakeWordEnabled: StateFlow<Boolean>,
-    capturedTurns: Flow<LinkCapturedTurn>,
+    capturedTurns: Flow<GeneratedLinkCapturedTurn>,
     captureByteCount: () -> Long,
     sinks: LinkProductSinks,
     private val composer: ComposerDraftStore,
@@ -237,15 +237,15 @@ private class ComposerDraftStore {
 
 /**
  * Owns the native audio payload behind capture.service.captured. The graph
- * carries the typed [LinkCapturedTurn]; the file stays here and is handed to
+ * carries the typed [GeneratedLinkCapturedTurn]; the file stays here and is handed to
  * the conversation sink when the generated edge delivers the turn.
  */
 private class PhoneCaptureAdapter(
     private val coordinator: LinkCoordinator,
     private val recorder: PushToTalkRecorder,
 ) {
-    private var pending: Pair<PushToTalkRecorder.Capture, LinkCapturedTurn>? = null
-    val captured = MutableSharedFlow<LinkCapturedTurn>(extraBufferCapacity = 1)
+    private var pending: Pair<PushToTalkRecorder.Capture, GeneratedLinkCapturedTurn>? = null
+    val captured = MutableSharedFlow<GeneratedLinkCapturedTurn>(extraBufferCapacity = 1)
 
     fun command(event: LinkCaptureCommandEvent) {
         when (event.operation) {
@@ -259,7 +259,7 @@ private class PhoneCaptureAdapter(
         }
     }
 
-    fun deliver(turn: LinkCapturedTurn) {
+    fun deliver(turn: GeneratedLinkCapturedTurn) {
         val current = checkNotNull(pending) { "No native capture for ${turn.turnId}" }
         check(current.second == turn) { "Captured turn contract does not match native payload" }
         pending = null
@@ -295,7 +295,7 @@ private class PhoneCaptureAdapter(
             coordinator.capture(CapturePhase.FAILED)
             return
         }
-        val turn = LinkCapturedTurn(
+        val turn = GeneratedLinkCapturedTurn(
             turnId = capture.turnId,
             targetId = target.id,
             payloadRef = capture.file.absolutePath,

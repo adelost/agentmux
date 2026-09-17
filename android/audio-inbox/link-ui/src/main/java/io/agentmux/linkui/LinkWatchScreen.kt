@@ -42,7 +42,7 @@ import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.LinkRouteOpenEvent
 import io.agentmux.linkui.product.LinkSessionPresentation
 import io.agentmux.linkui.product.LinkTargetPresentation
-import io.agentmux.linkui.product.LinkTargetSelectEvent
+import io.agentmux.linkui.product.generated.GeneratedLinkTargetSelect
 import io.agentmux.linkui.product.LinkUpdateCommandEvent
 import io.agentmux.linkui.product.LinkUpdatePresentation
 import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponent
@@ -134,7 +134,7 @@ fun LinkWatchSurface(
     }
     if (recipientOpen) {
         LinkRecipientPicker(target, onSelect = {
-            graph.onTargetSelect(LinkTargetSelectEvent(it))
+            graph.onTargetSelect(GeneratedLinkTargetSelect(it))
             recipientOpen = false
         }, onBack = { recipientOpen = false })
         return

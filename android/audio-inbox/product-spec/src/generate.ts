@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,9 +8,18 @@ import {
   logOutputManifest,
   productJsonEmitter,
   writeOutputManifest,
+  type ProductEmitterPlugin,
 } from "@v1d/product-spec";
-import { domainGraphEmitter } from "@v1d/product-emit/core";
+import { domainGraphEmitter, emitContractTypesKotlin } from "@v1d/product-emit/core";
 import { linkCapabilityTable } from "./capabilities.js";
+import {
+  capturedTurnContract,
+  composeTurnContract,
+  historyClearContract,
+  historyStatusContract,
+  preferencesStatusContract,
+  targetSelectContract,
+} from "./contracts.js";
 import { linkNativeEmitter } from "./emit-kotlin.js";
 import { compileAgentmuxLinkProduct } from "./product.js";
 
@@ -30,6 +40,7 @@ const manifest = buildOutputManifest(
   [
     productJsonEmitter(jsonPath),
     linkNativeEmitter(kotlinRoot),
+    linkContractTypesEmitter(),
     domainGraphEmitter({ domains: domainsPath, full: graphPath, productJsonPath: jsonPath }, linkCapabilityTable),
   ],
   [jsonPath, domainsPath, graphPath, kotlinRoot],
@@ -42,3 +53,33 @@ if (check) {
   await writeOutputManifest(linkRoot, manifest);
 }
 console.log(logOutputManifest(manifest));
+
+/**
+ * The contracts native code holds as plain values, as generated data classes: a renamed or retyped declared field
+ * fails the Kotlin build until the native code follows (Skyvw row 168's pattern, row 174). Only contracts whose fields
+ * are all primitives; the rest are carried by the state presentations and the port catalog.
+ */
+function linkContractTypesEmitter(): ProductEmitterPlugin {
+  const contracts = [
+    capturedTurnContract,
+    composeTurnContract,
+    targetSelectContract,
+    historyStatusContract,
+    historyClearContract,
+    preferencesStatusContract,
+  ];
+  return {
+    id: "link-contract-types",
+    emit: () => [{
+      id: "contract-types",
+      path: `${kotlinRoot}/GeneratedLinkContracts.kt`,
+      mediaType: "text/x-kotlin",
+      content: emitContractTypesKotlin(contracts, {
+        packageName: "io.agentmux.linkui.product.generated",
+        symbolPrefix: "Link",
+        sourceFile: "product-spec/src/contracts.ts",
+        sourceSha: createHash("sha256").update(JSON.stringify(contracts)).digest("hex"),
+      }),
+    }],
+  };
+}
