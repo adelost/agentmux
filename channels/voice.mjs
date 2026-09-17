@@ -25,7 +25,7 @@ import yaml from "js-yaml";
 import { esc } from "../lib.mjs";
 import { createAudioFeedHandlers } from "./audio-feed.mjs";
 import { createVoiceInput } from "./voice-input.mjs";
-import { paneForChannel, phoneTargetChannels } from "./audio-targets.mjs";
+import { phoneTargets } from "./audio-targets.mjs";
 import { DEFAULT_TTS_VOICE } from "../core/runtime-defaults.mjs";
 
 // Minimal mime map for the static PWA bundle. Anything not listed gets
@@ -135,24 +135,7 @@ export function createVoicePWA(deps) {
   }
 
   function listPhoneTargets() {
-    const primary = String(deps.audioDiscovery?.target || "").trim();
-    const targets = [];
-    const agents = loadAgents();
-    for (const channel of phoneTargetChannels(deps.audioDiscovery, agents)) {
-      const owner = paneForChannel(agents, channel);
-      if (!owner) continue;
-      const entry = agents[owner.name];
-      targets.push({
-        id: `${owner.name}:${owner.pane}`,
-        label: entry?.panes?.[owner.pane]?.label || `${owner.name}:${owner.pane}`,
-        kind: "agent",
-        agent: owner.name,
-        pane: owner.pane,
-        audioTarget: channel,
-        favorite: channel === primary,
-      });
-    }
-    return targets;
+    return phoneTargets(deps.audioDiscovery, loadAgents());
   }
 
   function validatePane(name, pane) {

@@ -132,3 +132,16 @@ CREATE TABLE IF NOT EXISTS exchange_codes (
   expiresAt INTEGER NOT NULL,
   usedAt INTEGER
 );
+
+-- What the fleet's own connector says it can reach, announced on every poll.
+-- The app's target list is this union with LINK_TARGETS, so adding a pane to
+-- the fleet no longer means editing a Cloudflare variable (row 184).
+CREATE TABLE IF NOT EXISTS connector_targets (
+  connectorId TEXT NOT NULL,
+  target TEXT NOT NULL,
+  label TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('wsl', 'windows')),
+  seenAt INTEGER NOT NULL,
+  PRIMARY KEY (connectorId, target)
+);

@@ -2,13 +2,22 @@
 
 import { requireConnector } from "./auth.mjs";
 import { ackDecision, failDecision, replyDecision } from "./mailbox.mjs";
-import { requestRateLimited } from "./config.mjs";
+import { announceableTargets, requestRateLimited, targetAnnounceTtlMs } from "./config.mjs";
 import { json, text } from "./util.mjs";
 
 const connectorContext = ({ env, request, url }) => {
   const source = url.searchParams.get("source") === "windows" ? "windows" : "wsl";
   return { source, connector: requireConnector({ env, request, source }) };
 };
+
+/** WHAT: The targets one connector owns right now. WHY: A pane it announced is
+ *  as much its own as one named in the configured seed, on every route. */
+async function reachableTargets({ store, env, connector, nowMs }) {
+  const remembered = await store.announcedTargetsFor(
+    connector.connectorId, nowMs - targetAnnounceTtlMs(env),
+  );
+  return new Set([...connector.targets, ...remembered.map((row) => row.target)]);
+}
 
 /** WHAT: Routes one connector API request. WHY: Keeps connector claim and completion behind one ownership-checked handler. */
 export async function handleConnectorRoutes({ request, env, store, url, nowMs }) {
@@ -27,15 +36,33 @@ export async function handleConnectorRoutes({ request, env, store, url, nowMs })
     }
     await store.reclaimExpiredLeases(nowMs);
     await store.reclaimStaleDelivered(nowMs - (Number(env.REPLY_TIMEOUT_SECONDS) || 600) * 1000);
+    // The connector tells the worker which panes the fleet can reach; the
+    // configured targets stay as the seed. Claiming and heartbeating cover the
+    // union, so an announced pane is reachable without a Cloudflare edit.
+    // Only the fleet's own WSL bridge announces panes. A windows connector
+    // serves the kinds LINK_TARGETS names it, so it can never announce an
+    // agent:pane id and then claim that pane's turns.
+    const announced = source === "wsl"
+      ? announceableTargets((await request.json().catch(() => ({})))?.targets)
+      : [];
+    if (announced.length) {
+      await store.announceTargets({
+        connectorId: connector.connectorId,
+        source,
+        targets: announced,
+        nowMs,
+        keepMs: targetAnnounceTtlMs(env),
+      });
+    }
+    const targets = [...await reachableTargets({ store, env, connector, nowMs })];
     const messages = await store.claimQueued({
       connectorId: connector.connectorId,
-      targets: connector.targets,
+      targets,
       leaseMs: (Number(env.CONNECTOR_LEASE_SECONDS) || 60) * 1000,
       nowMs,
     });
-    for (const target of connector.targets) {
-      await store.heartbeat({ connectorId: connector.connectorId, target, source, nowMs });
-    }
+    // One beat for the connector, whatever it reaches: liveness is its own.
+    await store.connectorBeat({ connectorId: connector.connectorId, source, nowMs });
     return json(null, 200, { messages });
   }
 
@@ -46,7 +73,7 @@ export async function handleConnectorRoutes({ request, env, store, url, nowMs })
     if (!/^voice\/[\w-]{8,80}\.m4a$/u.test(voiceRef)) return json(null, 400, { error: "voiceRef-invalid" });
     const message = await store.getMessageForVoice(voiceRef);
     if (!message) return json(null, 404, { error: "voice-message-not-found" });
-    if (!connector.targets.includes(message.target)) {
+    if (!(await reachableTargets({ store, env, connector, nowMs })).has(message.target)) {
       return json(null, 403, { error: "connector-scope-required" });
     }
     const object = await env.LINK_VOICE.get(voiceRef);
@@ -79,7 +106,7 @@ export async function handleConnectorRoutes({ request, env, store, url, nowMs })
       const connector = requireConnector({ env, request, source });
       if (!connector) return json(null, 401, { error: "connector-auth-required" });
       if (requestedConnectorId !== connector.connectorId ||
-          (message && !connector.targets.includes(message.target))) {
+          (message && !(await reachableTargets({ store, env, connector, nowMs })).has(message.target))) {
         return json(null, 403, { error: "connector-scope-required" });
       }
       const decision = decide({ message, connectorId: connector.connectorId });

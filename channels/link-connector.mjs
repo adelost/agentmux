@@ -7,6 +7,32 @@ import { dirname, join } from "node:path";
 import { normalizeServiceBaseUrl } from "../core/runtime-defaults.mjs";
 
 const JOURNAL_VERSION = 1;
+/** Re-announce an unchanged list this often, well inside the worker's 24 h
+ *  announce window, so a worker-side reset can never strand the phone's list. */
+const ANNOUNCE_REFRESH_MS = 60 * 60_000;
+
+/** WHAT: Normalises what the connector was given into announceable rows. WHY: The
+ *  caller may pass ids, rows, or a function read fresh each cycle. */
+export function announcedTargetList(targets) {
+  const rows = (typeof targets === "function" ? targets() : targets) || [];
+  return rows.map((target) => (typeof target === "string"
+    ? { id: target, label: target }
+    : { id: String(target.id), label: String(target.label ?? target.id) }));
+}
+
+/** WHAT: A stable fingerprint of one announced list. WHY: Announcing only on
+ *  change needs a cheap comparison that notices a relabel as well as a new pane. */
+export function listFingerprint(targets) {
+  // JSON, not a separator byte: a literal NUL in the source turns this file
+  // binary to git, which costs every future diff and blame on it.
+  const text = JSON.stringify(targets.map((target) => [target.id, target.label]));
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${targets.length}:${hash.toString(16)}`;
+}
 
 function readJournal(statePath) {
   try { return JSON.parse(readFileSync(statePath, "utf8")); }
@@ -89,7 +115,27 @@ export async function runLinkConnectorCycle({
     return parsed;
   };
 
-  const claimed = await post("/api/link/connector/poll?source=wsl");
+  // The poll announces what this fleet can reach, so the phone's TALK TO list is
+  // the fleet's own config and not a Cloudflare variable (row 184). The list is
+  // read fresh each cycle, but only SENT when it changed, or once an hour so the
+  // worker's announce window can never expire it: sixty-five upserts every
+  // fifteen seconds would be three quarters of a million D1 row writes a day for
+  // a list that changes a few times a week.
+  const announced = announcedTargetList(targets);
+  const announceHash = listFingerprint(announced);
+  const announceDue = journal.announce?.hash !== announceHash
+    || !Number.isFinite(journal.announce?.atMs)
+    || Date.now() - journal.announce.atMs >= ANNOUNCE_REFRESH_MS;
+  const claimed = await post(
+    "/api/link/connector/poll?source=wsl",
+    announceDue ? { targets: announced } : {},
+  );
+  if (announceDue) {
+    // Recorded only after the worker accepted the poll, so a failed cycle
+    // announces again instead of trusting an unsent list.
+    journal.announce = { hash: announceHash, atMs: Date.now() };
+    writeJournal(statePath, journal);
+  }
   const messages = Array.isArray(claimed.messages) ? claimed.messages : [];
   let handled = 0;
   for (const message of messages) {

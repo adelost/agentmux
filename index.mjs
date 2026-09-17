@@ -396,6 +396,16 @@ const defaultStaticDir = resolve(__dir, "../voice-pwa/build");
 const voicePwaStaticDir = process.env.VOICE_PWA_STATIC_DIR
   || (existsSync(defaultStaticDir) ? defaultStaticDir : null);
 
+// One discovery object for both phone paths: the voice PWA offers these panes
+// and the Link connector announces the same ones to the worker (row 184).
+const audioDiscovery = {
+  serverId: process.env.AUDIO_INBOX_SERVER_ID,
+  target: process.env.AUDIO_INBOX_TARGET,
+  // Extra phone-addressable Discord channels, e.g. project:3 + project:4.
+  targets: String(process.env.AUDIO_INBOX_TARGETS || "")
+    .split(",").map((value) => value.trim()).filter(Boolean),
+};
+
 const voicePwa = createVoicePWA({
   port: VOICE_PWA_PORT,
   host: VOICE_PWA_HOST,
@@ -410,13 +420,7 @@ const voicePwa = createVoicePWA({
     ? ({ name, pane, dir }) => jsonlWatcher.enqueuePane(name, pane, dir)
     : null,
   audioOutbox,
-  audioDiscovery: {
-    serverId: process.env.AUDIO_INBOX_SERVER_ID,
-    target: process.env.AUDIO_INBOX_TARGET,
-    // Extra phone-addressable Discord channels, e.g. project:3 + project:4.
-    targets: String(process.env.AUDIO_INBOX_TARGETS || "")
-      .split(",").map((value) => value.trim()).filter(Boolean),
-  },
+  audioDiscovery,
   staticDir: voicePwaStaticDir,
 });
 voicePwa.start()
@@ -471,4 +475,6 @@ startLinkConnectorIfConfigured({
   deliveryQueue,
   run,
   transcribeScript: TRANSCRIBE_SCRIPT,
+  agentsYamlPath: AGENTS_YAML,
+  audioDiscovery,
 });

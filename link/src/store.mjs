@@ -99,18 +99,53 @@ export function createLinkStore(db) {
       );
     },
 
-    heartbeat: ({ connectorId, target, source, nowMs }) =>
+    /** WHAT: One beat per connector, not one per target. WHY: A connector that
+     *  reaches sixty-five panes wrote sixty-five rows every fifteen seconds, and
+     *  the liveness fact is the connector's: each target reads it through its
+     *  owner. The connector's own row is the one where target = connectorId;
+     *  per-target rows written before row 184 stay in the table, unread. */
+    connectorBeat: ({ connectorId, source, nowMs }) =>
       run(
         `INSERT INTO heartbeats (connectorId, target, seenAt, source) VALUES (?, ?, ?, ?)
          ON CONFLICT (connectorId, target) DO UPDATE SET seenAt = excluded.seenAt`,
-        connectorId, target, nowMs, source,
+        connectorId, connectorId, nowMs, source,
       ),
 
-    heartbeatStates: (staleMs, nowMs) =>
+    /** WHAT: Records what one connector says it can reach. WHY: Keeps the app's
+     *  target list in the fleet's own config instead of a Cloudflare variable. */
+    announceTargets: async ({ connectorId, source, targets, nowMs, keepMs }) => {
+      for (const entry of targets) {
+        await run(
+          `INSERT INTO connector_targets (connectorId, target, label, kind, source, seenAt)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (connectorId, target) DO UPDATE SET
+             label = excluded.label, kind = excluded.kind, source = excluded.source, seenAt = excluded.seenAt`,
+          connectorId, entry.id, entry.label, entry.kind, source, nowMs,
+        );
+      }
+      // A pane the fleet stopped announcing disappears from the app after the
+      // same window, so a removed pane does not linger as a dead row.
+      await run("DELETE FROM connector_targets WHERE seenAt < ?", nowMs - keepMs);
+    },
+
+    announcedTargets: (freshAfterMs) =>
       all(
-        `SELECT target, MAX(seenAt) AS seenAt,
+        `SELECT target, label, kind, connectorId, MAX(seenAt) AS seenAt FROM connector_targets
+         WHERE seenAt >= ? GROUP BY target ORDER BY target`,
+        freshAfterMs,
+      ),
+
+    announcedTargetsFor: (connectorId, freshAfterMs) =>
+      all(
+        "SELECT target FROM connector_targets WHERE connectorId = ? AND seenAt >= ?",
+        connectorId, freshAfterMs,
+      ),
+
+    connectorBeats: (staleMs, nowMs) =>
+      all(
+        `SELECT connectorId, MAX(seenAt) AS seenAt,
                 MAX(CASE WHEN seenAt >= ? THEN 1 ELSE 0 END) AS online
-         FROM heartbeats GROUP BY target`,
+         FROM heartbeats WHERE connectorId = target GROUP BY connectorId`,
         nowMs - staleMs,
       ),
 
