@@ -39,11 +39,19 @@ export async function handleConnectorRoutes({ request, env, store, url, nowMs })
     // The connector tells the worker which panes the fleet can reach; the
     // configured targets stay as the seed. Claiming and heartbeating cover the
     // union, so an announced pane is reachable without a Cloudflare edit.
-    const ttlMs = targetAnnounceTtlMs(env);
-    const announced = announceableTargets((await request.json().catch(() => ({})))?.targets);
+    // Only the fleet's own WSL bridge announces panes. A windows connector
+    // serves the kinds LINK_TARGETS names it, so it can never announce an
+    // agent:pane id and then claim that pane's turns.
+    const announced = source === "wsl"
+      ? announceableTargets((await request.json().catch(() => ({})))?.targets)
+      : [];
     if (announced.length) {
       await store.announceTargets({
-        connectorId: connector.connectorId, source, targets: announced, nowMs, keepMs: ttlMs,
+        connectorId: connector.connectorId,
+        source,
+        targets: announced,
+        nowMs,
+        keepMs: targetAnnounceTtlMs(env),
       });
     }
     const targets = [...await reachableTargets({ store, env, connector, nowMs })];
@@ -53,9 +61,8 @@ export async function handleConnectorRoutes({ request, env, store, url, nowMs })
       leaseMs: (Number(env.CONNECTOR_LEASE_SECONDS) || 60) * 1000,
       nowMs,
     });
-    for (const target of targets) {
-      await store.heartbeat({ connectorId: connector.connectorId, target, source, nowMs });
-    }
+    // One beat for the connector, whatever it reaches: liveness is its own.
+    await store.connectorBeat({ connectorId: connector.connectorId, source, nowMs });
     return json(null, 200, { messages });
   }
 

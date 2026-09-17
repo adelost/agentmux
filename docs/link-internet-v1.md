@@ -66,9 +66,16 @@ heartbeats(connectorId TEXT, target TEXT, seenAt, source TEXT) -- wsl|windows
   med bounded lease (60 s); förlorad lease återgår till queued.
 - Samma poll ANNONSERAR flottans lista: `{targets:[{id,label}]}`. Worker sparar
   den i `connector_targets` och `GET /api/link/targets` svarar med unionen av
-  `LINK_TARGETS` (seedet) och det annonserade, med online ur heartbeats. Send
-  accepterar varje id i unionen. Bara `agent:pane` får annonseras, så en
-  connector kan aldrig ta över en kind som `windows`; seedets etiketter vinner.
+  `LINK_TARGETS` (seedet) och det annonserade. Bridgen skickar listan bara när
+  den ändrats, annars en gång i timmen: 65 paneler i varje poll (var 15:e s) är
+  386 000 D1-radskrivningar per dygn, mätt, mot 13 000 med regeln. Send
+  accepterar varje id i unionen. Bara `agent:pane` får annonseras och bara från
+  wsl-connectorn, så en windows-connector kan aldrig annonsera en pane och sedan
+  claima dess turer; seedets etiketter vinner.
+- Liveness är connectorns, inte panelens: en poll skriver EN heartbeat-rad
+  (`target = connectorId`) och varje target läser sin ägares rad. Appens svar är
+  oförändrat, en boolean per target. Rader per target från tiden före rad 184
+  ligger kvar i tabellen och läses inte.
   En pane som slutar annonseras faller ur listan efter `TARGET_ANNOUNCE_TTL_SECONDS`
   (24 h som default). Varför: telefonens TALK TO visade tre ids ur en
   Cloudflare-variabel medan flottan hade elva paneler (rad 184, 2026-09-17).
@@ -132,6 +139,22 @@ Android TTS är V1-uppspelning; server-MP3 optional fallback.
 2. Kopiera `link/wrangler.toml.example` till den ignorerade lokala
    `link/wrangler.toml`, fyll i egna D1/R2-resurser, `LINK_AUTH_ORIGIN`,
    `LINK_AUTH_CALLBACK_URL`, `LINK_AUTH_APP_ID` och connector-targets.
+
+   **Deploy-kontraktet för Workern, i denna ordning** (2026-09-17: en deploy av
+   master utan steg b tog Link ner i tretton minuter, 401 på varje connector-poll):
+   a. `link/wrangler.toml` ska ligga i den kanoniska checkouten, aldrig i en
+      branch-worktree som kan städas bort. Filen är gitignorerad.
+   b. `CONNECTOR_TARGETS_WSL` och `CONNECTOR_TARGETS_WINDOWS` MÅSTE finnas på
+      Workern (vars eller `wrangler secret put`). `requireConnector` returnerar
+      401 när källans lista är tom, och en Worker som deployas utan dem svarar
+      401 på varje poll även om tokens stämmer.
+   c. `wrangler deploy`, och vid schemaändring `wrangler d1 execute <db>
+      --remote` med den nya tabellen FÖRE deployen.
+   d. Verifiera med bridgens egen token att `POST /api/link/connector/poll`
+      svarar 200 innan bridgen rörs. Rulla annars tillbaka med
+      `wrangler rollback --version-id <föregående>`.
+   Produktion kör bara mergad master, och deployen görs från den kanoniska
+   checkouten.
 3. Lägg in `LINK_AUTH_CLIENT_SECRET`, `LINK_AUTH_STATE_SECRET`,
    `CONNECTOR_TOKEN_WSL` och `CONNECTOR_TOKEN_WINDOWS` som Worker-secrets.
 4. Koppla valfri privat HTTPS-domän till Workern, eller använd den isolerade

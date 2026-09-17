@@ -226,43 +226,38 @@ feature("store over the real schema: one exact journey and a connector crash", (
     }],
   });
 
-  component("heartbeats turn stale honestly", {
-    given: ["one wsl and one windows heartbeat", async () => {
+  component("connector beats turn stale honestly", {
+    given: ["one wsl and one windows connector beat", async () => {
       const store = createLinkStore(createTestDb());
-      await store.heartbeat({ connectorId: "wsl-1", target: "lsrc:3", source: "wsl", nowMs: NOW });
-      await store.heartbeat({ connectorId: "win-1", target: "windows", source: "windows", nowMs: NOW - 10 * 60_000 });
+      await store.connectorBeat({ connectorId: "wsl-1", source: "wsl", nowMs: NOW });
+      await store.connectorBeat({ connectorId: "windows-1", source: "windows", nowMs: NOW - 10 * 60_000 });
       return { store };
     }],
     when: ["reading states with a 90s stale bound", async ({ store }) =>
-      store.heartbeatStates(90_000, NOW)],
+      store.connectorBeats(90_000, NOW)],
     then: ["fresh is online, ten-minute-old is offline", (rows) => {
-      const byTarget = Object.fromEntries(rows.map((row) => [row.target, row.online]));
-      expect(byTarget).toEqual({ "lsrc:3": 1, windows: 0 });
+      const byConnector = Object.fromEntries(rows.map((row) => [row.connectorId, row.online]));
+      expect(byConnector).toEqual({ "wsl-1": 1, "windows-1": 0 });
     }],
   });
 
-  component("one active connector keeps a target online when another row is stale", {
-    given: ["fresh and stale connectors for the same target", async () => {
+  component("a connector beats once per poll, and per-target rows are not liveness", {
+    given: ["one connector beating twice and a legacy per-target row", async () => {
       const store = createLinkStore(createTestDb());
-      await store.heartbeat({
-        connectorId: "wsl-fresh",
-        target: "lsrc:3",
-        source: "wsl",
-        nowMs: NOW,
-      });
-      await store.heartbeat({
-        connectorId: "wsl-stale",
-        target: "lsrc:3",
-        source: "wsl",
-        nowMs: NOW - 10 * 60_000,
+      await store.connectorBeat({ connectorId: "wsl-1", source: "wsl", nowMs: NOW - 15_000 });
+      await store.connectorBeat({ connectorId: "wsl-1", source: "wsl", nowMs: NOW });
+      // Row 184 left the old per-target rows in place; they must stay unread.
+      await store.announceTargets({
+        connectorId: "wsl-1", source: "wsl", nowMs: NOW,
+        targets: [{ id: "skyvw:2", label: "Skydive worker two", kind: "agent" }],
+        keepMs: 3600_000,
       });
       return store;
     }],
-    when: ["reading the aggregate target state", (store) =>
-      store.heartbeatStates(90_000, NOW)],
-    then: ["the target appears once and remains online", (rows) => {
+    when: ["reading the connector states", (store) => store.connectorBeats(90_000, NOW)],
+    then: ["one row for the connector, online, however many panes it reaches", (rows) => {
       expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ target: "lsrc:3", online: 1 });
+      expect(rows[0]).toMatchObject({ connectorId: "wsl-1", online: 1 });
     }],
   });
 });

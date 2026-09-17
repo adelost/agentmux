@@ -99,11 +99,16 @@ export function createLinkStore(db) {
       );
     },
 
-    heartbeat: ({ connectorId, target, source, nowMs }) =>
+    /** WHAT: One beat per connector, not one per target. WHY: A connector that
+     *  reaches sixty-five panes wrote sixty-five rows every fifteen seconds, and
+     *  the liveness fact is the connector's: each target reads it through its
+     *  owner. The connector's own row is the one where target = connectorId;
+     *  per-target rows written before row 184 stay in the table, unread. */
+    connectorBeat: ({ connectorId, source, nowMs }) =>
       run(
         `INSERT INTO heartbeats (connectorId, target, seenAt, source) VALUES (?, ?, ?, ?)
          ON CONFLICT (connectorId, target) DO UPDATE SET seenAt = excluded.seenAt`,
-        connectorId, target, nowMs, source,
+        connectorId, connectorId, nowMs, source,
       ),
 
     /** WHAT: Records what one connector says it can reach. WHY: Keeps the app's
@@ -125,7 +130,7 @@ export function createLinkStore(db) {
 
     announcedTargets: (freshAfterMs) =>
       all(
-        `SELECT target, label, kind, MAX(seenAt) AS seenAt FROM connector_targets
+        `SELECT target, label, kind, connectorId, MAX(seenAt) AS seenAt FROM connector_targets
          WHERE seenAt >= ? GROUP BY target ORDER BY target`,
         freshAfterMs,
       ),
@@ -136,11 +141,11 @@ export function createLinkStore(db) {
         connectorId, freshAfterMs,
       ),
 
-    heartbeatStates: (staleMs, nowMs) =>
+    connectorBeats: (staleMs, nowMs) =>
       all(
-        `SELECT target, MAX(seenAt) AS seenAt,
+        `SELECT connectorId, MAX(seenAt) AS seenAt,
                 MAX(CASE WHEN seenAt >= ? THEN 1 ELSE 0 END) AS online
-         FROM heartbeats GROUP BY target`,
+         FROM heartbeats WHERE connectorId = target GROUP BY connectorId`,
         nowMs - staleMs,
       ),
 

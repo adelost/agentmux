@@ -1,9 +1,10 @@
 // The fleet's own list reaches the Link worker (row 184). What the voice PWA
-// offers and what the connector announces come from one function, and every
-// poll carries it, so TALK TO stops being three ids in a Cloudflare variable.
+// offers and what the connector announces come from one function, and the poll
+// carries it when it changed, so TALK TO stops being three ids in a Cloudflare
+// variable without turning every poll into sixty-five D1 writes.
 
 import { expect, feature, unit, component } from "bdd-vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { phoneTargets } from "./audio-targets.mjs";
@@ -62,15 +63,22 @@ feature("the phone's target list is the fleet's", () => {
     }],
   });
 
-  component("every poll announces the list to the worker", {
+  component("the poll announces the list when it changed, and hourly", {
     given: ["a connector whose targets are read fresh each cycle", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-link-poll-"));
+      const statePath = join(root, "connector.json");
       const posts = [];
       let listed = [{ id: "lsrc:3", label: "L-source 3" }];
       return {
         root,
         posts,
         relabel: () => { listed = [{ id: "lsrc:3", label: "L-source 3" }, { id: "skyvw:2", label: "Skydive worker two" }]; },
+        // Move the journal's announce stamp back, the way an hour of polling does.
+        age: (ms) => {
+          const journal = JSON.parse(readFileSync(statePath, "utf8"));
+          journal.announce.atMs -= ms;
+          writeFileSync(statePath, JSON.stringify(journal), "utf8");
+        },
         deps: {
           fetchImpl: async (url, init) => {
             posts.push({ url, body: JSON.parse(init.body || "{}") });
@@ -81,26 +89,33 @@ feature("the phone's target list is the fleet's", () => {
           targets: () => listed,
           agent: { hasResponseForPrompt: () => false },
           deliveryBroker: { enqueue: () => ({ id: "job-1" }) },
-          statePath: join(root, "connector.json"),
+          statePath,
           sleep: async () => {},
         },
       };
     }],
-    when: ["two cycles run with a pane added in between", async (harness) => {
+    when: ["four cycles run: first, unchanged, changed, then an hour later", async (harness) => {
+      await runLinkConnectorCycle(harness.deps);
       await runLinkConnectorCycle(harness.deps);
       harness.relabel();
+      await runLinkConnectorCycle(harness.deps);
+      harness.age(61 * 60_000);
       await runLinkConnectorCycle(harness.deps);
       rmSync(harness.root, { recursive: true, force: true });
       return harness.posts;
     }],
-    then: ["the poll body carries the current list, no restart needed", (posts) => {
-      expect(posts).toHaveLength(2);
+    then: ["the list is sent when it changed and once an hour, never every poll", (posts) => {
+      expect(posts).toHaveLength(4);
       expect(posts[0].url).toContain("/api/link/connector/poll");
       expect(posts[0].body.targets).toEqual([{ id: "lsrc:3", label: "L-source 3" }]);
-      expect(posts[1].body.targets).toEqual([
+      // Unchanged list: the poll carries no targets at all.
+      expect(posts[1].body.targets).toBeUndefined();
+      expect(posts[2].body.targets).toEqual([
         { id: "lsrc:3", label: "L-source 3" },
         { id: "skyvw:2", label: "Skydive worker two" },
       ]);
+      // An hour on, the same list is re-announced so the worker's window holds.
+      expect(posts[3].body.targets).toEqual(posts[2].body.targets);
     }],
   });
 });

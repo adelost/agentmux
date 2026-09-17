@@ -4,7 +4,7 @@ import { requireSession } from "./auth.mjs";
 import { sendDecision } from "./mailbox.mjs";
 import {
   targetsForApp, privateDiscoveryUrlsForApp, requestRateLimited, UUID_RE,
-  mergeTargets, targetAnnounceTtlMs,
+  mergeTargets, targetAnnounceTtlMs, connectorTargets,
 } from "./config.mjs";
 import { json } from "./util.mjs";
 
@@ -14,8 +14,29 @@ async function appTargets({ store, env, nowMs }) {
   const announced = await store.announcedTargets(nowMs - targetAnnounceTtlMs(env));
   return mergeTargets(
     targetsForApp(env),
-    announced.map((row) => ({ id: row.target, label: row.label, kind: row.kind })),
+    announced.map((row) => ({
+      id: row.target, label: row.label, kind: row.kind, connectorId: row.connectorId,
+    })),
   );
+}
+
+/** WHAT: Which targets are online. WHY: Liveness is the connector's, one beat per
+ *  poll; a target is online when the connector that owns it beat recently. An
+ *  announced target names its connector, a configured one is owned by the source
+ *  whose CONNECTOR_TARGETS lists it. */
+async function onlineTargets({ store, env, targets, nowMs }) {
+  const beats = await store.connectorBeats(90_000, nowMs);
+  const live = new Set(beats.filter((row) => row.online === 1).map((row) => row.connectorId));
+  const owners = new Map();
+  for (const source of ["wsl", "windows"]) {
+    for (const id of connectorTargets(env, source)) owners.set(id, `${source}-1`);
+  }
+  const online = {};
+  for (const target of targets) {
+    const owner = target.connectorId || owners.get(target.id);
+    online[target.id] = Boolean(owner && live.has(owner));
+  }
+  return online;
 }
 
 async function deleteUnusedVoice(env, voiceRef, existing) {
@@ -34,11 +55,13 @@ export async function handleAppRoutes({ request, env, store, url, nowMs }) {
   if (url.pathname === "/api/link/targets" && request.method === "GET") {
     const session = await requireSession({ store, request, nowMs });
     if (!session) return json(null, 401, { error: "session-required" });
-    const beats = await store.heartbeatStates(90_000, nowMs);
-    const online = Object.fromEntries(beats.map((row) => [row.target, row.online === 1]));
     const targets = await appTargets({ store, env, nowMs });
+    const online = await onlineTargets({ store, env, targets, nowMs });
     return json(null, 200, {
-      targets: targets.map((target) => ({ ...target, online: Boolean(online[target.id]) })),
+      // connectorId is who owns the pane, not something the app reads.
+      targets: targets.map(({ connectorId: _owner, ...target }) => ({
+        ...target, online: Boolean(online[target.id]),
+      })),
       privateDiscoveryUrls: privateDiscoveryUrlsForApp(env),
     });
   }
@@ -127,10 +150,12 @@ export async function handleAppRoutes({ request, env, store, url, nowMs }) {
     if (!session) return json(null, 401, { error: "session-required" });
     const afterSeq = Number(url.searchParams.get("after") || 0) || 0;
     const events = await store.eventsAfter({ afterSeq, limit: 50, identityId: session.identityId });
-    const beats = await store.heartbeatStates(90_000, nowMs);
+    // The app still reads one boolean per target; the worker now derives them
+    // from the owning connector's single beat instead of a row per target.
+    const targets = await appTargets({ store, env, nowMs });
     return json(null, 200, {
       events,
-      heartbeats: Object.fromEntries(beats.map((row) => [row.target, row.online === 1])),
+      heartbeats: await onlineTargets({ store, env, targets, nowMs }),
       now: nowMs,
     });
   }

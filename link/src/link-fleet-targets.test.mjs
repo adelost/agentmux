@@ -145,6 +145,60 @@ feature("the phone's target list comes from the fleet", () => {
     }],
   });
 
+  component("a poll writes one beat, however many panes the connector reaches", {
+    given: ["a worker and a session", async () => {
+      const env = makeEnv();
+      await seedSession(env);
+      return { env };
+    }],
+    when: ["the connector polls twice, announcing eleven panes", async ({ env }) => {
+      await poll(env, announce(11));
+      await poll(env, announce(11));
+      const beats = await env.LINK_DB.prepare(
+        "SELECT connectorId, target FROM heartbeats",
+      ).bind().all();
+      const listed = await (await worker.fetch(
+        req("https://link.v1d.io/api/link/targets", { token: SESSION }), env,
+      )).json();
+      return { rows: beats.results ?? beats, listed };
+    }],
+    then: ["one heartbeat row for the connector, and every target still reads online", (r) => {
+      // Row 184's write budget: liveness is the connector's, not the pane's.
+      expect(r.rows).toHaveLength(1);
+      expect(r.rows[0]).toMatchObject({ connectorId: "wsl-1", target: "wsl-1" });
+      expect(r.listed.targets.find((target) => target.id === "skyvw:7").online).toBe(true);
+      // A seeded wsl target reads the same beat; windows has not polled at all.
+      expect(r.listed.targets.find((target) => target.id === "lsrc:3").online).toBe(true);
+      expect(r.listed.targets.find((target) => target.id === "windows").online).toBe(false);
+    }],
+  });
+
+  component("only the fleet's own connector may announce panes", {
+    given: ["a worker and a session", async () => {
+      const env = makeEnv();
+      await seedSession(env);
+      return { env };
+    }],
+    when: ["the windows connector announces an agent pane", async ({ env }) => {
+      const polled = await worker.fetch(req("https://link.v1d.io/api/link/connector/poll?source=windows", {
+        method: "POST", token: "win-token", body: { targets: [{ id: "skyvw:2", label: "stolen" }] },
+      }), env);
+      const listed = await (await worker.fetch(
+        req("https://link.v1d.io/api/link/targets", { token: SESSION }), env,
+      )).json();
+      const sent = await worker.fetch(req("https://link.v1d.io/api/link/send", {
+        method: "POST", token: SESSION,
+        body: { clientMessageId: crypto.randomUUID(), target: "skyvw:2", kind: "text", text: "x" },
+      }), env);
+      return { polled, listed, sent };
+    }],
+    then: ["its poll works, its announcement does not", (r) => {
+      expect(r.polled.status).toBe(200);
+      expect(r.listed.targets.map((target) => target.id)).toEqual(["lsrc:3", "lsrc:10", "windows"]);
+      expect(r.sent.status).toBe(403);
+    }],
+  });
+
   component("a pane the fleet stopped announcing falls out of the list", {
     given: ["a worker with a short announce window", async () => {
       const env = makeEnv({ TARGET_ANNOUNCE_TTL_SECONDS: "60" });
