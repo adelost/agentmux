@@ -379,7 +379,7 @@
   ],
   "assetCatalogRef": {
     "id": "circlekit",
-    "version": "0.3.25"
+    "version": "0.3.70"
   },
   "componentFamilies": [
     {
@@ -7993,7 +7993,7 @@
       }
     ]
   },
-  "productSpecVersion": "0.3.52",
+  "productSpecVersion": "0.3.60",
   "rendererBindings": [
     {
       "capabilities": [
