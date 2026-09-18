@@ -84,8 +84,11 @@ async function awaitOneReply({
 }) {
   try {
     const replyText = await waitForLinkReply({ agent, target, prompt, replyTimeoutMs, sleep });
+    // Journalled with its body BEFORE the post, for the same reason the delivery
+    // is journalled before the ack: a pane answers once, and a lost post must
+    // leave the answer somewhere the next claim can re-post it from (row 187).
+    updateJournal(statePath, id, { stage: "replied", reply: replyText, replyAt: Date.now() });
     await post("/api/link/connector/reply", { clientMessageId: id, connectorId, body: replyText });
-    updateJournal(statePath, id, { stage: "replied", replyAt: Date.now() });
     return true;
   } catch (error) {
     const { stage, terminal } = connectorFailureDisposition(error, attempts);
@@ -105,12 +108,31 @@ export function linkTurnPrompt({ clientMessageId, body }) {
   return `[amux-link-turn:${clientMessageId}]\n${String(body || "").trim()}`;
 }
 
-/** WHAT: Maps one claimed message against the journal to its next step. WHY: Prevents a restart from re-acking or re-replying finished work. */
+/**
+ * WHAT: Maps one claimed message against the journal to its next step.
+ * WHY: The journal is what this connector remembers; the mailbox row is what the
+ * phone reads. When they disagree the mailbox is the one that is wrong for the
+ * user, so the claim repairs it instead of trusting the journal and moving on.
+ * Row 187, measured on production: a turn journalled delivered whose ack never
+ * reached the mailbox was re-claimed 377 times, and the pane's real answer was
+ * refused by the worker because an unacked row takes no reply.
+ */
 export function planClaimedMessage({ message, journalEntry }) {
-  if (journalEntry?.stage === "replied" || journalEntry?.stage === "failed") {
-    return { action: "skip", reason: `already-${journalEntry.stage}-locally` };
+  const mailboxAcked = Boolean(message?.deliveredAt);
+  const mailboxReplied = message?.state === "replied" || Boolean(message?.replyAt);
+  if (journalEntry?.stage === "failed") return { action: "skip", reason: "already-failed-locally" };
+  if (journalEntry?.stage === "replied") {
+    if (mailboxReplied) return { action: "skip", reason: "already-replied-locally" };
+    // The answer exists here and nowhere else. Journal entries written before
+    // the reply body was kept have nothing to re-post, so they wait for the
+    // pane again rather than claiming an answer this connector cannot produce.
+    const reply = typeof journalEntry.reply === "string" ? journalEntry.reply.trim() : "";
+    if (reply) return { action: "repost-reply", message, reply, needsAck: !mailboxAcked };
+    return { action: "await-reply", message, needsAck: !mailboxAcked };
   }
-  if (journalEntry?.stage === "delivered") return { action: "await-reply", message };
+  if (journalEntry?.stage === "delivered") {
+    return { action: "await-reply", message, needsAck: !mailboxAcked };
+  }
   return { action: "deliver", message };
 }
 
@@ -135,6 +157,80 @@ export function connectorFailureDisposition(error, attempts = 1) {
       invalidAudio ||
       (stage === "transcription-failed" && attempts >= 3),
   };
+}
+
+/**
+ * WHAT: Puts one claimed turn on its pane and acks it, or leaves it recoverable.
+ * WHY: Split out of runLinkConnectorCycle, whose fix history is this block's own
+ * state: the idempotency key that stopped double delivery, the receipt that
+ * stopped a false ack, the transcription that must fail before either. The
+ * cycle above now reads as claim, advance, hand off.
+ *
+ * Returns true only when the pane holds the turn AND the mailbox knows: false
+ * means nothing is lost, the lease simply expires and the turn comes back.
+ */
+async function deliverOneTurn({
+  message, id, journal, statePath, fetchImpl, serviceBase, auth, transcribe,
+  deliveryBroker, deliveryQueue, receiptTimeoutMs, sleep, post, connectorId, log,
+}) {
+  let body = String(message.body || "").trim();
+  if (message.kind === "voice" && message.voiceRef) {
+    const audio = await fetchImpl(`${serviceBase}/api/link/voice/${message.voiceRef}`, {
+      headers: auth,
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!audio.ok) throw new Error(`link-voice-${audio.status}`);
+    if (typeof transcribe !== "function") throw new Error("transcribe-unavailable");
+    body = String(await transcribe(Buffer.from(await audio.arrayBuffer()), message.voiceRef) || "").trim();
+    if (!body) throw new Error("transcribe-empty");
+  }
+  const agentName = String(message.target).split(":")[0];
+  const pane = Number(String(message.target).split(":")[1]);
+  const prompt = linkTurnPrompt({ clientMessageId: id, body });
+  const leaseAttempt = Number.isSafeInteger(message.attempts) && message.attempts > 0
+    ? message.attempts : 1;
+  journal.messages[id] = updateJournal(statePath, id, {
+    stage: "claimed", at: Date.now(), target: message.target, prompt,
+  });
+  // The stable key is the dedup: the durable queue atomically returns the
+  // existing job for a reused key. Only a proven cancelled job earns a rotated
+  // key; a live or unproven job keeps its single pane write and can never
+  // duplicate on reclaim.
+  const stableKey = `link:${id}`;
+  let job;
+  try {
+    job = deliveryBroker.enqueue({ agentName, pane, text: prompt, idempotencyKey: stableKey });
+    if (job?.status === "cancelled") {
+      job = deliveryBroker.enqueue({
+        agentName,
+        pane,
+        text: prompt,
+        idempotencyKey: `${stableKey}:attempt:${leaseAttempt}`,
+      });
+    }
+  } catch (error) {
+    log(`link-connector ${id} not-delivered:enqueue-refused ${String(error?.message || error)}`);
+    return false;
+  }
+  journal.messages[id] = updateJournal(statePath, id, { stage: "enqueued", jobId: job?.id || null });
+  // A merely enqueued job is not delivered: ack only on the broker's
+  // acknowledged ingest receipt. Cancelled or timed out stays leased, so the
+  // reclaim path keeps it recoverable without a false ack.
+  const receipt = await waitForBrokerReceipt({
+    queue: deliveryQueue,
+    agentName,
+    pane,
+    jobId: job?.id,
+    timeoutMs: receiptTimeoutMs,
+    sleep,
+  });
+  if (!receipt.delivered) {
+    log(`link-connector ${id} not-delivered:${receipt.terminal || "receipt-timeout"} (kept recoverable)`);
+    return false;
+  }
+  await post("/api/link/connector/ack", { clientMessageId: id, connectorId });
+  journal.messages[id] = updateJournal(statePath, id, { stage: "delivered" });
+  return true;
 }
 
 /** WHAT: Dispatches one bounded poll cycle for the WSL connector. WHY: Keeps every message exactly once through claim, ack, and reply. */
@@ -202,63 +298,24 @@ export async function runLinkConnectorCycle({
     if (plan.action === "skip") continue;
     try {
       if (plan.action === "deliver") {
-        let body = String(message.body || "").trim();
-        if (message.kind === "voice" && message.voiceRef) {
-          const audio = await fetchImpl(`${serviceBase}/api/link/voice/${message.voiceRef}`, {
-            headers: auth,
-            signal: AbortSignal.timeout(60_000),
-          });
-          if (!audio.ok) throw new Error(`link-voice-${audio.status}`);
-          if (typeof transcribe !== "function") throw new Error("transcribe-unavailable");
-          body = String(await transcribe(Buffer.from(await audio.arrayBuffer()), message.voiceRef) || "").trim();
-          if (!body) throw new Error("transcribe-empty");
-        }
-        const agentName = String(message.target).split(":")[0];
-        const pane = Number(String(message.target).split(":")[1]);
-        const prompt = linkTurnPrompt({ clientMessageId: id, body });
-        const leaseAttempt = Number.isSafeInteger(message.attempts) && message.attempts > 0
-          ? message.attempts : 1;
-        journal.messages[id] = updateJournal(statePath, id, {
-          stage: "claimed", at: Date.now(), target: message.target, prompt,
+        const onPane = await deliverOneTurn({
+          message, id, journal, statePath, fetchImpl, serviceBase, auth, transcribe,
+          deliveryBroker, deliveryQueue, receiptTimeoutMs, sleep, post, connectorId, log,
         });
-        // The stable key is the dedup: the durable queue atomically returns
-        // the existing job for a reused key. Only a proven cancelled job
-        // earns a rotated key; a live or unproven job keeps its single pane
-        // write and can never duplicate on reclaim.
-        const stableKey = `link:${id}`;
-        let job;
-        try {
-          job = deliveryBroker.enqueue({ agentName, pane, text: prompt, idempotencyKey: stableKey });
-          if (job?.status === "cancelled") {
-            job = deliveryBroker.enqueue({
-              agentName,
-              pane,
-              text: prompt,
-              idempotencyKey: `${stableKey}:attempt:${leaseAttempt}`,
-            });
-          }
-        } catch (error) {
-          log(`link-connector ${id} not-delivered:enqueue-refused ${String(error?.message || error)}`);
-          continue;
-        }
-        journal.messages[id] = updateJournal(statePath, id, { stage: "enqueued", jobId: job?.id || null });
-        // A merely enqueued job is not delivered: ack only on the broker's
-        // acknowledged ingest receipt. Cancelled or timed out stays leased,
-        // so the reclaim path keeps it recoverable without a false ack.
-        const receipt = await waitForBrokerReceipt({
-          queue: deliveryQueue,
-          agentName,
-          pane,
-          jobId: job?.id,
-          timeoutMs: receiptTimeoutMs,
-          sleep,
-        });
-        if (!receipt.delivered) {
-          log(`link-connector ${id} not-delivered:${receipt.terminal || "receipt-timeout"} (kept recoverable)`);
-          continue;
-        }
+        if (!onPane) continue;
+      }
+      // The pane already has this turn, but the mailbox row does not say so: the
+      // ack was lost on its way. Re-acking is not re-delivering; nothing is
+      // written to the pane, and the reply below would be refused without it.
+      if (plan.needsAck) {
         await post("/api/link/connector/ack", { clientMessageId: id, connectorId });
-        journal.messages[id] = updateJournal(statePath, id, { stage: "delivered" });
+        journal.messages[id] = updateJournal(statePath, id, { ackRepairedAt: Date.now() });
+      }
+      if (plan.action === "repost-reply") {
+        await post("/api/link/connector/reply", { clientMessageId: id, connectorId, body: plan.reply });
+        journal.messages[id] = updateJournal(statePath, id, { replyRepostedAt: Date.now() });
+        handled += 1;
+        continue;
       }
       // The reply is waited for beside the cycle, not inside it. A message the
       // worker re-claims while its wait runs is already covered by that wait.

@@ -34,14 +34,30 @@ function harness({ responses = {}, replyText = "svar från pane" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-link-conn-"));
   const statePath = join(root, "connector.json");
   const calls = { posts: [], enqueued: [] };
+  // What the worker recorded, keyed by message. A poll hands the row back as the
+  // mailbox has it, so a second cycle sees the ack and the reply that the first
+  // one posted. A stateless mailbox would keep saying "never delivered", and the
+  // connector's repair of exactly that state (row 187) would read as a bug.
+  const mailbox = new Map();
+  const recorded = (clientMessageId, patch) => {
+    const id = String(clientMessageId || "");
+    if (id) mailbox.set(id, { ...mailbox.get(id), ...patch });
+  };
   const fetchImpl = async (url, init) => {
-    calls.posts.push({ url, body: JSON.parse(init.body || "{}") });
+    const body = JSON.parse(init.body || "{}");
+    calls.posts.push({ url, body });
     const route = url.replace("https://link.v1d.io", "");
+    if (route.includes("/connector/ack")) recorded(body.clientMessageId, { state: "delivered", deliveredAt: NOW });
+    if (route.includes("/connector/reply")) recorded(body.clientMessageId, { state: "replied", replyAt: NOW, replyBody: body.body });
+    if (route.includes("/connector/fail")) recorded(body.clientMessageId, { state: "failed", lastError: body.error });
     const payload = responses[route] ?? (route.startsWith("/api/link/connector/poll") ? { messages: [] } : {});
     if (payload instanceof Error) throw payload;
+    const answered = route.startsWith("/api/link/connector/poll")
+      ? { ...payload, messages: (payload.messages || []).map((m) => ({ ...m, ...mailbox.get(String(m.clientMessageId)) })) }
+      : payload;
     const voice = Buffer.from("FAKE-VOICE-BYTES");
     const voiceBytes = voice.buffer.slice(voice.byteOffset, voice.byteOffset + voice.byteLength);
-    return { ok: true, json: async () => payload, arrayBuffer: async () => voiceBytes };
+    return { ok: true, json: async () => answered, arrayBuffer: async () => voiceBytes };
   };
   const agent = {
     hasResponseForPrompt: () => true,
@@ -145,7 +161,9 @@ feature("link connector cycle", () => {
   component("a claimed message redelivers after a mid-flight crash using the journal", {
     given: ["a journal that already delivered but never replied", () => {
       const ctx = harness({
-        responses: { "/api/link/connector/poll?source=wsl": { messages: [message()] } },
+        // The crash came after the ack landed, so the mailbox row carries it.
+        // A row the mailbox never acked is row 187's repair case, not this one.
+        responses: { "/api/link/connector/poll?source=wsl": { messages: [message({ state: "delivered", deliveredAt: NOW })] } },
       });
       const { writeFileSync } = require("node:fs");
       writeFileSync(ctx.statePath, JSON.stringify({
@@ -237,14 +255,28 @@ feature("link connector cycle", () => {
   });
 
   component("planClaimedMessage stages", {
-    given: ["three journal shapes", () => ({})],
+    given: ["one journal shape per mailbox shape", () => ({})],
     when: ["planning", () => [
       planClaimedMessage({ message: message(), journalEntry: null }),
+      planClaimedMessage({ message: message({ deliveredAt: NOW }), journalEntry: { stage: "delivered" } }),
+      planClaimedMessage({
+        message: message({ state: "replied", deliveredAt: NOW, replyAt: NOW }),
+        journalEntry: { stage: "replied" },
+      }),
+      // Row 187: the two shapes where the mailbox is behind the journal.
       planClaimedMessage({ message: message(), journalEntry: { stage: "delivered" } }),
-      planClaimedMessage({ message: message(), journalEntry: { stage: "replied" } }),
+      planClaimedMessage({
+        message: message({ state: "delivered", deliveredAt: NOW }),
+        journalEntry: { stage: "replied", reply: "svar från pane" },
+      }),
     ]],
-    then: ["deliver, await-reply, skip", (plans) => {
-      expect(plans.map((p) => p.action)).toEqual(["deliver", "await-reply", "skip"]);
+    then: ["deliver, await-reply, skip, then ack-repair and reply-repost", (plans) => {
+      expect(plans.map((p) => p.action)).toEqual([
+        "deliver", "await-reply", "skip", "await-reply", "repost-reply",
+      ]);
+      expect(plans[1].needsAck).toBe(false);
+      expect(plans[3].needsAck).toBe(true);
+      expect(plans[4]).toMatchObject({ needsAck: false, reply: "svar från pane" });
     }],
   });
 });

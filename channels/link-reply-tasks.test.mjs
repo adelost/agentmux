@@ -163,7 +163,9 @@ feature("a silent pane no longer holds the connector", () => {
 
   component("a restart re-adopts a delivered turn that was never answered", {
     given: ["a journal that says delivered and no wait in this process", () => {
-      const h = harness({ claims: [[message(ANSWERS, "skyvw:2", "svara")]] });
+      // The mailbox carries the ack it recorded before the restart; a row it
+      // never acked is row 187's repair case, and has its own test.
+      const h = harness({ claims: [[{ ...message(ANSWERS, "skyvw:2", "svara"), state: "delivered", deliveredAt: Date.now() }]] });
       // What a restart looks like: the journal survived, the wait did not.
       const statePath = h.deps.statePath;
       mkdirSync(h.root, { recursive: true });

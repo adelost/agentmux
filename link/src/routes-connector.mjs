@@ -2,7 +2,7 @@
 
 import { requireConnector } from "./auth.mjs";
 import { ackDecision, failDecision, replyDecision } from "./mailbox.mjs";
-import { announceableTargets, requestRateLimited, targetAnnounceTtlMs } from "./config.mjs";
+import { announceableTargets, maxDeliveryAttempts, requestRateLimited, targetAnnounceTtlMs } from "./config.mjs";
 import { json, text } from "./util.mjs";
 
 const connectorContext = ({ env, request, url }) => {
@@ -36,6 +36,16 @@ export async function handleConnectorRoutes({ request, env, store, url, nowMs })
     }
     await store.reclaimExpiredLeases(nowMs);
     await store.reclaimStaleDelivered(nowMs - (Number(env.REPLY_TIMEOUT_SECONDS) || 600) * 1000);
+    // Reclaiming alone has no floor: before row 187 a turn nobody could finish
+    // came back on every poll for ever, and the app had nothing to show but
+    // pending. After the declared number of attempts the mailbox says it is
+    // unanswered, with the reason in the row.
+    const attemptCap = maxDeliveryAttempts(env);
+    await store.failExhausted({
+      maxAttempts: attemptCap,
+      error: `no-reply-after-${attemptCap}-attempts`,
+      nowMs,
+    });
     // The connector tells the worker which panes the fleet can reach; the
     // configured targets stay as the seed. Claiming and heartbeating cover the
     // union, so an announced pane is reachable without a Cloudflare edit.

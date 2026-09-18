@@ -1,0 +1,3 @@
+# A stray control byte once made a .mjs source binary to git, so its diff
+# vanished and grep skipped it (link/src/config.mjs, row 184 into row 187).
+*.mjs text diff
