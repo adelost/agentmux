@@ -161,6 +161,15 @@ Android TTS är V1-uppspelning; server-MP3 optional fallback.
    d. Verifiera med bridgens egen token att `POST /api/link/connector/poll`
       svarar 200 innan bridgen rörs. Rulla annars tillbaka med
       `wrangler rollback --version-id <föregående>`.
+   e. FÖRE `kill -USR2` på bridgen: `amux doctor` måste skriva
+      `bridge process  pid <n>, supervised by start.sh`. USR2 är exit 75, och
+      bara en start.sh-supervisor startar om processen efter den koden. Säger
+      doctor `manual` eller visar ingen supervisor, så STANNA och fråga:
+      då avslutar USR2 bridgen i stället för att starta om den, och en
+      foreground-bridge ägs av människans terminal (2026-09-17 23:28: USR2 mot
+      en manuell bridge utan supervisor tog ner hela flottan i sju minuter, och
+      medan den låg nere gick inget meddelande fram, varken till en panel eller
+      till Discord, så ingen kunde tillfrågas).
    Produktion kör bara mergad master, och deployen görs från den kanoniska
    checkouten.
 3. Lägg in `LINK_AUTH_CLIENT_SECRET`, `LINK_AUTH_STATE_SECRET`,
