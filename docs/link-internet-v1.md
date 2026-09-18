@@ -91,6 +91,22 @@ heartbeats(connectorId TEXT, target TEXT, seenAt, source TEXT) -- wsl|windows
   durable amux-köns exakta ingest-kvitto; kö-cancel, vägrad enqueue eller
   kvittotimeout lämnar mailbox-leasen oackad och återvinningsbar. `ack` markerar delivered;
   `reply {body}` markerar replied, idempotent per clientMessageId.
+- Journalen är connectorns minne, mailboxen är det telefonen läser. När de säger
+  olika saker lagar claimen mailboxen (rad 187): säger journalen `delivered` men
+  raden saknar `deliveredAt` så ackas den igen, och säger journalen `replied`
+  medan raden inte gör det postas svaret om ur journalen, som därför sparar
+  svarstexten FÖRE sin post av samma skäl som leveransen journalförs före acken.
+  Att acka om är inte att leverera om: inget skrivs till panelen. Varför: en
+  förlorad ack lämnar raden oackad, och workern vägrar (409) ett svar på en
+  oackad rad, så panelens riktiga svar dog medan turen claimades om i all
+  oändlighet (Mattias "hej" till lsrc:3, 377 försök på nio timmar, mätt
+  2026-09-18).
+- Ett meddelande som claimats `MAX_DELIVERY_ATTEMPTS` gånger (5 som default) och
+  ligger i `queued` failas av workern med `no-reply-after-<n>-attempts`. Ett
+  försök kostar ett helt svarsfönster, så fem är ungefär en timmes tålamod. Bara
+  en `queued`-rad avslutas; en som är ute hos en connector just nu kan fortfarande
+  besvaras. Varför: utan ett golv har en tur ingen terminal state alls, och appen
+  visar "pending" för evigt för något som aldrig kommer.
 - Tappat svar återlevererar samma messageId vid nästa poll; aldrig nytt jobb (D).
 - `GET /api/link/events` (session): SSE eller bounded poll (`?after=<seq>`);
   återanslutning med samma `after` dubblerar inte playback/kvitton.

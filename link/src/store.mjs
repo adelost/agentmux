@@ -47,6 +47,18 @@ export function createLinkStore(db) {
         staleBeforeMs,
       ),
 
+    /** WHAT: Ends a message the connectors keep taking and never finish. WHY: A
+     *  turn with no terminal state is re-claimed for ever and the app shows it
+     *  pending for ever; after the declared number of attempts it says so out
+     *  loud instead (row 187). Only a queued row is ended: one that is out with
+     *  a connector right now may still be answered. */
+    failExhausted: ({ maxAttempts, error, nowMs }) =>
+      run(
+        `UPDATE messages SET state = 'failed', lastError = ?, replyAt = ?
+         WHERE state = 'queued' AND attempts >= ?`,
+        String(error || "").slice(0, 300), nowMs, maxAttempts,
+      ),
+
     claimQueued: ({ connectorId, targets, leaseMs, nowMs }) => {
       const marks = targets.map(() => "?").join(",");
       return all(
