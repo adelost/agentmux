@@ -13,6 +13,8 @@ import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakePhrases
 import io.agentmux.wakeword.WakeStatus
+import io.agentmux.wakeword.WakeTrace
+import io.agentmux.wakeword.WakeTraceBuffer
 import io.agentmux.wakeword.reduce
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 internal const val KEY_WAKE_WORD = "wakeWord"
 private const val KEY_WAKE_PHRASE = "wakePhrase"
+private const val KEY_WAKE_DEBUG = "wakeDebug"
 
 /** The one process-wide hands-free status, written by the service and read by settings and the notification. */
 internal object LinkWakeStatus {
@@ -32,6 +35,62 @@ internal object LinkWakeStatus {
         mutable.value = mutable.value.reduce(event)
         return mutable.value
     }
+}
+
+/**
+ * WHAT: Whether the microphone loop is being watched, and the bounded trace it writes when it is.
+ * WHY: Watching costs one extra speech-model call per 80 ms chunk, so it is off until someone asks and it
+ * is remembered, and the trace itself never leaves memory unless the wearer exports it. The switch is stored
+ * natively beside the wake phrase rather than declared: it changes nothing a product surface promises, it
+ * only decides whether the loop reports what it hears.
+ */
+internal object LinkWakeDebug {
+    /** One buffer for the process, like the status: the microphone thread writes it, the page reads it. */
+    val trace = WakeTraceBuffer()
+
+    private val mutableWatching = MutableStateFlow(false)
+    val watching: StateFlow<Boolean> = mutableWatching.asStateFlow()
+
+    fun restore(context: Context) {
+        mutableWatching.value = preferences(context).getBoolean(KEY_WAKE_DEBUG, false)
+    }
+
+    fun setWatching(context: Context, on: Boolean) {
+        preferences(context).edit().putBoolean(KEY_WAKE_DEBUG, on).apply()
+        mutableWatching.value = on
+        if (!on) trace.clear()
+        // The loop reads this once, when it opens: a change takes effect on the next listening pass.
+        context.startService(Intent(context, WakeWordService::class.java).setAction(WakeWordService.ACTION_RELISTEN))
+    }
+
+    fun read(): WakeTrace = trace.read()
+
+    /**
+     * Writes what is in memory to one file and answers with its name. This is the only thing that ever
+     * writes a trace to storage: watching alone leaves nothing behind.
+     */
+    fun export(context: Context): String {
+        val snapshot = trace.read()
+        val file = java.io.File(
+            context.getExternalFilesDir(null) ?: context.filesDir,
+            "wake-trace-${System.currentTimeMillis()}.tsv",
+        )
+        file.bufferedWriter().use { out ->
+            out.write("atMs\tpeakScore\tchunksOverThreshold\tspeech\tverdict\n")
+            snapshot.runs.asReversed().forEach { run ->
+                out.write(
+                    "%d\t%.4f\t%d\t%.4f\t%s\n".format(
+                        run.atMs, run.peakScore, run.chunksOverThreshold, run.speechProbability,
+                        run.refusal?.name ?: "HEARD",
+                    ),
+                )
+            }
+        }
+        return file.name
+    }
+
+    private fun preferences(context: Context) =
+        context.getSharedPreferences(AppContract.PREFS, Context.MODE_PRIVATE)
 }
 
 /** The chosen wake phrase: stored beside the other Link preferences and applied to a running loop at once. */
@@ -62,6 +121,7 @@ internal class LinkWakeWordControl(
 
     init {
         LinkWakePhraseChoice.restore(context)
+        LinkWakeDebug.restore(context)
     }
 
     fun setEnabled(on: Boolean) {

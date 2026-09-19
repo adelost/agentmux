@@ -16,7 +16,7 @@ dependencies {
 }
 
 // Measurements, not tests: they need audio that is too large and too borrowed to commit.
-// ./gradlew :wakeword:wakeCorpusReport   -Pcorpus=<dir built by scripts/wake-corpus.sh>   [-Ptraces=<dir>] [-Pphrases=..] [-Pdetection=1,2,3]
+// ./gradlew :wakeword:wakeCorpusReport   -Pcorpus=<dir built by scripts/wake-corpus.sh>   [-Ptraces=<dir>] [-Pphrases=..] [-Pdetection=1,2,3] [-Pthreshold=0.78]
 // ./gradlew :wakeword:wakePositivesReport -Pclips=<dir built by scripts/wake-positives.sh> [-Pphrases=..] [-Pdetection=1,2,3] [-Pthreshold=0.5]
 fun Project.measurement(name: String, mainClass: String, required: String, optional: List<String>) =
     tasks.register<JavaExec>(name) {
@@ -35,7 +35,7 @@ fun Project.measurement(name: String, mainClass: String, required: String, optio
 
 measurement(
     "wakeCorpusReport", "io.agentmux.wakeword.WakeCorpusReportKt",
-    required = "corpus", optional = listOf("traces", "phrases", "detection"),
+    required = "corpus", optional = listOf("traces", "phrases", "detection", "threshold"),
 )
 measurement(
     "wakePositivesReport", "io.agentmux.wakeword.WakePositivesReportKt",

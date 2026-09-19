@@ -37,7 +37,7 @@ internal fun replay(
         trace = trace,
     ).run()
     trace.close()
-    return Replayed(heard.wakes, heard.capturedMs, trace.highest, trace.longestRun)
+    return Replayed(heard.wakes, heard.capturedMs, trace.highest, trace.longestRun, trace.refusedRuns)
 }
 
 internal data class Replayed(
@@ -46,6 +46,8 @@ internal data class Replayed(
     val highestScore: Float,
     /** The most chunks in a row that were at or over the threshold: what a longer rule would have needed. */
     val longestRun: Int,
+    /** How many runs reached the threshold and were refused for being too short. */
+    val refusedRuns: Int,
 )
 
 /** One wake: when it fired, its score, what the VAD thought of that chunk, and the second on either side. */
@@ -76,9 +78,12 @@ private class RecordedTrace(file: File?, private val threshold: Float) : WakeChu
         private set
     var longestRun = 0
         private set
+    /** Runs that reached the threshold and were refused for being too short: the corpus's near misses. */
+    var refusedRuns = 0
+        private set
     private var run = 0
 
-    override fun onChunkScored(atMs: Long, score: Float, speechProbability: Float) {
+    override fun onChunkScored(atMs: Long, score: Float, speechProbability: Float, chunksOverThreshold: Int) {
         this.atMs = atMs
         speech = speechProbability
         if (score > highest) highest = score
@@ -86,6 +91,10 @@ private class RecordedTrace(file: File?, private val threshold: Float) : WakeChu
         if (run > longestRun) longestRun = run
         rows += Triple(atMs, score, speechProbability)
         writer?.write("%d\t%.4f\t%.4f\n".format(atMs, score, speechProbability))
+    }
+
+    override fun onRunEnded(run: WakeRun) {
+        if (!run.accepted) refusedRuns += 1
     }
 
     fun around(atMs: Long): List<Float> =

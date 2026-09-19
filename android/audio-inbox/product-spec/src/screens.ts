@@ -63,6 +63,7 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
             { instance: "session.public-link", region: "content" },
             { instance: "preferences.toggles", region: "content" },
             { instance: "wake.status", region: "content" },
+            { instance: "navigation.wake-debug-entry", region: "content" },
             { instance: "history.local", region: "content" },
             { instance: "updates.panel", region: "content" },
             { instance: "navigation.dev-host-entry", region: "content" },
@@ -75,6 +76,7 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
             { instance: "session.public-link", region: "content" },
             { instance: "preferences.toggles", region: "content" },
             { instance: "wake.status", region: "content" },
+            { instance: "navigation.wake-debug-entry", region: "content" },
             { instance: "history.local", region: "content" },
             { instance: "updates.panel", region: "content" },
             { instance: "navigation.dev-host-entry", region: "content" },
@@ -92,6 +94,21 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
           mounts: [
             { instance: "navigation.page-host", region: "host" },
             { instance: "dev.preview", region: "content" },
+          ],
+        })),
+      },
+    },
+    {
+      // A family covers all three surfaces; the page stays phone-only because
+      // only the phone artifact lists it, exactly as dev-host does.
+      screen: "wake-debug",
+      family: {
+        id: "link.wake-debug",
+        trees: (["round", "compact", "wide"] as const).map((surface) => ({
+          surface,
+          mounts: [
+            { instance: "navigation.page-host", region: "host" },
+            { instance: "wake.debug", region: "content" },
           ],
         })),
       },

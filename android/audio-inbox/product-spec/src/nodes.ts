@@ -44,6 +44,7 @@ export const linkNodes = [
     bindings: {
       openSettings: "navigation.settings-entry.open",
       openDevHost: "navigation.dev-host-entry.open",
+      openWakeDebug: "navigation.wake-debug-entry.open",
     },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },

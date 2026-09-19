@@ -34,13 +34,47 @@ described in `docs/qa/2026-09-19-wake-detection-run`:
 | Hey Marvin | 12/12 | 48/48 | 0.88 | 0.5 |
 | Alexa | 12/12 | 46/48 | 0.88 | 0.5 |
 
+## Why Hey Marvin keeps a threshold its false wake clears
+
+Hey Marvin wakes about **0.88 times an hour** on the same corpus, on one telephone
+caller whose burst scores 0.77, 0.79 and 0.71 in three chunks running, so no run
+length reaches it. Sweeping its threshold at the shipped run of two: 0.50, 0.60,
+0.70 and 0.75 all leave that one wake, 0.78 and 0.80 refuse it, and the clip set
+stays at 48 of 48 at every point.
+
+It stays at 0.50 anyway, because that last column cannot price the change: the
+same clips still give 48 of 48 at a threshold of **0.99**. A set nothing fails
+has no marginal examples in it, so it cannot tell 0.78 from 0.50, and a threshold
+is the hardest thing to walk back once someone has learned the phrase sometimes
+does not work. Hey Marvin is not the default phrase, and its rate is recorded
+here rather than traded against a number the evidence cannot support.
+
+The same easy set bounds the other direction too: Hey Jarvis losing **four of 48**
+clips to the run of two is a floor on that cost, not a measurement of it, and the
+real price is read on a device, where WAKE DEBUG shows a phrase someone actually
+said that was over the threshold for one chunk only.
+
+## A known miss
+
+Hey Jarvis does not wake on one of the two Swedish voices the clip set uses.
+`sv-SE-SofieNeural` says the phrase six times, clean and over noise, fast, normal
+and slow, and the model scores it 0.02, 0.03, 0.04, 0.23, 0.25 and 0.38 against a
+threshold of 0.40. Six misses out of six. `sv-SE-MattiasNeural` wakes it all six
+times, and Hey Marvin and Alexa wake on both voices every time.
+
+Three of those six are not close to any threshold, so this is the model rather
+than a setting. If a person finds that Link never hears them say "Hey Jarvis",
+the answer is to choose another phrase in Settings rather than to keep trying.
+Hey Jarvis stays the default because with the run of two it is the quiet one in
+an hour of radio, and because the phrase is the wearer's to change.
+
 Two earlier numbers this replaces. The 2026-09-14 false-wake column read 0, over
 5.9 minutes of synthesised Swedish speech, which is too little audio of one kind
 to show a rate of about one per hour. Its 12/12 Swedish column was measured on a
 clip set that was never committed and cannot be rebuilt: edge-tts no longer
 offers the Swedish voices it had. On the set `scripts/wake-positives.sh` declares,
-every Hey Jarvis miss is the one voice `sv-SE-SofieNeural`, whose clean clips
-peak at 0.03 against a threshold of 0.40. `scripts/wake-corpus.sh`,
+every Hey Jarvis miss is the one voice `sv-SE-SofieNeural`; see the known miss
+above for its six scores. `scripts/wake-corpus.sh`,
 `:wakeword:wakeCorpusReport` and `:wakeword:wakePositivesReport` are what measure
 all of it now.
 

@@ -10,14 +10,15 @@ import java.io.File
  * one false wake per hour. Nothing here is a fixture: the corpus is broadcast audio and Link's own replies,
  * kept out of the repository and rebuilt by `scripts/wake-corpus.sh`.
  *
- * `./gradlew :wakeword:wakeCorpusReport -Pcorpus=<dir> [-Ptraces=<dir>] [-Pphrases=hey-jarvis] [-Pdetection=1,2,3]`
+ * `./gradlew :wakeword:wakeCorpusReport -Pcorpus=<dir> [-Ptraces=<dir>] [-Pphrases=..] [-Pdetection=1,2,3] [-Pthreshold=0.78]`
  * Every number it prints comes from the loop the phone runs; this file only feeds it and counts.
  */
 fun main(args: Array<String>) {
     val named = namedArguments(args)
     val corpus = File(named["corpus"] ?: error("corpus=<directory of 16 kHz mono WAVs> is required"))
     val traceDir = named["traces"]?.let(::File)
-    val phrases = chosenPhrases(named["phrases"])
+    val threshold = named["threshold"]?.toFloat()
+    val phrases = chosenPhrases(named["phrases"]).map { if (threshold == null) it else it.copy(threshold = threshold) }
     val policies = detectionPolicies(named["detection"])
     val wavs = corpus.listFiles { f: File -> f.extension == "wav" }?.sortedBy { it.name }
         ?: error("no directory at ${corpus.absolutePath}")
@@ -72,14 +73,14 @@ private fun measure(
 private fun report(results: List<CorpusRun>) {
     println()
     println("FALSE WAKES PER HOUR, by phrase and rule")
-    println("%-12s %-6s %8s %7s %10s %12s".format("phrase", "run", "minutes", "wakes", "per hour", "captured s"))
+    println("%-12s %-6s %-10s %8s %7s %10s %12s".format("phrase", "run", "threshold", "minutes", "wakes", "per hour", "captured s"))
     results.groupBy { it.phrase to it.detection }.forEach { (key, runs) ->
         val (phrase, detection) = key
         val minutes = runs.sumOf { it.seconds } / 60
         val wakes = runs.sumOf { it.replayed.wakes.size }
         println(
-            "%-12s %-6d %8.1f %7d %10.2f %12.0f".format(
-                phrase.id, detection.chunksOverThreshold, minutes, wakes, wakes / (minutes / 60),
+            "%-12s %-6d %-10.2f %8.1f %7d %10.2f %12.0f".format(
+                phrase.id, detection.chunksOverThreshold, phrase.threshold, minutes, wakes, wakes / (minutes / 60),
                 runs.sumOf { it.replayed.capturedMs } / 1_000.0,
             ),
         )

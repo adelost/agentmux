@@ -158,6 +158,13 @@ object LinkNativeBindings {
         ),
         component(GeneratedLinkComponentTypeId.LINK_DEV_HOST_ENTRY, "dev-host-entry", phone, GeneratedLinkComponentId.NAVIGATION_DEV_HOST_ENTRY),
         component(GeneratedLinkComponentTypeId.LINK_DEV_PREVIEW, "dev-preview", phone, GeneratedLinkComponentId.DEV_PREVIEW),
+        component(
+            GeneratedLinkComponentTypeId.LINK_WAKE_DEBUG_ENTRY,
+            "wake-debug-entry",
+            phone,
+            GeneratedLinkComponentId.NAVIGATION_WAKE_DEBUG_ENTRY,
+        ),
+        component(GeneratedLinkComponentTypeId.LINK_WAKE_DEBUG, "wake-debug", phone, GeneratedLinkComponentId.WAKE_DEBUG),
         component(GeneratedLinkComponentTypeId.LINK_WAKE_WORD, "wake-word", phone, GeneratedLinkComponentId.WAKE_STATUS),
     )
 
@@ -180,7 +187,7 @@ object LinkNativeBindings {
     internal val nodes: List<LinkNativeNodeBinding> = listOf(
         node(
             GeneratedLinkNodeId.NAVIGATION_SERVICE,
-            listOf(NavigationOpenSettingsInput, NavigationOpenDevHostInput),
+            listOf(NavigationOpenSettingsInput, NavigationOpenDevHostInput, NavigationOpenWakeDebugInput),
             listOf(NavigationActivePageOutput),
         ),
         node(
@@ -344,6 +351,7 @@ object LinkNativeBindings {
                 page(GeneratedLinkPageId.HOME, LinkNativePageRestore.ROOT, LinkNativePageBack.SYSTEM),
                 page(GeneratedLinkPageId.SETTINGS, LinkNativePageRestore.PROCESS, LinkNativePageBack.PREVIOUS),
                 page(GeneratedLinkPageId.DEV_HOST, LinkNativePageRestore.PROCESS, LinkNativePageBack.PREVIOUS),
+                page(GeneratedLinkPageId.WAKE_DEBUG, LinkNativePageRestore.PROCESS, LinkNativePageBack.PREVIOUS),
             ),
         ),
         LinkNativeNavigationArtifactBinding(
@@ -367,6 +375,8 @@ object LinkNativeBindings {
             action(ComposerComposeEvent, ConversationComposeInput)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.NAVIGATION_DEV_HOST_ENTRY,
             action(DevHostOpenEvent, NavigationOpenDevHostInput, LinkNativeActionEffect.PUSH)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.NAVIGATION_WAKE_DEBUG_ENTRY,
+            action(WakeDebugOpenEvent, NavigationOpenWakeDebugInput, LinkNativeActionEffect.PUSH)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.PREFERENCES_TOGGLES,
             action(PreferencesToggleEvent, PreferencesToggleInput)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.HISTORY_LOCAL,

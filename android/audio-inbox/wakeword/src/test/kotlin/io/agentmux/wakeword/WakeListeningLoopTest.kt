@@ -31,9 +31,11 @@ class WakeListeningLoopTest {
     /** Every chunk the loop handed to a watcher, as (millisecond, score, speech probability). */
     private class Watched : WakeChunkTrace {
         val rows = mutableListOf<Triple<Long, Float, Float>>()
-        override fun onChunkScored(atMs: Long, score: Float, speechProbability: Float) {
+        val runs = mutableListOf<WakeRun>()
+        override fun onChunkScored(atMs: Long, score: Float, speechProbability: Float, chunksOverThreshold: Int) {
             rows += Triple(atMs, score, speechProbability)
         }
+        override fun onRunEnded(run: WakeRun) { runs += run }
     }
 
     private class CountedSpeech(private val script: Script) : SpeechChunkProbability {
@@ -131,6 +133,45 @@ class WakeListeningLoopTest {
         val nearMisses = listOf(0.9f to 0f, 0.1f to 0f, 0.9f to 0f, 0.1f to 0f, 0.9f to 0f)
         loop(Script(nearMisses + silence(40)), heard, detection = WakeDetectionPolicy(2)).run()
         assertEquals(0, heard.detections)
+    }
+
+    // lsrc:0 2026-09-19: the device pass exists to find a phrase someone said that the run rule refused,
+    // so that case has to be distinct in the trace, not buried among the chunks.
+    @Test
+    fun aPhraseOverTheThresholdForOneChunkIsAnEventOfItsOwn() {
+        val watched = Watched()
+        loop(Script(listOf(0.72f to 0.9f) + silence(40)), Heard(), trace = watched).run()
+        assertEquals(1, watched.runs.size)
+        val refused = watched.runs.single()
+        assertEquals(WakeRefusal.NOT_ENOUGH_CHUNKS, refused.refusal)
+        assertEquals(1, refused.chunksOverThreshold)
+        assertEquals(0.72f, refused.peakScore, 0.0001f)
+        assertEquals(0.9f, refused.speechProbability, 0.0001f)
+        assertEquals(false, refused.accepted)
+    }
+
+    @Test
+    fun aRunThatBecomesAQuestionIsTheSameEventWithoutARefusal() {
+        val watched = Watched()
+        loop(Script(saidTwice + speech(20) + silence(80)), Heard(), trace = watched).run()
+        val accepted = watched.runs.first()
+        assertEquals(true, accepted.accepted)
+        assertEquals(2, accepted.chunksOverThreshold)
+        assertEquals(0.9f, accepted.peakScore, 0.0001f)
+    }
+
+    @Test
+    fun theRunInProgressIsCountedOnTheChunkItselfAndClearedWhenItBreaks() {
+        val counted = mutableListOf<Int>()
+        val watched = object : WakeChunkTrace {
+            override fun onChunkScored(atMs: Long, score: Float, speechProbability: Float, chunksOverThreshold: Int) {
+                counted += chunksOverThreshold
+            }
+            override fun onRunEnded(run: WakeRun) = Unit
+        }
+        val script = Script(listOf(0.9f to 0f, 0.9f to 0f, 0.1f to 0f, 0.9f to 0f) + silence(10))
+        loop(script, Heard(), trace = watched, detection = WakeDetectionPolicy(3)).run()
+        assertEquals(listOf(1, 2, 0, 1), counted.take(4))
     }
 
     @Test

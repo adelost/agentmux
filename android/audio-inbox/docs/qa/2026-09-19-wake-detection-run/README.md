@@ -67,9 +67,9 @@ It reproduces the old set's "all voices" column almost exactly, which is what ma
 
 **The Swedish column does not come back for Hey Jarvis, and that is a finding rather than a flaw in the
 rebuild.** All six misses are the same voice, `sv-SE-SofieNeural`, and all six `sv-SE-MattiasNeural` clips
-wake it. Sofie's clean clips peak at 0.025 and 0.035 against a threshold of 0.40, so this is not a threshold
-away from working: that voice saying "Hey Jarvis" is not recognised at all. Hey Marvin and Alexa take both
-Swedish voices without trouble.
+wake it. Sofie's six clips score 0.02, 0.03, 0.04, 0.23, 0.25 and 0.38 against a threshold of 0.40, so the
+nearest miss is close but three of the six are nowhere near: that voice saying "Hey Jarvis" is mostly not
+recognised at all. Hey Marvin and Alexa take both Swedish voices without trouble.
 
 So "Swedish stays 12 of 12" cannot be used as the guard any more. The guard for a rule change is **no loss
 against this baseline**, and the baseline is the "this set" column above.

@@ -1,12 +1,13 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego port bindings
-// Product declarations SHA-256: 7461121287f15473522451e0bb481b7da336e51a72705924288272bd79a012ce
+// Product declarations SHA-256: 0b1204a694aebb58e23c7426a1fffd1b372e9e86743183eeca696a88cf867e0c
 package io.agentmux.linkui.product.generated
 
 internal object GeneratedLinkNativeLegoPortBindings {
     val bindings: List<GeneratedProductPortBinding> = listOf(
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SETTINGS_ENTRY_OPEN, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SERVICE_OPENSETTINGS, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_DEV_HOST_ENTRY_OPEN, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SERVICE_OPENDEVHOST, GeneratedProductPortPurpose.DATA),
+        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_WAKE_DEBUG_ENTRY_OPEN, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SERVICE_OPENWAKEDEBUG, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_TALK_COMMAND, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_SERVICE_COMMAND, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_SERVICE_CAPTURED, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_SERVICE_TURN, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_COMPOSER_COMPOSE, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_SERVICE_COMPOSE, GeneratedProductPortPurpose.DATA),

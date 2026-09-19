@@ -213,6 +213,20 @@ internal fun LinkPhoneSettings(
                             }
                         }
                     }
+                    // The debug page belongs to the wake word, so it appears with it and not before it.
+                    GeneratedLinkSettingsComponent.NAVIGATION_WAKE_DEBUG_ENTRY ->
+                        if (preferences.wakeWord || wake.phase != WakePhase.OFF) {
+                            item(mount.id) {
+                                PhoneRow(
+                                    title = "WAKE DEBUG",
+                                    sub = "What it hears, and what it refused",
+                                    icon = LinkNativeBindings.requireIcon("activity"),
+                                    onTap = {
+                                        graph.onWakeDebugOpen(LinkRouteOpenEvent(LinkRoute.WAKE_DEBUG))
+                                    },
+                                )
+                            }
+                        }
                     GeneratedLinkSettingsComponent.NAVIGATION_DEV_HOST_ENTRY -> item(mount.id) {
                         PhoneRow(
                             title = "DISPLAY PREVIEW",

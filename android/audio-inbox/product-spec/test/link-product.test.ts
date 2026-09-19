@@ -62,11 +62,15 @@ test("capture, delivery, reply and playback are typed graph edges", () => {
   ], "only the typed active PageId may cross service-to-page-host directly");
 });
 
+// WAKE DEBUG joined this list on 2026-09-19: Mattias asked for a view of what the wake word hears
+// ("nån debugging där också så att man ser när den hör det eller inte hör det"). It is phone-only like
+// dev-host, so only the phone artifact lists it while its family still covers all three surfaces.
 test("pages and artifacts cover exactly the declared screens", () => {
-  assert.deepEqual(product.componentFamilies.map(({ screen }) => screen), ["home", "settings", "dev-host"]);
+  assert.deepEqual(product.componentFamilies.map(({ screen }) => screen),
+    ["home", "settings", "dev-host", "wake-debug"]);
   const phone = product.artifacts.find(({ id }) => id === "phone-full-ui");
   const wear = product.artifacts.find(({ id }) => id === "wear-full-ui");
-  assert.deepEqual(phone?.screenRefs, ["home", "settings", "dev-host"]);
+  assert.deepEqual(phone?.screenRefs, ["home", "settings", "dev-host", "wake-debug"]);
   assert.deepEqual(wear?.screenRefs, ["home", "settings"]);
   assert.deepEqual(wear?.serves, ["round"]);
   assert.equal(product.navigation.pageValuesRef, "link.navigation.page");
@@ -80,7 +84,10 @@ test("pages and artifacts cover exactly the declared screens", () => {
   })), [
     {
       artifactRef: "phone-full-ui", entryPageRef: "home",
-      pages: ["home:root:system", "settings:process:previous", "dev-host:process:previous"],
+      pages: [
+        "home:root:system", "settings:process:previous",
+        "dev-host:process:previous", "wake-debug:process:previous",
+      ],
     },
     {
       artifactRef: "wear-full-ui", entryPageRef: "home",
@@ -104,6 +111,11 @@ test("pages and artifacts cover exactly the declared screens", () => {
       componentInstanceRef: "navigation.settings-entry",
       artifactRefs: ["phone-full-ui", "wear-full-ui"],
       actions: ["navigation.settings-entry.open->navigation.service.openSettings:push"],
+    },
+    {
+      componentInstanceRef: "navigation.wake-debug-entry",
+      artifactRefs: ["phone-full-ui"],
+      actions: ["navigation.wake-debug-entry.open->navigation.service.openWakeDebug:push"],
     },
   ]);
 });
