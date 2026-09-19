@@ -32,8 +32,6 @@ import io.agentmux.linkui.product.LinkPreferenceToggleEvent
 import io.agentmux.linkui.product.LinkWakePresentation
 import io.agentmux.linkui.product.wakePhaseWord
 import io.agentmux.wakeword.WakePhase
-import com.adelost.ringkit.ui.RingMessage
-import com.adelost.ringkit.ui.RingMessageSpec
 import com.adelost.ringkit.ui.RingTextComposer
 import com.adelost.ringkit.ui.RingTextInputSpec
 import io.agentmux.linkcore.ConnectionState
@@ -123,14 +121,19 @@ internal fun LinkPhoneHome(
                     // preference Settings writes. Not the talk ring: a press there would fight it for the
                     // microphone (decision 2026-09-14).
                     GeneratedLinkHomeComponent.WAKE_TOGGLE -> PhoneRow(
-                        title = wakePhaseWord(wake.phase),
-                        sub = wakeToggleDetail(wake, preferences.wakeWord),
+                        title = wake.phrase.spoken.uppercase(),
+                        sub = wakeRowDetail(wake, captureSpec.wake.hearing?.sendsInMs),
                         icon = LinkNativeBindings.requireIcon(
                             if (wake.phase == WakePhase.BLOCKED) "warning" else "record",
                         ),
                         onTap = {
                             graph.onWakeToggle(
-                                LinkPreferenceToggleEvent(LinkPreferenceKey.WAKE_WORD, !preferences.wakeWord),
+                                LinkPreferenceToggleEvent(
+                                    LinkPreferenceKey.WAKE_WORD,
+                                    // A blocked row is tapped to repair it. Toggling would switch off a
+                                    // wake word that is already on, which is not what the row offers.
+                                    if (wake.phase == WakePhase.BLOCKED) true else !preferences.wakeWord,
+                                ),
                             )
                         },
                     )
@@ -138,17 +141,10 @@ internal fun LinkPhoneHome(
                         state = listState,
                         modifier = Modifier.fillMaxWidth().weight(1f),
                     ) {
-                        if (turns.isEmpty()) {
-                            item("empty") {
-                                RingMessage(
-                                    RingMessageSpec(
-                                        author = "",
-                                        body = if (selected == null) "Choose a recipient" else "No messages yet",
-                                    ),
-                                    modifier = Modifier.padding(horizontal = 24.dp),
-                                )
-                            }
-                        } else {
+                        // lsrc:0 M2026-09-19 M3, one statement per fact: with no recipient the row and
+                        // the talk ring both say to choose one, so a third line saying it again goes, and
+                        // the conversation area stays empty until there is a conversation.
+                        if (turns.isNotEmpty()) {
                             val playbackRevision = turns.map { it.playbackPhase }
                             items(turns, key = LinkTurn::turnId) { turn ->
                                 LinkConversationTurn(
@@ -202,12 +198,21 @@ internal fun LinkPhoneHome(
 }
 
 /**
- * What the one word does not say: why it is off, why it stopped, or what to say when it is listening.
- * The blocked reason is the loop's own sentence, never a guess made here.
+ * The declared phase word first, then the one thing that word does not say. The row is titled by the
+ * phrase, so the second line never repeats it.
+ *
+ * lsrc:0 M1, 2026-09-19: a row titled OFF under CHOOSE RECIPIENT does not say what is off, and the phrase
+ * is exactly what a wearer has to say out loud. The blocked reason is the loop's own sentence, never a
+ * guess made here, so the one place that knows why it is blocked is the only place that words it.
  */
-private fun wakeToggleDetail(wake: LinkWakePresentation, enabled: Boolean): String = when {
-    wake.phase == WakePhase.BLOCKED -> wake.detail.orEmpty().ifBlank { "Wake word stopped" }
-    !enabled -> "Tap to listen for \"${wake.phrase.spoken}\""
-    wake.phase == WakePhase.LISTENING -> "Say \"${wake.phrase.spoken}\" · tap to stop"
-    else -> wake.detail.orEmpty().ifBlank { "Tap to stop" }
+internal fun wakeRowDetail(wake: LinkWakePresentation, sendsInMs: Int?): String {
+    val word = wakePhaseWord(wake.phase)
+    val rest = when (wake.phase) {
+        WakePhase.OFF -> "tap to listen"
+        WakePhase.LISTENING -> "tap to stop"
+        // The countdown the talk ring draws as a digit, in words, for the row that has no ring.
+        WakePhase.CAPTURING -> sendsInMs?.let { "${(it + 999) / 1_000} s" }.orEmpty()
+        else -> wake.detail.orEmpty()
+    }
+    return if (rest.isBlank()) word else "$word · $rest"
 }
