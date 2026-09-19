@@ -434,7 +434,7 @@
       "values": ["available", "checking", "downloading", "failed", "idle", "install-failed", "installing", "ready-to-install", "unavailable", "up-to-date"]
     },
     {
-      "id": "link.wake-notification-icon",
+      "id": "link.wake-glyph",
       "values": ["hearing", "speaking", "waiting"]
     },
     {

@@ -1,3 +1,6 @@
 .gradle/
 local.properties
 **/build/
+
+# Debug trees a contact sheet leaves behind when a row it looked for was not there.
+missing-*.xml

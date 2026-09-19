@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego catalog
-// Product declarations SHA-256: a83728112db9f4520026dde082a9cc4a50dce1964fafcaab1269d5bea86d338b
+// Product declarations SHA-256: a421831a163bb732129ff66fed4d34b3a5b9f5b1151d676e14a0c155b7f10421
 package io.agentmux.linkui.product.generated
 
 internal enum class GeneratedLinkNodeId(val wireId: String) { NAVIGATION_SERVICE("navigation.service"), CAPTURE_SERVICE("capture.service"), CONVERSATION_SERVICE("conversation.service"), PLAYBACK_SERVICE("playback.service"), TARGET_SERVICE("target.service"), SESSION_SERVICE("session.service"), HISTORY_SERVICE("history.service"), PREFERENCES_SERVICE("preferences.service"), UPDATES_SERVICE("updates.service"), RECOVERY_SERVICE("recovery.service"), CAPTURE_PRESENTATION("capture.presentation"), CONVERSATION_PRESENTATION("conversation.presentation"), PLAYBACK_PRESENTATION("playback.presentation"), TARGET_PRESENTATION("target.presentation"), SESSION_PRESENTATION("session.presentation"), HISTORY_PRESENTATION("history.presentation"), PREFERENCES_PRESENTATION("preferences.presentation"), UPDATES_PRESENTATION("updates.presentation"), RECOVERY_PRESENTATION("recovery.presentation"), CAPTURE_PHASE_PRESENTATION_ADAPTER("capture.phase.presentation-adapter"), CONVERSATION_DELIVERY_PHASE_PRESENTATION_ADAPTER("conversation.delivery-phase.presentation-adapter"), CONVERSATION_REPLY_PHASE_PRESENTATION_ADAPTER("conversation.reply-phase.presentation-adapter"), PLAYBACK_PHASE_PRESENTATION_ADAPTER("playback.phase.presentation-adapter"), TARGET_KIND_PRESENTATION_ADAPTER("target.kind.presentation-adapter"), SESSION_CONNECTION_STATE_PRESENTATION_ADAPTER("session.connection-state.presentation-adapter"), UPDATES_PHASE_PRESENTATION_ADAPTER("updates.phase.presentation-adapter"), RECOVERY_PHASE_PRESENTATION_ADAPTER("recovery.phase.presentation-adapter"), WAKE_SERVICE("wake.service"), WAKE_PRESENTATION("wake.presentation"), WAKE_PHASE_PRESENTATION_ADAPTER("wake.phase.presentation-adapter"), WAKE_PHRASE_PRESENTATION_ADAPTER("wake.phrase.presentation-adapter"), WAKE_SENSITIVITY_PRESENTATION_ADAPTER("wake.sensitivity.presentation-adapter") }
@@ -132,7 +132,7 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object LINK_WAKE_PHASE : GeneratedLinkFiniteValueId { override val value = "link.wake-phase" }
         data object LINK_WAKE_PHRASE : GeneratedLinkFiniteValueId { override val value = "link.wake-phrase" }
         data object LINK_WAKE_SENSITIVITY : GeneratedLinkFiniteValueId { override val value = "link.wake-sensitivity" }
-        data object LINK_WAKE_NOTIFICATION_ICON : GeneratedLinkFiniteValueId { override val value = "link.wake-notification-icon" }
+        data object LINK_WAKE_GLYPH : GeneratedLinkFiniteValueId { override val value = "link.wake-glyph" }
         data object LINK_NAVIGATION_PAGE : GeneratedLinkFiniteValueId { override val value = "link.navigation.page" }
     }
     val finiteValues: List<GeneratedLinkFiniteValueDeclaration> = listOf(
@@ -151,7 +151,7 @@ internal object GeneratedLinkNativeLegoCatalog {
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_WAKE_PHASE, setOf("off", "listening", "capturing", "sending", "thinking", "speaking", "blocked")),
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_WAKE_PHRASE, setOf("hey-jarvis", "hey-marvin", "alexa")),
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_WAKE_SENSITIVITY, setOf("strict", "normal", "eager")),
-        GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_WAKE_NOTIFICATION_ICON, setOf("waiting", "hearing", "speaking")),
+        GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_WAKE_GLYPH, setOf("waiting", "hearing", "speaking")),
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_NAVIGATION_PAGE, setOf("home", "settings", "dev-host", "wake-debug"))
     )
     val ports: List<GeneratedProductPort> = GeneratedLinkNativeLegoPortData.ports

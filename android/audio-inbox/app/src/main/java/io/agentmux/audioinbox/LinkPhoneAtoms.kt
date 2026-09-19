@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.CircleActionTiming
@@ -20,11 +21,14 @@ internal fun PhoneRow(
     onTap: (() -> Unit)? = null,
     immediate: Boolean = false,
     progress: CircleLabelProgress? = null,
+    /** Product-semantic pigment for a row that means something other than the page's ordinary voice. */
+    semanticColor: Color? = null,
 ) {
     RingRow(
         title = title,
         sub = sub,
         icon = icon,
+        semanticColor = semanticColor,
         onTap = onTap,
         labelProgress = progress,
         actionTiming = if (immediate) CircleActionTiming.IMMEDIATE else CircleActionTiming.DELIBERATE,

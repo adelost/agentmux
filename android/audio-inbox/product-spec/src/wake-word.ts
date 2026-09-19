@@ -73,14 +73,16 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
   } as const);
 
   /**
-   * Which glyph the ongoing notification wears. Three, not seven: a status bar shows a shape, not a state
-   * machine. Mattias 2026-09-19 read the old one, the system's "speak now" microphone, as Link hearing him
-   * all the time, so waiting is the quietest of the three and never the loudest.
+   * Which glyph a phase wears, on any surface that has room for one. Three, not seven: a glyph shows a
+   * shape, not a state machine. Mattias 2026-09-19 read the old one, the system's "speak now" microphone,
+   * as Link hearing him all the time, so waiting is the quietest of the three and never the loudest.
    * THINKING travels with SPEAKING because both are the answer half of a turn, and BLOCKED travels with
    * WAITING because a stopped loop is hearing nothing.
+   * Named for the phase rather than for the notification: the status bar was the first surface to wear
+   * these, the main page's row is the second, and one grouping decides for both.
    */
-  const notificationIcons = finiteValues(`${product}.wake-notification-icon`, ["waiting", "hearing", "speaking"]);
-  const phaseIcons = {
+  const phaseGlyphs = finiteValues(`${product}.wake-glyph`, ["waiting", "hearing", "speaking"]);
+  const phaseGlyph = {
     off: "waiting", listening: "waiting", blocked: "waiting",
     capturing: "hearing", sending: "hearing",
     thinking: "speaking", speaking: "speaking",
@@ -98,10 +100,10 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
     fields: [
       statePresentationField("phase", phases),
       statePresentationField("word", "string"),
-      statePresentationField("notificationIcon", notificationIcons),
+      statePresentationField("glyph", phaseGlyphs),
     ],
     cases: mapFiniteCases(phases, (phase) => ({
-      phase, word: phaseWords[phase], notificationIcon: phaseIcons[phase],
+      phase, word: phaseWords[phase], glyph: phaseGlyph[phase],
     })),
   });
   const phaseAuthority = defineStateAuthority({
@@ -189,7 +191,7 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
     phases,
     phrases,
     sensitivities,
-    notificationIcons,
+    phaseGlyphs,
     statusContract,
     service: wakeService,
     presentation,

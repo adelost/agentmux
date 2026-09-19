@@ -1,7 +1,7 @@
 package io.agentmux.linkui.product
 
 import io.agentmux.linkui.product.generated.GeneratedLinkCapturedTurn
-import io.agentmux.linkui.product.generated.GeneratedLinkWakeNotificationIconValue
+import io.agentmux.linkui.product.generated.GeneratedLinkWakeGlyphValue
 import io.agentmux.linkui.product.generated.GeneratedLinkComposeTurn
 import io.agentmux.linkui.product.generated.GeneratedLinkHistoryClear
 import io.agentmux.linkui.product.generated.GeneratedLinkHistoryStatus
@@ -464,16 +464,17 @@ fun wakeSensitivityWord(step: WakeSensitivity): String = GeneratedWakeSensitivit
 
 fun wakeSensitivityHint(step: WakeSensitivity): String = GeneratedWakeSensitivityAuthority.require(step.id).hint
 
-/** The three glyphs the ongoing notification may wear, as the declaration names them. */
-enum class WakeNotificationIcon { WAITING, HEARING, SPEAKING }
+/** The three glyphs a wake phase may wear, as the declaration names them. */
+enum class WakePhaseGlyph { WAITING, HEARING, SPEAKING }
 
 /**
  * Which glyph a phase wears, from the declaration. A host maps these three to its own resources; nothing
- * decides the grouping in native code, so the status bar cannot disagree with the phase.
+ * decides the grouping in native code, so no two surfaces wearing it can disagree with each other or with
+ * the phase. The status bar was the first to wear them and the main page's wake row is the second.
  */
-fun wakeNotificationIcon(phase: WakePhase): WakeNotificationIcon =
-    when (GeneratedWakePhaseAuthority.require(phase.wireId()).notificationIcon) {
-        GeneratedLinkWakeNotificationIconValue.WAITING -> WakeNotificationIcon.WAITING
-        GeneratedLinkWakeNotificationIconValue.HEARING -> WakeNotificationIcon.HEARING
-        GeneratedLinkWakeNotificationIconValue.SPEAKING -> WakeNotificationIcon.SPEAKING
+fun wakePhaseGlyph(phase: WakePhase): WakePhaseGlyph =
+    when (GeneratedWakePhaseAuthority.require(phase.wireId()).glyph) {
+        GeneratedLinkWakeGlyphValue.WAITING -> WakePhaseGlyph.WAITING
+        GeneratedLinkWakeGlyphValue.HEARING -> WakePhaseGlyph.HEARING
+        GeneratedLinkWakeGlyphValue.SPEAKING -> WakePhaseGlyph.SPEAKING
     }

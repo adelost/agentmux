@@ -68,11 +68,11 @@ class LinkWakeToggleTest {
     fun everyPhaseWearsOneOfThreeDeclaredGlyphsAndWaitingHearsNothing() {
         assertEquals(
             mapOf(
-                WakeNotificationIcon.WAITING to listOf(WakePhase.OFF, WakePhase.LISTENING, WakePhase.BLOCKED),
-                WakeNotificationIcon.HEARING to listOf(WakePhase.CAPTURING, WakePhase.SENDING),
-                WakeNotificationIcon.SPEAKING to listOf(WakePhase.THINKING, WakePhase.SPEAKING),
+                WakePhaseGlyph.WAITING to listOf(WakePhase.OFF, WakePhase.LISTENING, WakePhase.BLOCKED),
+                WakePhaseGlyph.HEARING to listOf(WakePhase.CAPTURING, WakePhase.SENDING),
+                WakePhaseGlyph.SPEAKING to listOf(WakePhase.THINKING, WakePhase.SPEAKING),
             ),
-            WakePhase.entries.groupBy(::wakeNotificationIcon).mapValues { (_, phases) -> phases.sortedBy { it.ordinal } },
+            WakePhase.entries.groupBy(::wakePhaseGlyph).mapValues { (_, phases) -> phases.sortedBy { it.ordinal } },
         )
     }
 

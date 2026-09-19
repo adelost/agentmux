@@ -6,8 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import io.agentmux.linkui.product.wakeNotificationIcon
-import io.agentmux.linkui.product.WakeNotificationIcon
+import io.agentmux.linkui.product.wakePhaseGlyph
+import io.agentmux.linkui.product.WakePhaseGlyph
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakeStatus
@@ -38,7 +38,7 @@ internal object WakeNotifications {
             PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(context, WAKE_CHANNEL)
-            .setSmallIcon(wakeSmallIcon(status.phase))
+            .setSmallIcon(wakeGlyphDrawable(status.phase))
             .setContentTitle(wakePhaseTitle(status.phase, status.phrase))
             .setContentText(status.detail.ifBlank { wakeHint(status.phrase) })
             .setContentIntent(open)
@@ -66,11 +66,12 @@ internal fun wakePhaseTitle(phase: WakePhase, phrase: WakePhrase): String = when
  * Link's own glyph rather than the system's "speak now" microphone, which Mattias read as Link hearing
  * him all the time. Which of the three the phase wears is declared, not decided here; this only says
  * which drawable each declared glyph is, because a resource id is the one thing a declaration cannot hold.
+ * Both surfaces that wear a glyph read it here, so the status bar and the main page's row cannot differ.
  */
-private fun wakeSmallIcon(phase: WakePhase): Int = when (wakeNotificationIcon(phase)) {
-    WakeNotificationIcon.WAITING -> R.drawable.ic_wake_waiting
-    WakeNotificationIcon.HEARING -> R.drawable.ic_wake_hearing
-    WakeNotificationIcon.SPEAKING -> R.drawable.ic_wake_speaking
+internal fun wakeGlyphDrawable(phase: WakePhase): Int = when (wakePhaseGlyph(phase)) {
+    WakePhaseGlyph.WAITING -> R.drawable.ic_wake_waiting
+    WakePhaseGlyph.HEARING -> R.drawable.ic_wake_hearing
+    WakePhaseGlyph.SPEAKING -> R.drawable.ic_wake_speaking
 }
 
 internal fun wakeHint(phrase: WakePhrase): String = "Say \"${phrase.spoken}\", then your question"

@@ -2548,11 +2548,11 @@
               },
               {
                 "clockDomain": "none",
-                "name": "notificationIcon",
+                "name": "glyph",
                 "nullable": false,
                 "value": {
                   "finite": true,
-                  "ref": "link.wake-notification-icon"
+                  "ref": "link.wake-glyph"
                 }
               }
             ],
@@ -2694,11 +2694,11 @@
               },
               {
                 "clockDomain": "none",
-                "name": "notificationIcon",
+                "name": "glyph",
                 "nullable": false,
                 "value": {
                   "finite": true,
-                  "ref": "link.wake-notification-icon"
+                  "ref": "link.wake-glyph"
                 }
               }
             ],
@@ -2949,7 +2949,7 @@
       ]
     },
     {
-      "id": "link.wake-notification-icon",
+      "id": "link.wake-glyph",
       "values": [
         "waiting",
         "hearing",
@@ -6393,11 +6393,11 @@
               },
               {
                 "clockDomain": "none",
-                "name": "notificationIcon",
+                "name": "glyph",
                 "nullable": false,
                 "value": {
                   "finite": true,
-                  "ref": "link.wake-notification-icon"
+                  "ref": "link.wake-glyph"
                 }
               }
             ],
@@ -8188,11 +8188,11 @@
           },
           {
             "clockDomain": "none",
-            "name": "notificationIcon",
+            "name": "glyph",
             "nullable": false,
             "value": {
               "finite": true,
-              "ref": "link.wake-notification-icon"
+              "ref": "link.wake-glyph"
             }
           }
         ],
@@ -10003,37 +10003,37 @@
       "presentation": {
         "cases": {
           "blocked": {
-            "notificationIcon": "waiting",
+            "glyph": "waiting",
             "phase": "blocked",
             "word": "BLOCKED"
           },
           "capturing": {
-            "notificationIcon": "hearing",
+            "glyph": "hearing",
             "phase": "capturing",
             "word": "HEARING"
           },
           "listening": {
-            "notificationIcon": "waiting",
+            "glyph": "waiting",
             "phase": "listening",
             "word": "LISTENING"
           },
           "off": {
-            "notificationIcon": "waiting",
+            "glyph": "waiting",
             "phase": "off",
             "word": "OFF"
           },
           "sending": {
-            "notificationIcon": "hearing",
+            "glyph": "hearing",
             "phase": "sending",
             "word": "SENDING"
           },
           "speaking": {
-            "notificationIcon": "speaking",
+            "glyph": "speaking",
             "phase": "speaking",
             "word": "SPEAKING"
           },
           "thinking": {
-            "notificationIcon": "speaking",
+            "glyph": "speaking",
             "phase": "thinking",
             "word": "THINKING"
           }
@@ -10062,11 +10062,11 @@
             },
             {
               "clockDomain": "none",
-              "name": "notificationIcon",
+              "name": "glyph",
               "nullable": false,
               "value": {
                 "finite": true,
-                "ref": "link.wake-notification-icon"
+                "ref": "link.wake-glyph"
               }
             }
           ],
@@ -10094,9 +10094,9 @@
             "value": "string"
           },
           {
-            "name": "notificationIcon",
+            "name": "glyph",
             "value": {
-              "id": "link.wake-notification-icon",
+              "id": "link.wake-glyph",
               "values": [
                 "waiting",
                 "hearing",
