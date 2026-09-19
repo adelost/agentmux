@@ -61,11 +61,21 @@ if ! rg -q 'fun LinkCaptureControl\(' "$shared/LinkCaptureControl.kt" ||
   echo "Link capture regression: Phone/Wear no longer share one PTT lifecycle" >&2
   exit 1
 fi
-if ! rg -q 'RingActionCueHost' "$main/LinkPhoneScreen.kt" ||
-   ! rg -q 'RingActionCueHost' "$wear/WearMainActivity.kt"; then
-  echo "Link capture regression: a host lost the shared CircleKit progress surface" >&2
+# The progress surface is mounted once, in the shared host, and both screens wrap themselves in it.
+# This used to name the two screen files and look for RingActionCueHost inside them. d65db17 (#328,
+# 2026-09-05) moved the mount into link-ui's LinkInteractionHost, which is what this check wants and
+# is more shared than what it asked for, so the check has been red on master ever since for a move
+# it should have allowed. It asks for the invariant now, in the two places the invariant lives.
+if ! rg -q 'RingActionCueHost' "$shared/LinkInteractionHost.kt"; then
+  echo "Link capture regression: the shared host no longer mounts CircleKit's progress surface" >&2
   exit 1
 fi
+for host in "$main/LinkPhoneScreen.kt" "$wear/WearMainActivity.kt"; do
+  if ! rg -q 'LinkInteractionHost' "$host"; then
+    echo "Link capture regression: $(basename "$host") does not mount the shared interaction host" >&2
+    exit 1
+  fi
+done
 
 if [[ ! -f "$update/LinkUpdater.kt" ]] ||
   ! rg -q 'io\.v1d\.circlekit:releasekit:' "$root/link-update-android/build.gradle.kts"; then
