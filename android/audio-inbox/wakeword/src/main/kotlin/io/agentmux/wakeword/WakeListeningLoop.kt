@@ -37,7 +37,8 @@ class WakeListeningLoop(
     private val detector: WakeChunkScorer,
     private val vad: SpeechChunkProbability,
     private val threshold: Float,
-    private val policy: EndpointPolicy,
+    private val endpoint: EndpointPolicy,
+    private val detection: WakeDetectionPolicy = WakeDetectionPolicy(),
     private val detectionAllowed: () -> Boolean,
     private val listener: WakeLoopListener,
     private val trace: WakeChunkTrace? = null,
@@ -45,6 +46,8 @@ class WakeListeningLoop(
     @Volatile private var running = true
     @Volatile private var cancelRequested = false
     private var chunksHeard = 0L
+    /** How many chunks in a row have been at or over the threshold; [WakeDetectionPolicy] says how many it takes. */
+    private var run = 0
 
     fun stop() {
         running = false
@@ -68,6 +71,7 @@ class WakeListeningLoop(
                 cancelRequested = false
                 if (question != null) {
                     question = null
+                    run = 0
                     detector.reset()
                     vad.reset()
                 }
@@ -79,17 +83,23 @@ class WakeListeningLoop(
                 if (finished) {
                     listener.onQuestion(capturing.end, capturing.pcm(), capturing.startedAtMs)
                     question = null
+                    run = 0
                     detector.reset()
                 }
                 continue
             }
-            if (!detectionAllowed()) continue
+            if (!detectionAllowed()) {
+                run = 0
+                continue
+            }
             val score = detector.score(chunk)
             trace?.onChunkScored(chunksHeard * WAKE_CHUNK_MS, score, vad.probability(chunk))
-            if (score >= threshold) {
+            run = if (score >= threshold) run + 1 else 0
+            if (run >= detection.chunksOverThreshold) {
+                run = 0
                 listener.onDetected(score)
                 vad.reset()
-                question = QuestionCapture(vad, policy, skipChunks = WAKE_TAIL_CHUNKS)
+                question = QuestionCapture(vad, endpoint, skipChunks = WAKE_TAIL_CHUNKS)
             }
         }
     }

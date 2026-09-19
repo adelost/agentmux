@@ -128,7 +128,7 @@ class WakeWordService : Service(), WakeLoopListener {
                                 override fun reset() = vad.reset()
                             },
                             threshold = phrase.threshold,
-                            policy = EndpointPolicy(),
+                            endpoint = EndpointPolicy(),
                             detectionAllowed = { LinkWakeStatus.status.value.listensForWakeWord() },
                             listener = this,
                         ).also { loop = it }.run()
