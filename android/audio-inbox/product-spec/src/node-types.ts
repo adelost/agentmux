@@ -109,9 +109,14 @@ export const historyService = service({
 } as const);
 
 /** Durable user preferences behind typed toggles; SharedPreferences stays native. */
+/**
+ * Two controls can ask for a preference to change: the list in Settings and the wake word's own control on
+ * the main page. A service input takes exactly one upstream, so each names its own, and the service stays
+ * the single place that writes the stored preference.
+ */
 export const preferencesService = service({
   id: "link.preferences",
-  inputs: [port("toggle", preferenceToggleContract)],
+  inputs: [port("toggle", preferenceToggleContract), port("wakeToggle", preferenceToggleContract)],
   outputs: [port("status", preferencesStatusContract)],
   runtime: runtime("external", "process", "durable", "none", ["storage.preferences"], ["storage.write"]),
 } as const);

@@ -64,6 +64,9 @@ internal object HistoryClearInput :
 internal object HistoryStatusOutput :
     ProductOutputPort<GeneratedLinkHistoryStatus>(PortIds.HISTORY_SERVICE_STATUS)
 
+internal object PreferencesWakeToggleInput :
+    ProductInputPort<LinkPreferenceToggleEvent, Unit>(PortIds.PREFERENCES_SERVICE_WAKETOGGLE)
+
 internal object PreferencesToggleInput :
     ProductInputPort<LinkPreferenceToggleEvent, Unit>(PortIds.PREFERENCES_SERVICE_TOGGLE)
 
@@ -160,6 +163,9 @@ internal object PublicLinkModelInput :
 internal object PreferencesModelInput :
     ProductComponentInput<GeneratedLinkPreferencesStatus>(PortIds.PREFERENCES_TOGGLES_MODEL)
 
+internal object WakeToggleEvent :
+    ProductComponentEvent<LinkPreferenceToggleEvent, Unit>(PortIds.WAKE_TOGGLE_TOGGLE)
+
 internal object PreferencesToggleEvent :
     ProductComponentEvent<LinkPreferenceToggleEvent, Unit>(PortIds.PREFERENCES_TOGGLES_TOGGLE)
 
@@ -177,6 +183,9 @@ internal object UpdatesCommandEvent :
 
 internal object RecoveryModelInput :
     ProductComponentInput<LinkRecoveryPresentation>(PortIds.RECOVERY_STATUS_MODEL)
+
+internal object WakeToggleModelInput :
+    ProductComponentInput<LinkWakePresentation>(PortIds.WAKE_TOGGLE_MODEL)
 
 internal object WakeModelInput :
     ProductComponentInput<LinkWakePresentation>(PortIds.WAKE_STATUS_MODEL)

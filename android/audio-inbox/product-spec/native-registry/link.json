@@ -90,6 +90,11 @@
       "profiles": ["phone-full-ui"]
     },
     {
+      "componentId": "link.wake-toggle",
+      "rendererId": "wake-toggle",
+      "profiles": ["phone-full-ui"]
+    },
+    {
       "componentId": "link.wake-word",
       "rendererId": "wake-word",
       "profiles": ["phone-full-ui"]
@@ -252,7 +257,7 @@
       "nodeId": "preferences.service",
       "nativePortId": "preferences.service",
       "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": ["toggle"],
+      "inputPorts": ["toggle", "wakeToggle"],
       "outputPorts": ["status"]
     },
     {
@@ -594,6 +599,17 @@
         {
           "sourcePortRef": "updates.panel.command",
           "targetPortRef": "updates.service.command",
+          "effect": "dispatch"
+        }
+        ]
+      },
+      {
+        "artifactRef": "phone-full-ui",
+        "componentInstanceRef": "wake.toggle",
+        "actions": [
+        {
+          "sourcePortRef": "wake.toggle.toggle",
+          "targetPortRef": "preferences.service.wakeToggle",
           "effect": "dispatch"
         }
         ]

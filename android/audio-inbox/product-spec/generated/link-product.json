@@ -84,6 +84,10 @@
           "mountRef": "target.picker"
         },
         {
+          "componentInstanceRef": "wake.toggle",
+          "mountRef": "wake.toggle"
+        },
+        {
           "componentInstanceRef": "conversation.latest",
           "mountRef": "conversation.latest"
         },
@@ -118,6 +122,10 @@
         {
           "componentInstanceRef": "target.picker",
           "mountRef": "target.picker"
+        },
+        {
+          "componentInstanceRef": "wake.toggle",
+          "mountRef": "wake.toggle"
         },
         {
           "componentInstanceRef": "conversation.latest",
@@ -529,9 +537,20 @@
               },
               {
                 "capacity": null,
+                "id": "wake.toggle",
+                "instance": "wake.toggle",
+                "order": 2,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "conversation.latest",
                 "instance": "conversation.latest",
-                "order": 2,
+                "order": 3,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -542,7 +561,7 @@
                 "capacity": null,
                 "id": "playback.controls",
                 "instance": "playback.controls",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -554,7 +573,7 @@
                 "capacity": null,
                 "id": "conversation.composer",
                 "instance": "conversation.composer",
-                "order": 4,
+                "order": 5,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -565,7 +584,7 @@
                 "capacity": null,
                 "id": "capture.talk",
                 "instance": "capture.talk",
-                "order": 5,
+                "order": 6,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -576,7 +595,7 @@
                 "capacity": null,
                 "id": "navigation.settings-entry",
                 "instance": "navigation.settings-entry",
-                "order": 6,
+                "order": 7,
                 "priority": 0,
                 "region": "chrome",
                 "requirement": {
@@ -612,9 +631,20 @@
               },
               {
                 "capacity": null,
+                "id": "wake.toggle",
+                "instance": "wake.toggle",
+                "order": 2,
+                "priority": 0,
+                "region": "rail",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "conversation.latest",
                 "instance": "conversation.latest",
-                "order": 2,
+                "order": 3,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -625,7 +655,7 @@
                 "capacity": null,
                 "id": "playback.controls",
                 "instance": "playback.controls",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -637,7 +667,7 @@
                 "capacity": null,
                 "id": "conversation.composer",
                 "instance": "conversation.composer",
-                "order": 4,
+                "order": 5,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -648,7 +678,7 @@
                 "capacity": null,
                 "id": "capture.talk",
                 "instance": "capture.talk",
-                "order": 5,
+                "order": 6,
                 "priority": 0,
                 "region": "rail",
                 "requirement": {
@@ -659,7 +689,7 @@
                 "capacity": null,
                 "id": "navigation.settings-entry",
                 "instance": "navigation.settings-entry",
-                "order": 6,
+                "order": 7,
                 "priority": 0,
                 "region": "chrome",
                 "requirement": {
@@ -1369,6 +1399,20 @@
       },
       "componentTypeRef": "link.wake-debug",
       "id": "wake.debug"
+    },
+    {
+      "bindings": {
+        "events": {
+          "toggle": "preferences.service.wakeToggle"
+        },
+        "inputs": {
+          "model": "wake.presentation.model",
+          "wakePhrase": "wake.phrase.presentation-adapter.presentation",
+          "wakeState": "wake.phase.presentation-adapter.presentation"
+        }
+      },
+      "componentTypeRef": "link.wake-toggle",
+      "id": "wake.toggle"
     },
     {
       "bindings": {
@@ -2484,6 +2528,12 @@
                   "finite": true,
                   "ref": "link.wake-phase"
                 }
+              },
+              {
+                "clockDomain": "none",
+                "name": "word",
+                "nullable": false,
+                "value": "string"
               }
             ],
             "id": "wake.phase.payload",
@@ -2514,6 +2564,129 @@
         }
       ],
       "outputs": [],
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "id": "link.wake-toggle",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "detections",
+                "nullable": false,
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "phrase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phrase"
+                }
+              }
+            ],
+            "id": "link.wake-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "word",
+                "nullable": false,
+                "value": "string"
+              }
+            ],
+            "id": "wake.phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "wakeState",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phrase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phrase"
+                }
+              }
+            ],
+            "id": "wake.phrase.payload",
+            "kind": "snapshot"
+          },
+          "id": "wakePhrase",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "key",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.preference-key"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "enabled",
+                "nullable": false,
+                "value": "boolean"
+              }
+            ],
+            "id": "link.preference-toggle",
+            "kind": "event"
+          },
+          "id": "toggle",
+          "required": true
+        }
+      ],
       "requiredCapabilities": [
         "ui.component-tree"
       ]
@@ -2829,6 +3002,13 @@
       "artifacts": [
         "phone-full-ui"
       ],
+      "assetRef": "record",
+      "id": "component.wake-toggle"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
       "assetRef": "activity",
       "id": "component.wake-debug"
     },
@@ -3037,6 +3217,25 @@
         "componentInstanceRef": "updates.panel",
         "pageRefs": [
           "settings"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.preference-toggle",
+            "effect": "dispatch",
+            "id": "toggle",
+            "kind": "event",
+            "sourcePortRef": "wake.toggle.toggle",
+            "targetPortRef": "preferences.service.wakeToggle"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui"
+        ],
+        "componentInstanceRef": "wake.toggle",
+        "pageRefs": [
+          "home"
         ]
       }
     ],
@@ -3254,7 +3453,8 @@
         "lifecycleSources": []
       },
       "bindings": {
-        "toggle": "preferences.toggles.toggle"
+        "toggle": "preferences.toggles.toggle",
+        "wakeToggle": "wake.toggle.toggle"
       },
       "config": {},
       "id": "preferences.service",
@@ -4173,6 +4373,32 @@
             "kind": "event"
           },
           "id": "toggle",
+          "purpose": "data"
+        },
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "key",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.preference-key"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "enabled",
+                "nullable": false,
+                "value": "boolean"
+              }
+            ],
+            "id": "link.preference-toggle",
+            "kind": "event"
+          },
+          "id": "wakeToggle",
           "purpose": "data"
         }
       ],
@@ -5996,6 +6222,12 @@
                   "finite": true,
                   "ref": "link.wake-phase"
                 }
+              },
+              {
+                "clockDomain": "none",
+                "name": "word",
+                "nullable": false,
+                "value": "string"
               }
             ],
             "id": "wake.phase.payload",
@@ -6156,6 +6388,12 @@
         "kind": "component-event",
         "purpose": "data",
         "to": "preferences.service.toggle"
+      },
+      {
+        "from": "wake.toggle.toggle",
+        "kind": "component-event",
+        "purpose": "data",
+        "to": "preferences.service.wakeToggle"
       },
       {
         "from": "updates.panel.command",
@@ -6420,6 +6658,24 @@
         "kind": "component-input",
         "purpose": "data",
         "to": "recovery.status.recoveryState"
+      },
+      {
+        "from": "wake.presentation.model",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "wake.toggle.model"
+      },
+      {
+        "from": "wake.phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "wake.toggle.wakeState"
+      },
+      {
+        "from": "wake.phrase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "wake.toggle.wakePhrase"
       },
       {
         "from": "wake.presentation.model",
@@ -6836,6 +7092,54 @@
         "ref": "navigation.wake-debug-entry.open",
         "required": true,
         "typeRef": "link.wake-debug-entry"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.wake-status",
+        "direction": "input",
+        "ownerId": "wake.toggle",
+        "ownerKind": "component",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "wake.toggle.model",
+        "required": true,
+        "typeRef": "link.wake-toggle"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "wake.phase.payload",
+        "direction": "input",
+        "ownerId": "wake.toggle",
+        "ownerKind": "component",
+        "portId": "wakeState",
+        "purpose": "data",
+        "ref": "wake.toggle.wakeState",
+        "required": true,
+        "typeRef": "link.wake-toggle"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "wake.phrase.payload",
+        "direction": "input",
+        "ownerId": "wake.toggle",
+        "ownerKind": "component",
+        "portId": "wakePhrase",
+        "purpose": "data",
+        "ref": "wake.toggle.wakePhrase",
+        "required": true,
+        "typeRef": "link.wake-toggle"
+      },
+      {
+        "boundary": "ui-event",
+        "contractRef": "link.preference-toggle",
+        "direction": "output",
+        "ownerId": "wake.toggle",
+        "ownerKind": "component",
+        "portId": "toggle",
+        "purpose": "data",
+        "ref": "wake.toggle.toggle",
+        "required": true,
+        "typeRef": "link.wake-toggle"
       },
       {
         "boundary": "presentation",
@@ -7546,6 +7850,12 @@
               "finite": true,
               "ref": "link.wake-phase"
             }
+          },
+          {
+            "clockDomain": "none",
+            "name": "word",
+            "nullable": false,
+            "value": "string"
           }
         ],
         "id": "wake.phase.payload",
@@ -7783,6 +8093,18 @@
         "portId": "toggle",
         "purpose": "data",
         "ref": "preferences.service.toggle",
+        "required": true,
+        "typeRef": "link.preferences"
+      },
+      {
+        "boundary": "ui-event",
+        "contractRef": "link.preference-toggle",
+        "direction": "input",
+        "ownerId": "preferences.service",
+        "ownerKind": "node",
+        "portId": "wakeToggle",
+        "purpose": "data",
+        "ref": "preferences.service.wakeToggle",
         "required": true,
         "typeRef": "link.preferences"
       },
@@ -9291,28 +9613,36 @@
       "presentation": {
         "cases": {
           "blocked": {
-            "phase": "blocked"
+            "phase": "blocked",
+            "word": "BLOCKED"
           },
           "capturing": {
-            "phase": "capturing"
+            "phase": "capturing",
+            "word": "HEARING"
           },
           "listening": {
-            "phase": "listening"
+            "phase": "listening",
+            "word": "LISTENING"
           },
           "off": {
-            "phase": "off"
+            "phase": "off",
+            "word": "OFF"
           },
           "sending": {
-            "phase": "sending"
+            "phase": "sending",
+            "word": "SENDING"
           },
           "speaking": {
-            "phase": "speaking"
+            "phase": "speaking",
+            "word": "SPEAKING"
           },
           "thinking": {
-            "phase": "thinking"
+            "phase": "thinking",
+            "word": "THINKING"
           }
         },
         "consumers": [
+          "wake.toggle.wakeState",
           "wake.status.wakeState"
         ],
         "contract": {
@@ -9326,6 +9656,12 @@
                 "finite": true,
                 "ref": "link.wake-phase"
               }
+            },
+            {
+              "clockDomain": "none",
+              "name": "word",
+              "nullable": false,
+              "value": "string"
             }
           ],
           "id": "wake.phase.payload",
@@ -9346,6 +9682,10 @@
                 "blocked"
               ]
             }
+          },
+          {
+            "name": "word",
+            "value": "string"
           }
         ],
         "id": "wake.phase",
@@ -9426,6 +9766,7 @@
           }
         },
         "consumers": [
+          "wake.toggle.wakePhrase",
           "wake.status.wakePhrase"
         ],
         "contract": {

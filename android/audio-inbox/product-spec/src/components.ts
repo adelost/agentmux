@@ -157,6 +157,24 @@ export const devPreviewComponentType = defineComponentType({
   outputs: [],
 });
 
+/**
+ * One control on the main page: the wake word's state in one declared word, and a tap that turns
+ * hands-free listening on or off. Mattias 2026-09-19 asked to "toggla det enklare ... på kanske
+ * huvudsidan". It writes the same preference Settings writes, through the same port, so there is one
+ * source of truth for whether Link is listening. It is not the talk ring: the 2026-09-14 decision keeps
+ * a press on the ring from fighting hands-free over the microphone.
+ */
+export const wakeToggleComponentType = defineComponentType({
+  id: "link.wake-toggle",
+  requiredCapabilities: componentTree,
+  inputs: [
+    componentPort("model", linkWakeWord.statusContract),
+    componentPort("wakeState", linkWakeWord.phaseAuthority.authority.presentation.contract),
+    componentPort("wakePhrase", linkWakeWord.phraseAuthority.authority.presentation.contract),
+  ],
+  outputs: [componentPort("toggle", preferenceToggleContract)],
+});
+
 /** The settings row that opens WAKE DEBUG. Phone only, like the page it opens. */
 export const wakeDebugEntryComponentType = defineComponentType({
   id: "link.wake-debug-entry",
@@ -198,6 +216,7 @@ export const linkComponentTypes = [
   wakeDebugEntryComponentType,
   wakeDebugComponentType,
   linkWakeWord.componentType,
+  wakeToggleComponentType,
 ] as const;
 
 export const linkComponentInstances = [
@@ -333,6 +352,17 @@ export const linkComponentInstances = [
   {
     id: "wake.debug", componentTypeRef: wakeDebugComponentType.id,
     bindings: { inputs: {}, events: {} },
+  },
+  {
+    id: "wake.toggle", componentTypeRef: wakeToggleComponentType.id,
+    bindings: {
+      inputs: {
+        model: "wake.presentation.model",
+        wakeState: linkWakeWord.phaseAuthority.presentationPortRef,
+        wakePhrase: linkWakeWord.phraseAuthority.presentationPortRef,
+      },
+      events: { toggle: "preferences.service.wakeToggle" },
+    },
   },
   linkWakeWord.component,
 ] as const;

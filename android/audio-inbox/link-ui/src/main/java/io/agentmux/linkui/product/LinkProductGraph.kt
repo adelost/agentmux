@@ -7,6 +7,7 @@ import io.agentmux.linkui.product.generated.GeneratedLinkHistoryStatus
 import io.agentmux.linkui.product.generated.GeneratedLinkPreferencesStatus
 import io.agentmux.linkui.product.generated.GeneratedLinkTargetSelect
 import com.adelost.releasekit.UpdateState
+import io.agentmux.wakeword.WakePhase
 import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkState
@@ -88,6 +89,9 @@ open class LinkProductGraph(
     val updates: StateFlow<LinkUpdatePresentation>
     val recovery: StateFlow<LinkRecoveryPresentation>
     val wake: StateFlow<LinkWakePresentation>
+
+    /** wake.toggle.model — the main page control's own port onto the same presentation. */
+    val wakeToggleModel: StateFlow<LinkWakePresentation>
     val activePage: StateFlow<LinkRoute>
 
     /** The capture control's host-neutral spec, derived beside the talk model. */
@@ -115,6 +119,7 @@ open class LinkProductGraph(
     private val localHistoryClear: ProductComponentEventEmitter<GeneratedLinkHistoryClear, Unit>
     private val updatesCommand: ProductComponentEventEmitter<LinkUpdateCommandEvent, Unit>
     private val settingsActionOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
+    private val wakeToggle: ProductComponentEventEmitter<LinkPreferenceToggleEvent, Unit>
     private val devHostOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
     private val wakeDebugOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
 
@@ -298,6 +303,8 @@ open class LinkProductGraph(
         runtime.bindInput(PlaybackCommandInput) { event -> sinks.playbackCommand(event) }
         runtime.bindInput(TargetSelectInput) { event -> sinks.targetSelect(event) }
         runtime.bindInput(PreferencesToggleInput) { event -> sinks.preferenceToggle(event) }
+        // The main page's control and the Settings list write the same preference through the same sink.
+        runtime.bindInput(PreferencesWakeToggleInput) { event -> sinks.preferenceToggle(event) }
         runtime.bindInput(HistoryClearInput) { event -> sinks.historyClear(event) }
         runtime.bindInput(UpdatesCommandInput) { event -> sinks.updateCommand(event) }
 
@@ -313,6 +320,7 @@ open class LinkProductGraph(
         updates = runtime.connected(UpdatesModelInput, processScope)
         recovery = runtime.connected(RecoveryModelInput, processScope)
         wake = runtime.connected(WakeModelInput, processScope)
+        wakeToggleModel = runtime.connected(WakeToggleModelInput, processScope)
         activePage = runtime.connected(PageHostActivePageInput, processScope)
 
         talkCommand = runtime.componentEvent(TalkCommandEvent, processScope)
@@ -320,6 +328,7 @@ open class LinkProductGraph(
         activePlaybackCommand = runtime.componentEvent(ActivePlaybackCommandEvent, processScope)
         targetSelect = runtime.componentEvent(TargetSelectEvent, processScope)
         preferencesToggle = runtime.componentEvent(PreferencesToggleEvent, processScope)
+        wakeToggle = runtime.componentEvent(WakeToggleEvent, processScope)
         localHistoryClear = runtime.componentEvent(LocalHistoryClearEvent, processScope)
         updatesCommand = runtime.componentEvent(UpdatesCommandEvent, processScope)
         settingsActionOpen = runtime.componentEvent(SettingsActionOpenEvent, processScope)
@@ -393,6 +402,10 @@ open class LinkProductGraph(
         devHostOpen.emit(event)
     }
 
+    fun onWakeToggle(event: LinkPreferenceToggleEvent) {
+        wakeToggle.emit(event)
+    }
+
     fun onWakeDebugOpen(event: LinkRouteOpenEvent) {
         wakeDebugOpen.emit(event)
     }
@@ -420,5 +433,14 @@ open class LinkProductGraph(
         componentInputs.forEach { runtime.connected(it, processScope) }
     }
 
-    private fun Enum<*>.wireId(): String = name.lowercase().replace('_', '-')
+
 }
+
+/** A Kotlin enum constant as the declaration spells it: LOWER_SNAKE becomes lower-dash. */
+internal fun Enum<*>.wireId(): String = name.lowercase().replace('_', '-')
+
+/**
+ * The one declared word for a wake phase. A control that has room for one word shows this and never a
+ * word of its own, so what a wearer reads cannot drift from the phase the loop is in.
+ */
+fun wakePhaseWord(phase: WakePhase): String = GeneratedWakePhaseAuthority.require(phase.wireId()).word

@@ -64,10 +64,17 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
     },
   } as const);
 
+  // One word per phase, for a control with no room for a sentence. Declared rather than typed beside the
+  // control, so the word a wearer reads on the main page cannot drift from the phase the loop is in.
+  // "hearing" rather than "capturing": what the phase is called inside is not what it is called out loud.
+  const phaseWords = {
+    off: "OFF", listening: "LISTENING", capturing: "HEARING", sending: "SENDING",
+    thinking: "THINKING", speaking: "SPEAKING", blocked: "BLOCKED",
+  } as const;
   const phasePresentation = defineStatePresentation(phases, {
     id: "wake.phase",
-    fields: [statePresentationField("phase", phases)],
-    cases: mapFiniteCases(phases, (phase) => ({ phase })),
+    fields: [statePresentationField("phase", phases), statePresentationField("word", "string")],
+    cases: mapFiniteCases(phases, (phase) => ({ phase, word: phaseWords[phase] })),
   });
   const phaseAuthority = defineStateAuthority({
     id: phasePresentation.id,

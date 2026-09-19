@@ -166,6 +166,7 @@ object LinkNativeBindings {
         ),
         component(GeneratedLinkComponentTypeId.LINK_WAKE_DEBUG, "wake-debug", phone, GeneratedLinkComponentId.WAKE_DEBUG),
         component(GeneratedLinkComponentTypeId.LINK_WAKE_WORD, "wake-word", phone, GeneratedLinkComponentId.WAKE_STATUS),
+        component(GeneratedLinkComponentTypeId.LINK_WAKE_TOGGLE, "wake-toggle", phone, GeneratedLinkComponentId.WAKE_TOGGLE),
     )
 
     val icons: List<LinkNativeIconBinding> = listOf(
@@ -214,7 +215,7 @@ object LinkNativeBindings {
         node(GeneratedLinkNodeId.HISTORY_SERVICE, listOf(HistoryClearInput), listOf(HistoryStatusOutput)),
         node(
             GeneratedLinkNodeId.PREFERENCES_SERVICE,
-            listOf(PreferencesToggleInput),
+            listOf(PreferencesToggleInput, PreferencesWakeToggleInput),
             listOf(PreferencesStatusOutput),
         ),
         node(
@@ -379,6 +380,8 @@ object LinkNativeBindings {
             action(WakeDebugOpenEvent, NavigationOpenWakeDebugInput, LinkNativeActionEffect.PUSH)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.PREFERENCES_TOGGLES,
             action(PreferencesToggleEvent, PreferencesToggleInput)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.WAKE_TOGGLE,
+            action(WakeToggleEvent, PreferencesWakeToggleInput)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.HISTORY_LOCAL,
             action(LocalHistoryClearEvent, HistoryClearInput)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY,

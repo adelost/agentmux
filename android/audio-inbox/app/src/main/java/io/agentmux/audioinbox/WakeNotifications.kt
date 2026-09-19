@@ -13,7 +13,7 @@ import io.agentmux.wakeword.WakeStatus
 internal const val WAKE_NOTIFICATION_ID = 4_107
 private const val WAKE_CHANNEL = "wake-word"
 
-/** The ongoing notification that says what hands-free Link is doing and offers Stop. */
+/** The ongoing notification that says what hands-free Link is doing and offers to turn it off. */
 internal object WakeNotifications {
     fun build(context: Context, status: WakeStatus): Notification {
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -34,7 +34,7 @@ internal object WakeNotifications {
             .setContentText(status.detail.ifBlank { wakeHint(status.phrase) })
             .setContentIntent(open)
             .setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "Stop", stop).build())
+            .addAction(Notification.Action.Builder(null, "Turn off", stop).build())
             .build()
     }
 
