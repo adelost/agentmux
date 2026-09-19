@@ -1,0 +1,49 @@
+# What Link says out loud, in the two languages the fleet answers in. Lines starting with # are skipped.
+# These are the shapes its replies actually take: a SUMMARY line, a short Swedish sentence, a question back.
+# wake-corpus.sh speaks them with the server's own synthesiser and plays them the way the phone speaker would,
+# because the detector keeps listening while Link talks and its own voice is a candidate trigger.
+Rad 205 är stängd på v0.5.1497, taggen som håller merge-commiten.
+SUMMARY: The build fails on a missing environment variable. Add DATABASE_URL and run it again.
+Jag har mätt formeln på tjugoåtta punkter och båda anropsplatserna är överens inom en millimeter.
+SUMMARY: Dispatch three was green, and this time on a criterion that cannot be lucky.
+Emulatorn är uppe, jag fångade bilden och stoppade den i samma låsta kommando.
+SUMMARY: Two files changed, targeted tests green, no full suite was run.
+Höjdvisningen skiljer sig med en fot från femhundra meter och uppåt, så glaset visar inte samma tal som loggen.
+Jag kan inte lova det innan jag har kört det, så jag kör det nu och återkommer med siffran.
+SUMMARY: The wake word fires on a single eighty millisecond chunk, with no run and no refractory time.
+Klockan väcker skärmen under fallet, men bara när kartan och auto är på.
+SUMMARY: Row two hundred and four is closed on the tag with the measured numbers in its state.
+Det tog sextiofem sekunder att bygga verktyget från källkod, och det hittade felet som hade dödat körningen.
+Jag lägger inte till en ny grind, den finns redan och den heter check generated.
+SUMMARY: Hey, the recorded climb is in two resources build phases, so the app will find it at launch.
+Tack, då stänger jag raden och går vidare till nästa i min bana.
+Vinden är en notering i vyerna, inte en mast, och jag mäter masten på tre ställen först.
+SUMMARY: I measured before changing anything, and the drift does not cancel against a ground reference.
+Den lyssnar fortfarande, säg bara ordet igen så tar jag nästa fråga.
+Jag har skickat bilderna till dig, säg till om du vill ha dem i en annan ordning.
+SUMMARY: Nothing was published, the page is private until you share it.
+SUMMARY: Hey, that run is finished. Twelve of twelve Swedish voices still wake it.
+Jag hörde ingen fråga efter väckordet, så jag lade mig och väntar igen.
+Kan du säga det igen? Jag fick bara tystnad efter ordet.
+SUMMARY: Heavy gradle wedges the release cron, so I closed the emulator first.
+Det är tre kopior av samma formel i appen, och den tredje visste raden inget om.
+SUMMARY: I refused to guess. The page counts what it saw, so a red run names its own cause.
+Ja, jag kan höja tröskeln, men inte förrän jag har mätt hur ofta den väcks i dag.
+SUMMARY: Your reading was right and mine was wrong, and the correction is in the row.
+Hej, jag är här. Vad vill du att jag gör?
+SUMMARY: Nothing is published. The artifact stays private until you share the link.
+Batteriet räcker, tjänsten tar under en procent i timmen när den bara lyssnar.
+SUMMARY: The notification icon is the system speak now glyph, which is why it looks like it is hearing you.
+Jag har lagt bilderna i mappen och skickat sökvägen till lsrc noll.
+SUMMARY: Two hundred and eight is queued, and I do not start it before the other two close.
+Mikrofonen ägs av en enda tjänst, så push to talk och väckordet slåss aldrig om den.
+SUMMARY: A red that fails on setup is not a red. This one failed on the symptom.
+Klockan visar samma höjd som telefonen nu, inom en millimeter över hela bandet.
+SUMMARY: The corpus is sixty five minutes long and none of it is synthetic speech alone.
+Säg bara till om du vill att jag stänger av den tills vidare.
+SUMMARY: I will not move a number before the measurement exists. That is the whole point of step one.
+Vinden ritas som en liten notering i hörnet i stället för en mast mitt i bilden.
+SUMMARY: Both APKs are on the release and the tag is reachable from main.
+Jag kan inte lova hur det låter i bilen förrän jag har hört ett riktigt pass.
+SUMMARY: Dispatch three of three. No paid minute was spent.
+Det där var min egen röst du hörde, inte din. Jag lyssnar fortfarande efter ordet.

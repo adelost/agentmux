@@ -12,14 +12,9 @@ import io.agentmux.wakeword.WAKE_CHUNK_MS
 import io.agentmux.wakeword.WAKE_CHUNK_SAMPLES
 import io.agentmux.wakeword.WAKE_SAMPLE_RATE
 import java.io.File
+import io.agentmux.wakeword.WakePcmSource
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.readPcm16Wav
-
-/** 16 kHz mono PCM in whole 80 ms chunks; the microphone in production, a local WAV fixture in QA. */
-internal interface WakePcmSource : AutoCloseable {
-    /** Fills [chunk] completely; false once the source has stopped delivering audio. */
-    fun read(chunk: ShortArray): Boolean
-}
 
 /** Why a PCM source could not open, shown to the user instead of a silent wake word. */
 internal class WakeSourceUnavailable(message: String) : Exception(message)

@@ -3,6 +3,7 @@ package io.agentmux.audioinbox
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import io.agentmux.wakeword.normalizeAmplitude
 
 class PushToTalkMeterTest {
     @Test

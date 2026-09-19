@@ -5,9 +5,9 @@ import android.app.Activity
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import io.agentmux.linkcore.RecorderFinalizer
+import io.agentmux.wakeword.normalizeAmplitude
 import java.io.File
 import java.util.UUID
-import kotlin.math.sqrt
 
 internal class PushToTalkRecorder(
     private val activity: Activity,
@@ -90,9 +90,4 @@ internal class PushToTalkRecorder(
         capture?.file?.delete()
         capture = null
     }
-}
-
-internal fun normalizeAmplitude(amplitude: Int): Float {
-    require(amplitude >= 0)
-    return sqrt((amplitude / 32_767f).coerceIn(0f, 1f))
 }
