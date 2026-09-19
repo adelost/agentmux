@@ -200,6 +200,9 @@ private fun WakeMeter(latest: WakeChunkReading?, peak: LinkWakePeak, threshold: 
     }
 }
 
+/** A peak worth naming is one a wearer can see is not the live score, at the precision the page prints. */
+internal fun peakIsHeld(peak: Float, score: Float): Boolean = "%.2f".format(peak) != "%.2f".format(score)
+
 /** One mark across the bar, at a probability's own place on it. */
 private fun DrawScope.tick(at: Float, color: Color, size: Size) {
     val x = size.width * at.coerceIn(0f, 1f)
@@ -215,7 +218,9 @@ private fun DrawScope.tick(at: Float, color: Color, size: Size) {
 private fun meterSentence(latest: WakeChunkReading?, peak: LinkWakePeak, threshold: Float): String {
     if (latest == null) return "Say the phrase, or wait for the room to make a sound"
     val run = if (latest.chunksOverThreshold > 0) "${chunkCount(latest.chunksOverThreshold)} in a row · " else ""
-    val held = if (peak.score > latest.score) "peak ${"%.2f".format(peak.score)} · " else ""
+    // Only when the held peak is a different number than the one on screen: two decimals hide a difference
+    // of a thousandth, and "peak 0.00" beside "SCORE 0.00" claims a hold that is not being held.
+    val held = if (peakIsHeld(peak.score, latest.score)) "peak ${"%.2f".format(peak.score)} · " else ""
     val over = if (latest.score >= threshold) "over the threshold · " else ""
     return "$over$held${run}speech ${"%.2f".format(latest.speechProbability)} · " +
         "${latest.atMs / 1_000} s of listening"
