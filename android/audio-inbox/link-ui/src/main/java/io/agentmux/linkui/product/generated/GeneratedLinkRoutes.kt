@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the declared route identity (title and icon per screen)
-// Product declarations SHA-256: 19c8418024765cee0f04b2a20a7f0cc17b973fadcc36e49c876fa5b75b980ad9
+// Product declarations SHA-256: e6150cfb9a457d5a11067e0bb3b5e52e71dccd94750818c8c7f67737af69dad5
 package io.agentmux.linkui.product.generated
 
 enum class GeneratedLinkPageId(val wireId: String) {
@@ -8,6 +8,7 @@ enum class GeneratedLinkPageId(val wireId: String) {
     SETTINGS("settings"),
     DEV_HOST("dev-host"),
     WAKE_DEBUG("wake-debug"),
+    WAKE_TRY("wake-try"),
 }
 
 data class GeneratedLinkRouteDescriptor(
@@ -22,6 +23,7 @@ object GeneratedLinkRoutes {
         GeneratedLinkPageId.SETTINGS -> GeneratedLinkRouteDescriptor(route, "SETTINGS", "gear")
         GeneratedLinkPageId.DEV_HOST -> GeneratedLinkRouteDescriptor(route, "DISPLAY PREVIEW", "phone")
         GeneratedLinkPageId.WAKE_DEBUG -> GeneratedLinkRouteDescriptor(route, "WAKE DEBUG", "gauge")
+        GeneratedLinkPageId.WAKE_TRY -> GeneratedLinkRouteDescriptor(route, "TRY THE WAKE WORD", "target")
     }
 }
 

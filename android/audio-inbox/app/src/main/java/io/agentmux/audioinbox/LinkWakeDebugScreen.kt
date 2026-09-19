@@ -25,14 +25,9 @@ import io.agentmux.wakeword.TracedRun
 import io.agentmux.linkui.product.LinkWakePeak
 import com.adelost.designkit.ui.circleAccentColor
 import com.adelost.designkit.ui.CircleText
-import com.adelost.designkit.ui.MenuDesign
-import com.adelost.designkit.ui.phoneSurfaceDesign
 import com.adelost.designkit.ui.CircleAccentStrength
 import com.adelost.designkit.ui.CircleAccent
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
@@ -45,20 +40,13 @@ import androidx.compose.foundation.Canvas
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.wakeSensitivityWord
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
-import io.agentmux.wakeword.WAKE_CHUNK_MS
 import io.agentmux.wakeword.WakeRefusal
 import io.agentmux.wakeword.WakeSensitivity
 import io.agentmux.wakeword.WakeRun
 import kotlinx.coroutines.delay
 
-/** The bar's own shape: tall enough to read at a glance, and marks that overhang it so they are visible. */
-private val METER_HEIGHT = 12.dp
+/** The speech bar is this page's alone: only a watcher is told how sure the voice model was. */
 private val SPEECH_HEIGHT = 4.dp
-private val TICK_WIDTH = 2.dp
-private val TICK_OVERHANG = 3.dp
-
-/** Twelve and a half readings a second is the loop's own rate; the page redraws with it, not faster. */
-private const val TRACE_REFRESH_MS = WAKE_CHUNK_MS.toLong()
 
 /**
  * WHAT: What the wake word hears while it waits: the live score against its threshold, the speech
@@ -152,17 +140,10 @@ private fun WakeMeter(latest: WakeChunkReading?, peak: LinkWakePeak, threshold: 
     val dim = circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.INACTIVE)
     val supporting = circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.SUPPORTING)
     val bright = circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.ACTIVE)
-    // The design system has no meter, so it has no token for the part of a bar that is empty. The dimmest
-    // text colour is still far too loud for it: at full strength the track reads as a full bar.
-    val track = bright.copy(alpha = 0.16f)
+    val track = meterTrack(bright)
     val score = latest?.score ?: 0f
     val over = latest != null && score >= threshold
-    // The page has one left edge for everything that carries meaning, so the bars start where a row's
-    // words start: its own padding, the icon this block does not have, and the gap after it. The numbers
-    // are this surface's own, not the watch's, which is why they come from the phone design rather than
-    // from the shared menu metrics.
-    val phone = phoneSurfaceDesign()
-    val textInset = MenuDesign.rowPaddingH + phone.rowIconDiameter + phone.rowIconTextGap
+    val textInset = meterTextInset()
     Column(modifier = phoneRowModifier().padding(start = textInset, top = 10.dp, bottom = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             CircleText("SCORE", dim, 11f, letterSpacingSp = 0.6f)
@@ -203,17 +184,6 @@ private fun WakeMeter(latest: WakeChunkReading?, peak: LinkWakePeak, threshold: 
 /** A peak worth naming is one a wearer can see is not the live score, at the precision the page prints. */
 internal fun peakIsHeld(peak: Float, score: Float): Boolean = "%.2f".format(peak) != "%.2f".format(score)
 
-/** One mark across the bar, at a probability's own place on it. */
-private fun DrawScope.tick(at: Float, color: Color, size: Size) {
-    val x = size.width * at.coerceIn(0f, 1f)
-    drawLine(
-        color = color,
-        start = Offset(x, -TICK_OVERHANG.toPx()),
-        end = Offset(x, size.height + TICK_OVERHANG.toPx()),
-        strokeWidth = TICK_WIDTH.toPx(),
-    )
-}
-
 /** What the bars do not say: how sure the speech model is, how much of a run is in, and for how long. */
 private fun meterSentence(latest: WakeChunkReading?, peak: LinkWakePeak, threshold: Float): String {
     if (latest == null) return "Say the phrase, or wait for the room to make a sound"
@@ -229,7 +199,6 @@ private fun meterSentence(latest: WakeChunkReading?, peak: LinkWakePeak, thresho
 /** A count and its noun, because "1 row(s)" is not something anyone says out loud. */
 private fun runCount(runs: Int): String = if (runs == 1) "1 run" else "$runs runs"
 
-private fun chunkCount(chunks: Int): String = if (chunks == 1) "1 chunk" else "$chunks chunks"
 
 /** Each ended run as one row, verdict first, because that is what a wearer is looking for. */
 private fun androidx.compose.foundation.lazy.LazyListScope.items(runs: List<TracedRun>, step: WakeSensitivity) {

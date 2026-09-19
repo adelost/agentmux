@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.componentFamilies
-// Product declarations SHA-256: eb42010b6856eab6fcb4733d764291775102f70dec19dcba8c22d2eda2fbb786
+// Product declarations SHA-256: bc60e3a6743789c16dd3cd8c875d608813657a5e5f8338d29199e10921ec36bb
 package io.agentmux.linkui.product.generated
 
 import com.adelost.designkit.ui.CircleSurfaceClass

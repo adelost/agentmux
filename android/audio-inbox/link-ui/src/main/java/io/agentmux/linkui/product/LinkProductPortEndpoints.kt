@@ -22,6 +22,9 @@ internal object NavigationOpenDevHostInput :
 internal object NavigationOpenWakeDebugInput :
     ProductInputPort<LinkRouteOpenEvent, Unit>(PortIds.NAVIGATION_SERVICE_OPENWAKEDEBUG)
 
+internal object NavigationOpenWakeTryInput :
+    ProductInputPort<LinkRouteOpenEvent, Unit>(PortIds.NAVIGATION_SERVICE_OPENWAKETRY)
+
 internal object NavigationActivePageOutput :
     ProductOutputPort<LinkRoute>(PortIds.NAVIGATION_SERVICE_ACTIVEPAGE)
 
@@ -201,3 +204,6 @@ internal object DevHostOpenEvent :
 
 internal object WakeDebugOpenEvent :
     ProductComponentEvent<LinkRouteOpenEvent, Unit>(PortIds.NAVIGATION_WAKE_DEBUG_ENTRY_OPEN)
+
+internal object WakeTryOpenEvent :
+    ProductComponentEvent<LinkRouteOpenEvent, Unit>(PortIds.NAVIGATION_WAKE_TRY_ENTRY_OPEN)

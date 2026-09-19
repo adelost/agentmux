@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego catalog type vocabulary
-// Product declarations SHA-256: 908747e9f68a83952e240403ddc0fcf76999f91076c29a99f5f07c43a804ba74
+// Product declarations SHA-256: 5bd83ef413a74e2cebef81d31de1bd8374d4b91e6d38d28ea5d37e73fa4b9fd7
 package io.agentmux.linkui.product.generated
 
 internal interface GeneratedLinkFiniteValueId { val value: String }

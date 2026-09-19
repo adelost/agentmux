@@ -30,12 +30,10 @@ import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.graphics.vector.ImageVector
 import io.agentmux.linkui.product.wakePhaseWord
 import io.agentmux.linkui.linkWakeToggleLabels
-import io.agentmux.linkui.product.wakeSensitivityHint
 import io.agentmux.linkui.product.wakeSensitivityWord
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakePhrases
-import io.agentmux.wakeword.WakeSensitivity
 import androidx.compose.ui.platform.LocalContext
 import io.agentmux.linkui.product.LinkPlaybackCommandEvent
 import io.agentmux.linkui.product.LinkPreferenceToggleEvent
@@ -197,27 +195,6 @@ internal fun LinkPhoneSettings(
                                 modifier = phoneRowModifier(),
                             )
                         }
-                        item("${mount.id}.sensitivity") {
-                            val context = LocalContext.current
-                            RingChoiceRow(
-                                title = "SENSITIVITY",
-                                hint = wakeSensitivityHint(wake.sensitivity),
-                                selected = wakeSensitivityWord(wake.sensitivity),
-                                options = WakeSensitivity.offered.map(::wakeSensitivityWord),
-                                role = CircleChoiceRole.STEPPED,
-                                // Three words need their sentence within reach, the way the toggles above
-                                // carry theirs: the row shows the step, the info affordance says what it does.
-                                infoSelected = true,
-                                onSelect = { word ->
-                                    LinkWakeSensitivityChoice.choose(
-                                        context,
-                                        WakeSensitivity.offered.first { wakeSensitivityWord(it) == word },
-                                    )
-                                },
-                                icon = LinkNativeBindings.requireIcon("target"),
-                                modifier = phoneRowModifier(),
-                            )
-                        }
                         // Only a blocked loop still gets a row of its own: its reason is the one fact
                         // about the wake word that nothing else on this page states.
                         if (wake.phase == WakePhase.BLOCKED) {
@@ -252,6 +229,20 @@ internal fun LinkPhoneSettings(
                                 )
                             }
                         }
+                    }
+                    // Row 217: where SENSITIVITY used to cycle through three words in place. Choosing a
+                    // step and hearing what it does were two rows on two pages, so the row now shows the
+                    // step and opens the page that can try it. It is offered with the wake word off as
+                    // well, because whether Link hears you is the question you ask before turning it on.
+                    GeneratedLinkSettingsComponent.NAVIGATION_WAKE_TRY_ENTRY -> item(mount.id) {
+                        PhoneRow(
+                            title = "SENSITIVITY",
+                            sub = "${wakeSensitivityWord(wake.sensitivity)} · try the phrase and choose",
+                            icon = LinkNativeBindings.requireIcon(
+                                GeneratedLinkRoutes.descriptor(LinkRoute.WAKE_TRY).iconAssetRef,
+                            ),
+                            onTap = { graph.onWakeTryOpen(LinkRouteOpenEvent(LinkRoute.WAKE_TRY)) },
+                        )
                     }
                     // The debug page belongs to the wake word, so it appears with it and not before it.
                     GeneratedLinkSettingsComponent.NAVIGATION_WAKE_DEBUG_ENTRY ->

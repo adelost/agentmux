@@ -59,6 +59,8 @@ class WakeWordService : Service(), WakeLoopListener {
     private var thinkingTones: Job? = null
     private val readAloudRequested = mutableSetOf<String>()
     private var qaWav: String? = null
+    /** True only when the TRY page started the loop itself, which is what leaving it has to undo. */
+    private var startedForTry = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -66,6 +68,8 @@ class WakeWordService : Service(), WakeLoopListener {
         when (intent?.action) {
             ACTION_START -> start(intent.getStringExtra(EXTRA_QA_WAV))
             ACTION_CANCEL_QUESTION -> cancelQuestion()
+            ACTION_TRY_OPEN -> openForTry()
+            ACTION_TRY_CLOSE -> closeForTry()
             // Watching is read when the loop opens, so turning it on or off reopens it.
             ACTION_RELISTEN -> if (micThread != null) relisten()
             ACTION_STOP -> {
@@ -137,9 +141,10 @@ class WakeWordService : Service(), WakeLoopListener {
                             detection = sensitivity.detection,
                             detectionAllowed = { LinkWakeStatus.status.value.listensForWakeWord() },
                             listener = this,
-                            // Null unless the wearer opened WAKE DEBUG and switched watching on: with a
-                            // trace the loop asks the speech model about every waiting chunk as well.
-                            trace = if (LinkWakeDebug.watching.value) LinkWakeDebug.trace else null,
+                            // Null unless the TRY page is open or the wearer switched watching on in
+                            // WAKE DEBUG: with a trace the loop asks the speech model about every
+                            // waiting chunk as well, which is why nobody gets one for free.
+                            trace = wakeChunkWatchers(),
                         ).also { loop = it }.run()
                     }
                 }
@@ -166,14 +171,50 @@ class WakeWordService : Service(), WakeLoopListener {
 
     private fun assetBytes(name: String): ByteArray = assets.open(name).use { it.readBytes() }
 
-    override fun onDetected(score: Float) = MainThread.run {
-        val interrupted = LinkWakeStatus.status.value.phase == WakePhase.SPEAKING
-        LinkWakeStatus.apply(WakeEvent.Detected(score))
-        if (interrupted) coordinator?.stopAudio()
-        earcons?.heard()
+    override fun onDetected(score: Float) {
+        // Row 217. On the TRY page a wake is judged and shown and nothing else: the question the loop
+        // has just started is dropped on the very next chunk, before one chunk of it is kept, and no
+        // phase changes, so no ring, no earcon and no notification says Link is hearing a question.
+        if (LinkWakeTry.open.value) {
+            loop?.cancelQuestion()
+            return
+        }
+        MainThread.run {
+            val interrupted = LinkWakeStatus.status.value.phase == WakePhase.SPEAKING
+            LinkWakeStatus.apply(WakeEvent.Detected(score))
+            if (interrupted) coordinator?.stopAudio()
+            earcons?.heard()
+        }
     }
 
-    override fun onHearing(hearing: WakeHearing) = MainThread.run { LinkWakeStatus.apply(WakeEvent.Heard(hearing)) }
+    /** The cancel above lands before the first chunk is accepted; a late one is still not the page's. */
+    override fun onHearing(hearing: WakeHearing) {
+        if (LinkWakeTry.open.value) return
+        MainThread.run { LinkWakeStatus.apply(WakeEvent.Heard(hearing)) }
+    }
+
+    /**
+     * The TRY page is on screen. The loop reopens so it reports every chunk to the page's recorder, and
+     * it starts here when the wake word is off: the page listens for as long as it is open and says so.
+     */
+    private fun openForTry() {
+        if (micThread == null) {
+            startedForTry = true
+            start(null)
+        } else {
+            relisten()
+        }
+    }
+
+    /** The page is gone: the loop goes back to what it was, which is off when the page started it. */
+    private fun closeForTry() {
+        if (startedForTry) {
+            startedForTry = false
+            stop(null)
+            return
+        }
+        if (micThread != null) relisten()
+    }
 
     /** The talk ring was tapped while a question was heard: drop it before anything is encoded or sent. */
     private fun cancelQuestion() {
@@ -184,6 +225,10 @@ class WakeWordService : Service(), WakeLoopListener {
     }
 
     override fun onQuestion(end: UtteranceEnd, pcm: ShortArray, startedAtMs: Long) {
+        // The one seam a question can come into being at, and the TRY page's promise is that none does
+        // while it is open. The cancel in onDetected means this cannot normally be reached; the promise
+        // is not left resting on that timing.
+        if (LinkWakeTry.open.value) return
         val detection = LinkWakeStatus.status.value.detections
         if (end == UtteranceEnd.NO_SPEECH) {
             MainThread.run {
@@ -298,6 +343,8 @@ class WakeWordService : Service(), WakeLoopListener {
         const val ACTION_STOP = "io.agentmux.audioinbox.WAKE_STOP"
         const val ACTION_CANCEL_QUESTION = "io.agentmux.audioinbox.WAKE_CANCEL_QUESTION"
         const val ACTION_RELISTEN = "io.agentmux.audioinbox.WAKE_RELISTEN"
+        const val ACTION_TRY_OPEN = "io.agentmux.audioinbox.WAKE_TRY_OPEN"
+        const val ACTION_TRY_CLOSE = "io.agentmux.audioinbox.WAKE_TRY_CLOSE"
         const val EXTRA_QA_WAV = "qa_wake_wav"
     }
 }

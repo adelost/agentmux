@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego port bindings
-// Product declarations SHA-256: 908747e9f68a83952e240403ddc0fcf76999f91076c29a99f5f07c43a804ba74
+// Product declarations SHA-256: 5bd83ef413a74e2cebef81d31de1bd8374d4b91e6d38d28ea5d37e73fa4b9fd7
 package io.agentmux.linkui.product.generated
 
 internal object GeneratedLinkNativeLegoPortBindings {
@@ -8,6 +8,7 @@ internal object GeneratedLinkNativeLegoPortBindings {
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SETTINGS_ENTRY_OPEN, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SERVICE_OPENSETTINGS, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_DEV_HOST_ENTRY_OPEN, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SERVICE_OPENDEVHOST, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_WAKE_DEBUG_ENTRY_OPEN, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SERVICE_OPENWAKEDEBUG, GeneratedProductPortPurpose.DATA),
+        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_WAKE_TRY_ENTRY_OPEN, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SERVICE_OPENWAKETRY, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_TALK_COMMAND, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_SERVICE_COMMAND, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_SERVICE_CAPTURED, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_SERVICE_TURN, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_COMPOSER_COMPOSE, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_SERVICE_COMPOSE, GeneratedProductPortPurpose.DATA),
@@ -61,6 +62,7 @@ internal object GeneratedLinkNativeLegoPortBindings {
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_PHASE_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_PANEL_UPDATESTATE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_PRESENTATION_MODEL, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_STATUS_MODEL, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_PHASE_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_STATUS_RECOVERYSTATE, GeneratedProductPortPurpose.DATA),
+        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.WAKE_SENSITIVITY_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_WAKE_TRY_ENTRY_WAKESENSITIVITY, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.WAKE_PRESENTATION_MODEL, GeneratedLinkNativeLegoCatalog.PortIds.WAKE_TOGGLE_MODEL, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.WAKE_PHASE_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.WAKE_TOGGLE_WAKESTATE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.WAKE_PHRASE_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.WAKE_TOGGLE_WAKEPHRASE, GeneratedProductPortPurpose.DATA),

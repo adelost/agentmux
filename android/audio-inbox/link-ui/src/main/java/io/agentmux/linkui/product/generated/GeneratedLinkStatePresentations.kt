@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: 580a0f4a9467863520992e734e41959f970e4e38198ee435751a0194a5e439a7
+// Product declarations SHA-256: 9bfb8df131ab2946781a6089231b4ddd928cdef85e9d7f44cc50e564ead5579c
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput
@@ -411,6 +411,9 @@ internal object GeneratedWakeSensitivityAuthority {
         GeneratedLinkNativeLegoCatalog.PortIds.WAKE_SENSITIVITY_PRESENTATION_ADAPTER_PRESENTATION,
     ) {}
     val componentInputs: List<ProductComponentInput<GeneratedWakeSensitivityPresentation>> = listOf(
+        object : ProductComponentInput<GeneratedWakeSensitivityPresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_WAKE_TRY_ENTRY_WAKESENSITIVITY,
+        ) {},
         object : ProductComponentInput<GeneratedWakeSensitivityPresentation>(
             GeneratedLinkNativeLegoCatalog.PortIds.WAKE_TOGGLE_WAKESENSITIVITY,
         ) {},
