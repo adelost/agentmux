@@ -55,6 +55,16 @@ class WakeRunRowTest {
         }
     }
 
+    // The meter frame that showed this: "peak 0.00 · speech 0.00" beside a score of 0.00, where the two
+    // floats differed by less than the page prints.
+    @Test
+    fun aPeakIsOnlyNamedWhenItReadsDifferentlyFromTheScore() {
+        assertEquals(false, peakIsHeld(0.0041f, 0.0009f))
+        assertEquals(false, peakIsHeld(0.45f, 0.45f))
+        assertEquals(true, peakIsHeld(0.45f, 0.02f))
+        assertEquals(true, peakIsHeld(0.016f, 0.004f))  // 0.02 against 0.00
+    }
+
     @Test
     fun aClockIsReadInTheWearersOwnZone() {
         assertEquals("18:56:09", runClock(at, zone))
