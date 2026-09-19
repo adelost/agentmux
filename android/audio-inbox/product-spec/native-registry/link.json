@@ -80,6 +80,16 @@
       "profiles": ["phone-full-ui", "wear-full-ui"]
     },
     {
+      "componentId": "link.wake-debug",
+      "rendererId": "wake-debug",
+      "profiles": ["phone-full-ui"]
+    },
+    {
+      "componentId": "link.wake-debug-entry",
+      "rendererId": "wake-debug-entry",
+      "profiles": ["phone-full-ui"]
+    },
+    {
       "componentId": "link.wake-word",
       "rendererId": "wake-word",
       "profiles": ["phone-full-ui"]
@@ -207,7 +217,7 @@
       "nodeId": "navigation.service",
       "nativePortId": "navigation.service",
       "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": ["openDevHost", "openSettings"],
+      "inputPorts": ["openDevHost", "openSettings", "openWakeDebug"],
       "outputPorts": ["activePage"]
     },
     {
@@ -377,7 +387,7 @@
     },
     {
       "id": "link.navigation.page",
-      "values": ["dev-host", "home", "settings"]
+      "values": ["dev-host", "home", "settings", "wake-debug"]
     },
     {
       "id": "link.playback-operation",
@@ -440,6 +450,12 @@
         },
         {
           "pageRef": "dev-host",
+          "restore": "process",
+          "back": "previous",
+          "guardContractRef": null
+        },
+        {
+          "pageRef": "wake-debug",
           "restore": "process",
           "back": "previous",
           "guardContractRef": null
@@ -523,6 +539,17 @@
         {
           "sourcePortRef": "navigation.settings-entry.open",
           "targetPortRef": "navigation.service.openSettings",
+          "effect": "push"
+        }
+        ]
+      },
+      {
+        "artifactRef": "phone-full-ui",
+        "componentInstanceRef": "navigation.wake-debug-entry",
+        "actions": [
+        {
+          "sourcePortRef": "navigation.wake-debug-entry.open",
+          "targetPortRef": "navigation.service.openWakeDebug",
           "effect": "push"
         }
         ]

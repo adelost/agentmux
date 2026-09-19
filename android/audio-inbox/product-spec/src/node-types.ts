@@ -51,7 +51,11 @@ const runtime = <
  */
 export const navigationService = service({
   id: "link.navigation",
-  inputs: [port("openSettings", routeOpenContract), port("openDevHost", routeOpenContract)],
+  inputs: [
+    port("openSettings", routeOpenContract),
+    port("openDevHost", routeOpenContract),
+    port("openWakeDebug", routeOpenContract),
+  ],
   outputs: [port("activePage", activePageContract)],
   runtime: runtime("instance", "instance", "transient", "none", [], ["navigation.route-state"]),
 } as const);

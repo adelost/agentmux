@@ -61,6 +61,9 @@ internal fun LinkPhoneScreen(
                     },
                 )
             }
+            route == LinkRoute.WAKE_DEBUG -> {
+                LinkWakeDebugScreen(onBack = { check(graph.navigation.back()) })
+            }
             route == LinkRoute.SETTINGS -> {
                 LinkPhoneSettings(
                     graph = graph,

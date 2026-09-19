@@ -29,6 +29,7 @@ graph LR
     n_navigation_page_host(["page-host<br/><i>component</i>"])
     n_navigation_service["service<br/><i>service</i>"]
     n_navigation_settings_entry(["settings-entry<br/><i>component</i>"])
+    n_navigation_wake_debug_entry(["wake-debug-entry<br/><i>component</i>"])
   end
   subgraph playback["playback"]
     n_playback_controls(["controls<br/><i>component</i>"])
@@ -67,6 +68,7 @@ graph LR
     n_updates_service["service<br/><i>service</i>"]
   end
   subgraph wake["wake"]
+    n_wake_debug(["debug<br/><i>component</i>"])
     n_wake_phase_presentation_adapter["phase.presentation-adapter<br/><i>present</i>"]
     n_wake_phrase_presentation_adapter["phrase.presentation-adapter<br/><i>present</i>"]
     n_wake_presentation["presentation<br/><i>present</i>"]
@@ -95,6 +97,7 @@ graph LR
   n_navigation_dev_host_entry -->|"navigation.route-intent"| n_navigation_service
   n_navigation_service -->|"navigation.active-page"| n_navigation_page_host
   n_navigation_settings_entry -->|"navigation.route-intent"| n_navigation_service
+  n_navigation_wake_debug_entry -->|"navigation.route-intent"| n_navigation_service
   n_playback_controls -->|"playback-command"| n_playback_service
   n_playback_phase_presentation_adapter -->|"phase.payload"| n_playback_controls
   n_playback_presentation -->|"playback-status"| n_playback_controls

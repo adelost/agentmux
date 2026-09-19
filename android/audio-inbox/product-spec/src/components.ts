@@ -157,6 +157,28 @@ export const devPreviewComponentType = defineComponentType({
   outputs: [],
 });
 
+/** The settings row that opens WAKE DEBUG. Phone only, like the page it opens. */
+export const wakeDebugEntryComponentType = defineComponentType({
+  id: "link.wake-debug-entry",
+  requiredCapabilities: [...componentTree, "ui.dev-host"],
+  inputs: [],
+  outputs: [componentPort("open", routeOpenContract)],
+});
+
+/**
+ * What the microphone hears while it waits, as a page: the live score against the threshold, the speech
+ * probability beside it, how many chunks of the run are in, and the last events with the rule that decided
+ * each one. Like `link.dev-preview` this renders outside the data graph, and for the same reason the 2026-09-14
+ * decision kept the capture level out of it: these are 12.5 readings a second from one bounded native buffer,
+ * and a product graph is not where a signal of that rate belongs. Nothing here is stored unless asked for.
+ */
+export const wakeDebugComponentType = defineComponentType({
+  id: "link.wake-debug",
+  requiredCapabilities: componentTree,
+  inputs: [],
+  outputs: [],
+});
+
 export const linkComponentTypes = [
   targetPickerComponentType,
   talkComponentType,
@@ -173,6 +195,8 @@ export const linkComponentTypes = [
   navigationEntryComponentType,
   devHostEntryComponentType,
   devPreviewComponentType,
+  wakeDebugEntryComponentType,
+  wakeDebugComponentType,
   linkWakeWord.componentType,
 ] as const;
 
@@ -297,6 +321,17 @@ export const linkComponentInstances = [
   },
   {
     id: "dev.preview", componentTypeRef: devPreviewComponentType.id,
+    bindings: { inputs: {}, events: {} },
+  },
+  {
+    id: "navigation.wake-debug-entry", componentTypeRef: wakeDebugEntryComponentType.id,
+    bindings: {
+      inputs: {},
+      events: { open: "navigation.service.openWakeDebug" },
+    },
+  },
+  {
+    id: "wake.debug", componentTypeRef: wakeDebugComponentType.id,
     bindings: { inputs: {}, events: {} },
   },
   linkWakeWord.component,

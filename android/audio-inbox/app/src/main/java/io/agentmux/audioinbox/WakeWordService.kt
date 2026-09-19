@@ -66,6 +66,8 @@ class WakeWordService : Service(), WakeLoopListener {
         when (intent?.action) {
             ACTION_START -> start(intent.getStringExtra(EXTRA_QA_WAV))
             ACTION_CANCEL_QUESTION -> cancelQuestion()
+            // Watching is read when the loop opens, so turning it on or off reopens it.
+            ACTION_RELISTEN -> if (micThread != null) relisten()
             ACTION_STOP -> {
                 // Stop from the notification means off, so reopening Link does not restart listening.
                 getSharedPreferences(AppContract.PREFS, MODE_PRIVATE).edit().putBoolean(KEY_WAKE_WORD, false).apply()
@@ -131,6 +133,9 @@ class WakeWordService : Service(), WakeLoopListener {
                             endpoint = EndpointPolicy(),
                             detectionAllowed = { LinkWakeStatus.status.value.listensForWakeWord() },
                             listener = this,
+                            // Null unless the wearer opened WAKE DEBUG and switched watching on: with a
+                            // trace the loop asks the speech model about every waiting chunk as well.
+                            trace = if (LinkWakeDebug.watching.value) LinkWakeDebug.trace else null,
                         ).also { loop = it }.run()
                     }
                 }
@@ -288,6 +293,7 @@ class WakeWordService : Service(), WakeLoopListener {
         const val ACTION_START = "io.agentmux.audioinbox.WAKE_START"
         const val ACTION_STOP = "io.agentmux.audioinbox.WAKE_STOP"
         const val ACTION_CANCEL_QUESTION = "io.agentmux.audioinbox.WAKE_CANCEL_QUESTION"
+        const val ACTION_RELISTEN = "io.agentmux.audioinbox.WAKE_RELISTEN"
         const val EXTRA_QA_WAV = "qa_wake_wav"
     }
 }

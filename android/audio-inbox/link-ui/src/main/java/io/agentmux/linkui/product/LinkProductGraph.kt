@@ -116,6 +116,7 @@ open class LinkProductGraph(
     private val updatesCommand: ProductComponentEventEmitter<LinkUpdateCommandEvent, Unit>
     private val settingsActionOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
     private val devHostOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
+    private val wakeDebugOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
 
     init {
         // Service outputs first: component inputs may only connect to an
@@ -291,6 +292,7 @@ open class LinkProductGraph(
 
         runtime.bindInput(NavigationOpenSettingsInput) { event -> navigation.open(event.target) }
         runtime.bindInput(NavigationOpenDevHostInput) { event -> navigation.open(event.target) }
+        runtime.bindInput(NavigationOpenWakeDebugInput) { event -> navigation.open(event.target) }
         runtime.bindInput(CaptureCommandInput) { event -> sinks.captureCommand(event) }
         runtime.bindInput(ConversationComposeInput) { event -> sinks.compose(event) }
         runtime.bindInput(PlaybackCommandInput) { event -> sinks.playbackCommand(event) }
@@ -322,6 +324,7 @@ open class LinkProductGraph(
         updatesCommand = runtime.componentEvent(UpdatesCommandEvent, processScope)
         settingsActionOpen = runtime.componentEvent(SettingsActionOpenEvent, processScope)
         devHostOpen = runtime.componentEvent(DevHostOpenEvent, processScope)
+        wakeDebugOpen = runtime.componentEvent(WakeDebugOpenEvent, processScope)
 
         runtime.requireNodeOutputTotality()
         runtime.requireComponentPortTotality()
@@ -388,6 +391,10 @@ open class LinkProductGraph(
 
     fun onDevHostOpen(event: LinkRouteOpenEvent) {
         devHostOpen.emit(event)
+    }
+
+    fun onWakeDebugOpen(event: LinkRouteOpenEvent) {
+        wakeDebugOpen.emit(event)
     }
 
     open fun close() {
