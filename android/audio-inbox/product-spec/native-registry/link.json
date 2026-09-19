@@ -366,6 +366,13 @@
       "outputPorts": ["model"]
     },
     {
+      "nodeId": "wake.sensitivity.presentation-adapter",
+      "nativePortId": "wake.sensitivity.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
       "nodeId": "wake.service",
       "nativePortId": "wake.service",
       "profiles": ["phone-full-ui", "wear-full-ui"],
@@ -437,6 +444,10 @@
     {
       "id": "link.wake-phrase",
       "values": ["alexa", "hey-jarvis", "hey-marvin"]
+    },
+    {
+      "id": "link.wake-sensitivity",
+      "values": ["eager", "normal", "strict"]
     }
   ],
   "navigation": {

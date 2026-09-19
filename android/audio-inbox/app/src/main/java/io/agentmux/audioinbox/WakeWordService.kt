@@ -114,6 +114,7 @@ class WakeWordService : Service(), WakeLoopListener {
     }
 
     private fun listen(phrase: WakePhrase, qaWav: String?) {
+        val sensitivity = LinkWakeStatus.status.value.sensitivity
         try {
             openModels(phrase).use { models ->
                 SileroSpeechProbability.load(assetBytes("silero_vad.onnx")).use { vad ->
@@ -129,8 +130,11 @@ class WakeWordService : Service(), WakeLoopListener {
                                 override fun probability(chunk: ShortArray) = vad.probability(chunk)
                                 override fun reset() = vad.reset()
                             },
-                            threshold = phrase.threshold,
+                            // The wearer's step moves the phrase's own measured threshold and says how
+                            // many chunks must agree; both are read here, when the loop opens.
+                            threshold = sensitivity.thresholdFor(phrase),
                             endpoint = EndpointPolicy(),
+                            detection = sensitivity.detection,
                             detectionAllowed = { LinkWakeStatus.status.value.listensForWakeWord() },
                             listener = this,
                             // Null unless the wearer opened WAKE DEBUG and switched watching on: with a

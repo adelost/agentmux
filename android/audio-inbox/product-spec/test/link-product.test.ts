@@ -138,6 +138,7 @@ test("every compiler-exposed closed state lineage has one executable authority",
     "recovery.service.status#phase",
     "wake.service.status#phase",
     "wake.service.status#phrase",
+    "wake.service.status#sensitivity",
   ]);
   for (const authority of product.stateAuthorities) {
     assert.ok(authority.presentation.consumers.length > 0, `${authority.id} has no component consumer`);

@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: 47c9ab543e874c6e9789602d14ff616512167125d8ad20490aa1a90459a48aaf
+// Product declarations SHA-256: a34fc0c8be0b5360b6c66c7764b39f524517b027e9562e4f0534b0f5335b5fe4
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput
@@ -82,6 +82,11 @@ internal enum class GeneratedLinkWakePhraseValue(val wireId: String) {
     HEY_JARVIS("hey-jarvis"),
     HEY_MARVIN("hey-marvin"),
     ALEXA("alexa"),
+}
+internal enum class GeneratedLinkWakeSensitivityValue(val wireId: String) {
+    STRICT("strict"),
+    NORMAL("normal"),
+    EAGER("eager"),
 }
 internal data class GeneratedCapturePhasePresentation(
     val phase: GeneratedLinkCapturePhaseValue,
@@ -388,6 +393,38 @@ internal object GeneratedWakePhraseAuthority {
 
     fun require(stateId: String): GeneratedWakePhrasePresentation = requireNotNull(cases[stateId]) {
         "Unknown wake.phrase state '$stateId'"
+    }
+}
+
+internal data class GeneratedWakeSensitivityPresentation(
+    val sensitivity: GeneratedLinkWakeSensitivityValue,
+    val word: String,
+    val hint: String,
+)
+
+internal object GeneratedWakeSensitivityAuthority {
+    fun <T : Any> inputPort(): ProductDataInput<T> = object : ProductDataInput<T>(
+        GeneratedLinkNativeLegoCatalog.PortIds.WAKE_SENSITIVITY_PRESENTATION_ADAPTER_STATE,
+    ) {}
+    val outputPort: ProductOutputPort<GeneratedWakeSensitivityPresentation> = object : ProductOutputPort<GeneratedWakeSensitivityPresentation>(
+        GeneratedLinkNativeLegoCatalog.PortIds.WAKE_SENSITIVITY_PRESENTATION_ADAPTER_PRESENTATION,
+    ) {}
+    val componentInputs: List<ProductComponentInput<GeneratedWakeSensitivityPresentation>> = listOf(
+        object : ProductComponentInput<GeneratedWakeSensitivityPresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.WAKE_TOGGLE_WAKESENSITIVITY,
+        ) {},
+        object : ProductComponentInput<GeneratedWakeSensitivityPresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.WAKE_STATUS_WAKESENSITIVITY,
+        ) {},
+    )
+    private val cases: Map<String, GeneratedWakeSensitivityPresentation> = mapOf(
+        "strict" to GeneratedWakeSensitivityPresentation(sensitivity = GeneratedLinkWakeSensitivityValue.STRICT, word = "STRICT", hint = "Fewer false wakes, and it may miss you"),
+        "normal" to GeneratedWakeSensitivityPresentation(sensitivity = GeneratedLinkWakeSensitivityValue.NORMAL, word = "NORMAL", hint = "What each phrase was measured at"),
+        "eager" to GeneratedWakeSensitivityPresentation(sensitivity = GeneratedLinkWakeSensitivityValue.EAGER, word = "EAGER", hint = "For a voice it keeps missing"),
+    )
+
+    fun require(stateId: String): GeneratedWakeSensitivityPresentation = requireNotNull(cases[stateId]) {
+        "Unknown wake.sensitivity state '$stateId'"
     }
 }
 

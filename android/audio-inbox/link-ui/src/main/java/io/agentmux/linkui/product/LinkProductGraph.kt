@@ -24,6 +24,8 @@ import io.agentmux.linkui.product.generated.GeneratedTargetKindAuthority
 import io.agentmux.linkui.product.generated.GeneratedUpdatesPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedWakePhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedWakePhraseAuthority
+import io.agentmux.linkui.product.generated.GeneratedWakeSensitivityAuthority
+import io.agentmux.wakeword.WakeSensitivity
 import io.agentmux.wakeword.WakeStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -291,6 +293,13 @@ open class LinkProductGraph(
             { it.phrase.id },
             GeneratedWakePhraseAuthority::require,
         )
+        mountStateAuthority(
+            GeneratedWakeSensitivityAuthority.inputPort<LinkWakePresentation>(),
+            GeneratedWakeSensitivityAuthority.outputPort,
+            GeneratedWakeSensitivityAuthority.componentInputs,
+            { it.sensitivity.id },
+            GeneratedWakeSensitivityAuthority::require,
+        )
 
         // The one service-internal edge: a captured turn is delivered to the
         // conversation service through its generated binding, never directly.
@@ -445,6 +454,15 @@ internal fun Enum<*>.wireId(): String = name.lowercase().replace('_', '-')
  * word of its own, so what a wearer reads cannot drift from the phase the loop is in.
  */
 fun wakePhaseWord(phase: WakePhase): String = GeneratedWakePhaseAuthority.require(phase.wireId()).word
+
+/**
+ * The declared word and sentence for one sensitivity step. What the step does to the loop lives in
+ * `:wakeword` beside the models, because it was measured there; what a wearer reads lives in the
+ * declaration, so a copy change cannot become a behaviour change or the other way round.
+ */
+fun wakeSensitivityWord(step: WakeSensitivity): String = GeneratedWakeSensitivityAuthority.require(step.id).word
+
+fun wakeSensitivityHint(step: WakeSensitivity): String = GeneratedWakeSensitivityAuthority.require(step.id).hint
 
 /** The three glyphs the ongoing notification may wear, as the declaration names them. */
 enum class WakeNotificationIcon { WAITING, HEARING, SPEAKING }

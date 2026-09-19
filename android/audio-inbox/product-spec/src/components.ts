@@ -171,6 +171,7 @@ export const wakeToggleComponentType = defineComponentType({
     componentPort("model", linkWakeWord.statusContract),
     componentPort("wakeState", linkWakeWord.phaseAuthority.authority.presentation.contract),
     componentPort("wakePhrase", linkWakeWord.phraseAuthority.authority.presentation.contract),
+    componentPort("wakeSensitivity", linkWakeWord.sensitivityAuthority.authority.presentation.contract),
   ],
   outputs: [componentPort("toggle", preferenceToggleContract)],
 });
@@ -360,6 +361,7 @@ export const linkComponentInstances = [
         model: "wake.presentation.model",
         wakeState: linkWakeWord.phaseAuthority.presentationPortRef,
         wakePhrase: linkWakeWord.phraseAuthority.presentationPortRef,
+        wakeSensitivity: linkWakeWord.sensitivityAuthority.presentationPortRef,
       },
       events: { toggle: "preferences.service.wakeToggle" },
     },

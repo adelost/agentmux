@@ -18,10 +18,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelost.ringkit.ui.PhoneScreenHeader
 import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.LinkRoute
+import io.agentmux.linkui.product.wakeSensitivityWord
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 import io.agentmux.wakeword.WAKE_CHUNK_MS
-import io.agentmux.wakeword.WakeDetectionPolicy
 import io.agentmux.wakeword.WakeRefusal
+import io.agentmux.wakeword.WakeSensitivity
 import io.agentmux.wakeword.WakeRun
 import io.agentmux.wakeword.WakeTrace
 import kotlinx.coroutines.delay
@@ -76,13 +77,17 @@ internal fun LinkWakeDebugScreen(onBack: () -> Unit) {
             )
         }
         item("phrase") {
+            // The rule the page is watching is the wearer's step, not the shipped default, so both the
+            // threshold and the run length are read from his choice and named beside it.
             PhoneRow(
                 title = wake.phrase.spoken.uppercase(),
-                sub = "Threshold ${"%.2f".format(wake.phrase.threshold)} · ${WakeDetectionPolicy().chunksOverThreshold} chunks in a row",
+                sub = "${wakeSensitivityWord(wake.sensitivity)} · threshold " +
+                    "${"%.2f".format(wake.sensitivity.thresholdFor(wake.phrase))} · " +
+                    "${wake.sensitivity.detection.chunksOverThreshold} chunks in a row",
                 icon = LinkNativeBindings.requireIcon("target"),
             )
         }
-        item("live") { LiveReading(trace, wake.phrase.threshold) }
+        item("live") { LiveReading(trace, wake.sensitivity.thresholdFor(wake.phrase)) }
         if (!watching) return@LazyColumn
         item("export") {
             PhoneRow(
@@ -99,7 +104,7 @@ internal fun LinkWakeDebugScreen(onBack: () -> Unit) {
                 icon = LinkNativeBindings.requireIcon("activity"),
             )
         }
-        items(trace.runs)
+        items(trace.runs, wake.sensitivity)
     }
 }
 
@@ -119,28 +124,32 @@ private fun LiveReading(trace: WakeTrace, threshold: Float) {
 }
 
 /** Each ended run as one row; the refused single chunk is named in words, because it is the case to look for. */
-private fun androidx.compose.foundation.lazy.LazyListScope.items(runs: List<WakeRun>) {
+private fun androidx.compose.foundation.lazy.LazyListScope.items(runs: List<WakeRun>, step: WakeSensitivity) {
     runs.forEachIndexed { index, run ->
         item("run-$index-${run.atMs}") {
             PhoneRow(
                 title = "${"%.2f".format(run.peakScore)} · ${run.chunksOverThreshold} CHUNK(S)",
-                sub = runSentence(run),
+                sub = runSentence(run, step),
                 icon = LinkNativeBindings.requireIcon(if (run.accepted) "record" else "warning"),
             )
         }
     }
 }
 
-/** What happened to one run, in the words the wearer needs rather than the rule's name. */
-private fun runSentence(run: WakeRun): String {
+/**
+ * What happened to one run, in the words the wearer needs rather than the rule's name. A refusal names the
+ * step that refused it, because with a sensitivity to set, "the rule" is no longer one thing.
+ */
+private fun runSentence(run: WakeRun, step: WakeSensitivity): String {
     val at = "${run.atMs / 1_000} s"
     val speech = "speech ${"%.2f".format(run.speechProbability)}"
+    val wants = "${wakeSensitivityWord(step)} wants ${step.detection.chunksOverThreshold}"
     return when (run.refusal) {
         null -> "$at · heard · became a question · $speech"
         WakeRefusal.NOT_ENOUGH_CHUNKS -> if (run.chunksOverThreshold == 1) {
-            "$at · REFUSED · over the threshold for one chunk only · $speech"
+            "$at · REFUSED · over the threshold once, $wants · $speech"
         } else {
-            "$at · REFUSED · ${run.chunksOverThreshold} chunks, the rule wants ${WakeDetectionPolicy().chunksOverThreshold} · $speech"
+            "$at · REFUSED · ${run.chunksOverThreshold} chunks, $wants · $speech"
         }
     }
 }
