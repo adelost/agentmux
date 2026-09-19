@@ -66,10 +66,15 @@ Each row is 80 ms. The firing chunk is the last one: after it the loop is captur
 ## What the numbers say about the six suspects
 
 **S1, one chunk decides. Supported, and it is the strongest thing in the data.** Every one of the five wakes
-is a single chunk spike: the chunk before it scored 0.19, 0.10, 0.13, 0.22 and 0.07, all under the threshold
-that the next chunk cleared. A rule of two consecutive chunks at or over the threshold would have refused all
-five. It is not free: it delays a real detection by 80 ms and it has to be paid for on the positive clips,
-which are measured next and before anything moves.
+fired on a chunk whose predecessor scored 0.19, 0.10, 0.13, 0.22 and 0.07, all under the threshold that the
+next chunk cleared. It is not free: it delays a real detection by 80 ms and it has to be paid for on the
+positive clips, which are measured next and before anything moves.
+
+> **Corrected 2026-09-19, by measurement.** This section first said a rule of two consecutive chunks would
+> have refused all five. It refuses three of five, and a rule of three refuses four; see
+> `docs/qa/2026-09-19-wake-detection-run`. The error was reading a rule off this trace: the trace stops the
+> moment the loop starts capturing, so it can show the chunks before a wake and never the ones after, and
+> three of the five bursts carry on above the threshold after the chunk that fired.
 
 **S2, no speech gate. Mostly refuted for these wakes.** The VAD called the firing chunk 0.96, 1.00, 0.27, 0.89
 and 0.73 speech. A speech floor of 0.5 would have refused one of five, the Karlavagnen Marvin wake. These false
