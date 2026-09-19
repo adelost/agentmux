@@ -46,10 +46,9 @@ class WakeListeningLoop(
     @Volatile private var running = true
     @Volatile private var cancelRequested = false
     private var chunksHeard = 0L
-    /** How many chunks in a row have been at or over the threshold; [WakeDetectionPolicy] says how many it takes. */
-    private var run = 0
+    /** The one run rule, shared with the watcher's near-miss count and with the TRY page's judge. */
+    private val runs = WakeRunCounter(threshold, detection)
     private var runStartedMs = 0L
-    private var runPeak = 0f
     private var runSpeech = 0f
 
     fun stop() {
@@ -66,11 +65,10 @@ class WakeListeningLoop(
      * what a run that never reached the policy's length gets; null is a run that became a question.
      */
     private fun endRun(refusal: WakeRefusal?) {
-        if (run > 0) {
-            trace?.onRunEnded(WakeRun(runStartedMs, runPeak, run, runSpeech, refusal))
+        if (runs.length > 0) {
+            trace?.onRunEnded(WakeRun(runStartedMs, runs.peak, runs.length, runSpeech, refusal))
         }
-        run = 0
-        runPeak = 0f
+        runs.reset()
         // Nothing can read this before the next run writes it, so the reset is hygiene rather than a fix:
         // it keeps a closed run from leaving a reading behind for whoever reads one line earlier next.
         runSpeech = 0f
@@ -110,27 +108,21 @@ class WakeListeningLoop(
             }
             val atMs = chunksHeard * WAKE_CHUNK_MS
             val score = detector.score(chunk)
-            val overThreshold = score >= threshold
-            if (overThreshold) {
-                if (run == 0) {
-                    runStartedMs = atMs
-                    runPeak = 0f
-                }
-                run += 1
-                if (score > runPeak) runPeak = score
-            }
+            val starting = runs.length == 0
+            val overThreshold = runs.over(score)
+            if (overThreshold && starting) runStartedMs = atMs
             if (trace != null) {
                 val speech = vad.probability(chunk)
                 if (overThreshold) runSpeech = speech
                 // A chunk under the threshold ends the run, so the live count it is reported with is zero,
                 // not the length of the run it just broke. That one arrives as its own refused event.
-                trace.onChunkScored(atMs, score, speech, if (overThreshold) run else 0)
+                trace.onChunkScored(atMs, score, speech, if (overThreshold) runs.length else 0)
             }
             if (!overThreshold) {
                 endRun(WakeRefusal.NOT_ENOUGH_CHUNKS)
                 continue
             }
-            if (run < detection.chunksOverThreshold) continue
+            if (!runs.complete) continue
             endRun(refusal = null)
             listener.onDetected(score)
             vad.reset()

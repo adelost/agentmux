@@ -17,7 +17,7 @@ internal fun replay(
 ): Replayed {
     val detector = WakeWordDetector(models)
     vad.reset()
-    val trace = RecordedTrace(traceFile, phrase.threshold)
+    val trace = RecordedTrace(traceFile, phrase.threshold, detection)
     val heard = CountedWakes(trace)
     WakeListeningLoop(
         source = WavChunks(samples),
@@ -66,7 +66,11 @@ private class WavChunks(private val samples: ShortArray) : WakePcmSource {
 }
 
 /** Keeps every waiting chunk's two scores, so a wake can be read with the second before and after it. */
-private class RecordedTrace(file: File?, private val threshold: Float) : WakeChunkTrace {
+private class RecordedTrace(
+    file: File?,
+    threshold: Float,
+    detection: WakeDetectionPolicy,
+) : WakeChunkTrace {
     private val rows = mutableListOf<Triple<Long, Float, Float>>()
     private val writer = file?.also { it.parentFile?.mkdirs() }?.bufferedWriter()?.also { it.write("ms\tscore\tspeech\n") }
     /** The chunk the loop is on: it traces a chunk before it decides about it. */
@@ -76,19 +80,18 @@ private class RecordedTrace(file: File?, private val threshold: Float) : WakeChu
         private set
     var highest = 0f
         private set
-    var longestRun = 0
-        private set
     /** Runs that reached the threshold and were refused for being too short: the corpus's near misses. */
     var refusedRuns = 0
         private set
-    private var run = 0
+    /** The loop's own rule, so a report cannot count runs by a copy of it. */
+    private val runs = WakeRunCounter(threshold, detection)
+    val longestRun: Int get() = runs.longest
 
     override fun onChunkScored(atMs: Long, score: Float, speechProbability: Float, chunksOverThreshold: Int) {
         this.atMs = atMs
         speech = speechProbability
         if (score > highest) highest = score
-        run = if (score >= threshold) run + 1 else 0
-        if (run > longestRun) longestRun = run
+        if (!runs.over(score)) runs.reset()
         rows += Triple(atMs, score, speechProbability)
         writer?.write("%d\t%.4f\t%.4f\n".format(atMs, score, speechProbability))
     }
