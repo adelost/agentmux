@@ -64,6 +64,20 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
     },
   } as const);
 
+  /**
+   * Which glyph the ongoing notification wears. Three, not seven: a status bar shows a shape, not a state
+   * machine. Mattias 2026-09-19 read the old one, the system's "speak now" microphone, as Link hearing him
+   * all the time, so waiting is the quietest of the three and never the loudest.
+   * THINKING travels with SPEAKING because both are the answer half of a turn, and BLOCKED travels with
+   * WAITING because a stopped loop is hearing nothing.
+   */
+  const notificationIcons = finiteValues(`${product}.wake-notification-icon`, ["waiting", "hearing", "speaking"]);
+  const phaseIcons = {
+    off: "waiting", listening: "waiting", blocked: "waiting",
+    capturing: "hearing", sending: "hearing",
+    thinking: "speaking", speaking: "speaking",
+  } as const;
+
   // One word per phase, for a control with no room for a sentence. Declared rather than typed beside the
   // control, so the word a wearer reads on the main page cannot drift from the phase the loop is in.
   // "hearing" rather than "capturing": what the phase is called inside is not what it is called out loud.
@@ -73,8 +87,14 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
   } as const;
   const phasePresentation = defineStatePresentation(phases, {
     id: "wake.phase",
-    fields: [statePresentationField("phase", phases), statePresentationField("word", "string")],
-    cases: mapFiniteCases(phases, (phase) => ({ phase, word: phaseWords[phase] })),
+    fields: [
+      statePresentationField("phase", phases),
+      statePresentationField("word", "string"),
+      statePresentationField("notificationIcon", notificationIcons),
+    ],
+    cases: mapFiniteCases(phases, (phase) => ({
+      phase, word: phaseWords[phase], notificationIcon: phaseIcons[phase],
+    })),
   });
   const phaseAuthority = defineStateAuthority({
     id: phasePresentation.id,
@@ -133,6 +153,7 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
   return {
     phases,
     phrases,
+    notificationIcons,
     statusContract,
     service: wakeService,
     presentation,

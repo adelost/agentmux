@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The answer half of a turn, waiting for the reply and reading it aloud: a filled mark with two arcs
+  leaving it. Sound comes out here, which is the one thing the waiting glyph must never suggest.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,9.5h3l4,-3.5v12l-4,-3.5h-3z" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M14.5,9a4.2,4.2 0,0 1,0 6M17.8,6.2a8.4,8.4 0,0 1,0 11.6"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.0" />
+</vector>

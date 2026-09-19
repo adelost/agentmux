@@ -1,6 +1,7 @@
 package io.agentmux.linkui.product
 
 import io.agentmux.linkui.product.generated.GeneratedLinkCapturedTurn
+import io.agentmux.linkui.product.generated.GeneratedLinkWakeNotificationIconValue
 import io.agentmux.linkui.product.generated.GeneratedLinkComposeTurn
 import io.agentmux.linkui.product.generated.GeneratedLinkHistoryClear
 import io.agentmux.linkui.product.generated.GeneratedLinkHistoryStatus
@@ -444,3 +445,17 @@ internal fun Enum<*>.wireId(): String = name.lowercase().replace('_', '-')
  * word of its own, so what a wearer reads cannot drift from the phase the loop is in.
  */
 fun wakePhaseWord(phase: WakePhase): String = GeneratedWakePhaseAuthority.require(phase.wireId()).word
+
+/** The three glyphs the ongoing notification may wear, as the declaration names them. */
+enum class WakeNotificationIcon { WAITING, HEARING, SPEAKING }
+
+/**
+ * Which glyph a phase wears, from the declaration. A host maps these three to its own resources; nothing
+ * decides the grouping in native code, so the status bar cannot disagree with the phase.
+ */
+fun wakeNotificationIcon(phase: WakePhase): WakeNotificationIcon =
+    when (GeneratedWakePhaseAuthority.require(phase.wireId()).notificationIcon) {
+        GeneratedLinkWakeNotificationIconValue.WAITING -> WakeNotificationIcon.WAITING
+        GeneratedLinkWakeNotificationIconValue.HEARING -> WakeNotificationIcon.HEARING
+        GeneratedLinkWakeNotificationIconValue.SPEAKING -> WakeNotificationIcon.SPEAKING
+    }
