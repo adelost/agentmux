@@ -93,6 +93,48 @@ class WakeTryTest {
         assertEquals(2, judged.byStep.getValue(WakeSensitivity.STRICT).longestRun)
     }
 
+    /**
+     * Measured on a phone 2026-09-19, and the reason the page holds the loop rather than cancelling what
+     * it starts: a clip that wakes every step read NO under STRICT on the glass. Dropping the question
+     * after it began reset the detector in the middle of the phrase, and the rest of the run never
+     * reached the page. Held the other way, what the page is handed is what the file says.
+     */
+    @Test
+    fun aLoopThatMayNotAskAQuestionHandsThePageTheWholeUtterance() {
+        val fixture = "hey-jarvis-question-sv-noise.wav"
+        val whileWatching = pageWatching(fixture)
+        val fromTheFile = judge(fixture)
+
+        WakeSensitivity.offered.forEach { step ->
+            assertEquals(
+                "$fixture under ${step.id}",
+                fromTheFile.byStep.getValue(step).wakes,
+                whileWatching.byStep.getValue(step).wakes,
+            )
+        }
+        // Named, because this is the one the truncated run lost: the strictest step needs a third chunk
+        // and only gets it if nothing interrupted the phrase.
+        assertTrue(whileWatching.byStep.getValue(WakeSensitivity.STRICT).wakes)
+    }
+
+    /** The clip through the real loop with the page's own recorder on it, as a phone runs TRY mode. */
+    private fun pageWatching(fixture: String): WakeTry = wakeModels(phrase).use { models ->
+        SileroSpeechProbability.load(modelBytes("silero_vad.onnx")).use { vad ->
+            val recorder = WakeTryRecorder(phrase)
+            val bytes = requireNotNull(javaClass.getResourceAsStream("/$fixture")).readBytes()
+            replay(
+                phrase = phrase,
+                models = models,
+                vad = vad,
+                samples = readPcm16Wav(bytes),
+                detection = WakeSensitivity.NORMAL.detection,
+                watcher = recorder,
+                questionsAllowed = false,
+            )
+            recorder.read().tries.first().judged
+        }
+    }
+
     /** Every chunk of the fixture scored once by each model, in order, exactly as the loop meets them. */
     private fun judge(fixture: String): WakeTry = wakeModels(phrase).use { models ->
         SileroSpeechProbability.load(modelBytes("silero_vad.onnx")).use { vad ->

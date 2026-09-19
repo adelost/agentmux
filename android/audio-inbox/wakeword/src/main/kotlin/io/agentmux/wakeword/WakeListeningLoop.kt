@@ -42,6 +42,15 @@ class WakeListeningLoop(
     private val detectionAllowed: () -> Boolean,
     private val listener: WakeLoopListener,
     private val trace: WakeChunkTrace? = null,
+    /**
+     * False while a surface is only listening in: every chunk is still scored and reported, and a run
+     * that is long enough is simply not turned into a question. It is not the same as [cancelQuestion],
+     * which drops a question that has already begun: measured on a device 2026-09-19, dropping one
+     * resets the detector in the middle of the phrase, and the clip that wakes every step then read NO
+     * under STRICT because the rest of its run never reached the page. A page that judges an utterance
+     * needs the utterance whole, so it asks for no question to start rather than for one to be dropped.
+     */
+    private val questionsAllowed: () -> Boolean = { true },
 ) {
     @Volatile private var running = true
     @Volatile private var cancelRequested = false
@@ -119,10 +128,15 @@ class WakeListeningLoop(
                 trace.onChunkScored(atMs, score, speech, if (overThreshold) runs.length else 0)
             }
             if (!overThreshold) {
-                endRun(WakeRefusal.NOT_ENOUGH_CHUNKS)
+                // A run that was long enough and became nothing was not refused for being short: while a
+                // watcher holds the loop, nothing was asked of it at all.
+                endRun(if (runs.complete) WakeRefusal.NOT_ASKED else WakeRefusal.NOT_ENOUGH_CHUNKS)
                 continue
             }
             if (!runs.complete) continue
+            // Only a question resets the detector, so while none may start, the run stays open and the
+            // chunks after it are still the same utterance for whoever is watching.
+            if (!questionsAllowed()) continue
             endRun(refusal = null)
             listener.onDetected(score)
             vad.reset()

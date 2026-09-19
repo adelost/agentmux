@@ -14,6 +14,10 @@ internal fun replay(
     samples: ShortArray,
     detection: WakeDetectionPolicy,
     traceFile: File? = null,
+    /** A second watcher on the same chunks, the way the TRY page watches the loop on a phone. */
+    watcher: WakeChunkTrace? = null,
+    /** False replays the loop as the TRY page holds it: judged and reported, never asked. */
+    questionsAllowed: Boolean = true,
 ): Replayed {
     val detector = WakeWordDetector(models)
     vad.reset()
@@ -34,7 +38,8 @@ internal fun replay(
         detection = detection,
         detectionAllowed = { true },
         listener = heard,
-        trace = trace,
+        trace = if (watcher == null) trace else WakeChunkTraceFanout(listOf(trace, watcher)),
+        questionsAllowed = { questionsAllowed },
     ).run()
     trace.close()
     return Replayed(heard.wakes, heard.capturedMs, trace.highest, trace.longestRun, trace.refusedRuns)

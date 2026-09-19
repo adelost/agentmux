@@ -239,6 +239,9 @@ internal fun runSentence(traced: TracedRun, step: WakeSensitivity, zone: ZoneId 
         } else {
             "${chunkCount(run.chunksOverThreshold)}, $wants"
         }
+        // Row 217: long enough to wake Link, and the TRY page was holding the loop while it judged what
+        // it heard. Calling that a refusal would put the rule's name on something the rule never saw.
+        WakeRefusal.NOT_ASKED -> "${chunkCount(run.chunksOverThreshold)}, nothing was asked while TRY was open"
     }
     return "$what · $speech · ${runClock(traced.wallClockMs, zone)}"
 }

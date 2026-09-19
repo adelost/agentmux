@@ -195,7 +195,8 @@ class MainActivity : ComponentActivity() {
         if (permissions.isNotEmpty()) requestPermissions(permissions.toTypedArray(), 1)
     }
 
-    private companion object {
+    /** The debug-only launch seam QA uses; a test names these rather than copying their strings. */
+    internal companion object {
         const val STATE_ROUTE = "io.agentmux.audioinbox.ROUTE"
         const val QA_STATE_EXTRA = "qa_state"
         const val QA_STATE_ACTIVE = "active"
