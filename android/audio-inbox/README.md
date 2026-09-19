@@ -44,7 +44,7 @@ announcements off closes that feed and stops its playback. Explicit `amux say`
 remains a separate user-requested channel.
 
 **Wake word** is off by default and phone-only. When turned on, the foreground
-`WakeWordService` owns one microphone, shows an ongoing notification with Stop,
+`WakeWordService` owns one microphone, shows an ongoing notification with Turn off,
 and runs wake phrase detection on device (Hey Jarvis, Hey Marvin or Alexa, picked
 in Settings). After the phrase it records the question
 until 2.5 s of silence (Silero VAD, 30 s cap), encodes the same AAC/MPEG-4 file
@@ -58,9 +58,29 @@ Every stop reason is shown in the
 notification and the Settings status row. On the home screen the talk ring shows
 it like holding HOLD TO TALK: listening, live voice level and the countdown
 before a paused question is sent. Turning it on asks for Unrestricted
-battery use so the phone does not stop the listening service; Stop in the
-notification turns the preference off. Without the toggle Link never opens a
+battery use so the phone does not stop the listening service; Turn off in the
+notification turns the preference off. The main page carries the same switch: one
+row showing the wake word's state in one declared word, and a tap that writes the
+same preference Settings writes. Without either toggle Link never opens a
 background microphone.
+
+The notification wears one of Link's own three monochrome glyphs, chosen by the
+declared phase group: an open ring while it waits for the phrase, a level meter
+while it hears a question, a speaker while it answers. Its channel is created
+silent, with no sound, no vibration and no badge. **Android keeps a channel's
+settings once it exists**, so a phone that already has the wake word channel from
+an earlier build keeps whatever that build gave it; the silence applies to fresh
+installs. Clearing Link's data, or reinstalling, is what gives an existing phone
+the new channel.
+
+**WAKE DEBUG**, a phone-only page under Settings, shows what the detector hears:
+the live score against the phrase's threshold, the speech probability beside it,
+how many chunks of the run are in, and the last fifty runs that reached the
+threshold with the rule that decided each one. A run that was over the threshold
+for one chunk only and was refused is named in those words, because that is the
+case a rate measured on synthesised clips cannot price. Watching is off until
+asked and costs one extra speech-model call per 80 ms chunk; the trace is bounded
+and in memory, and nothing is written to storage until EXPORT is tapped.
 
 Recording starts on press; release sends once, and a press shorter than 500 ms
 is discarded. Sliding outside the control cancels. Text Send is disabled for
