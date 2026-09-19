@@ -149,3 +149,34 @@ re-read the fleet every tick. Pattern, in force from 2026-09-17:
   false signal.
 - Never wake a pane from the watch to ask for status; commits and the ledger
   are the status. Example: `skydive-altimeter/.agents/0/fleet-check.py`.
+
+## 8. The ledger: one list of rows, closed one by one
+
+Sections 1 and 7 speak of rows and the ledger. This is what they are. Use it
+whenever work spans more than one reply or more than one agent. Pattern in
+force from 2026-09-14 (`skydive-altimeter/TASKS.md`), written down 2026-09-19.
+
+- One file in the repo the work belongs to: `TASKS.md` (or `docs/TASKS.md`).
+  One table. Columns: row number, what (one outcome), owner, done when (the
+  proof, as something that can be run or looked at), state, closed on (commit
+  or release plus the numbers the proof gave).
+- Numbers are never reused. A finding made while working a row becomes a NEW
+  row; it does not grow the old one.
+- One "done for every row" block above the table (release or merge, picture
+  for anything visible, the test that fails before and passes after, nothing
+  silent). A row's own line adds to it, never replaces it.
+- The orchestrator closes a row after checking the proof himself. A worker's
+  "done" moves the row to review, not to closed.
+- Closing WITHOUT a code change is a valid outcome when a measurement says
+  so. The closing note says what was measured.
+- A row the human must act on is a row too (owner: the human), so waiting on
+  him is visible and everything else keeps moving.
+- The human's words live verbatim in their own file next to the ledger
+  (`MATTIAS-FIXLIST.md`, `PLAN-*.md`), each with your reading marked as yours.
+  The ledger holds outcomes, not quotes.
+- The top of the file is the table. History is `git log` and the closing
+  notes; when the header grows into paragraphs, move them to an archive file
+  with the same format and unique numbers across both.
+- Report from the ledger: closed today with their release, open with their
+  state, the decisions that are the human's. The watch in section 7 reads the
+  same file.
