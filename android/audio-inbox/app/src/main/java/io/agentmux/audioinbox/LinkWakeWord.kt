@@ -78,12 +78,15 @@ internal object LinkWakeDebug {
             "wake-trace-${System.currentTimeMillis()}.tsv",
         )
         file.bufferedWriter().use { out ->
-            out.write("atMs\tpeakScore\tchunksOverThreshold\tspeech\tverdict\n")
-            snapshot.runs.asReversed().forEach { run ->
+            // The clock column is the wearer's, the millisecond column is the loop's: one says when it
+            // happened to him, the other how far into this listening pass it was.
+            out.write("clock\tatMs\tpeakScore\tchunksOverThreshold\tspeech\tverdict\n")
+            snapshot.runs.asReversed().forEach { traced ->
+                val run = traced.run
                 out.write(
-                    "%d\t%.4f\t%d\t%.4f\t%s\n".format(
-                        run.atMs, run.peakScore, run.chunksOverThreshold, run.speechProbability,
-                        run.refusal?.name ?: "HEARD",
+                    "%s\t%d\t%.4f\t%d\t%.4f\t%s\n".format(
+                        runClock(traced.wallClockMs), run.atMs, run.peakScore, run.chunksOverThreshold,
+                        run.speechProbability, run.refusal?.name ?: "HEARD",
                     ),
                 )
             }

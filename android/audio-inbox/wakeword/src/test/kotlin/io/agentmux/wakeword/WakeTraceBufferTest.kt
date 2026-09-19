@@ -13,14 +13,14 @@ class WakeTraceBufferTest {
     fun aFreshTraceHasHeardNothing() {
         val trace = WakeTraceBuffer().read()
         assertNull(trace.latest)
-        assertEquals(emptyList<WakeRun>(), trace.runs)
+        assertEquals(emptyList<TracedRun>(), trace.runs)
     }
 
     @Test
     fun theNewestRunIsFirstAndTheOldestFallsOffTheEnd() {
         val buffer = WakeTraceBuffer(capacity = 3)
         (1L..5L).forEach { buffer.onRunEnded(run(it * 1_000)) }
-        assertEquals(listOf(5_000L, 4_000L, 3_000L), buffer.read().runs.map { it.atMs })
+        assertEquals(listOf(5_000L, 4_000L, 3_000L), buffer.read().runs.map { it.run.atMs })
     }
 
     @Test
@@ -30,6 +30,18 @@ class WakeTraceBufferTest {
         buffer.onChunkScored(160, 0.7f, 0.9f, 1)
         val latest = buffer.read().latest
         assertEquals(WakeChunkReading(160, 0.7f, 0.9f, 1), latest)
+    }
+
+    // The loop counts in chunks from the microphone it opened; a page needs the wearer's own clock, and it
+    // is taken here, on arrival, so the loop never has to be given one.
+    @Test
+    fun everyRunIsStampedWithTheClockItArrivedOn() {
+        var now = 1_700_000_000_000L
+        val buffer = WakeTraceBuffer(wallClock = { now })
+        buffer.onRunEnded(run(80))
+        now += 5_000
+        buffer.onRunEnded(run(160))
+        assertEquals(listOf(1_700_000_005_000L, 1_700_000_000_000L), buffer.read().runs.map { it.wallClockMs })
     }
 
     @Test
@@ -54,6 +66,6 @@ class WakeTraceBufferTest {
         val buffer = WakeTraceBuffer()
         buffer.onRunEnded(run(80, refusal = null))
         buffer.onRunEnded(run(160))
-        assertEquals(listOf(false, true), buffer.read().runs.map { it.accepted })
+        assertEquals(listOf(false, true), buffer.read().runs.map { it.run.accepted })
     }
 }
