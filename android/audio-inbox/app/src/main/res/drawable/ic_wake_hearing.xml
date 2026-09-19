@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Hearing a question: a level meter, because that is what is happening. Bars go in, nothing comes out,
+  and it is plainly not the waiting glyph at a glance in a status bar.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M5,10.5L5,13.5M9,7.5L9,16.5M13,4.5L13,19.5M17,8.5L17,15.5M21,11L21,13"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.4" />
+</vector>

@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import io.agentmux.linkui.product.wakeNotificationIcon
+import io.agentmux.linkui.product.WakeNotificationIcon
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakeStatus
@@ -18,7 +20,14 @@ internal object WakeNotifications {
     fun build(context: Context, status: WakeStatus): Notification {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(WAKE_CHANNEL, "Wake word", NotificationManager.IMPORTANCE_LOW),
+            // An ongoing notification for a microphone that is only waiting has nothing to announce:
+            // no sound, no vibration, no badge. Android keeps a channel's settings once it exists, so
+            // this decides how it starts life on a fresh install.
+            NotificationChannel(WAKE_CHANNEL, "Wake word", NotificationManager.IMPORTANCE_LOW).apply {
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+            },
         )
         val open = PendingIntent.getActivity(
             context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
@@ -29,7 +38,7 @@ internal object WakeNotifications {
             PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(context, WAKE_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(wakeSmallIcon(status.phase))
             .setContentTitle(wakePhaseTitle(status.phase, status.phrase))
             .setContentText(status.detail.ifBlank { wakeHint(status.phrase) })
             .setContentIntent(open)
@@ -51,6 +60,17 @@ internal fun wakePhaseTitle(phase: WakePhase, phrase: WakePhrase): String = when
     WakePhase.THINKING -> "Waiting for the reply"
     WakePhase.SPEAKING -> "Reading the reply"
     WakePhase.BLOCKED -> "Wake word stopped"
+}
+
+/**
+ * Link's own glyph rather than the system's "speak now" microphone, which Mattias read as Link hearing
+ * him all the time. Which of the three the phase wears is declared, not decided here; this only says
+ * which drawable each declared glyph is, because a resource id is the one thing a declaration cannot hold.
+ */
+private fun wakeSmallIcon(phase: WakePhase): Int = when (wakeNotificationIcon(phase)) {
+    WakeNotificationIcon.WAITING -> R.drawable.ic_wake_waiting
+    WakeNotificationIcon.HEARING -> R.drawable.ic_wake_hearing
+    WakeNotificationIcon.SPEAKING -> R.drawable.ic_wake_speaking
 }
 
 internal fun wakeHint(phrase: WakePhrase): String = "Say \"${phrase.spoken}\", then your question"

@@ -62,6 +62,20 @@ class LinkWakeToggleTest {
         )
     }
 
+    // Mattias 2026-09-19 read the system's "speak now" microphone as Link hearing him all the time.
+    // Three glyphs, and the quiet one is worn by every phase where nothing is being heard.
+    @Test
+    fun everyPhaseWearsOneOfThreeDeclaredGlyphsAndWaitingHearsNothing() {
+        assertEquals(
+            mapOf(
+                WakeNotificationIcon.WAITING to listOf(WakePhase.OFF, WakePhase.LISTENING, WakePhase.BLOCKED),
+                WakeNotificationIcon.HEARING to listOf(WakePhase.CAPTURING, WakePhase.SENDING),
+                WakeNotificationIcon.SPEAKING to listOf(WakePhase.THINKING, WakePhase.SPEAKING),
+            ),
+            WakePhase.entries.groupBy(::wakeNotificationIcon).mapValues { (_, phases) -> phases.sortedBy { it.ordinal } },
+        )
+    }
+
     @Test
     fun theControlReadsItsOwnDeclaredPortOntoTheWakePresentation() {
         val wake = MutableStateFlow(WakeStatus())

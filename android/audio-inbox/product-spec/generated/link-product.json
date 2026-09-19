@@ -2534,6 +2534,15 @@
                 "name": "word",
                 "nullable": false,
                 "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "notificationIcon",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-notification-icon"
+                }
               }
             ],
             "id": "wake.phase.payload",
@@ -2630,6 +2639,15 @@
                 "name": "word",
                 "nullable": false,
                 "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "notificationIcon",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-notification-icon"
+                }
               }
             ],
             "id": "wake.phase.payload",
@@ -2836,6 +2854,14 @@
         "hey-jarvis",
         "hey-marvin",
         "alexa"
+      ]
+    },
+    {
+      "id": "link.wake-notification-icon",
+      "values": [
+        "waiting",
+        "hearing",
+        "speaking"
       ]
     },
     {
@@ -6228,6 +6254,15 @@
                 "name": "word",
                 "nullable": false,
                 "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "notificationIcon",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-notification-icon"
+                }
               }
             ],
             "id": "wake.phase.payload",
@@ -7856,6 +7891,15 @@
             "name": "word",
             "nullable": false,
             "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "notificationIcon",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.wake-notification-icon"
+            }
           }
         ],
         "id": "wake.phase.payload",
@@ -9613,30 +9657,37 @@
       "presentation": {
         "cases": {
           "blocked": {
+            "notificationIcon": "waiting",
             "phase": "blocked",
             "word": "BLOCKED"
           },
           "capturing": {
+            "notificationIcon": "hearing",
             "phase": "capturing",
             "word": "HEARING"
           },
           "listening": {
+            "notificationIcon": "waiting",
             "phase": "listening",
             "word": "LISTENING"
           },
           "off": {
+            "notificationIcon": "waiting",
             "phase": "off",
             "word": "OFF"
           },
           "sending": {
+            "notificationIcon": "hearing",
             "phase": "sending",
             "word": "SENDING"
           },
           "speaking": {
+            "notificationIcon": "speaking",
             "phase": "speaking",
             "word": "SPEAKING"
           },
           "thinking": {
+            "notificationIcon": "speaking",
             "phase": "thinking",
             "word": "THINKING"
           }
@@ -9662,6 +9713,15 @@
               "name": "word",
               "nullable": false,
               "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "notificationIcon",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.wake-notification-icon"
+              }
             }
           ],
           "id": "wake.phase.payload",
@@ -9686,6 +9746,17 @@
           {
             "name": "word",
             "value": "string"
+          },
+          {
+            "name": "notificationIcon",
+            "value": {
+              "id": "link.wake-notification-icon",
+              "values": [
+                "waiting",
+                "hearing",
+                "speaking"
+              ]
+            }
           }
         ],
         "id": "wake.phase",
