@@ -90,7 +90,7 @@ export const linkNodes = [
   {
     id: "preferences.service", nodeTypeRef: preferencesService.id,
     config: {},
-    bindings: { toggle: "preferences.toggles.toggle" },
+    bindings: { toggle: "preferences.toggles.toggle", wakeToggle: "wake.toggle.toggle" },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {

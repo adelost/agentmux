@@ -26,6 +26,7 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
           { surface: "compact", mounts: [
             { instance: "navigation.page-host", region: "host" },
             { instance: "target.picker", region: "content" },
+            { instance: "wake.toggle", region: "content" },
             { instance: "conversation.latest", region: "content" },
             { instance: "playback.controls", region: "footer", requirement: optional },
             { instance: "conversation.composer", region: "footer" },
@@ -35,6 +36,7 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
           { surface: "wide", mounts: [
             { instance: "navigation.page-host", region: "host" },
             { instance: "target.picker", region: "rail" },
+            { instance: "wake.toggle", region: "rail" },
             { instance: "conversation.latest", region: "content" },
             { instance: "playback.controls", region: "footer", requirement: optional },
             { instance: "conversation.composer", region: "footer" },

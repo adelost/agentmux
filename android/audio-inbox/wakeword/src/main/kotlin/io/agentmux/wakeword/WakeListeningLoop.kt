@@ -71,6 +71,9 @@ class WakeListeningLoop(
         }
         run = 0
         runPeak = 0f
+        // Nothing can read this before the next run writes it, so the reset is hygiene rather than a fix:
+        // it keeps a closed run from leaving a reading behind for whoever reads one line earlier next.
+        runSpeech = 0f
     }
 
     fun run() {

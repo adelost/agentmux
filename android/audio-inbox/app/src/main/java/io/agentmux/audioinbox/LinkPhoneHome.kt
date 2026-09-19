@@ -27,6 +27,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.ringkit.ui.PhoneScreenHeader
+import io.agentmux.linkcore.LinkPreferenceKey
+import io.agentmux.linkui.product.LinkPreferenceToggleEvent
+import io.agentmux.linkui.product.LinkWakePresentation
+import io.agentmux.linkui.product.wakePhaseWord
+import io.agentmux.wakeword.WakePhase
 import com.adelost.ringkit.ui.RingMessage
 import com.adelost.ringkit.ui.RingMessageSpec
 import com.adelost.ringkit.ui.RingTextComposer
@@ -67,6 +72,8 @@ internal fun LinkPhoneHome(
     val composer by graph.composerDraft.collectAsStateWithLifecycle()
     val captureSpec by graph.captureSpec.collectAsStateWithLifecycle()
     val savedReplyAudio by graph.savedReplyAudio.collectAsStateWithLifecycle()
+    val wake by graph.wakeToggleModel.collectAsStateWithLifecycle()
+    val preferences by graph.preferences.collectAsStateWithLifecycle()
     var choosingRecipient by remember { mutableStateOf(false) }
     if (choosingRecipient) {
         LinkRecipientPicker(
@@ -111,6 +118,22 @@ internal fun LinkPhoneHome(
                     GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> Unit
                     GeneratedLinkHomeComponent.TARGET_PICKER ->
                         PhoneRow(linkRecipientRow(target) { choosingRecipient = true })
+                    // Mattias 2026-09-19 asked to turn the wake word on and off "enklare ... på kanske
+                    // huvudsidan". One word for where it is, one tap for on or off, writing the same
+                    // preference Settings writes. Not the talk ring: a press there would fight it for the
+                    // microphone (decision 2026-09-14).
+                    GeneratedLinkHomeComponent.WAKE_TOGGLE -> PhoneRow(
+                        title = wakePhaseWord(wake.phase),
+                        sub = wakeToggleDetail(wake, preferences.wakeWord),
+                        icon = LinkNativeBindings.requireIcon(
+                            if (wake.phase == WakePhase.BLOCKED) "warning" else "record",
+                        ),
+                        onTap = {
+                            graph.onWakeToggle(
+                                LinkPreferenceToggleEvent(LinkPreferenceKey.WAKE_WORD, !preferences.wakeWord),
+                            )
+                        },
+                    )
                     GeneratedLinkHomeComponent.CONVERSATION_LATEST -> LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxWidth().weight(1f),
@@ -176,4 +199,15 @@ internal fun LinkPhoneHome(
             }
         }
     }
+}
+
+/**
+ * What the one word does not say: why it is off, why it stopped, or what to say when it is listening.
+ * The blocked reason is the loop's own sentence, never a guess made here.
+ */
+private fun wakeToggleDetail(wake: LinkWakePresentation, enabled: Boolean): String = when {
+    wake.phase == WakePhase.BLOCKED -> wake.detail.orEmpty().ifBlank { "Wake word stopped" }
+    !enabled -> "Tap to listen for \"${wake.phrase.spoken}\""
+    wake.phase == WakePhase.LISTENING -> "Say \"${wake.phrase.spoken}\" · tap to stop"
+    else -> wake.detail.orEmpty().ifBlank { "Tap to stop" }
 }

@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego catalog
-// Product declarations SHA-256: 0b1204a694aebb58e23c7426a1fffd1b372e9e86743183eeca696a88cf867e0c
+// Product declarations SHA-256: 4a0d87ad04b23b51cdf1ed2766029779b6889d82ad752681c0df9054cd405351
 package io.agentmux.linkui.product.generated
 
 internal enum class GeneratedLinkNodeId(val wireId: String) { NAVIGATION_SERVICE("navigation.service"), CAPTURE_SERVICE("capture.service"), CONVERSATION_SERVICE("conversation.service"), PLAYBACK_SERVICE("playback.service"), TARGET_SERVICE("target.service"), SESSION_SERVICE("session.service"), HISTORY_SERVICE("history.service"), PREFERENCES_SERVICE("preferences.service"), UPDATES_SERVICE("updates.service"), RECOVERY_SERVICE("recovery.service"), CAPTURE_PRESENTATION("capture.presentation"), CONVERSATION_PRESENTATION("conversation.presentation"), PLAYBACK_PRESENTATION("playback.presentation"), TARGET_PRESENTATION("target.presentation"), SESSION_PRESENTATION("session.presentation"), HISTORY_PRESENTATION("history.presentation"), PREFERENCES_PRESENTATION("preferences.presentation"), UPDATES_PRESENTATION("updates.presentation"), RECOVERY_PRESENTATION("recovery.presentation"), CAPTURE_PHASE_PRESENTATION_ADAPTER("capture.phase.presentation-adapter"), CONVERSATION_DELIVERY_PHASE_PRESENTATION_ADAPTER("conversation.delivery-phase.presentation-adapter"), CONVERSATION_REPLY_PHASE_PRESENTATION_ADAPTER("conversation.reply-phase.presentation-adapter"), PLAYBACK_PHASE_PRESENTATION_ADAPTER("playback.phase.presentation-adapter"), TARGET_KIND_PRESENTATION_ADAPTER("target.kind.presentation-adapter"), SESSION_CONNECTION_STATE_PRESENTATION_ADAPTER("session.connection-state.presentation-adapter"), UPDATES_PHASE_PRESENTATION_ADAPTER("updates.phase.presentation-adapter"), RECOVERY_PHASE_PRESENTATION_ADAPTER("recovery.phase.presentation-adapter"), WAKE_SERVICE("wake.service"), WAKE_PRESENTATION("wake.presentation"), WAKE_PHASE_PRESENTATION_ADAPTER("wake.phase.presentation-adapter"), WAKE_PHRASE_PRESENTATION_ADAPTER("wake.phrase.presentation-adapter") }
@@ -25,6 +25,7 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object HISTORY_SERVICE_CLEAR : GeneratedProductInputPortId { override val value = "history.service.clear" }
         data object HISTORY_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "history.service.status" }
         data object PREFERENCES_SERVICE_TOGGLE : GeneratedProductInputPortId { override val value = "preferences.service.toggle" }
+        data object PREFERENCES_SERVICE_WAKETOGGLE : GeneratedProductInputPortId { override val value = "preferences.service.wakeToggle" }
         data object PREFERENCES_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "preferences.service.status" }
         data object UPDATES_SERVICE_COMMAND : GeneratedProductInputPortId { override val value = "updates.service.command" }
         data object UPDATES_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "updates.service.status" }
@@ -103,6 +104,10 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object NAVIGATION_SETTINGS_ENTRY_OPEN : GeneratedProductOutputPortId { override val value = "navigation.settings-entry.open" }
         data object NAVIGATION_DEV_HOST_ENTRY_OPEN : GeneratedProductOutputPortId { override val value = "navigation.dev-host-entry.open" }
         data object NAVIGATION_WAKE_DEBUG_ENTRY_OPEN : GeneratedProductOutputPortId { override val value = "navigation.wake-debug-entry.open" }
+        data object WAKE_TOGGLE_MODEL : GeneratedProductInputPortId { override val value = "wake.toggle.model" }
+        data object WAKE_TOGGLE_WAKESTATE : GeneratedProductInputPortId { override val value = "wake.toggle.wakeState" }
+        data object WAKE_TOGGLE_WAKEPHRASE : GeneratedProductInputPortId { override val value = "wake.toggle.wakePhrase" }
+        data object WAKE_TOGGLE_TOGGLE : GeneratedProductOutputPortId { override val value = "wake.toggle.toggle" }
         data object WAKE_STATUS_MODEL : GeneratedProductInputPortId { override val value = "wake.status.model" }
         data object WAKE_STATUS_WAKESTATE : GeneratedProductInputPortId { override val value = "wake.status.wakeState" }
         data object WAKE_STATUS_WAKEPHRASE : GeneratedProductInputPortId { override val value = "wake.status.wakePhrase" }

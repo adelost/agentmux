@@ -230,6 +230,9 @@ fun linkWatchRows(
     GeneratedLinkHomeComponents.resolve(CircleSurfaceClass.ROUND).orderedMounts.forEach { mount ->
         when (mount.component) {
             GeneratedLinkHomeComponent.NAVIGATION_PAGE_HOST -> Unit
+            // The wake word is phone-only, so the round tree never mounts its control; this branch exists
+            // because the component vocabulary is shared, not because the watch has one to draw.
+            GeneratedLinkHomeComponent.WAKE_TOGGLE -> Unit
             GeneratedLinkHomeComponent.TARGET_PICKER ->
                 rows += linkRecipientRow(target, onOpenRecipients).copy(key = mount.id)
             GeneratedLinkHomeComponent.CAPTURE_TALK -> rows += RowSpec(

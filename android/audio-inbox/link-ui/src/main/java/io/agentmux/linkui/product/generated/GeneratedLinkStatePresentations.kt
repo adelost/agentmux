@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: 7da6705c816614b8794617bef5658429c3810730193904a687a0b4efce9e2f99
+// Product declarations SHA-256: cd0766efaa746828a4b5825c48da2722ba130a46ab270cdb682c7ba3ed95e5bb
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput
@@ -322,6 +322,7 @@ internal object GeneratedRecoveryPhaseAuthority {
 
 internal data class GeneratedWakePhasePresentation(
     val phase: GeneratedLinkWakePhaseValue,
+    val word: String,
 )
 
 internal object GeneratedWakePhaseAuthority {
@@ -333,17 +334,20 @@ internal object GeneratedWakePhaseAuthority {
     ) {}
     val componentInputs: List<ProductComponentInput<GeneratedWakePhasePresentation>> = listOf(
         object : ProductComponentInput<GeneratedWakePhasePresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.WAKE_TOGGLE_WAKESTATE,
+        ) {},
+        object : ProductComponentInput<GeneratedWakePhasePresentation>(
             GeneratedLinkNativeLegoCatalog.PortIds.WAKE_STATUS_WAKESTATE,
         ) {},
     )
     private val cases: Map<String, GeneratedWakePhasePresentation> = mapOf(
-        "off" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.OFF),
-        "listening" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.LISTENING),
-        "capturing" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.CAPTURING),
-        "sending" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SENDING),
-        "thinking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.THINKING),
-        "speaking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SPEAKING),
-        "blocked" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.BLOCKED),
+        "off" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.OFF, word = "OFF"),
+        "listening" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.LISTENING, word = "LISTENING"),
+        "capturing" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.CAPTURING, word = "HEARING"),
+        "sending" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SENDING, word = "SENDING"),
+        "thinking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.THINKING, word = "THINKING"),
+        "speaking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SPEAKING, word = "SPEAKING"),
+        "blocked" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.BLOCKED, word = "BLOCKED"),
     )
 
     fun require(stateId: String): GeneratedWakePhasePresentation = requireNotNull(cases[stateId]) {
@@ -363,6 +367,9 @@ internal object GeneratedWakePhraseAuthority {
         GeneratedLinkNativeLegoCatalog.PortIds.WAKE_PHRASE_PRESENTATION_ADAPTER_PRESENTATION,
     ) {}
     val componentInputs: List<ProductComponentInput<GeneratedWakePhrasePresentation>> = listOf(
+        object : ProductComponentInput<GeneratedWakePhrasePresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.WAKE_TOGGLE_WAKEPHRASE,
+        ) {},
         object : ProductComponentInput<GeneratedWakePhrasePresentation>(
             GeneratedLinkNativeLegoCatalog.PortIds.WAKE_STATUS_WAKEPHRASE,
         ) {},
