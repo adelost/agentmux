@@ -2,6 +2,7 @@ package io.agentmux.audioinbox
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelost.designkit.ui.CircleAccent
@@ -128,6 +130,15 @@ internal fun LinkWakeTryScreen(onBack: () -> Unit) {
     }
 }
 
+/**
+ * One size for every verdict, and room for the two lines the longest one takes. Measured at 27 sp:
+ * "NOT THE PHRASE", the longest line any verdict breaks into, is about 234 dp wide inside the block's
+ * 272 dp at the narrowest phone this page is offered on.
+ */
+private const val VERDICT_SP = 27f
+private val VERDICT_HEIGHT = 72.dp
+private val WHY_HEIGHT = 32.dp
+
 /** The peak the page is reading against: the try being shown, or the live meter's own hold. */
 private fun shownPeak(showing: RecordedTry?, peak: LinkWakePeak): Float =
     showing?.judged?.highestScore ?: peak.score
@@ -148,32 +159,55 @@ private fun Verdict(showing: RecordedTry?, step: WakeSensitivity, phrase: WakePh
     )
 }
 
-/** The answer, then one line of why. Both are for the step in use; the rows below carry the other two. */
+/**
+ * The answer, then one line of why. Both are for the step in use; the rows below carry the other two.
+ *
+ * The block is one height and one type size whatever it says. lsrc:0 2026-09-19 measured the first
+ * version: the longest verdict shrank its own type and everything under it jumped about 8 px between
+ * states, so a wearer who says the phrase twice sees the page move rather than the answer change. The
+ * longest verdict breaks onto two lines inside the same box instead.
+ */
 @Composable
 private fun Verdict(words: String, color: androidx.compose.ui.graphics.Color, why: String) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 22.dp, bottom = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CircleText(
-            text = words,
-            color = color,
-            // One long verdict exists, and shrinking it is better than three words on three lines.
-            fontSizeSp = if (words.length > 14) 21f else 30f,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            balancedLines = true,
-        )
+        FixedLines(VERDICT_HEIGHT) {
+            CircleText(
+                text = words,
+                color = color,
+                fontSizeSp = VERDICT_SP,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                balancedLines = true,
+            )
+        }
         Spacer(Modifier.height(8.dp))
-        CircleText(
-            text = why,
-            color = circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.SUPPORTING),
-            fontSizeSp = 12f,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-        )
+        FixedLines(WHY_HEIGHT) {
+            CircleText(
+                text = why,
+                color = circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.SUPPORTING),
+                fontSizeSp = 12f,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+            )
+        }
     }
+}
+
+/**
+ * Two lines' worth of room, with one line centred in it. CircleText's sizes are fixed against the
+ * wearer's font scale (circleFixedSp), so a height in dp holds two of them on any phone.
+ */
+@Composable
+private fun FixedLines(height: Dp, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxWidth().height(height),
+        contentAlignment = Alignment.Center,
+        content = { content() },
+    )
 }
 
 /**

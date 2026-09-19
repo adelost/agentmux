@@ -134,19 +134,15 @@ class LinkWakeTryNativeTest {
     }
 
     /**
-     * Plays a committed clip through the real loop. The microphone the page opened is closed first, so
-     * the clip is the only thing the detector is given and the page's own recorder is still attached
-     * when the loop comes back.
+     * Hands a committed clip to the real loop: it becomes what the detector reads, whether the loop is
+     * already listening under an open page or has to be started for it. Nothing is stopped on the way,
+     * because a stop and a start milliseconds apart is a race no wearer runs and no proof should.
      */
     private fun play(clip: String, activity: ActivityScenario<MainActivity>) {
         val file = File(context.cacheDir, clip)
         instrumentation.context.assets.open(clip).use { source ->
             file.outputStream().use { source.copyTo(it) }
         }
-        activity.onActivity {
-            it.startService(Intent(it, WakeWordService::class.java).setAction(WakeWordService.ACTION_STOP))
-        }
-        compose.waitUntil(10_000) { LinkWakeStatus.status.value.phase == WakePhase.OFF }
         activity.onActivity {
             it.startForegroundService(
                 Intent(it, WakeWordService::class.java)

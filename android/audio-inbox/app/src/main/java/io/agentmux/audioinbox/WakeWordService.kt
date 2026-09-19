@@ -62,10 +62,18 @@ class WakeWordService : Service(), WakeLoopListener {
     private var qaWav: String? = null
     /** True only when the TRY page started the loop itself, which is what leaving it has to undo. */
     private var startedForTry = false
+    /**
+     * The newest start Android has given this service. A stop quotes it, so a start that arrives while
+     * the stop is being carried out keeps the service alive instead of being dropped with it: the page
+     * can be left and opened again in the same second, and the TRY page's own start asks for the
+     * foreground, which Android kills the app for not keeping.
+     */
+    private var lastStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         when (intent?.action) {
             ACTION_START -> start(intent.getStringExtra(EXTRA_QA_WAV))
             ACTION_CANCEL_QUESTION -> cancelQuestion()
@@ -89,6 +97,13 @@ class WakeWordService : Service(), WakeLoopListener {
             // Already listening, and this start still has to post a notification: every start that asked
             // for the foreground must, and Android kills the app five seconds later if one does not.
             goForeground(LinkWakeStatus.status.value)
+            // A QA clip handed to a loop that is already listening becomes what it reads, so a proof can
+            // play something through a page that is open without stopping the loop under it first. The
+            // microphone is the only source a release build ever opens.
+            if (BuildConfig.DEBUG && qaWav != null) {
+                this.qaWav = qaWav
+                relisten()
+            }
             return
         }
         this.qaWav = qaWav
@@ -355,7 +370,7 @@ class WakeWordService : Service(), WakeLoopListener {
         coordinator?.let(LinkRuntime::release)
         coordinator = null
         stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        stopSelf(lastStartId)
     }
 
     override fun onDestroy() {
