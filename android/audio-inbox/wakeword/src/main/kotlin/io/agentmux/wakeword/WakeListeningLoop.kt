@@ -1,16 +1,10 @@
-package io.agentmux.audioinbox
-
-import io.agentmux.wakeword.EndpointPolicy
-import io.agentmux.wakeword.UtteranceEnd
-import io.agentmux.wakeword.UtteranceProgress
-import io.agentmux.wakeword.WAKE_CHUNK_SAMPLES
-import io.agentmux.wakeword.WakeHearing
+package io.agentmux.wakeword
 
 // The phrase's last syllable and the confirmation beep: neither is part of the question.
 private const val WAKE_TAIL_CHUNKS = 4
 
-/** What the microphone thread reports to the service's main-thread reducer. */
-internal interface WakeLoopListener {
+/** What the microphone thread reports to the host's reducer. */
+interface WakeLoopListener {
     fun onDetected(score: Float)
     /** Every captured chunk of a question: its voice level and the countdown to sending. */
     fun onHearing(hearing: WakeHearing)
@@ -19,13 +13,13 @@ internal interface WakeLoopListener {
 }
 
 /** The wake-word model as the loop needs it: a score per chunk and a reset between questions. */
-internal interface WakeChunkScorer {
+interface WakeChunkScorer {
     fun score(chunk: ShortArray): Float
     fun reset()
 }
 
 /** The voice-activity model as the loop needs it. */
-internal interface SpeechChunkProbability {
+interface SpeechChunkProbability {
     fun probability(chunk: ShortArray): Float
     fun reset()
 }
@@ -34,8 +28,11 @@ internal interface SpeechChunkProbability {
  * WHAT: One microphone thread: score each chunk for the wake word, then capture the question until the VAD says it ended.
  * WHY: A single AudioRecord owner avoids the busy-microphone gap between detection and recording.
  * A question only ever starts from a detection (Mattias 2026-09-15: "vill man ha nåt mer så säger man ... wake up-ordet igen").
+ *
+ * [trace] is null unless someone is watching: with it the loop also asks the VAD about every waiting chunk, which is
+ * one more model call per 80 ms and is why it is never on by default.
  */
-internal class WakeListeningLoop(
+class WakeListeningLoop(
     private val source: WakePcmSource,
     private val detector: WakeChunkScorer,
     private val vad: SpeechChunkProbability,
@@ -43,9 +40,11 @@ internal class WakeListeningLoop(
     private val policy: EndpointPolicy,
     private val detectionAllowed: () -> Boolean,
     private val listener: WakeLoopListener,
+    private val trace: WakeChunkTrace? = null,
 ) {
     @Volatile private var running = true
     @Volatile private var cancelRequested = false
+    private var chunksHeard = 0L
 
     fun stop() {
         running = false
@@ -64,6 +63,7 @@ internal class WakeListeningLoop(
                 if (running) listener.onSourceStopped()
                 return
             }
+            chunksHeard += 1
             if (cancelRequested) {
                 cancelRequested = false
                 if (question != null) {
@@ -85,6 +85,7 @@ internal class WakeListeningLoop(
             }
             if (!detectionAllowed()) continue
             val score = detector.score(chunk)
+            trace?.onChunkScored(chunksHeard * WAKE_CHUNK_MS, score, vad.probability(chunk))
             if (score >= threshold) {
                 listener.onDetected(score)
                 vad.reset()

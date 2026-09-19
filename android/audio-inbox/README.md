@@ -99,7 +99,8 @@ Public Link uses the `/auth/*` and `/api/link/*` routes on `link.v1d.io`.
   shared byte-for-byte by Phone and Wear.
 - `link-session-android`: the single Android Keystore-backed session store.
 - `wakeword`: app-agnostic, Android-free wake word engine (openWakeWord
-  detector, Silero VAD endpoint, phase reducer) and its ONNX models. The
+  detector, Silero VAD endpoint, the microphone listening loop, phase reducer)
+  and its ONNX models. The
   product declares it with `product-spec/src/wake-word.ts`, a reusable
   `defineWakeWordFeature(prefix)` building block.
 - `link-update-android`: the single Link adapter onto CircleKit ReleaseKit;
