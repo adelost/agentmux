@@ -76,16 +76,20 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
    * Which glyph a phase wears, on any surface that has room for one. Three, not seven: a glyph shows a
    * shape, not a state machine. Mattias 2026-09-19 read the old one, the system's "speak now" microphone,
    * as Link hearing him all the time, so waiting is the quietest of the three and never the loudest.
-   * THINKING travels with SPEAKING because both are the answer half of a turn, and BLOCKED travels with
-   * WAITING because a stopped loop is hearing nothing.
+   * THINKING travels with SPEAKING because both are the answer half of a turn. BLOCKED is alone in
+   * ATTENTION: it is the one phase that needs a person to do something, and a row that says so has to look
+   * unlike the three that are only reporting. A status bar never shows it in practice, because a blocked
+   * loop has no service to post one.
    * Named for the phase rather than for the notification: the status bar was the first surface to wear
-   * these, the main page's row is the second, and one grouping decides for both.
+   * these, the main page's row is the second, and one grouping decides for both, so no surface picks a
+   * glyph of its own (lsrc:0, 2026-09-19).
    */
-  const phaseGlyphs = finiteValues(`${product}.wake-glyph`, ["waiting", "hearing", "speaking"]);
+  const phaseGlyphs = finiteValues(`${product}.wake-glyph`, ["waiting", "hearing", "speaking", "attention"]);
   const phaseGlyph = {
-    off: "waiting", listening: "waiting", blocked: "waiting",
+    off: "waiting", listening: "waiting",
     capturing: "hearing", sending: "hearing",
     thinking: "speaking", speaking: "speaking",
+    blocked: "attention",
   } as const;
 
   // One word per phase, for a control with no room for a sentence. Declared rather than typed beside the

@@ -185,6 +185,7 @@ object LinkNativeBindings {
         icon("trash", "RingIcons.Trash", RingIcons.Trash),
         icon("download", "RingIcons.Download", RingIcons.Download),
         icon("warning", "RingIcons.Warning", RingIcons.Warning),
+        icon("gauge", "RingIcons.Gauge", RingIcons.Gauge),
     )
 
     internal val nodes: List<LinkNativeNodeBinding> = listOf(

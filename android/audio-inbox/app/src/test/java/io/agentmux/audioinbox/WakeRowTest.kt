@@ -56,7 +56,7 @@ class WakeRowTest {
     @Test
     fun phasesThatShareADeclaredGlyphShareADrawable() {
         val drawables = WakePhase.entries.map(::wakeGlyphDrawable).toSet()
-        assertEquals(3, drawables.size)
+        assertEquals(4, drawables.size)
         WakePhase.entries.groupBy(::wakePhaseGlyph).forEach { (glyph, phases) ->
             assertEquals(glyph.name, 1, phases.map(::wakeGlyphDrawable).toSet().size)
         }

@@ -1,6 +1,8 @@
 package io.agentmux.linkui
 
 import io.agentmux.linkcore.LinkPreferenceKey
+import io.agentmux.wakeword.WakePhase
+import io.agentmux.linkui.product.LinkWakePresentation
 
 /** Existing audio capabilities, expressed once as content for the shared choice atom. */
 data class LinkAudioPreference(
@@ -18,3 +20,15 @@ fun linkAudioPreferences(readReplies: Boolean, announcements: Boolean, wakeWord:
     LinkAudioPreference(LinkPreferenceKey.WAKE_WORD, "WAKE WORD",
         "• Say the wake phrase, then ask\n• The answer is read aloud", wakeWord),
 )
+
+/**
+ * WHAT: The two labels the WAKE WORD toggle shows, off first.
+ * WHY: lsrc:0 S1, 2026-09-19. Settings carried a row reading LISTENING FOR "HEY JARVIS" between WAKE
+ * PHRASE and WAKE DEBUG, which is a status line dressed as a row; the toggle says it instead. A loop that
+ * is on but not listening says only ON, because what it is doing then is the main page's to report and
+ * naming it here would be a second answer to the same question.
+ */
+fun linkWakeToggleLabels(wake: LinkWakePresentation): Pair<String, String> = "OFF" to when (wake.phase) {
+    WakePhase.LISTENING -> "ON · listening for \"${wake.phrase.spoken}\""
+    else -> "ON"
+}

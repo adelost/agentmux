@@ -2953,7 +2953,8 @@
       "values": [
         "waiting",
         "hearing",
-        "speaking"
+        "speaking",
+        "attention"
       ]
     },
     {
@@ -2994,7 +2995,7 @@
       "artifacts": [
         "phone-full-ui"
       ],
-      "assetRef": "activity",
+      "assetRef": "gauge",
       "id": "route.wake-debug"
     },
     {
@@ -3127,14 +3128,14 @@
       "artifacts": [
         "phone-full-ui"
       ],
-      "assetRef": "activity",
+      "assetRef": "gauge",
       "id": "component.wake-debug"
     },
     {
       "artifacts": [
         "phone-full-ui"
       ],
-      "assetRef": "activity",
+      "assetRef": "gauge",
       "id": "component.wake-debug-entry"
     }
   ],
@@ -10003,7 +10004,7 @@
       "presentation": {
         "cases": {
           "blocked": {
-            "glyph": "waiting",
+            "glyph": "attention",
             "phase": "blocked",
             "word": "BLOCKED"
           },
@@ -10100,7 +10101,8 @@
               "values": [
                 "waiting",
                 "hearing",
-                "speaking"
+                "speaking",
+                "attention"
               ]
             }
           }
