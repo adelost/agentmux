@@ -198,6 +198,35 @@ export const wakeDebugComponentType = defineComponentType({
   outputs: [],
 });
 
+/**
+ * Row 217: the settings row that opens TRY THE WAKE WORD. It is where SENSITIVITY used to cycle through
+ * three words in place, which meant choosing a step and hearing what it does were two different rows on
+ * two different pages (measured on 1.2.22). The row still shows the step in use, which is why it takes the
+ * sensitivity presentation as its model, and a tap opens the page that can answer for all three at once.
+ */
+export const wakeTryEntryComponentType = defineComponentType({
+  id: "link.wake-try-entry",
+  requiredCapabilities: componentTree,
+  inputs: [
+    componentPort("wakeSensitivity", linkWakeWord.sensitivityAuthority.authority.presentation.contract),
+  ],
+  outputs: [componentPort("open", routeOpenContract)],
+});
+
+/**
+ * Row 217: one page to try the phrase and choose the step. While it is open the loop runs in TRY mode, a
+ * wake is judged and shown and never acted on, and one utterance is judged under all three steps at once
+ * (`judgeUnderEveryStep`), so a wearer never has to say the phrase again to see what the other two would
+ * have done. Like WAKE DEBUG it renders outside the data graph and for the same reason: the meter is
+ * 12.5 readings a second from one bounded native buffer.
+ */
+export const wakeTryComponentType = defineComponentType({
+  id: "link.wake-try",
+  requiredCapabilities: componentTree,
+  inputs: [],
+  outputs: [],
+});
+
 export const linkComponentTypes = [
   targetPickerComponentType,
   talkComponentType,
@@ -216,6 +245,8 @@ export const linkComponentTypes = [
   devPreviewComponentType,
   wakeDebugEntryComponentType,
   wakeDebugComponentType,
+  wakeTryEntryComponentType,
+  wakeTryComponentType,
   linkWakeWord.componentType,
   wakeToggleComponentType,
 ] as const;
@@ -352,6 +383,17 @@ export const linkComponentInstances = [
   },
   {
     id: "wake.debug", componentTypeRef: wakeDebugComponentType.id,
+    bindings: { inputs: {}, events: {} },
+  },
+  {
+    id: "navigation.wake-try-entry", componentTypeRef: wakeTryEntryComponentType.id,
+    bindings: {
+      inputs: { wakeSensitivity: linkWakeWord.sensitivityAuthority.presentationPortRef },
+      events: { open: "navigation.service.openWakeTry" },
+    },
+  },
+  {
+    id: "wake.try", componentTypeRef: wakeTryComponentType.id,
     bindings: { inputs: {}, events: {} },
   },
   {

@@ -79,6 +79,9 @@ android {
         unitTests.isReturnDefaultValues = true
     }
     sourceSets.getByName("androidTest").java.srcDir("../link-ui/src/hostTest")
+    // Row 217's native proof plays the same committed clips the JVM tests measure, through the real
+    // detector on a device. They are assets of the test APK, never of Link itself.
+    sourceSets.getByName("androidTest").assets.srcDir("../wakeword/src/test/resources")
     // The wake word models live beside the app-agnostic engine that reads them.
     sourceSets.getByName("main").assets.srcDir("../wakeword/models")
 }

@@ -65,6 +65,7 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
             { instance: "session.public-link", region: "content" },
             { instance: "preferences.toggles", region: "content" },
             { instance: "wake.status", region: "content" },
+            { instance: "navigation.wake-try-entry", region: "content" },
             { instance: "navigation.wake-debug-entry", region: "content" },
             { instance: "history.local", region: "content" },
             { instance: "updates.panel", region: "content" },
@@ -78,6 +79,7 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
             { instance: "session.public-link", region: "content" },
             { instance: "preferences.toggles", region: "content" },
             { instance: "wake.status", region: "content" },
+            { instance: "navigation.wake-try-entry", region: "content" },
             { instance: "navigation.wake-debug-entry", region: "content" },
             { instance: "history.local", region: "content" },
             { instance: "updates.panel", region: "content" },
@@ -111,6 +113,20 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
           mounts: [
             { instance: "navigation.page-host", region: "host" },
             { instance: "wake.debug", region: "content" },
+          ],
+        })),
+      },
+    },
+    {
+      // Row 217, phone only for the same reason WAKE DEBUG is.
+      screen: "wake-try",
+      family: {
+        id: "link.wake-try",
+        trees: (["round", "compact", "wide"] as const).map((surface) => ({
+          surface,
+          mounts: [
+            { instance: "navigation.page-host", region: "host" },
+            { instance: "wake.try", region: "content" },
           ],
         })),
       },

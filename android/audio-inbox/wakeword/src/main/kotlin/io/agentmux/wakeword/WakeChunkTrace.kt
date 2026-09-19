@@ -4,6 +4,12 @@ package io.agentmux.wakeword
 enum class WakeRefusal {
     /** Shorter than [WakeDetectionPolicy.chunksOverThreshold]: one model's opinion of one twelfth of a second. */
     NOT_ENOUGH_CHUNKS,
+
+    /**
+     * Long enough, and nobody was listening for an answer: the TRY page holds the loop while it judges
+     * what it hears, so a run that ended there would have woken Link and was never asked to.
+     */
+    NOT_ASKED,
 }
 
 /** One run of chunks at or over the threshold, and what the rules did with it. */

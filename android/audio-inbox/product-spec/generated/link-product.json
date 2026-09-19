@@ -15,7 +15,8 @@
         "home",
         "settings",
         "dev-host",
-        "wake-debug"
+        "wake-debug",
+        "wake-try"
       ],
       "serves": [
         "round",
@@ -208,6 +209,10 @@
           "mountRef": "wake.status"
         },
         {
+          "componentInstanceRef": "navigation.wake-try-entry",
+          "mountRef": "navigation.wake-try-entry"
+        },
+        {
           "componentInstanceRef": "navigation.wake-debug-entry",
           "mountRef": "navigation.wake-debug-entry"
         },
@@ -260,6 +265,10 @@
           "mountRef": "wake.status"
         },
         {
+          "componentInstanceRef": "navigation.wake-try-entry",
+          "mountRef": "navigation.wake-try-entry"
+        },
+        {
           "componentInstanceRef": "navigation.wake-debug-entry",
           "mountRef": "navigation.wake-debug-entry"
         },
@@ -378,6 +387,54 @@
       ],
       "omittedMounts": [],
       "screenRef": "wake-debug",
+      "surface": "wide"
+    },
+    {
+      "artifactRef": "phone-full-ui",
+      "includedMounts": [
+        {
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
+        },
+        {
+          "componentInstanceRef": "wake.try",
+          "mountRef": "wake.try"
+        }
+      ],
+      "omittedMounts": [],
+      "screenRef": "wake-try",
+      "surface": "round"
+    },
+    {
+      "artifactRef": "phone-full-ui",
+      "includedMounts": [
+        {
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
+        },
+        {
+          "componentInstanceRef": "wake.try",
+          "mountRef": "wake.try"
+        }
+      ],
+      "omittedMounts": [],
+      "screenRef": "wake-try",
+      "surface": "compact"
+    },
+    {
+      "artifactRef": "phone-full-ui",
+      "includedMounts": [
+        {
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
+        },
+        {
+          "componentInstanceRef": "wake.try",
+          "mountRef": "wake.try"
+        }
+      ],
+      "omittedMounts": [],
+      "screenRef": "wake-try",
       "surface": "wide"
     },
     {
@@ -840,9 +897,20 @@
               },
               {
                 "capacity": null,
+                "id": "navigation.wake-try-entry",
+                "instance": "navigation.wake-try-entry",
+                "order": 6,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "navigation.wake-debug-entry",
                 "instance": "navigation.wake-debug-entry",
-                "order": 6,
+                "order": 7,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -853,7 +921,7 @@
                 "capacity": null,
                 "id": "history.local",
                 "instance": "history.local",
-                "order": 7,
+                "order": 8,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -864,7 +932,7 @@
                 "capacity": null,
                 "id": "updates.panel",
                 "instance": "updates.panel",
-                "order": 8,
+                "order": 9,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -875,7 +943,7 @@
                 "capacity": null,
                 "id": "navigation.dev-host-entry",
                 "instance": "navigation.dev-host-entry",
-                "order": 9,
+                "order": 10,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -886,7 +954,7 @@
                 "capacity": null,
                 "id": "recovery.status",
                 "instance": "recovery.status",
-                "order": 10,
+                "order": 11,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -968,9 +1036,20 @@
               },
               {
                 "capacity": null,
+                "id": "navigation.wake-try-entry",
+                "instance": "navigation.wake-try-entry",
+                "order": 6,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "navigation.wake-debug-entry",
                 "instance": "navigation.wake-debug-entry",
-                "order": 6,
+                "order": 7,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -981,7 +1060,7 @@
                 "capacity": null,
                 "id": "history.local",
                 "instance": "history.local",
-                "order": 7,
+                "order": 8,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -992,7 +1071,7 @@
                 "capacity": null,
                 "id": "updates.panel",
                 "instance": "updates.panel",
-                "order": 8,
+                "order": 9,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -1003,7 +1082,7 @@
                 "capacity": null,
                 "id": "navigation.dev-host-entry",
                 "instance": "navigation.dev-host-entry",
-                "order": 9,
+                "order": 10,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -1014,7 +1093,7 @@
                 "capacity": null,
                 "id": "recovery.status",
                 "instance": "recovery.status",
-                "order": 10,
+                "order": 11,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -1206,6 +1285,95 @@
         ]
       },
       "screen": "wake-debug"
+    },
+    {
+      "family": {
+        "id": "link.wake-try",
+        "trees": [
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "id": "wake.try",
+                "instance": "wake.try",
+                "order": 1,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              }
+            ],
+            "surface": "round"
+          },
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "id": "wake.try",
+                "instance": "wake.try",
+                "order": 1,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              }
+            ],
+            "surface": "compact"
+          },
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "id": "wake.try",
+                "instance": "wake.try",
+                "order": 1,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              }
+            ],
+            "surface": "wide"
+          }
+        ]
+      },
+      "screen": "wake-try"
     }
   ],
   "components": [
@@ -1399,6 +1567,26 @@
       },
       "componentTypeRef": "link.wake-debug",
       "id": "wake.debug"
+    },
+    {
+      "bindings": {
+        "events": {
+          "open": "navigation.service.openWakeTry"
+        },
+        "inputs": {
+          "wakeSensitivity": "wake.sensitivity.presentation-adapter.presentation"
+        }
+      },
+      "componentTypeRef": "link.wake-try-entry",
+      "id": "navigation.wake-try-entry"
+    },
+    {
+      "bindings": {
+        "events": {},
+        "inputs": {}
+      },
+      "componentTypeRef": "link.wake-try",
+      "id": "wake.try"
     },
     {
       "bindings": {
@@ -2475,6 +2663,80 @@
       ]
     },
     {
+      "id": "link.wake-try-entry",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "word",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "hint",
+                "nullable": false,
+                "value": "string"
+              }
+            ],
+            "id": "wake.sensitivity.payload",
+            "kind": "snapshot"
+          },
+          "id": "wakeSensitivity",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "target",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.navigation.page"
+                }
+              }
+            ],
+            "id": "link.navigation.route-intent",
+            "kind": "event",
+            "navigation": {
+              "effect": "push",
+              "kind": "route"
+            }
+          },
+          "id": "open",
+          "required": true
+        }
+      ],
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "id": "link.wake-try",
+      "inputs": [],
+      "outputs": [],
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
       "id": "link.wake-word",
       "inputs": [
         {
@@ -2963,7 +3225,8 @@
         "home",
         "settings",
         "dev-host",
-        "wake-debug"
+        "wake-debug",
+        "wake-try"
       ]
     }
   ],
@@ -2997,6 +3260,13 @@
       ],
       "assetRef": "gauge",
       "id": "route.wake-debug"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "target",
+      "id": "route.wake-try"
     },
     {
       "artifacts": [
@@ -3137,6 +3407,20 @@
       ],
       "assetRef": "gauge",
       "id": "component.wake-debug-entry"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "target",
+      "id": "component.wake-try"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "target",
+      "id": "component.wake-try-entry"
     }
   ],
   "id": "agentmux-link",
@@ -3255,6 +3539,25 @@
           "phone-full-ui"
         ],
         "componentInstanceRef": "navigation.wake-debug-entry",
+        "pageRefs": [
+          "settings"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.navigation.route-intent",
+            "effect": "push",
+            "id": "open",
+            "kind": "route",
+            "sourcePortRef": "navigation.wake-try-entry.open",
+            "targetPortRef": "navigation.service.openWakeTry"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui"
+        ],
+        "componentInstanceRef": "navigation.wake-try-entry",
         "pageRefs": [
           "settings"
         ]
@@ -3406,6 +3709,12 @@
             "guardContractRef": null,
             "pageRef": "wake-debug",
             "restore": "process"
+          },
+          {
+            "back": "previous",
+            "guardContractRef": null,
+            "pageRef": "wake-try",
+            "restore": "process"
           }
         ]
       },
@@ -3450,6 +3759,11 @@
         "back": "previous",
         "guardContractRef": null,
         "id": "wake-debug"
+      },
+      {
+        "back": "previous",
+        "guardContractRef": null,
+        "id": "wake-try"
       }
     ],
     "pageValuesRef": "link.navigation.page",
@@ -3483,7 +3797,8 @@
       "bindings": {
         "openDevHost": "navigation.dev-host-entry.open",
         "openSettings": "navigation.settings-entry.open",
-        "openWakeDebug": "navigation.wake-debug-entry.open"
+        "openWakeDebug": "navigation.wake-debug-entry.open",
+        "openWakeTry": "navigation.wake-try-entry.open"
       },
       "config": {},
       "id": "navigation.service",
@@ -3854,6 +4169,30 @@
             }
           },
           "id": "openWakeDebug",
+          "purpose": "data"
+        },
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "target",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.navigation.page"
+                }
+              }
+            ],
+            "id": "link.navigation.route-intent",
+            "kind": "event",
+            "navigation": {
+              "effect": "push",
+              "kind": "route"
+            }
+          },
+          "id": "openWakeTry",
           "purpose": "data"
         }
       ],
@@ -6627,6 +6966,12 @@
         "to": "navigation.service.openWakeDebug"
       },
       {
+        "from": "navigation.wake-try-entry.open",
+        "kind": "component-event",
+        "purpose": "data",
+        "to": "navigation.service.openWakeTry"
+      },
+      {
         "from": "capture.talk.command",
         "kind": "component-event",
         "purpose": "data",
@@ -6943,6 +7288,12 @@
         "kind": "component-input",
         "purpose": "data",
         "to": "recovery.status.recoveryState"
+      },
+      {
+        "from": "wake.sensitivity.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "navigation.wake-try-entry.wakeSensitivity"
       },
       {
         "from": "wake.presentation.model",
@@ -7389,6 +7740,30 @@
         "ref": "navigation.wake-debug-entry.open",
         "required": true,
         "typeRef": "link.wake-debug-entry"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "wake.sensitivity.payload",
+        "direction": "input",
+        "ownerId": "navigation.wake-try-entry",
+        "ownerKind": "component",
+        "portId": "wakeSensitivity",
+        "purpose": "data",
+        "ref": "navigation.wake-try-entry.wakeSensitivity",
+        "required": true,
+        "typeRef": "link.wake-try-entry"
+      },
+      {
+        "boundary": "ui-event",
+        "contractRef": "link.navigation.route-intent",
+        "direction": "output",
+        "ownerId": "navigation.wake-try-entry",
+        "ownerKind": "component",
+        "portId": "open",
+        "purpose": "data",
+        "ref": "navigation.wake-try-entry.open",
+        "required": true,
+        "typeRef": "link.wake-try-entry"
       },
       {
         "boundary": "presentation",
@@ -8280,6 +8655,18 @@
         "portId": "openWakeDebug",
         "purpose": "data",
         "ref": "navigation.service.openWakeDebug",
+        "required": true,
+        "typeRef": "link.navigation"
+      },
+      {
+        "boundary": "ui-event",
+        "contractRef": "link.navigation.route-intent",
+        "direction": "input",
+        "ownerId": "navigation.service",
+        "ownerKind": "node",
+        "portId": "openWakeTry",
+        "purpose": "data",
+        "ref": "navigation.service.openWakeTry",
         "required": true,
         "typeRef": "link.navigation"
       },
@@ -10315,6 +10702,7 @@
           }
         },
         "consumers": [
+          "navigation.wake-try-entry.wakeSensitivity",
           "wake.toggle.wakeSensitivity",
           "wake.status.wakeSensitivity"
         ],

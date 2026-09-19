@@ -19,6 +19,10 @@ export const linkPagePresentations = [
   { id: "settings", title: "SETTINGS", iconAssetRef: "gear" },
   { id: "dev-host", title: "DISPLAY PREVIEW", iconAssetRef: "phone" },
   { id: "wake-debug", title: "WAKE DEBUG", iconAssetRef: "gauge" },
+  // Row 217. The title cannot be the phrase: three phrases are declared and a wearer picks one, so a
+  // page called TRY HEY JARVIS would be a lie the moment he picks Hey Marvin. The page names the phrase
+  // itself, from the declared value, the way the main page's row is titled by it.
+  { id: "wake-try", title: "TRY THE WAKE WORD", iconAssetRef: "target" },
 ] as const;
 
 /**

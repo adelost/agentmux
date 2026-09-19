@@ -25,4 +25,6 @@ export const linkComponentIconRefs = [
   { id: "component.wake-toggle", assetRef: "record", artifacts: ["phone-full-ui"] },
   { id: "component.wake-debug", assetRef: "gauge", artifacts: ["phone-full-ui"] },
   { id: "component.wake-debug-entry", assetRef: "gauge", artifacts: ["phone-full-ui"] },
+  { id: "component.wake-try", assetRef: "target", artifacts: ["phone-full-ui"] },
+  { id: "component.wake-try-entry", assetRef: "target", artifacts: ["phone-full-ui"] },
 ] as const;

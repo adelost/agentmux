@@ -55,6 +55,7 @@ export const navigationService = service({
     port("openSettings", routeOpenContract),
     port("openDevHost", routeOpenContract),
     port("openWakeDebug", routeOpenContract),
+    port("openWakeTry", routeOpenContract),
   ],
   outputs: [port("activePage", activePageContract)],
   runtime: runtime("instance", "instance", "transient", "none", [], ["navigation.route-state"]),

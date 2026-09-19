@@ -20,7 +20,7 @@ const linkArtifacts = [
     rendererRefs: ["android-phone-compose"],
     requiredCapabilities: ["ui.menu", "ui.navigation", "ui.component-tree"],
     entryScreen: "home",
-    screenRefs: ["home", "settings", "dev-host", "wake-debug"],
+    screenRefs: ["home", "settings", "dev-host", "wake-debug", "wake-try"],
     serves: ["round", "compact", "wide"],
   },
   {
@@ -40,6 +40,7 @@ const linkNavigation = defineProductNavigation(linkScreenComponentFamilies, {
     settings: { guard: null, back: "previous" },
     "dev-host": { guard: null, back: "previous" },
     "wake-debug": { guard: null, back: "previous" },
+    "wake-try": { guard: null, back: "previous" },
   },
 });
 

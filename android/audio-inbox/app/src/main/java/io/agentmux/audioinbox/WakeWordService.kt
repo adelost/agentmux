@@ -21,6 +21,7 @@ import io.agentmux.wakeword.WakeLoopListener
 import io.agentmux.wakeword.WakePcmSource
 import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakePhase
+import io.agentmux.wakeword.WakeStatus
 import io.agentmux.wakeword.WakeWordDetector
 import io.agentmux.wakeword.WakeWordModels
 import io.agentmux.wakeword.listensForWakeWord
@@ -59,13 +60,25 @@ class WakeWordService : Service(), WakeLoopListener {
     private var thinkingTones: Job? = null
     private val readAloudRequested = mutableSetOf<String>()
     private var qaWav: String? = null
+    /** True only when the TRY page started the loop itself, which is what leaving it has to undo. */
+    private var startedForTry = false
+    /**
+     * The newest start Android has given this service. A stop quotes it, so a start that arrives while
+     * the stop is being carried out keeps the service alive instead of being dropped with it: the page
+     * can be left and opened again in the same second, and the TRY page's own start asks for the
+     * foreground, which Android kills the app for not keeping.
+     */
+    private var lastStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         when (intent?.action) {
             ACTION_START -> start(intent.getStringExtra(EXTRA_QA_WAV))
             ACTION_CANCEL_QUESTION -> cancelQuestion()
+            ACTION_TRY_OPEN -> openForTry()
+            ACTION_TRY_CLOSE -> closeForTry()
             // Watching is read when the loop opens, so turning it on or off reopens it.
             ACTION_RELISTEN -> if (micThread != null) relisten()
             ACTION_STOP -> {
@@ -80,16 +93,23 @@ class WakeWordService : Service(), WakeLoopListener {
     }
 
     private fun start(qaWav: String?) {
-        if (micThread != null) return
+        if (micThread != null) {
+            // Already listening, and this start still has to post a notification: every start that asked
+            // for the foreground must, and Android kills the app five seconds later if one does not.
+            goForeground(LinkWakeStatus.status.value)
+            // A QA clip handed to a loop that is already listening becomes what it reads, so a proof can
+            // play something through a page that is open without stopping the loop under it first. The
+            // microphone is the only source a release build ever opens.
+            if (BuildConfig.DEBUG && qaWav != null) {
+                this.qaWav = qaWav
+                relisten()
+            }
+            return
+        }
         this.qaWav = qaWav
         LinkWakePhraseChoice.restore(this)
         val status = LinkWakeStatus.apply(WakeEvent.Start)
-        try {
-            ServiceCompat.startForeground(this, WAKE_NOTIFICATION_ID, WakeNotifications.build(this, status), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } catch (error: RuntimeException) {
-            stop("Android refused the microphone service · ${error.message.orEmpty().take(80)}")
-            return
-        }
+        if (!goForeground(status)) return
         val held = LinkRuntime.acquire(this).also { coordinator = it }
         earcons = WakeEarcons()
         wakeLock = getSystemService(PowerManager::class.java)
@@ -136,10 +156,14 @@ class WakeWordService : Service(), WakeLoopListener {
                             endpoint = EndpointPolicy(),
                             detection = sensitivity.detection,
                             detectionAllowed = { LinkWakeStatus.status.value.listensForWakeWord() },
+                            // Row 217: while the TRY page is open the loop judges and reports and is
+                            // never allowed to ask, so the utterance reaches the page whole.
+                            questionsAllowed = { !LinkWakeTry.open.value },
                             listener = this,
-                            // Null unless the wearer opened WAKE DEBUG and switched watching on: with a
-                            // trace the loop asks the speech model about every waiting chunk as well.
-                            trace = if (LinkWakeDebug.watching.value) LinkWakeDebug.trace else null,
+                            // Null unless the TRY page is open or the wearer switched watching on in
+                            // WAKE DEBUG: with a trace the loop asks the speech model about every
+                            // waiting chunk as well, which is why nobody gets one for free.
+                            trace = wakeChunkWatchers(),
                         ).also { loop = it }.run()
                     }
                 }
@@ -166,14 +190,73 @@ class WakeWordService : Service(), WakeLoopListener {
 
     private fun assetBytes(name: String): ByteArray = assets.open(name).use { it.readBytes() }
 
-    override fun onDetected(score: Float) = MainThread.run {
-        val interrupted = LinkWakeStatus.status.value.phase == WakePhase.SPEAKING
-        LinkWakeStatus.apply(WakeEvent.Detected(score))
-        if (interrupted) coordinator?.stopAudio()
-        earcons?.heard()
+    override fun onDetected(score: Float) {
+        // Row 217. While the TRY page is open the loop may not ask a question at all, so this is only
+        // reached if that wiring is ever wrong. Nothing is what the page promises, and nothing is what
+        // happens here: no phase changes, so no ring, no earcon, and no notification says Link is
+        // hearing a question. Dropping one after the fact is what must not be done; it resets the
+        // detector and takes the rest of the phrase with it.
+        if (LinkWakeTry.open.value) return
+        MainThread.run {
+            val interrupted = LinkWakeStatus.status.value.phase == WakePhase.SPEAKING
+            LinkWakeStatus.apply(WakeEvent.Detected(score))
+            if (interrupted) coordinator?.stopAudio()
+            earcons?.heard()
+        }
     }
 
-    override fun onHearing(hearing: WakeHearing) = MainThread.run { LinkWakeStatus.apply(WakeEvent.Heard(hearing)) }
+    /** Nothing is captured while the page is open, and a chunk of one is still not the page's. */
+    override fun onHearing(hearing: WakeHearing) {
+        if (LinkWakeTry.open.value) return
+        MainThread.run { LinkWakeStatus.apply(WakeEvent.Heard(hearing)) }
+    }
+
+    /**
+     * Posts the one microphone notification, and says whether Android allowed it. Every foreground start
+     * lands here: measured on a device 2026-09-19, a second foreground start that reopened the loop
+     * without posting one had the app killed by
+     * `ForegroundServiceDidNotStartInTimeException` five seconds later.
+     */
+    private fun goForeground(status: WakeStatus): Boolean = try {
+        ServiceCompat.startForeground(
+            this, WAKE_NOTIFICATION_ID, WakeNotifications.build(this, status),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+        )
+        true
+    } catch (error: RuntimeException) {
+        stop("Android refused the microphone service · ${error.message.orEmpty().take(80)}")
+        false
+    }
+
+    /**
+     * The TRY page is on screen. The loop reopens so it reports every chunk to the page's recorder, and
+     * it starts here when the wake word is off: the page listens for as long as it is open and says so.
+     */
+    private fun openForTry() {
+        if (micThread == null) {
+            startedForTry = true
+            start(null)
+            return
+        }
+        goForeground(LinkWakeStatus.status.value)
+        relisten()
+    }
+
+    /** The page is gone: the loop goes back to what it was, which is off when the page started it. */
+    private fun closeForTry() {
+        if (micThread == null) {
+            // Whatever was listening has already stopped; this service has nothing left to hold open.
+            startedForTry = false
+            stopSelf()
+            return
+        }
+        if (startedForTry) {
+            startedForTry = false
+            stop(null)
+            return
+        }
+        relisten()
+    }
 
     /** The talk ring was tapped while a question was heard: drop it before anything is encoded or sent. */
     private fun cancelQuestion() {
@@ -184,6 +267,10 @@ class WakeWordService : Service(), WakeLoopListener {
     }
 
     override fun onQuestion(end: UtteranceEnd, pcm: ShortArray, startedAtMs: Long) {
+        // The one seam a question can come into being at, and the TRY page's promise is that none does
+        // while it is open. The loop is told not to start one, so this cannot normally be reached; the
+        // promise is not left resting on one parameter being passed.
+        if (LinkWakeTry.open.value) return
         val detection = LinkWakeStatus.status.value.detections
         if (end == UtteranceEnd.NO_SPEECH) {
             MainThread.run {
@@ -283,7 +370,7 @@ class WakeWordService : Service(), WakeLoopListener {
         coordinator?.let(LinkRuntime::release)
         coordinator = null
         stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        stopSelf(lastStartId)
     }
 
     override fun onDestroy() {
@@ -298,6 +385,8 @@ class WakeWordService : Service(), WakeLoopListener {
         const val ACTION_STOP = "io.agentmux.audioinbox.WAKE_STOP"
         const val ACTION_CANCEL_QUESTION = "io.agentmux.audioinbox.WAKE_CANCEL_QUESTION"
         const val ACTION_RELISTEN = "io.agentmux.audioinbox.WAKE_RELISTEN"
+        const val ACTION_TRY_OPEN = "io.agentmux.audioinbox.WAKE_TRY_OPEN"
+        const val ACTION_TRY_CLOSE = "io.agentmux.audioinbox.WAKE_TRY_CLOSE"
         const val EXTRA_QA_WAV = "qa_wake_wav"
     }
 }

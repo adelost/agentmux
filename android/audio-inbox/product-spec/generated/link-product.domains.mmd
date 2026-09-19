@@ -11,14 +11,15 @@ graph LR
   conversation["conversation<br/>4 nodes, 2 components"]
   dev["dev<br/>1 component"]
   history["history<br/>2 nodes, 1 component"]
-  navigation["navigation<br/>1 node, 4 components"]
+  navigation["navigation<br/>1 node, 5 components"]
   playback["playback<br/>3 nodes, 1 component"]
   preferences["preferences<br/>2 nodes, 1 component"]
   recovery["recovery<br/>3 nodes, 1 component"]
   session["session<br/>3 nodes, 2 components"]
   target["target<br/>3 nodes, 1 component"]
   updates["updates<br/>3 nodes, 1 component"]
-  wake["wake<br/>5 nodes, 3 components"]
+  wake["wake<br/>5 nodes, 4 components"]
   capture -->|"captured-turn"| conversation
+  wake -->|"sensitivity.payload"| navigation
   wake -->|"preference-toggle"| preferences
   style dev stroke-dasharray: 5 5,stroke:#c33

@@ -67,10 +67,10 @@ test("capture, delivery, reply and playback are typed graph edges", () => {
 // dev-host, so only the phone artifact lists it while its family still covers all three surfaces.
 test("pages and artifacts cover exactly the declared screens", () => {
   assert.deepEqual(product.componentFamilies.map(({ screen }) => screen),
-    ["home", "settings", "dev-host", "wake-debug"]);
+    ["home", "settings", "dev-host", "wake-debug", "wake-try"]);
   const phone = product.artifacts.find(({ id }) => id === "phone-full-ui");
   const wear = product.artifacts.find(({ id }) => id === "wear-full-ui");
-  assert.deepEqual(phone?.screenRefs, ["home", "settings", "dev-host", "wake-debug"]);
+  assert.deepEqual(phone?.screenRefs, ["home", "settings", "dev-host", "wake-debug", "wake-try"]);
   assert.deepEqual(wear?.screenRefs, ["home", "settings"]);
   assert.deepEqual(wear?.serves, ["round"]);
   assert.equal(product.navigation.pageValuesRef, "link.navigation.page");
@@ -87,6 +87,7 @@ test("pages and artifacts cover exactly the declared screens", () => {
       pages: [
         "home:root:system", "settings:process:previous",
         "dev-host:process:previous", "wake-debug:process:previous",
+        "wake-try:process:previous",
       ],
     },
     {
@@ -116,6 +117,12 @@ test("pages and artifacts cover exactly the declared screens", () => {
       componentInstanceRef: "navigation.wake-debug-entry",
       artifactRefs: ["phone-full-ui"],
       actions: ["navigation.wake-debug-entry.open->navigation.service.openWakeDebug:push"],
+    },
+    {
+      // Row 217: the row that used to cycle SENSITIVITY in place now opens the page that tries it.
+      componentInstanceRef: "navigation.wake-try-entry",
+      artifactRefs: ["phone-full-ui"],
+      actions: ["navigation.wake-try-entry.open->navigation.service.openWakeTry:push"],
     },
   ]);
 });

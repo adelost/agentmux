@@ -54,6 +54,7 @@ class WakeListeningLoopTest {
         vad: SpeechChunkProbability = CountedSpeech(script),
         trace: WakeChunkTrace? = null,
         detection: WakeDetectionPolicy = WakeDetectionPolicy(),
+        questionsAllowed: Boolean = true,
     ): WakeListeningLoop = WakeListeningLoop(
         source = script,
         detector = object : WakeChunkScorer {
@@ -67,6 +68,7 @@ class WakeListeningLoopTest {
         detectionAllowed = { true },
         listener = heard,
         trace = trace,
+        questionsAllowed = { questionsAllowed },
     )
 
     /** The phrase as the shipped rule needs to hear it: two chunks in a row at or over the threshold. */
@@ -148,6 +150,30 @@ class WakeListeningLoopTest {
         assertEquals(0.72f, refused.peakScore, 0.0001f)
         assertEquals(0.9f, refused.speechProbability, 0.0001f)
         assertEquals(false, refused.accepted)
+    }
+
+    /**
+     * lsrc:0 2026-09-19, reading row 217: a run that was long enough and became nothing was not refused
+     * for being short, and WAKE DEBUG prints that word to the wearer. The two endings are different
+     * facts and the trace has to tell them apart.
+     */
+    @Test
+    fun aRunNobodyWasAskingAboutIsNotCalledTooShort() {
+        val watched = Watched()
+        loop(Script(saidTwice + silence(10)), Heard(), trace = watched, questionsAllowed = false).run()
+
+        val held = watched.runs.single()
+        assertEquals(WakeRefusal.NOT_ASKED, held.refusal)
+        assertEquals(2, held.chunksOverThreshold)
+        assertEquals(false, held.accepted)
+    }
+
+    @Test
+    fun aRunTooShortToBeAskedAboutIsStillTooShort() {
+        val watched = Watched()
+        loop(Script(listOf(0.9f to 0f) + silence(10)), Heard(), trace = watched, questionsAllowed = false).run()
+
+        assertEquals(WakeRefusal.NOT_ENOUGH_CHUNKS, watched.runs.single().refusal)
     }
 
     @Test

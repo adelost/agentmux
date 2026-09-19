@@ -30,6 +30,7 @@ graph LR
     n_navigation_service["service<br/><i>service</i>"]
     n_navigation_settings_entry(["settings-entry<br/><i>component</i>"])
     n_navigation_wake_debug_entry(["wake-debug-entry<br/><i>component</i>"])
+    n_navigation_wake_try_entry(["wake-try-entry<br/><i>component</i>"])
   end
   subgraph playback["playback"]
     n_playback_controls(["controls<br/><i>component</i>"])
@@ -76,6 +77,7 @@ graph LR
     n_wake_service["service<br/><i>service</i>"]
     n_wake_status(["status<br/><i>component</i>"])
     n_wake_toggle(["toggle<br/><i>component</i>"])
+    n_wake_try(["try<br/><i>component</i>"])
   end
   n_capture_phase_presentation_adapter -->|"phase.payload"| n_capture_talk
   n_capture_presentation -->|"capture-status"| n_capture_talk
@@ -100,6 +102,7 @@ graph LR
   n_navigation_service -->|"navigation.active-page"| n_navigation_page_host
   n_navigation_settings_entry -->|"navigation.route-intent"| n_navigation_service
   n_navigation_wake_debug_entry -->|"navigation.route-intent"| n_navigation_service
+  n_navigation_wake_try_entry -->|"navigation.route-intent"| n_navigation_service
   n_playback_controls -->|"playback-command"| n_playback_service
   n_playback_phase_presentation_adapter -->|"phase.payload"| n_playback_controls
   n_playback_presentation -->|"playback-status"| n_playback_controls
@@ -134,6 +137,7 @@ graph LR
   n_wake_phrase_presentation_adapter -->|"phrase.payload"| n_wake_toggle
   n_wake_presentation -->|"wake-status"| n_wake_status
   n_wake_presentation -->|"wake-status"| n_wake_toggle
+  n_wake_sensitivity_presentation_adapter -->|"sensitivity.payload"| n_navigation_wake_try_entry
   n_wake_sensitivity_presentation_adapter -->|"sensitivity.payload"| n_wake_status
   n_wake_sensitivity_presentation_adapter -->|"sensitivity.payload"| n_wake_toggle
   n_wake_service -->|"wake-status"| n_wake_phase_presentation_adapter
