@@ -137,6 +137,28 @@ internal object LinkWakeSensitivityChoice {
 }
 
 /**
+ * WHAT: The one sentence a wearer reads when the wake word is on and the microphone is not his to use.
+ * WHY: lsrc:0 M4, 2026-09-19. Losing the permission never wrote the preference off, so the loop simply
+ * never started and every surface read OFF: a wake word that is on and cannot hear looked exactly like one
+ * that is off. It is worded once, here, and the row only prints the phase word and this reason.
+ */
+internal const val MICROPHONE_NEEDED = "microphone permission needed · tap to allow"
+
+/** What a resume does with the wake word. Named so the rule can be read and tested without a phone. */
+internal enum class WakeResumeAction { NOTHING, BLOCK_ON_PERMISSION, START }
+
+/**
+ * On and allowed, so listen; on and not allowed, so say so; off, so nothing. A loop that is already
+ * running is left alone, and one that was blocked is started again once the permission comes back.
+ */
+internal fun wakeResumeAction(enabled: Boolean, microphoneGranted: Boolean, phase: WakePhase): WakeResumeAction = when {
+    !enabled -> WakeResumeAction.NOTHING
+    !microphoneGranted -> WakeResumeAction.BLOCK_ON_PERMISSION
+    phase == WakePhase.OFF || phase == WakePhase.BLOCKED -> WakeResumeAction.START
+    else -> WakeResumeAction.NOTHING
+}
+
+/**
  * WHAT: The phone's WAKE WORD preference: permission, battery exemption and the listening service.
  * WHY: A microphone service may only start while Link is on screen; this runs from the settings toggle and on resume.
  */
@@ -157,7 +179,7 @@ internal class LinkWakeWordControl(
     fun setEnabled(on: Boolean) {
         if (on && !microphoneGranted()) {
             requestMicrophone()
-            LinkWakeStatus.apply(WakeEvent.Blocked("Allow the microphone, then turn WAKE WORD on again"))
+            LinkWakeStatus.apply(WakeEvent.Blocked(MICROPHONE_NEEDED))
             return
         }
         preferences.edit().putBoolean(KEY_WAKE_WORD, on).apply()
@@ -178,7 +200,11 @@ internal class LinkWakeWordControl(
     /** Restores listening after the process was gone; the Activity is visible, so the start is allowed. */
     fun resume() {
         mutableEnabled.value = preferences.getBoolean(KEY_WAKE_WORD, false)
-        if (mutableEnabled.value && microphoneGranted() && LinkWakeStatus.status.value.phase == WakePhase.OFF) start()
+        when (wakeResumeAction(mutableEnabled.value, microphoneGranted(), LinkWakeStatus.status.value.phase)) {
+            WakeResumeAction.NOTHING -> Unit
+            WakeResumeAction.BLOCK_ON_PERMISSION -> LinkWakeStatus.apply(WakeEvent.Blocked(MICROPHONE_NEEDED))
+            WakeResumeAction.START -> start()
+        }
     }
 
     private fun start() {

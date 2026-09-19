@@ -59,8 +59,23 @@ tap_named() {
   sleep 1.2
 }
 
+# Whether a node is there at all, without tapping it: used before dismissing a dialog that may not exist.
+sees_named() {
+  local xml rc=1
+  xml="$(mktemp)"
+  if dump_to "$xml" && python3 "$here/qa-find-node.py" "$xml" "$1" >/dev/null 2>&1; then rc=0; fi
+  rm -f "$xml"
+  return $rc
+}
+
 echo "installing $apk on $serial"
 adb install -r -g "$apk" >/dev/null
+# Screen 01 says first run, so it has to be one. An install keeps the app's data, and a preference left on
+# by an earlier sheet makes the very first tap miss and every later tap land somewhere nobody looked up.
+adb shell pm clear "$package" >/dev/null
+# The battery exemption outlives the app's data and is granted for good once anyone says yes, so screen 03
+# would quietly stop being the dialog a person meets the first time. Taken back with it.
+adb shell dumpsys deviceidle whitelist "-$package" >/dev/null 2>&1 || true
 adb shell am force-stop "$package"
 adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard
@@ -86,12 +101,14 @@ if [ "$flavour" = "phone" ]; then
   tap_named "Tap to listen" || echo "the main page has no wake row" >&2
   sleep 2
   shot "03-main-wake-on-battery-ask"
-  # The dialog belongs to the system, not to Link, and it swallows every tap behind it. Leave only when
-  # it is gone, so a later tap cannot land on a row that is covered.
+  # The dialog belongs to the system, not to Link, and it swallows every tap behind it. It is also not
+  # always there: a phone that already granted the exemption never shows it. So the dialog is looked for
+  # before anything is tapped, and BACK is never pressed on a hunch, because on the page itself BACK
+  # leaves Link and every screen after it would be of the launcher.
   for _ in 1 2 3; do
-    tap_named "Allow" || tap_named "Deny" || adb shell input keyevent KEYCODE_BACK
+    sees_named "run in background" || break
+    tap_named "Allow" || tap_named "Deny" || break
     sleep 2
-    tap_named "run in background" >/dev/null 2>&1 || break
   done
   sleep 2
   shot "04-main-listening"
@@ -129,15 +146,19 @@ if [ "$flavour" = "phone" ]; then
     adb shell input keyevent KEYCODE_BACK; sleep 1
   fi
 
-  # Blocked: the microphone taken away while the preference is on, which is the state a wearer meets
-  # after saying no to the permission.
+  # Blocked: the microphone taken away while the preference is on. Nothing is tapped to provoke it any
+  # more; the preference stays on, so simply returning to the page is what a wearer does and what he sees.
   adb shell pm revoke "$package" android.permission.RECORD_AUDIO >/dev/null 2>&1 || true
   adb shell am force-stop "$package"
   adb shell am start -n "$package/io.agentmux.audioinbox.MainActivity" >/dev/null
   sleep 3
-  tap_named "Tap to listen" || tap_named "OFF" || true
-  sleep 2
   shot "09-main-blocked"
+  # And the repair the row offers: the tap asks for the permission rather than switching anything off.
+  if tap_named "tap to allow"; then
+    sleep 2
+    shot "09b-main-blocked-tap-asks"
+    adb shell input keyevent KEYCODE_BACK; sleep 1
+  fi
   tap_named "SETTINGS" || true
   shot "10-settings-blocked"
   adb shell input keyevent KEYCODE_BACK; sleep 1
