@@ -63,14 +63,15 @@ class LinkWakeToggleTest {
     }
 
     // Mattias 2026-09-19 read the system's "speak now" microphone as Link hearing him all the time.
-    // Three glyphs, and the quiet one is worn by every phase where nothing is being heard.
+    // Four glyphs: three that report, and one for the single phase that needs a person to do something.
     @Test
-    fun everyPhaseWearsOneOfThreeDeclaredGlyphsAndWaitingHearsNothing() {
+    fun everyPhaseWearsOneOfFourDeclaredGlyphsAndOnlyBlockedAsksForAnything() {
         assertEquals(
             mapOf(
-                WakePhaseGlyph.WAITING to listOf(WakePhase.OFF, WakePhase.LISTENING, WakePhase.BLOCKED),
+                WakePhaseGlyph.WAITING to listOf(WakePhase.OFF, WakePhase.LISTENING),
                 WakePhaseGlyph.HEARING to listOf(WakePhase.CAPTURING, WakePhase.SENDING),
                 WakePhaseGlyph.SPEAKING to listOf(WakePhase.THINKING, WakePhase.SPEAKING),
+                WakePhaseGlyph.ATTENTION to listOf(WakePhase.BLOCKED),
             ),
             WakePhase.entries.groupBy(::wakePhaseGlyph).mapValues { (_, phases) -> phases.sortedBy { it.ordinal } },
         )

@@ -26,6 +26,10 @@ import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkui.activeTurnId
 import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.LinkWakePresentation
+import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.graphics.vector.ImageVector
+import io.agentmux.linkui.product.wakePhaseWord
+import io.agentmux.linkui.linkWakeToggleLabels
 import io.agentmux.linkui.product.wakeSensitivityHint
 import io.agentmux.linkui.product.wakeSensitivityWord
 import io.agentmux.wakeword.WakePhase
@@ -150,16 +154,24 @@ internal fun LinkPhoneSettings(
                     GeneratedLinkSettingsComponent.PREFERENCES_TOGGLES -> {
                         linkAudioPreferences(preferences.speakReplies, preferences.handsFree, preferences.wakeWord).forEach { preference ->
                             item("${mount.id}.${preference.key}") {
+                                // The wake word's toggle says what it is listening for, so the page needs
+                                // no status row of its own (lsrc:0 S1, 2026-09-19). The labels are the
+                                // choice's two options, the way the phrase and sensitivity rows read too.
+                                val (off, on) = if (preference.key == LinkPreferenceKey.WAKE_WORD) {
+                                    linkWakeToggleLabels(wake)
+                                } else {
+                                    "OFF" to "ON"
+                                }
                                 RingChoiceRow(
                                     title = preference.title,
                                     hint = preference.hint,
-                                    selected = if (preference.enabled) "ON" else "OFF",
-                                    options = listOf("OFF", "ON"),
+                                    selected = if (preference.enabled) on else off,
+                                    options = listOf(off, on),
                                     role = CircleChoiceRole.TOGGLE,
                                     infoSelected = true,
                                     onSelect = {
                                         graph.onPreferencesToggle(
-                                            LinkPreferenceToggleEvent(preference.key, it == "ON"),
+                                            LinkPreferenceToggleEvent(preference.key, it == on),
                                         )
                                     },
                                     icon = LinkNativeBindings.requireIcon(
@@ -206,12 +218,16 @@ internal fun LinkPhoneSettings(
                                 modifier = phoneRowModifier(),
                             )
                         }
-                        item(mount.id) {
-                            PhoneRow(
-                                title = wakePhaseTitle(wake.phase, wake.phrase).uppercase(),
-                                sub = wakeStatusDetail(wake),
-                                icon = LinkNativeBindings.requireIcon(if (wake.phase == WakePhase.BLOCKED) "warning" else "record"),
-                            )
+                        // Only a blocked loop still gets a row of its own: its reason is the one fact
+                        // about the wake word that nothing else on this page states.
+                        if (wake.phase == WakePhase.BLOCKED) {
+                            item(mount.id) {
+                                PhoneRow(
+                                    title = wakePhaseWord(wake.phase),
+                                    sub = wakeStatusDetail(wake),
+                                    icon = ImageVector.vectorResource(wakeGlyphDrawable(wake.phase)),
+                                )
+                            }
                         }
                     }
                     GeneratedLinkSettingsComponent.HISTORY_LOCAL -> {
@@ -241,10 +257,14 @@ internal fun LinkPhoneSettings(
                     GeneratedLinkSettingsComponent.NAVIGATION_WAKE_DEBUG_ENTRY ->
                         if (preferences.wakeWord || wake.phase != WakePhase.OFF) {
                             item(mount.id) {
+                                // The row opens a page, so it wears that page's declared glyph rather than
+                                // one chosen here. lsrc:0 S2, 2026-09-19: it wore LOCAL HISTORY's chart,
+                                // and two different pages looked like one.
+                                val route = GeneratedLinkRoutes.descriptor(LinkRoute.WAKE_DEBUG)
                                 PhoneRow(
-                                    title = "WAKE DEBUG",
+                                    title = route.title,
                                     sub = "What it hears, and what it refused",
-                                    icon = LinkNativeBindings.requireIcon("activity"),
+                                    icon = LinkNativeBindings.requireIcon(route.iconAssetRef),
                                     onTap = {
                                         graph.onWakeDebugOpen(LinkRouteOpenEvent(LinkRoute.WAKE_DEBUG))
                                     },

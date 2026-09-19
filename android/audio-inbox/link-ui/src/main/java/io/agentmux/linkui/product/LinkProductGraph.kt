@@ -465,7 +465,7 @@ fun wakeSensitivityWord(step: WakeSensitivity): String = GeneratedWakeSensitivit
 fun wakeSensitivityHint(step: WakeSensitivity): String = GeneratedWakeSensitivityAuthority.require(step.id).hint
 
 /** The three glyphs a wake phase may wear, as the declaration names them. */
-enum class WakePhaseGlyph { WAITING, HEARING, SPEAKING }
+enum class WakePhaseGlyph { WAITING, HEARING, SPEAKING, ATTENTION }
 
 /**
  * Which glyph a phase wears, from the declaration. A host maps these three to its own resources; nothing
@@ -477,4 +477,5 @@ fun wakePhaseGlyph(phase: WakePhase): WakePhaseGlyph =
         GeneratedLinkWakeGlyphValue.WAITING -> WakePhaseGlyph.WAITING
         GeneratedLinkWakeGlyphValue.HEARING -> WakePhaseGlyph.HEARING
         GeneratedLinkWakeGlyphValue.SPEAKING -> WakePhaseGlyph.SPEAKING
+        GeneratedLinkWakeGlyphValue.ATTENTION -> WakePhaseGlyph.ATTENTION
     }

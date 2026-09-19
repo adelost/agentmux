@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: 6bdc172af323cb4af2f6a8efc42f9569898cc10050c41f68e34b4eab1c01af73
+// Product declarations SHA-256: 580a0f4a9467863520992e734e41959f970e4e38198ee435751a0194a5e439a7
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput
@@ -77,6 +77,7 @@ internal enum class GeneratedLinkWakeGlyphValue(val wireId: String) {
     WAITING("waiting"),
     HEARING("hearing"),
     SPEAKING("speaking"),
+    ATTENTION("attention"),
 }
 internal enum class GeneratedLinkWakePhraseValue(val wireId: String) {
     HEY_JARVIS("hey-jarvis"),
@@ -358,7 +359,7 @@ internal object GeneratedWakePhaseAuthority {
         "sending" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SENDING, word = "SENDING", glyph = GeneratedLinkWakeGlyphValue.HEARING),
         "thinking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.THINKING, word = "THINKING", glyph = GeneratedLinkWakeGlyphValue.SPEAKING),
         "speaking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SPEAKING, word = "SPEAKING", glyph = GeneratedLinkWakeGlyphValue.SPEAKING),
-        "blocked" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.BLOCKED, word = "BLOCKED", glyph = GeneratedLinkWakeGlyphValue.WAITING),
+        "blocked" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.BLOCKED, word = "BLOCKED", glyph = GeneratedLinkWakeGlyphValue.ATTENTION),
     )
 
     fun require(stateId: String): GeneratedWakePhasePresentation = requireNotNull(cases[stateId]) {

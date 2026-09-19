@@ -18,7 +18,7 @@ export const linkPagePresentations = [
   { id: "home", title: "LINK", iconAssetRef: "link" },
   { id: "settings", title: "SETTINGS", iconAssetRef: "gear" },
   { id: "dev-host", title: "DISPLAY PREVIEW", iconAssetRef: "phone" },
-  { id: "wake-debug", title: "WAKE DEBUG", iconAssetRef: "activity" },
+  { id: "wake-debug", title: "WAKE DEBUG", iconAssetRef: "gauge" },
 ] as const;
 
 /**

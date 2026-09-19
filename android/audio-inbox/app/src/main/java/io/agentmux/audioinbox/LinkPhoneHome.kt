@@ -128,15 +128,11 @@ internal fun LinkPhoneHome(
                     GeneratedLinkHomeComponent.WAKE_TOGGLE -> PhoneRow(
                         title = wake.phrase.spoken.uppercase(),
                         sub = wakeRowDetail(wake, captureSpec.wake.hearing?.sendsInMs),
-                        // The declared phase glyph, the same three the status bar wears, so the row stops
-                        // looking like the recipient row above it. BLOCKED is the row's own exception and
-                        // not a regrouping: the status bar answers what Link is hearing, where a row that
-                        // needs a person to do something has to say so (lsrc:0 M2, 2026-09-19).
-                        icon = if (wake.phase == WakePhase.BLOCKED) {
-                            LinkNativeBindings.requireIcon("warning")
-                        } else {
-                            ImageVector.vectorResource(wakeGlyphDrawable(wake.phase))
-                        },
+                        // The declared phase glyph, the same four the status bar wears. Nothing is chosen
+                        // here, BLOCKED included: it wears ATTENTION because the declaration says a phase
+                        // that needs a person to do something looks unlike the ones that only report
+                        // (lsrc:0 M2 and its follow-up, 2026-09-19).
+                        icon = ImageVector.vectorResource(wakeGlyphDrawable(wake.phase)),
                         // A wake word that is off is not doing anything, and the row says so quietly.
                         semanticColor = if (wake.phase == WakePhase.OFF) {
                             circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.INACTIVE)

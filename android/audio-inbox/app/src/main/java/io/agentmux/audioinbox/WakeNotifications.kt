@@ -72,6 +72,7 @@ internal fun wakeGlyphDrawable(phase: WakePhase): Int = when (wakePhaseGlyph(pha
     WakePhaseGlyph.WAITING -> R.drawable.ic_wake_waiting
     WakePhaseGlyph.HEARING -> R.drawable.ic_wake_hearing
     WakePhaseGlyph.SPEAKING -> R.drawable.ic_wake_speaking
+    WakePhaseGlyph.ATTENTION -> R.drawable.ic_wake_attention
 }
 
 internal fun wakeHint(phrase: WakePhrase): String = "Say \"${phrase.spoken}\", then your question"
