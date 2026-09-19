@@ -27,9 +27,11 @@ import io.agentmux.linkui.product.generated.GeneratedLinkPageId
 import io.agentmux.linkui.product.generated.GeneratedPlaybackPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedRecoveryPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedWakePhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedWakeSensitivityAuthority
 import io.agentmux.linkui.product.generated.GeneratedWakePhraseAuthority
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakePhrases
+import io.agentmux.wakeword.WakeSensitivity
 import io.agentmux.linkui.product.generated.GeneratedConversationReplyPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedTargetKindAuthority
 import io.agentmux.linkui.product.generated.GeneratedUpdatesPhaseAuthority
@@ -237,6 +239,11 @@ object LinkNativeBindings {
             listOf(GeneratedWakePhraseAuthority.outputPort),
         ),
         node(
+            GeneratedLinkNodeId.WAKE_SENSITIVITY_PRESENTATION_ADAPTER,
+            listOf(GeneratedWakeSensitivityAuthority.inputPort<Any>()),
+            listOf(GeneratedWakeSensitivityAuthority.outputPort),
+        ),
+        node(
             GeneratedLinkNodeId.CAPTURE_PRESENTATION,
             listOf(CapturePresentationSourceInput),
             listOf(CapturePresentationModelOutput),
@@ -342,6 +349,7 @@ object LinkNativeBindings {
         finiteValues(FiniteValueIds.LINK_RECOVERY_PHASE, wireValues<LinkRecoveryPhase>()),
         finiteValues(FiniteValueIds.LINK_WAKE_PHASE, wireValues<WakePhase>()),
         finiteValues(FiniteValueIds.LINK_WAKE_PHRASE, WakePhrases.offered.mapTo(linkedSetOf()) { it.id }),
+        finiteValues(FiniteValueIds.LINK_WAKE_SENSITIVITY, WakeSensitivity.offered.mapTo(linkedSetOf()) { it.id }),
         finiteValues(FiniteValueIds.LINK_WAKE_NOTIFICATION_ICON, wireValues<WakeNotificationIcon>()),
     )
 

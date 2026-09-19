@@ -1408,6 +1408,7 @@
         "inputs": {
           "model": "wake.presentation.model",
           "wakePhrase": "wake.phrase.presentation-adapter.presentation",
+          "wakeSensitivity": "wake.sensitivity.presentation-adapter.presentation",
           "wakeState": "wake.phase.presentation-adapter.presentation"
         }
       },
@@ -1420,6 +1421,7 @@
         "inputs": {
           "model": "wake.presentation.model",
           "wakePhrase": "wake.phrase.presentation-adapter.presentation",
+          "wakeSensitivity": "wake.sensitivity.presentation-adapter.presentation",
           "wakeState": "wake.phase.presentation-adapter.presentation"
         }
       },
@@ -2508,6 +2510,15 @@
                   "finite": true,
                   "ref": "link.wake-phrase"
                 }
+              },
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
+                }
               }
             ],
             "id": "link.wake-status",
@@ -2569,6 +2580,38 @@
             "kind": "snapshot"
           },
           "id": "wakePhrase",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "word",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "hint",
+                "nullable": false,
+                "value": "string"
+              }
+            ],
+            "id": "wake.sensitivity.payload",
+            "kind": "snapshot"
+          },
+          "id": "wakeSensitivity",
           "required": true
         }
       ],
@@ -2613,6 +2656,15 @@
                   "finite": true,
                   "ref": "link.wake-phrase"
                 }
+              },
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
+                }
               }
             ],
             "id": "link.wake-status",
@@ -2674,6 +2726,38 @@
             "kind": "snapshot"
           },
           "id": "wakePhrase",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "word",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "hint",
+                "nullable": false,
+                "value": "string"
+              }
+            ],
+            "id": "wake.sensitivity.payload",
+            "kind": "snapshot"
+          },
+          "id": "wakeSensitivity",
           "required": true
         }
       ],
@@ -2854,6 +2938,14 @@
         "hey-jarvis",
         "hey-marvin",
         "alexa"
+      ]
+    },
+    {
+      "id": "link.wake-sensitivity",
+      "values": [
+        "strict",
+        "normal",
+        "eager"
       ]
     },
     {
@@ -3677,6 +3769,14 @@
       "config": {},
       "id": "wake.phrase.presentation-adapter",
       "nodeTypeRef": "wake.phrase.presentation-adapter"
+    },
+    {
+      "bindings": {
+        "state": "wake.service.status"
+      },
+      "config": {},
+      "id": "wake.sensitivity.presentation-adapter",
+      "nodeTypeRef": "wake.sensitivity.presentation-adapter"
     }
   ],
   "nodeTypes": [
@@ -6065,6 +6165,15 @@
                   "finite": true,
                   "ref": "link.wake-phrase"
                 }
+              },
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
+                }
               }
             ],
             "id": "link.wake-status",
@@ -6127,6 +6236,15 @@
                   "finite": true,
                   "ref": "link.wake-phrase"
                 }
+              },
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
+                }
               }
             ],
             "id": "link.wake-status",
@@ -6170,6 +6288,15 @@
                 "value": {
                   "finite": true,
                   "ref": "link.wake-phrase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
                 }
               }
             ],
@@ -6224,6 +6351,15 @@
                 "value": {
                   "finite": true,
                   "ref": "link.wake-phrase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
                 }
               }
             ],
@@ -6317,6 +6453,15 @@
                   "finite": true,
                   "ref": "link.wake-phrase"
                 }
+              },
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
+                }
               }
             ],
             "id": "link.wake-status",
@@ -6343,6 +6488,104 @@
               }
             ],
             "id": "wake.phrase.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "wake.sensitivity.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "detections",
+                "nullable": false,
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "phrase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phrase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
+                }
+              }
+            ],
+            "id": "link.wake-status",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "sensitivity",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-sensitivity"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "word",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "hint",
+                "nullable": false,
+                "value": "string"
+              }
+            ],
+            "id": "wake.sensitivity.payload",
             "kind": "snapshot"
           },
           "id": "presentation",
@@ -6557,6 +6800,12 @@
         "to": "wake.phrase.presentation-adapter.state"
       },
       {
+        "from": "wake.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "wake.sensitivity.presentation-adapter.state"
+      },
+      {
         "from": "navigation.service.activePage",
         "kind": "component-input",
         "purpose": "data",
@@ -6713,6 +6962,12 @@
         "to": "wake.toggle.wakePhrase"
       },
       {
+        "from": "wake.sensitivity.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "wake.toggle.wakeSensitivity"
+      },
+      {
         "from": "wake.presentation.model",
         "kind": "component-input",
         "purpose": "data",
@@ -6729,6 +6984,12 @@
         "kind": "component-input",
         "purpose": "data",
         "to": "wake.status.wakePhrase"
+      },
+      {
+        "from": "wake.sensitivity.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "wake.status.wakeSensitivity"
       }
     ],
     "componentPorts": [
@@ -7165,6 +7426,18 @@
         "typeRef": "link.wake-toggle"
       },
       {
+        "boundary": "presentation",
+        "contractRef": "wake.sensitivity.payload",
+        "direction": "input",
+        "ownerId": "wake.toggle",
+        "ownerKind": "component",
+        "portId": "wakeSensitivity",
+        "purpose": "data",
+        "ref": "wake.toggle.wakeSensitivity",
+        "required": true,
+        "typeRef": "link.wake-toggle"
+      },
+      {
         "boundary": "ui-event",
         "contractRef": "link.preference-toggle",
         "direction": "output",
@@ -7209,6 +7482,18 @@
         "portId": "wakePhrase",
         "purpose": "data",
         "ref": "wake.status.wakePhrase",
+        "required": true,
+        "typeRef": "link.wake-word"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "wake.sensitivity.payload",
+        "direction": "input",
+        "ownerId": "wake.status",
+        "ownerKind": "component",
+        "portId": "wakeSensitivity",
+        "purpose": "data",
+        "ref": "wake.status.wakeSensitivity",
         "required": true,
         "typeRef": "link.wake-word"
       }
@@ -7869,6 +8154,15 @@
               "finite": true,
               "ref": "link.wake-phrase"
             }
+          },
+          {
+            "clockDomain": "none",
+            "name": "sensitivity",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.wake-sensitivity"
+            }
           }
         ],
         "id": "link.wake-status",
@@ -7919,6 +8213,34 @@
           }
         ],
         "id": "wake.phrase.payload",
+        "kind": "snapshot"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "sensitivity",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.wake-sensitivity"
+            }
+          },
+          {
+            "clockDomain": "none",
+            "name": "word",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "hint",
+            "nullable": false,
+            "value": "string"
+          }
+        ],
+        "id": "wake.sensitivity.payload",
         "kind": "snapshot"
       }
     ],
@@ -8691,6 +9013,30 @@
         "ref": "wake.phrase.presentation-adapter.presentation",
         "required": true,
         "typeRef": "wake.phrase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.wake-status",
+        "direction": "input",
+        "ownerId": "wake.sensitivity.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "wake.sensitivity.presentation-adapter.state",
+        "required": true,
+        "typeRef": "wake.sensitivity.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "wake.sensitivity.payload",
+        "direction": "output",
+        "ownerId": "wake.sensitivity.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "wake.sensitivity.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "wake.sensitivity.presentation-adapter"
       }
     ]
   },
@@ -9795,6 +10141,15 @@
                 "finite": true,
                 "ref": "link.wake-phrase"
               }
+            },
+            {
+              "clockDomain": "none",
+              "name": "sensitivity",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.wake-sensitivity"
+              }
             }
           ],
           "id": "link.wake-status",
@@ -9905,6 +10260,15 @@
                 "finite": true,
                 "ref": "link.wake-phrase"
               }
+            },
+            {
+              "clockDomain": "none",
+              "name": "sensitivity",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.wake-sensitivity"
+              }
             }
           ],
           "id": "link.wake-status",
@@ -9918,6 +10282,147 @@
             "hey-jarvis",
             "hey-marvin",
             "alexa"
+          ]
+        }
+      }
+    },
+    {
+      "adapter": {
+        "inputPortRef": "wake.sensitivity.presentation-adapter.state",
+        "nodeInstanceRef": "wake.sensitivity.presentation-adapter",
+        "nodeTypeRef": "wake.sensitivity.presentation-adapter",
+        "outputPortRef": "wake.sensitivity.presentation-adapter.presentation"
+      },
+      "id": "wake.sensitivity",
+      "presentation": {
+        "cases": {
+          "eager": {
+            "hint": "For a voice it keeps missing",
+            "sensitivity": "eager",
+            "word": "EAGER"
+          },
+          "normal": {
+            "hint": "What each phrase was measured at",
+            "sensitivity": "normal",
+            "word": "NORMAL"
+          },
+          "strict": {
+            "hint": "Fewer false wakes, and it may miss you",
+            "sensitivity": "strict",
+            "word": "STRICT"
+          }
+        },
+        "consumers": [
+          "wake.toggle.wakeSensitivity",
+          "wake.status.wakeSensitivity"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "sensitivity",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.wake-sensitivity"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "word",
+              "nullable": false,
+              "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "hint",
+              "nullable": false,
+              "value": "string"
+            }
+          ],
+          "id": "wake.sensitivity.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "sensitivity",
+            "value": {
+              "id": "link.wake-sensitivity",
+              "values": [
+                "strict",
+                "normal",
+                "eager"
+              ]
+            }
+          },
+          {
+            "name": "word",
+            "value": "string"
+          },
+          {
+            "name": "hint",
+            "value": "string"
+          }
+        ],
+        "id": "wake.sensitivity",
+        "stateRef": "link.wake-sensitivity"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.wake-phase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "detail",
+              "nullable": true,
+              "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "detections",
+              "nullable": false,
+              "value": "integer"
+            },
+            {
+              "clockDomain": "none",
+              "name": "phrase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.wake-phrase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "sensitivity",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.wake-sensitivity"
+              }
+            }
+          ],
+          "id": "link.wake-status",
+          "kind": "state"
+        },
+        "portRef": "wake.service.status",
+        "stateField": "sensitivity",
+        "states": {
+          "id": "link.wake-sensitivity",
+          "values": [
+            "strict",
+            "normal",
+            "eager"
           ]
         }
       }

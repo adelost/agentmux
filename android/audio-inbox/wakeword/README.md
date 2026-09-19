@@ -54,6 +54,26 @@ clips to the run of two is a floor on that cost, not a measurement of it, and th
 real price is read on a device, where WAKE DEBUG shows a phrase someone actually
 said that was over the threshold for one chunk only.
 
+One committed fixture already has that shape. `hey-jarvis-question-sv-soft.wav`
+peaks at 0.4197, over its 0.40 threshold, and the loop refuses it under every
+sensitivity step because the peak is one chunk long. The detector test pins that
+peak but scores chunks rather than running the loop, so nothing said it out loud
+before `WakeSensitivityTest`.
+
+## Sensitivity: three steps, not a slider
+
+A wearer sets how eagerly the phrase answers, as STRICT, NORMAL or EAGER
+(`WakeSensitivity`), each one a rule and an offset from the phrase's own
+threshold, which stays the anchor. NORMAL is what the table above measures.
+EAGER takes 0.10 off and is the only step that gains anything measurable: Hey
+Jarvis goes to 35 of 48 clips and 7 of 12 Swedish, recovering one clip of the
+voice under "A known miss", with no false wake gained on any phrase. STRICT asks
+for three chunks in a row and adds 0.05, and on this corpus the run of three is
+the whole of its effect; the margin's only measured result is one Alexa clip. It
+is kept because a wearer who reaches for STRICT has a room the corpus does not
+contain, and the device pass is what decides it. Every row is in
+`docs/qa/2026-09-19-wake-sensitivity`.
+
 ## A known miss
 
 Hey Jarvis does not wake on one of the two Swedish voices the clip set uses.

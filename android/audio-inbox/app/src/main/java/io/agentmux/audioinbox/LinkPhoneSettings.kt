@@ -26,9 +26,12 @@ import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkui.activeTurnId
 import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.LinkWakePresentation
+import io.agentmux.linkui.product.wakeSensitivityHint
+import io.agentmux.linkui.product.wakeSensitivityWord
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakePhrases
+import io.agentmux.wakeword.WakeSensitivity
 import androidx.compose.ui.platform.LocalContext
 import io.agentmux.linkui.product.LinkPlaybackCommandEvent
 import io.agentmux.linkui.product.LinkPreferenceToggleEvent
@@ -179,6 +182,27 @@ internal fun LinkPhoneSettings(
                                     LinkWakePhraseChoice.choose(context, WakePhrases.offered.first { wakePhraseLabel(it) == label })
                                 },
                                 icon = LinkNativeBindings.requireIcon("record"),
+                                modifier = phoneRowModifier(),
+                            )
+                        }
+                        item("${mount.id}.sensitivity") {
+                            val context = LocalContext.current
+                            RingChoiceRow(
+                                title = "SENSITIVITY",
+                                hint = wakeSensitivityHint(wake.sensitivity),
+                                selected = wakeSensitivityWord(wake.sensitivity),
+                                options = WakeSensitivity.offered.map(::wakeSensitivityWord),
+                                role = CircleChoiceRole.STEPPED,
+                                // Three words need their sentence within reach, the way the toggles above
+                                // carry theirs: the row shows the step, the info affordance says what it does.
+                                infoSelected = true,
+                                onSelect = { word ->
+                                    LinkWakeSensitivityChoice.choose(
+                                        context,
+                                        WakeSensitivity.offered.first { wakeSensitivityWord(it) == word },
+                                    )
+                                },
+                                icon = LinkNativeBindings.requireIcon("target"),
                                 modifier = phoneRowModifier(),
                             )
                         }

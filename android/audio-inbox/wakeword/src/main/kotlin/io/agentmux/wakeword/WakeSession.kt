@@ -38,6 +38,7 @@ data class WakeStatus(
     /** Only while a question is being captured; null otherwise. */
     val hearing: WakeHearing? = null,
     val phrase: WakePhrase = WakePhrases.HEY_JARVIS,
+    val sensitivity: WakeSensitivity = WakeSensitivity.NORMAL,
 )
 
 sealed interface WakeEvent {
@@ -48,6 +49,8 @@ sealed interface WakeEvent {
     data class Heard(val hearing: WakeHearing) : WakeEvent
     /** The user picked another phrase; the microphone loop reloads its model. */
     data class PhraseChosen(val phrase: WakePhrase) : WakeEvent
+    /** The user moved the sensitivity; the microphone loop reopens with the step's rule and threshold. */
+    data class SensitivityChosen(val sensitivity: WakeSensitivity) : WakeEvent
     /** The user tapped the talk ring while a question was being heard: it is dropped, never sent. */
     data object QuestionCancelled : WakeEvent
     /** A finished capture; [turnId] is null when the host could not submit it, with [failure] saying why. */
@@ -69,9 +72,10 @@ fun WakeStatus.listensForWakeWord(): Boolean =
  * WHY: Every stop reason stays visible as a detail, so a silent wake word never has to be guessed at.
  */
 fun WakeStatus.reduce(event: WakeEvent): WakeStatus = when (event) {
-    WakeEvent.Start -> WakeStatus(WakePhase.LISTENING, detections = detections, phrase = phrase)
-    WakeEvent.Stop -> WakeStatus(WakePhase.OFF, detections = detections, phrase = phrase)
+    WakeEvent.Start -> WakeStatus(WakePhase.LISTENING, detections = detections, phrase = phrase, sensitivity = sensitivity)
+    WakeEvent.Stop -> WakeStatus(WakePhase.OFF, detections = detections, phrase = phrase, sensitivity = sensitivity)
     is WakeEvent.PhraseChosen -> copy(phrase = event.phrase)
+    is WakeEvent.SensitivityChosen -> copy(sensitivity = event.sensitivity)
     is WakeEvent.Blocked -> copy(phase = WakePhase.BLOCKED, turnId = null, detail = event.reason, hearing = null)
     is WakeEvent.Detected -> if (listensForWakeWord()) {
         copy(

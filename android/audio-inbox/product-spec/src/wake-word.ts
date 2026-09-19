@@ -33,6 +33,13 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
   ]);
   // The phrases whose models ship in `:wakeword` (WakePhrases.offered), default first.
   const phrases = finiteValues(`${product}.wake-phrase`, ["hey-jarvis", "hey-marvin", "alexa"]);
+  /**
+   * How eagerly the wake word answers. Three steps with a word each, not a confidence slider: a raw
+   * threshold called "sensitivity" runs backwards to its own name, higher meaning less sensitive.
+   * The vocabulary is declared here; what each step does to the threshold and the rule is measured and
+   * lives beside the models in `:wakeword` (WakeSensitivity), exactly as a phrase's threshold does.
+   */
+  const sensitivities = finiteValues(`${product}.wake-sensitivity`, ["strict", "normal", "eager"]);
 
   const statusContract = {
     id: `${product}.wake-status`, kind: "state", boundary: "presentation",
@@ -41,6 +48,7 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
       field("detail", "string", { nullable: true }),
       field("detections", "integer"),
       field("phrase", finiteValueRef(phrases.id)),
+      field("sensitivity", finiteValueRef(sensitivities.id)),
     ],
   } as const;
 
@@ -102,6 +110,30 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
     presentation: phasePresentation,
   });
 
+  /** One word and one sentence per step, so what a wearer reads is declared beside what the step is. */
+  const sensitivityCopy = {
+    strict: { word: "STRICT", hint: "Fewer false wakes, and it may miss you" },
+    normal: { word: "NORMAL", hint: "What each phrase was measured at" },
+    eager: { word: "EAGER", hint: "For a voice it keeps missing" },
+  } as const;
+  const sensitivityPresentation = defineStatePresentation(sensitivities, {
+    id: "wake.sensitivity",
+    fields: [
+      statePresentationField("sensitivity", sensitivities),
+      statePresentationField("word", "string"),
+      statePresentationField("hint", "string"),
+    ],
+    cases: mapFiniteCases(sensitivities, (step) => ({ sensitivity: step, ...sensitivityCopy[step] })),
+  });
+  const sensitivityAuthority = defineStateAuthority({
+    id: sensitivityPresentation.id,
+    source: {
+      portRef: "wake.service.status", contract: statusContract,
+      stateField: "sensitivity", states: sensitivities,
+    },
+    presentation: sensitivityPresentation,
+  });
+
   const phrasePresentation = defineStatePresentation(phrases, {
     id: "wake.phrase",
     fields: [statePresentationField("phrase", phrases)],
@@ -120,6 +152,7 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
       componentPort("model", statusContract),
       componentPort("wakeState", phaseAuthority.authority.presentation.contract),
       componentPort("wakePhrase", phraseAuthority.authority.presentation.contract),
+      componentPort("wakeSensitivity", sensitivityAuthority.authority.presentation.contract),
     ],
     outputs: [],
   });
@@ -136,6 +169,7 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
     },
     phaseAuthority.adapter.node,
     phraseAuthority.adapter.node,
+    sensitivityAuthority.adapter.node,
   ] as const;
 
   const component = {
@@ -145,6 +179,7 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
         model: "wake.presentation.model",
         wakeState: phaseAuthority.presentationPortRef,
         wakePhrase: phraseAuthority.presentationPortRef,
+        wakeSensitivity: sensitivityAuthority.presentationPortRef,
       },
       events: {},
     },
@@ -153,14 +188,19 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
   return {
     phases,
     phrases,
+    sensitivities,
     notificationIcons,
     statusContract,
     service: wakeService,
     presentation,
     phaseAuthority,
     phraseAuthority,
+    sensitivityAuthority,
     componentType,
-    nodeTypes: [wakeService, presentation, phaseAuthority.adapter.type, phraseAuthority.adapter.type] as const,
+    nodeTypes: [
+      wakeService, presentation, phaseAuthority.adapter.type, phraseAuthority.adapter.type,
+      sensitivityAuthority.adapter.type,
+    ] as const,
     nodes,
     component,
   };

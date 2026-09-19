@@ -12,6 +12,7 @@ import io.agentmux.wakeword.WakeEvent
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakePhrases
+import io.agentmux.wakeword.WakeSensitivity
 import io.agentmux.wakeword.WakeStatus
 import io.agentmux.wakeword.WakeTrace
 import io.agentmux.wakeword.WakeTraceBuffer
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 internal const val KEY_WAKE_WORD = "wakeWord"
 private const val KEY_WAKE_PHRASE = "wakePhrase"
 private const val KEY_WAKE_DEBUG = "wakeDebug"
+private const val KEY_WAKE_SENSITIVITY = "wakeSensitivity"
 
 /** The one process-wide hands-free status, written by the service and read by settings and the notification. */
 internal object LinkWakeStatus {
@@ -108,6 +110,33 @@ internal object LinkWakePhraseChoice {
 }
 
 /**
+ * WHAT: How eagerly the wake word answers, stored beside the chosen phrase.
+ * WHY: The phrase and the sensitivity are the same kind of choice, one the wearer makes about a loop that
+ * keeps running, so they are kept and applied the same way: written here, reduced into the status, and
+ * taken up by the microphone loop when it reopens.
+ */
+internal object LinkWakeSensitivityChoice {
+    fun choose(context: Context, sensitivity: WakeSensitivity) {
+        context.getSharedPreferences(AppContract.PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_WAKE_SENSITIVITY, sensitivity.id).apply()
+        LinkWakeStatus.apply(WakeEvent.SensitivityChosen(sensitivity))
+        // What is in the trace was heard under the rule that has just been replaced, and WAKE DEBUG names
+        // the step beside every run, so keeping those rows would put this step's name on another step's
+        // verdicts. They go with the rule that produced them.
+        LinkWakeDebug.trace.clear()
+        // The step decides the loop's rule and its threshold, both of which are read when the loop opens.
+        context.startService(Intent(context, WakeWordService::class.java).setAction(WakeWordService.ACTION_RELISTEN))
+    }
+
+    /** Never chosen, or a name a later build no longer offers: what Link measures best at. */
+    fun restore(context: Context) {
+        val stored = context.getSharedPreferences(AppContract.PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_WAKE_SENSITIVITY, null)
+        LinkWakeStatus.apply(WakeEvent.SensitivityChosen(WakeSensitivity.byId(stored) ?: WakeSensitivity.NORMAL))
+    }
+}
+
+/**
  * WHAT: The phone's WAKE WORD preference: permission, battery exemption and the listening service.
  * WHY: A microphone service may only start while Link is on screen; this runs from the settings toggle and on resume.
  */
@@ -121,6 +150,7 @@ internal class LinkWakeWordControl(
 
     init {
         LinkWakePhraseChoice.restore(context)
+        LinkWakeSensitivityChoice.restore(context)
         LinkWakeDebug.restore(context)
     }
 

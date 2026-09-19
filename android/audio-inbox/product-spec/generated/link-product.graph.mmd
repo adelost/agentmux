@@ -72,6 +72,7 @@ graph LR
     n_wake_phase_presentation_adapter["phase.presentation-adapter<br/><i>present</i>"]
     n_wake_phrase_presentation_adapter["phrase.presentation-adapter<br/><i>present</i>"]
     n_wake_presentation["presentation<br/><i>present</i>"]
+    n_wake_sensitivity_presentation_adapter["sensitivity.presentation-adapter<br/><i>present</i>"]
     n_wake_service["service<br/><i>service</i>"]
     n_wake_status(["status<br/><i>component</i>"])
     n_wake_toggle(["toggle<br/><i>component</i>"])
@@ -133,7 +134,10 @@ graph LR
   n_wake_phrase_presentation_adapter -->|"phrase.payload"| n_wake_toggle
   n_wake_presentation -->|"wake-status"| n_wake_status
   n_wake_presentation -->|"wake-status"| n_wake_toggle
+  n_wake_sensitivity_presentation_adapter -->|"sensitivity.payload"| n_wake_status
+  n_wake_sensitivity_presentation_adapter -->|"sensitivity.payload"| n_wake_toggle
   n_wake_service -->|"wake-status"| n_wake_phase_presentation_adapter
   n_wake_service -->|"wake-status"| n_wake_phrase_presentation_adapter
   n_wake_service -->|"wake-status"| n_wake_presentation
+  n_wake_service -->|"wake-status"| n_wake_sensitivity_presentation_adapter
   n_wake_toggle -->|"preference-toggle"| n_preferences_service
