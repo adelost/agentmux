@@ -142,7 +142,7 @@ internal object LinkWakeSensitivityChoice {
  * never started and every surface read OFF: a wake word that is on and cannot hear looked exactly like one
  * that is off. It is worded once, here, and the row only prints the phase word and this reason.
  */
-internal const val MICROPHONE_NEEDED = "microphone permission needed · tap to allow"
+internal const val MICROPHONE_NEEDED = "microphone needed · tap to allow"
 
 /** What a resume does with the wake word. Named so the rule can be read and tested without a phone. */
 internal enum class WakeResumeAction { NOTHING, BLOCK_ON_PERMISSION, START }

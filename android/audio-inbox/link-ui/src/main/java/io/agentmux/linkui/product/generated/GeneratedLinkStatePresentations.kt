@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: a34fc0c8be0b5360b6c66c7764b39f524517b027e9562e4f0534b0f5335b5fe4
+// Product declarations SHA-256: 6bdc172af323cb4af2f6a8efc42f9569898cc10050c41f68e34b4eab1c01af73
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput
@@ -73,7 +73,7 @@ internal enum class GeneratedLinkWakePhaseValue(val wireId: String) {
     SPEAKING("speaking"),
     BLOCKED("blocked"),
 }
-internal enum class GeneratedLinkWakeNotificationIconValue(val wireId: String) {
+internal enum class GeneratedLinkWakeGlyphValue(val wireId: String) {
     WAITING("waiting"),
     HEARING("hearing"),
     SPEAKING("speaking"),
@@ -333,7 +333,7 @@ internal object GeneratedRecoveryPhaseAuthority {
 internal data class GeneratedWakePhasePresentation(
     val phase: GeneratedLinkWakePhaseValue,
     val word: String,
-    val notificationIcon: GeneratedLinkWakeNotificationIconValue,
+    val glyph: GeneratedLinkWakeGlyphValue,
 )
 
 internal object GeneratedWakePhaseAuthority {
@@ -352,13 +352,13 @@ internal object GeneratedWakePhaseAuthority {
         ) {},
     )
     private val cases: Map<String, GeneratedWakePhasePresentation> = mapOf(
-        "off" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.OFF, word = "OFF", notificationIcon = GeneratedLinkWakeNotificationIconValue.WAITING),
-        "listening" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.LISTENING, word = "LISTENING", notificationIcon = GeneratedLinkWakeNotificationIconValue.WAITING),
-        "capturing" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.CAPTURING, word = "HEARING", notificationIcon = GeneratedLinkWakeNotificationIconValue.HEARING),
-        "sending" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SENDING, word = "SENDING", notificationIcon = GeneratedLinkWakeNotificationIconValue.HEARING),
-        "thinking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.THINKING, word = "THINKING", notificationIcon = GeneratedLinkWakeNotificationIconValue.SPEAKING),
-        "speaking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SPEAKING, word = "SPEAKING", notificationIcon = GeneratedLinkWakeNotificationIconValue.SPEAKING),
-        "blocked" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.BLOCKED, word = "BLOCKED", notificationIcon = GeneratedLinkWakeNotificationIconValue.WAITING),
+        "off" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.OFF, word = "OFF", glyph = GeneratedLinkWakeGlyphValue.WAITING),
+        "listening" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.LISTENING, word = "LISTENING", glyph = GeneratedLinkWakeGlyphValue.WAITING),
+        "capturing" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.CAPTURING, word = "HEARING", glyph = GeneratedLinkWakeGlyphValue.HEARING),
+        "sending" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SENDING, word = "SENDING", glyph = GeneratedLinkWakeGlyphValue.HEARING),
+        "thinking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.THINKING, word = "THINKING", glyph = GeneratedLinkWakeGlyphValue.SPEAKING),
+        "speaking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SPEAKING, word = "SPEAKING", glyph = GeneratedLinkWakeGlyphValue.SPEAKING),
+        "blocked" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.BLOCKED, word = "BLOCKED", glyph = GeneratedLinkWakeGlyphValue.WAITING),
     )
 
     fun require(stateId: String): GeneratedWakePhasePresentation = requireNotNull(cases[stateId]) {

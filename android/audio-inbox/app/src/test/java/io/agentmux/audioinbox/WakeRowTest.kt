@@ -1,6 +1,7 @@
 package io.agentmux.audioinbox
 
 import io.agentmux.linkui.product.LinkWakePresentation
+import io.agentmux.linkui.product.wakePhaseGlyph
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakePhrases
 import io.agentmux.wakeword.WakeSensitivity
@@ -48,6 +49,17 @@ class WakeRowTest {
             wakeRowDetail(wake(WakePhase.BLOCKED, "Microphone in use"), null),
         )
         assertEquals("BLOCKED", wakeRowDetail(wake(WakePhase.BLOCKED), null))
+    }
+
+    // One grouping, two surfaces: the status bar and this row read the same declared glyph, and the
+    // drawable each one maps to is the same drawable.
+    @Test
+    fun phasesThatShareADeclaredGlyphShareADrawable() {
+        val drawables = WakePhase.entries.map(::wakeGlyphDrawable).toSet()
+        assertEquals(3, drawables.size)
+        WakePhase.entries.groupBy(::wakePhaseGlyph).forEach { (glyph, phases) ->
+            assertEquals(glyph.name, 1, phases.map(::wakeGlyphDrawable).toSet().size)
+        }
     }
 
     // The defect itself: the preference stays on when the permission goes, so the loop never starts and

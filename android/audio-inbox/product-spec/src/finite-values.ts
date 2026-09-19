@@ -37,5 +37,5 @@ export const linkFiniteValues = [
   linkWakeWord.phases,
   linkWakeWord.phrases,
   linkWakeWord.sensitivities,
-  linkWakeWord.notificationIcons,
+  linkWakeWord.phaseGlyphs,
 ] as const;

@@ -30,6 +30,11 @@ import com.adelost.ringkit.ui.PhoneScreenHeader
 import io.agentmux.linkcore.LinkPreferenceKey
 import io.agentmux.linkui.product.LinkPreferenceToggleEvent
 import io.agentmux.linkui.product.LinkWakePresentation
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
+import com.adelost.designkit.ui.CircleAccent
+import com.adelost.designkit.ui.CircleAccentStrength
+import com.adelost.designkit.ui.circleAccentColor
 import io.agentmux.linkui.product.wakePhaseWord
 import io.agentmux.wakeword.WakePhase
 import com.adelost.ringkit.ui.RingTextComposer
@@ -123,9 +128,21 @@ internal fun LinkPhoneHome(
                     GeneratedLinkHomeComponent.WAKE_TOGGLE -> PhoneRow(
                         title = wake.phrase.spoken.uppercase(),
                         sub = wakeRowDetail(wake, captureSpec.wake.hearing?.sendsInMs),
-                        icon = LinkNativeBindings.requireIcon(
-                            if (wake.phase == WakePhase.BLOCKED) "warning" else "record",
-                        ),
+                        // The declared phase glyph, the same three the status bar wears, so the row stops
+                        // looking like the recipient row above it. BLOCKED is the row's own exception and
+                        // not a regrouping: the status bar answers what Link is hearing, where a row that
+                        // needs a person to do something has to say so (lsrc:0 M2, 2026-09-19).
+                        icon = if (wake.phase == WakePhase.BLOCKED) {
+                            LinkNativeBindings.requireIcon("warning")
+                        } else {
+                            ImageVector.vectorResource(wakeGlyphDrawable(wake.phase))
+                        },
+                        // A wake word that is off is not doing anything, and the row says so quietly.
+                        semanticColor = if (wake.phase == WakePhase.OFF) {
+                            circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.INACTIVE)
+                        } else {
+                            null
+                        },
                         onTap = {
                             graph.onWakeToggle(
                                 LinkPreferenceToggleEvent(

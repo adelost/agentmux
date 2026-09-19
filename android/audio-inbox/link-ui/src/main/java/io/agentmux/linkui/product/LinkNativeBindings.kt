@@ -350,7 +350,7 @@ object LinkNativeBindings {
         finiteValues(FiniteValueIds.LINK_WAKE_PHASE, wireValues<WakePhase>()),
         finiteValues(FiniteValueIds.LINK_WAKE_PHRASE, WakePhrases.offered.mapTo(linkedSetOf()) { it.id }),
         finiteValues(FiniteValueIds.LINK_WAKE_SENSITIVITY, WakeSensitivity.offered.mapTo(linkedSetOf()) { it.id }),
-        finiteValues(FiniteValueIds.LINK_WAKE_NOTIFICATION_ICON, wireValues<WakeNotificationIcon>()),
+        finiteValues(FiniteValueIds.LINK_WAKE_GLYPH, wireValues<WakePhaseGlyph>()),
     )
 
     internal val navigationArtifacts: List<LinkNativeNavigationArtifactBinding> = listOf(
