@@ -92,14 +92,14 @@ internal fun LinkWakeDebugScreen(onBack: () -> Unit) {
         item("export") {
             PhoneRow(
                 title = "EXPORT",
-                sub = exported ?: "Writes these ${trace.runs.size} rows to one file · nothing is written until you ask",
+                sub = exported ?: "Writes ${runCount(trace.runs.size)} to one file · nothing is written otherwise",
                 icon = LinkNativeBindings.requireIcon("download"),
                 onTap = { exported = "Wrote ${LinkWakeDebug.export(context)}" },
             )
         }
         item("runs-heading") {
             PhoneRow(
-                title = "LAST ${trace.runs.size} OVER THE THRESHOLD",
+                title = "LAST ${runCount(trace.runs.size).uppercase()} OVER THE THRESHOLD",
                 sub = "Newest first · a refused one is a phrase that was not heard",
                 icon = LinkNativeBindings.requireIcon("activity"),
             )
@@ -123,12 +123,17 @@ private fun LiveReading(trace: WakeTrace, threshold: Float) {
     )
 }
 
+/** A count and its noun, because "1 row(s)" is not something anyone says out loud. */
+private fun runCount(runs: Int): String = if (runs == 1) "1 run" else "$runs runs"
+
+private fun chunkCount(chunks: Int): String = if (chunks == 1) "1 chunk" else "$chunks chunks"
+
 /** Each ended run as one row; the refused single chunk is named in words, because it is the case to look for. */
 private fun androidx.compose.foundation.lazy.LazyListScope.items(runs: List<WakeRun>, step: WakeSensitivity) {
     runs.forEachIndexed { index, run ->
         item("run-$index-${run.atMs}") {
             PhoneRow(
-                title = "${"%.2f".format(run.peakScore)} · ${run.chunksOverThreshold} CHUNK(S)",
+                title = "${"%.2f".format(run.peakScore)} · ${chunkCount(run.chunksOverThreshold).uppercase()}",
                 sub = runSentence(run, step),
                 icon = LinkNativeBindings.requireIcon(if (run.accepted) "record" else "warning"),
             )
@@ -149,7 +154,7 @@ private fun runSentence(run: WakeRun, step: WakeSensitivity): String {
         WakeRefusal.NOT_ENOUGH_CHUNKS -> if (run.chunksOverThreshold == 1) {
             "$at · REFUSED · over the threshold once, $wants · $speech"
         } else {
-            "$at · REFUSED · ${run.chunksOverThreshold} chunks, $wants · $speech"
+            "$at · REFUSED · ${chunkCount(run.chunksOverThreshold)}, $wants · $speech"
         }
     }
 }

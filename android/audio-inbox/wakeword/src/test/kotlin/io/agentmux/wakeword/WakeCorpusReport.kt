@@ -72,16 +72,22 @@ private fun measure(
 
 private fun report(results: List<CorpusRun>) {
     println()
+    // "refused" is every run that reached the threshold and was too short for the rule: the near misses
+    // a longer rule bought its quiet with, and the shape the debug page shows a wearer.
     println("FALSE WAKES PER HOUR, by phrase and rule")
-    println("%-12s %-6s %-10s %8s %7s %10s %12s".format("phrase", "run", "threshold", "minutes", "wakes", "per hour", "captured s"))
+    println(
+        "%-12s %-6s %-10s %8s %7s %10s %12s %8s".format(
+            "phrase", "run", "threshold", "minutes", "wakes", "per hour", "captured s", "refused",
+        ),
+    )
     results.groupBy { it.phrase to it.detection }.forEach { (key, runs) ->
         val (phrase, detection) = key
         val minutes = runs.sumOf { it.seconds } / 60
         val wakes = runs.sumOf { it.replayed.wakes.size }
         println(
-            "%-12s %-6d %-10.2f %8.1f %7d %10.2f %12.0f".format(
+            "%-12s %-6d %-10.2f %8.1f %7d %10.2f %12.0f %8d".format(
                 phrase.id, detection.chunksOverThreshold, phrase.threshold, minutes, wakes, wakes / (minutes / 60),
-                runs.sumOf { it.replayed.capturedMs } / 1_000.0,
+                runs.sumOf { it.replayed.capturedMs } / 1_000.0, runs.sumOf { it.replayed.refusedRuns },
             ),
         )
     }
