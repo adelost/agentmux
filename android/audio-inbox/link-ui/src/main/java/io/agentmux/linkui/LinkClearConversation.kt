@@ -2,6 +2,7 @@ package io.agentmux.linkui
 
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.adelost.ringkit.ui.RowSpec
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 import io.agentmux.linkui.product.generated.GeneratedLinkHistoryClear
 import io.agentmux.linkui.product.generated.GeneratedLinkHistoryStatus
 
@@ -25,6 +26,9 @@ fun linkClearConversationRow(
         icon = icon,
         hint = "Hold to remove this conversation from this phone. Agents and Discord keep theirs.",
         holdToConfirm = true,
+        // The one Link control that waits, and it says so from the product's own declaration rather
+        // than from this call site: clearing is not taken back by a second press (row 225).
+        actionTiming = GeneratedLinkControlTiming.HISTORY_CLEAR,
         onTap = { onClear(GeneratedLinkHistoryClear(targetId)) },
     )
 }

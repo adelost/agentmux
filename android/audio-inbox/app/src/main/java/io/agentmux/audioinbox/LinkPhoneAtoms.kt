@@ -19,7 +19,16 @@ internal fun PhoneRow(
     sub: String,
     icon: ImageVector,
     onTap: (() -> Unit)? = null,
-    immediate: Boolean = false,
+    /**
+     * Which kind of button this row is, from the product's own declaration
+     * ([io.agentmux.linkui.product.generated.GeneratedLinkControlTiming]).
+     *
+     * A row that says nothing is a touch. That is the safe direction and the one Link already had:
+     * until row 225 a host-wide override made every control immediate, so defaulting the other way
+     * would put an invisible gate on every row that never names itself. A row with no onTap draws no
+     * gesture at all, which is why most callers have nothing to say here.
+     */
+    timing: CircleActionTiming = CircleActionTiming.IMMEDIATE,
     progress: CircleLabelProgress? = null,
     /** Product-semantic pigment for a row that means something other than the page's ordinary voice. */
     semanticColor: Color? = null,
@@ -31,7 +40,7 @@ internal fun PhoneRow(
         semanticColor = semanticColor,
         onTap = onTap,
         labelProgress = progress,
-        actionTiming = if (immediate) CircleActionTiming.IMMEDIATE else CircleActionTiming.DELIBERATE,
+        actionTiming = timing,
         modifier = phoneRowModifier(),
     )
 }

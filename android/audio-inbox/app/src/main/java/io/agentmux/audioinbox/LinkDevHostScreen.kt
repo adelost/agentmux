@@ -17,6 +17,7 @@ import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 import com.adelost.ringkit.ports.CirclePortInspection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
 /**
  * The dev-host route: the shared CircleKit host preview plus the product port
@@ -46,6 +47,7 @@ internal fun LinkDevHostScreen(
                 sub = "RESPONSIVE · WATCH EXACT",
                 icon = LinkNativeBindings.requireIcon("phone"),
                 onTap = { navigator.push(circleHostPreviewScreen(port)) },
+                actionTiming = GeneratedLinkControlTiming.DEV_HOST_PREVIEW,
             ),
             RowSpec(
                 key = "product-ports",
@@ -53,6 +55,7 @@ internal fun LinkDevHostScreen(
                 sub = "SERVICE · COMPONENT GRAPH",
                 icon = LinkNativeBindings.requireIcon("activity"),
                 onTap = { navigator.push(circlePortScreen(inspections, navigator::push, title = "PRODUCT PORTS")) },
+                actionTiming = GeneratedLinkControlTiming.DEV_PRODUCT_PORTS,
             ),
         )
     }

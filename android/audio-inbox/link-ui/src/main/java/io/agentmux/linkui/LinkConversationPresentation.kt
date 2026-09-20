@@ -13,6 +13,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
 /** Both hosts select the same retained conversation by stable recipient ID. */
 fun linkConversationTurns(turns: List<LinkTurn>, recipientId: String?): List<LinkTurn> =
@@ -34,7 +35,7 @@ fun linkHistoryRows(
             sub = "${format.format(Instant.ofEpochMilli(turn.createdAtMs))} · ${turnStatusLabel(turn)}",
             icon = RingIcons.Pencil,
             onTap = { onOpen(turn.turnId) },
-            actionTiming = CircleActionTiming.IMMEDIATE,
+            actionTiming = GeneratedLinkControlTiming.CONVERSATION_OPEN_TURN,
             multiline = true,
         )
     }
@@ -60,7 +61,7 @@ fun linkReadAloudRow(turn: LinkTurn, onCommand: (PlaybackOperation, String) -> U
         },
         icon = if (active) RingIcons.Stop else RingIcons.Play,
         onTap = { onCommand(operation, turn.turnId) },
-        actionTiming = CircleActionTiming.IMMEDIATE,
+        actionTiming = GeneratedLinkControlTiming.CONVERSATION_PLAY_TURN,
         multiline = true,
     )
 }
