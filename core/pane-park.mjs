@@ -112,7 +112,7 @@ export function shouldBlockSend({ text, park, force = false } = {}) {
  * silent work on a downgraded model, but the human is not always the one who
  * downgraded it and may deliberately want the new model (the operator: fable→opus is
  * fine now). So the FIRST brief after a park warns without delivering; a SECOND
- * brief is an explicit human confirmation ("send again") — deliver it and clear
+ * regular brief confirms use of the current model, deliver only that brief and clear
  * the park so the pane and every later brief flow normally. A newer park
  * (different timestamp) re-warns. `warnedSinceMs` is the park we already warned
  * about; null on the first brief this incident.
@@ -124,10 +124,18 @@ export function decideParkedSend({ park, warnedSinceMs = null } = {}) {
   return { action: "warn", sinceMs: park.sinceMs };
 }
 
-/** One-line explanation for the sender when a brief is blocked. */
-export function blockedSendMessage(paneKey, park, { now = Date.now() } = {}) {
+/** WHAT: Formats a blocked send and its valid recovery. WHY: Keeps recorded evidence separate from invented model changes and replay promises. */
+export function blockedSendMessage(paneKey, park, {
+  now = Date.now(), surface = "cli", canSelectModel = false,
+} = {}) {
   const mins = Math.max(0, Math.round((now - park.sinceMs) / 60000));
-  return `🅿 ${paneKey} är parkerad efter modell-nedgradering (${park.detail || "okänd"}, ${mins} min sedan). ` +
-    `Briefen levererades INTE — arbete nu skulle köras på fallback-modellen. ` +
-    `Byt tillbaka modellen först (/model), eller skicka om med --force om det är avsiktligt.`;
+  const pane = String(paneKey).split(":").at(-1);
+  const recovery = surface === "discord"
+    ? `Sending another regular message to ${paneKey} accepts the current engine/model and clears this pause. ` +
+      `The blocked message is not replayed.` +
+      (canSelectModel ? ` To choose a Codex model first, use \`.${pane} //model <model>\`.` : "")
+    : `Resend the intended input with \`--force\` to accept the current engine/model. ` +
+      `Nothing is replayed automatically.`;
+  return `Message not sent to ${paneKey}: new work messages are paused (${mins} min ago). ` +
+    `Recorded reason: ${park.detail || "not recorded"}. ${recovery}`;
 }
