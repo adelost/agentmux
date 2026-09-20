@@ -22,7 +22,7 @@ function mockMsg({ content = "hello", channelId = "ch1", id = "msg-1", isBot = f
   };
 }
 
-function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatusDriver, queueFleetRestartRequest, scheduleBridgeRestart } = {}) {
+function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatusDriver, queueFleetRestartRequest, scheduleBridgeRestart, modelChangeOptions } = {}) {
   const defaultMapping = { name: "_ai", dir: "/home/user/project", pane: 0 };
   const mapping = mappingOverride ?? defaultMapping;
   const channelMapData = channelMapEntries ?? new Map([["ch1", defaultMapping]]);
@@ -91,6 +91,7 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatus
     }),
     runExclusive: vi.fn(async (_name, _pane, work) => work()),
   };
+  let modelClock = 0;
 
   const { onMessage } = createHandlers({
     agent,
@@ -104,6 +105,12 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatus
     agentsYamlPath,
     pollInterval: 1,
     codexStatusDriver,
+    modelChangeOptions: modelChangeOptions || {
+      now: () => modelClock,
+      wait: async (ms) => { modelClock += ms; },
+      timeoutMs: 10,
+      pollMs: 1,
+    },
     queueFleetRestartRequest,
     scheduleBridgeRestart,
     deliveryBroker,
@@ -220,7 +227,7 @@ feature("/model dialect routing", () => {
       unlinkSync(path);
     }],
     then: ["failed closed before restarting", (_, { msg, agent }) => {
-      const reply = msg.reply.mock.calls[0][0];
+      const reply = msg.reply.mock.calls.at(-1)[0];
       expect(agent.restartCodex).not.toHaveBeenCalled();
       expect(reply).toMatch(/modelbyte avbrutet/i);
       expect(agent.sendOnly).not.toHaveBeenCalled();
@@ -267,19 +274,28 @@ feature("/model dialect routing", () => {
       const s = setup({ agentsYamlPath: path, codexStatusDriver: driver });
       s.agent.isBusy.mockResolvedValue(false);
       s.agent.capturePane.mockResolvedValue("\n› Ask Codex to do anything\n");
-      s.agent.getContextPercent.mockReturnValue({
-        percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
-      });
+      s.agent.getContextPercent
+        .mockReturnValueOnce({
+          percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
+          lastCompactAt: "2026-09-20T10:00:00.000Z",
+        })
+        .mockReturnValue({
+          percent: 8, tokens: 16000, model: "gpt-5.6-sol", effort: "xhigh",
+          lastCompactAt: "2026-09-20T13:30:00.000Z",
+        });
       return { ...s, path, driver, msg: mockMsg({ content: "/model gpt-5.6-sol max" }) };
     }],
     when: ["onMessage is called", async ({ onMessage, msg, path }) => {
       await onMessage(msg);
       unlinkSync(path);
     }],
-    then: ["restart carries Max and global-default guarantee", (_, { msg, agent }) => {
+    then: ["restart carries Max and global-default guarantee", (_, { msg, agent, deliveryBroker }) => {
+      expect(deliveryBroker.enqueueAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        text: "/compact", kind: "slash", source: "model-switch",
+      }));
       expect(agent.restartCodex).toHaveBeenCalledTimes(1);
       expect(agent.restartCodex.mock.calls[0][2]).toMatchObject({ model: "gpt-5.6-sol", effort: "max" });
-      expect(msg.reply.mock.calls[0][0]).toContain("global default orörd");
+      expect(msg.reply.mock.calls.at(-1)[0]).toContain("global default orörd");
     }],
   });
 
@@ -293,9 +309,15 @@ feature("/model dialect routing", () => {
       const s = setup({ agentsYamlPath: path, codexStatusDriver: driver });
       s.agent.isBusy.mockResolvedValue(false);
       s.agent.capturePane.mockResolvedValue("\n› Ask Codex to do anything\n");
-      s.agent.getContextPercent.mockReturnValue({
-        percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
-      });
+      s.agent.getContextPercent
+        .mockReturnValueOnce({
+          percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
+          lastCompactAt: "2026-09-20T10:00:00.000Z",
+        })
+        .mockReturnValue({
+          percent: 8, tokens: 16000, model: "gpt-5.6-sol", effort: "xhigh",
+          lastCompactAt: "2026-09-20T13:30:00.000Z",
+        });
       return { ...s, path, msg: mockMsg({ content: "/model gpt-6" }) };
     }],
     when: ["onMessage is called", async ({ onMessage, msg, path }) => {
@@ -304,7 +326,7 @@ feature("/model dialect routing", () => {
     }],
     then: ["the process receives gpt-6-astra", (_, { msg, agent }) => {
       expect(agent.restartCodex.mock.calls[0][2]).toMatchObject({ model: "gpt-6-astra", effort: "xhigh" });
-      expect(msg.reply.mock.calls[0][0]).toContain("gpt-6-astra");
+      expect(msg.reply.mock.calls.at(-1)[0]).toContain("gpt-6-astra");
     }],
   });
 
@@ -316,10 +338,19 @@ feature("/model dialect routing", () => {
       s.agent.isBusy.mockResolvedValue(false);
       s.agent.capturePane
         .mockResolvedValueOnce("\n› Ask Codex to do anything\n")
+        .mockResolvedValueOnce("\n› Ask Codex to do anything\n")
+        .mockResolvedValueOnce("\n› Ask Codex to do anything\n")
+        .mockResolvedValueOnce("\n› Ask Codex to do anything\n")
         .mockResolvedValue("\n› keep my local draft\n");
-      s.agent.getContextPercent.mockReturnValue({
-        percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
-      });
+      s.agent.getContextPercent
+        .mockReturnValueOnce({
+          percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
+          lastCompactAt: "2026-09-20T10:00:00.000Z",
+        })
+        .mockReturnValue({
+          percent: 8, tokens: 16000, model: "gpt-5.6-sol", effort: "xhigh",
+          lastCompactAt: "2026-09-20T13:30:00.000Z",
+        });
       return { ...s, path, msg: mockMsg({ content: "/model gpt-5.6-sol max" }) };
     }],
     when: ["onMessage is called", async ({ onMessage, msg, path }) => {
@@ -328,8 +359,8 @@ feature("/model dialect routing", () => {
     }],
     then: ["no second restart destroys the draft", (_, { msg, agent }) => {
       expect(agent.restartCodex).toHaveBeenCalledTimes(1);
-      expect(msg.reply.mock.calls[0][0]).toMatch(/Återställningen misslyckades också/);
-      expect(msg.reply.mock.calls[0][0]).toMatch(/preserve pane input/);
+      expect(msg.reply.mock.calls.at(-1)[0]).toMatch(/Återställningen misslyckades också/);
+      expect(msg.reply.mock.calls.at(-1)[0]).toMatch(/preserve pane input/);
     }],
   });
 });

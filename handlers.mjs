@@ -13,6 +13,7 @@ import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
 import { readQuotaSnapshot } from "./core/quota-usage.mjs";
 import { formatQuotaSnapshot } from "./core/quota-format.mjs";
 import { prepareCodexIdle } from "./core/codex-tui.mjs";
+import { runCompactFirstCodexModelChange } from "./core/codex-model-command.mjs";
 import {
   clearCodexModelOverride,
   codexLoginCommand,
@@ -72,25 +73,25 @@ export async function reconcileAllSessions(agent, agentNames, log = (msg) => con
 
 const HELP_TEXT = [
   "**Commands:**",
-  "`/help` — show this message",
-  "`/peek` — last response from agent",
-  "`/raw` — last 50 lines of tmux pane (raw)",
-  "`/status` — native Codex account, model, context and usage limits",
-  "`/quota` — shared account quota: Claude session/week/Fable + Codex week",
-  "`/switch` — toggle this Codex pane between account profiles 1 and 2",
+  "`/help`: show this message",
+  "`/peek`: last response from agent",
+  "`/raw`: last 50 lines of tmux pane (raw)",
+  "`/status`: native Codex account, model, context and usage limits",
+  "`/quota`: shared account quota: Claude session/week/Fable + Codex week",
+  "`/switch`: toggle this Codex pane between account profiles 1 and 2",
   "`/model`: show current model; Codex aliases: astra/gpt-6/sol; Claude: fable/opus/sonnet/haiku",
-  "`/restore` — restore the model that was active before the latest downgrade",
-  "`/dismiss` — dismiss blocking prompt (survey etc.)",
-  "`/esc` — interrupt (send Escape)",
-  "`/use <agent>[.pane]` — switch channel target",
-  "`/use reset` — back to yaml default",
-  "`/thinking` — toggle real-time text streaming (default: on)",
-  "`/follow` — toggle: stream output even when typing in tmux",
-  "`/tts` — toggle text-to-speech for this channel",
-  "`/sync` — create/sync Discord channels from agentmux.yaml",
-  "`/reload` — reload agents.yaml",
-  "`/restart` — restart agentmux bridge",
-  "`/restart all` — recreate every configured tmux session + restart bridge (interrupts active work)",
+  "`/restore`: restore the model that was active before the latest downgrade",
+  "`/dismiss`: dismiss blocking prompt (survey etc.)",
+  "`/esc`: interrupt (send Escape)",
+  "`/use <agent>[.pane]`: switch channel target",
+  "`/use reset`: back to yaml default",
+  "`/thinking`: toggle real-time text streaming (default: on)",
+  "`/follow`: toggle: stream output even when typing in tmux",
+  "`/tts`: toggle text-to-speech for this channel",
+  "`/sync`: create/sync Discord channels from agentmux.yaml",
+  "`/reload`: reload agents.yaml",
+  "`/restart`: restart agentmux bridge",
+  "`/restart all`: recreate every configured tmux session + restart bridge (interrupts active work)",
   "",
   "Prefix with `.N` to target pane N (e.g. `.1 /raw`)",
 ].join("\n");
@@ -167,10 +168,11 @@ export function renderCatchupLine(countResult) {
 }
 
 /**
- * Create message handler with all dependencies injected.
+ * WHAT: Routes channel messages to AMUX actions. WHY: Prevents transport coupling.
+ *
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentmuxYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, deliveryBroker = null, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus, queueFleetRestartRequest = queueFleetRestart, scheduleBridgeRestart = (delayMs) => setTimeout(() => process.exit(75), delayMs) }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, deliveryBroker = null, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus, modelChangeOptions = {}, queueFleetRestartRequest = queueFleetRestart, scheduleBridgeRestart = (delayMs) => setTimeout(() => process.exit(75), delayMs) }) {
   const noopRecorder = { save: () => {}, enabled: false };
   const rec = recorder || noopRecorder;
   const sendLocks = new Map();
@@ -591,42 +593,31 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         }
         const [, requestedModel, targetEffort] = spec;
         const targetModel = resolveCodexModelName(requestedModel);
-        const result = await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
-          const idle = await prepareCodexIdle({ agent, name: mapping.name, pane });
-          if (!idle.ok) return { ok: false, error: `${idle.stage}: ${idle.error}` };
-
-          const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
-          const previous = codexModelOverride(state, mapping.name, pane)
-            || (context?.model ? { model: context.model, effort: context.effort ?? null } : null);
-          const effort = targetEffort?.toLowerCase() || previous?.effort || null;
-          const profile = selectedCodexProfile(state, mapping.name, pane);
-          setCodexModelOverride(state, mapping.name, pane, targetModel, effort);
-
-          try {
-            await agent.restartCodex(mapping.name, pane, { profile, model: targetModel, effort });
-            const verified = await nativeCodexStatus(mapping, pane);
-            if (!verified.ok) throw new Error(`native status: ${verified.stage}: ${verified.error}`);
-            const actual = verified.status.model;
-            if (actual?.id !== targetModel || (effort && actual?.effort !== effort)) {
-              throw new Error(`expected ${targetModel}${effort ? ` ${effort}` : ""}, status shows ${actual?.id || "unknown"}${actual?.effort ? ` ${actual.effort}` : ""}`);
-            }
-            rememberNativeModel(mapping, pane, verified.status);
-            return { ok: true, model: actual.id, effort: actual.effort };
-          } catch (err) {
-            let rollbackError = null;
-            try { await rollbackCodexLaunch(mapping, pane, { profile, model: previous }); }
-            catch (rollback) { rollbackError = rollback.message; }
-            return { ok: false, error: err.message, rollbackError };
-          }
-        });
+        await msg.reply(`Compacting ${mapping.name}:${pane} before model change; the switch runs only after a fresh receipt.`);
+        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () => runCompactFirstCodexModelChange({
+          agent, state, name: mapping.name, pane, targetModel, targetEffort,
+          statusDriver: codexStatusDriver,
+          log: (message) => console.log(`[${ts()}] ${message}`),
+          sendCompact: () => deliveryBroker
+            ? deliveryBroker.enqueueAndWait({
+                agentName: mapping.name, pane, text: "/compact", kind: "slash", source: "model-switch",
+                metadata: { channelId: msg.channelId, messageId: msg.id },
+              })
+            : sendSlashVerified(agent, mapping.name, pane, "/compact"),
+          ...modelChangeOptions,
+        }));
         if (result.ok) {
           if (readParkState(mapping.name, pane)) {
             unparkPane({ session: mapping.name, pane, detail: `explicit model switch: ${result.model} ${result.effort || ""}`.trim() });
           }
-          await msg.reply(`✅ model changed to ${result.model}${result.effort ? ` ${result.effort}` : ""} — bara ${mapping.name}:${pane}; global default orörd`);
+          await msg.reply(`✅ compact verified, then model changed to ${result.model}${result.effort ? ` ${result.effort}` : ""}; bara ${mapping.name}:${pane}, global default orörd`);
         } else {
-          await msg.reply(`⚠️ modelbyte avbrutet: ${result.error}.` +
-            (result.rollbackError ? ` Återställningen misslyckades också: ${result.rollbackError}` : " Föregående modell återställdes."));
+          const error = result.error || `${result.stage}: ${result.reason}`;
+          const recovery = result.stage === "switch"
+            ? (result.rollbackError ? ` Återställningen misslyckades också: ${result.rollbackError}` : " Föregående modell återställdes.")
+            : " Modellen ändrades inte.";
+          await msg.reply(`⚠️ modelbyte avbrutet före osäkert cachebyte: ${error}.` +
+            recovery);
         }
         return;
       }

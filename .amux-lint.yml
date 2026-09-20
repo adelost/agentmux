@@ -13,7 +13,7 @@ fileSize:
     core/native-runtime-client.mjs: 544
     core/suggestions-comment-bridge.mjs: 1131
     core/worktree-deps.mjs: 675
-    handlers.mjs: 1248
+    handlers.mjs: 1239
     spikes/web-ui/app.js: 1660
     spikes/web-ui/server.mjs: 2725
     spikes/web-ui/tools/native-canary-gate.mjs: 534
