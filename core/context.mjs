@@ -278,6 +278,15 @@ function latestCodexSessionFor(paneDir) {
   return null;
 }
 
+function codexRecordedModel(entry) {
+  const settings = entry?.type === "turn_context" ? entry.payload
+    : entry?.type === "event_msg" && entry.payload?.type === "thread_settings_applied"
+      ? entry.payload.thread_settings : null;
+  return settings?.model ? { model: settings.model,
+    effort: settings.collaboration_mode?.settings?.reasoning_effort
+      ?? settings.reasoning_effort ?? settings.effort ?? null } : null;
+}
+
 function getContextFromCodexJsonl(paneDir) {
   const file = latestCodexSessionFor(paneDir);
   if (!file) return null;
@@ -299,12 +308,8 @@ function getContextFromCodexJsonl(paneDir) {
       const compactTime = Date.parse(entry?.timestamp || entry?.payload?.timestamp || "");
       if (Number.isFinite(compactTime)) lastCompactAt = new Date(compactTime).toISOString();
     }
-    if (!turnCtx && entry?.type === "turn_context" && entry.payload?.model) {
-      turnCtx = {
-        model: entry.payload.model,
-        effort: entry.payload.collaboration_mode?.settings?.reasoning_effort
-          ?? entry.payload.effort ?? null,
-      };
+    if (!turnCtx && codexRecordedModel(entry)) {
+      turnCtx = codexRecordedModel(entry);
       continue;
     }
 
@@ -360,15 +365,11 @@ function backwardTurnContext(filePath) {
       readSync(fd, buf, 0, window, size - window);
       let found = null;
       for (const line of buf.toString("utf-8").split("\n")) {
-        if (!line.includes('"turn_context"')) continue;
+        if (!line.includes('"turn_context"') && !line.includes('"thread_settings_applied"')) continue;
         let entry;
         try { entry = JSON.parse(line); } catch { continue; }
-        if (entry?.type !== "turn_context" || !entry.payload?.model) continue;
-        found = {
-          model: entry.payload.model,
-          effort: entry.payload.collaboration_mode?.settings?.reasoning_effort
-            ?? entry.payload.effort ?? null,
-        };
+        const model = codexRecordedModel(entry);
+        if (model) found = model;
       }
       if (found) return found;
       if (window >= maxDepth) return null;
@@ -393,15 +394,11 @@ function headTurnContext(filePath) {
     const buf = Buffer.alloc(256 * 1024);
     const n = readSync(fd, buf, 0, buf.length, 0);
     for (const line of buf.toString("utf-8", 0, n).split("\n")) {
-      if (!line.includes('"turn_context"')) continue;
+      if (!line.includes('"turn_context"') && !line.includes('"thread_settings_applied"')) continue;
       let entry;
       try { entry = JSON.parse(line); } catch { continue; }
-      if (entry?.type !== "turn_context" || !entry.payload?.model) continue;
-      return {
-        model: entry.payload.model,
-        effort: entry.payload.collaboration_mode?.settings?.reasoning_effort
-          ?? entry.payload.effort ?? null,
-      };
+      const model = codexRecordedModel(entry);
+      if (model) return model;
     }
     return null;
   } catch {

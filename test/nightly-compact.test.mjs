@@ -8,6 +8,7 @@ import { cmdDream } from "../cli/dream.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { parseConfig, generateAgentsYaml } from "../sync.mjs";
 import { rememberContextCompact } from "../core/context-maintenance.mjs";
+import { createState } from "../core/state.mjs";
 
 const now = () => Date.parse("2026-09-07T02:00:00Z");
 const facts = () => ({ engine: "claude", backend: "tmux", running: true,
@@ -36,6 +37,50 @@ function fixture() {
 }
 
 feature("nightly context budget", () => {
+  for (const status of ["VERIFIED", "FAILED", "ATTEMPTING"]) {
+    component(`R2 rechecks a ${status} shared fence written by another state instance during lease wait`, {
+      when: ["a competing maintenance path records the same generation before nightly acquires the lease", async () => {
+        const fx = fixture(), statePath = join(fx.root, "state.json"), journal = join(fx.root, "session.jsonl");
+        writeFileSync(journal, status === "VERIFIED" ? JSON.stringify({ type: "system", subtype: "compact_boundary" }) + "\n" : "");
+        fx.ctx.state = createState(statePath);
+        const other = createState(statePath), acquire = fx.deps.queue.acquireSessionLease;
+        let checks = 0;
+        fx.change({ tokens: 120_000 });
+        fx.deps.queue.acquireSessionLease = (...args) => ++checks === 1 ? null : acquire(...args);
+        fx.deps.sleep = async ms => {
+          if (ms === 2_000) other.set("context_maintenance_by_pane_v1", { "claw:4": {
+            sessionId: "same-session", cursor: { positions: { [journal]: 0 } }, status,
+            beforeTokens: 120_000, reason: status === "FAILED" ? "provider-usage-limited" : null,
+          } });
+        };
+        try { return { result: await runNightlyCompact(fx.ctx, {}, fx.deps), calls: fx.calls() }; }
+        finally { fx.clean(); }
+      }],
+      then: ["no second model call is authorized by the stale pre-lock observation", ({ calls, result }) => {
+        expect(calls).toBe(0);
+        expect(result.rows[0].sharedStatus).toBe(status);
+      }],
+    });
+  }
+  for (const status of ["FAILED", "ATTEMPTING"]) {
+    component(`R3 keeps an earlier ${status} attempt visible without retrying`, {
+      when: ["nightly encounters the previous failed or ambiguous generation", async () => {
+        const fx = fixture(), journal = join(fx.root, "session.jsonl");
+        writeFileSync(journal, "");
+        fx.ctx.state = createState(join(fx.root, "state.json"));
+        fx.ctx.state.set("context_maintenance_by_pane_v1", { "claw:4": {
+          sessionId: "same-session", cursor: { positions: { [journal]: 0 } }, status,
+          beforeTokens: 120_000, reason: "provider-usage-limited",
+        } });
+        try { return { result: await runNightlyCompact(fx.ctx, {}, fx.deps), calls: fx.calls() }; }
+        finally { fx.clean(); }
+      }],
+      then: ["the unresolved count and original cause survive", ({ result, calls }) => {
+        expect(calls).toBe(0); expect(result.unresolved).toBe(1);
+        expect(result.rows[0]).toMatchObject({ sharedStatus: status, beforeTokens: 120_000, reason: "provider-usage-limited" });
+      }],
+    });
+  }
   unit("selects 227k at 28 percent and 100k at 10 percent without changing the daytime rule", {
     when: ["checking absolute context tokens", () => [facts(), { ...facts(), tokens: 100_000, percent: 10 }].map((item) => nightlyCompactDecision(item, policy))],
     then: ["both are eligible", (result) => expect(result).toEqual([null, null])],
@@ -107,7 +152,8 @@ feature("nightly context budget", () => {
       finally { fx.clean(); }
     }],
     then: ["nightly checks the receipt and spends no second compact", ({ result, calls }) => {
-      expect(result.rows[0].reason).toBe("compact-already-attempted-without-new-work"); expect(calls).toBe(0);
+      expect(result.rows[0].reason).toBe("compact-already-verified-without-new-work"); expect(calls).toBe(0);
+      expect(result.rows[0].status).toBe("compacted-above-budget"); expect(result.unresolved).toBe(1);
     }],
   });
   component("temporary lease contention retries without spending the night's model attempt", {

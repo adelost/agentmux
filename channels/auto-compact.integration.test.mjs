@@ -51,10 +51,11 @@ const CONTENT = {
 
 // Build the injected deps. `state.content` is read fresh each capture so a
 // test can simulate a compact succeeding (context drops) mid-run.
-function harness({ height = 50, content = CONTENT.full100, maxTokens = DEFAULT_CONFIG.maxTokens } = {}) {
+function harness({ height = 50, content = CONTENT.full100, maxTokens = DEFAULT_CONFIG.maxTokens, running = true } = {}) {
   const { path, dir } = writeYaml();
   const state = { content, fires: 0, rootDir: dir };
   const agent = {
+    paneProcessState: async () => ({ running }),
     capturePane: async () => state.content,
     sendOnly: async (_name, cmd) => { if (cmd === "/compact") state.fires++; },
     // Delivery-contract surface (core/delivery.mjs sendSlashVerified):
@@ -67,7 +68,7 @@ function harness({ height = 50, content = CONTENT.full100, maxTokens = DEFAULT_C
   const ac = createAutoCompact({
     agent, agentsYamlPath: path, discord, tmux, config, log: () => {},
   });
-  return { ac, state };
+  return { ac, state, agent };
 }
 
 async function ticks(ac, n) {
@@ -119,19 +120,15 @@ function kimiHarness({ percentTokens = 900_000, maxContext = 1_000_000 } = {}) {
   return { ac, state };
 }
 
-feature("auto-compact covers every registered engine", () => {
-  unit("a Kimi pane over the threshold is compacted, not silently skipped", {
+feature("automatic paid compact requires supported exact receipts", () => {
+  unit("Kimi is not auto-compacted without an exact-receipt implementation", {
     given: ["a Kimi pane whose journal reports 90% context", () => kimiHarness()],
     when: ["running the warn+compact ticks", async ({ ac, state }) => {
       await ticks(ac, 3);
       return state;
     }],
-    then: ["/compact reached the pane", (state) => {
-      // The regression this pins: auto-compact carried a hardcoded
-      // `if (dialect === "kimi") continue`, so Kimi panes were tracked but
-      // never compacted. skyvw:7 sat at 83% for days and every wake re-sent
-      // that whole uncached context.
-      expect(state.fires).toBeGreaterThan(0);
+    then: ["Mattias's no-unverified-automatic-spend rule holds; engine/model remain untouched", (state) => {
+      expect(state.fires).toBe(0);
       state.restore();
     }],
   });
@@ -147,6 +144,26 @@ feature("auto-compact covers every registered engine", () => {
 });
 
 feature("auto-compact tick — runaway prevention (the real bug)", () => {
+  component("missing process evidence cannot authorize a warning or paid compact", {
+    given: ["no process observer is available", () => {
+      const fx = harness(); delete fx.agent.paneProcessState; return fx;
+    }],
+    when: ["polling the apparently large idle context", async ({ ac, state }) => {
+      await ac.tick(); return { warnings: ac.getWarnings(), fires: state.fires };
+    }],
+    then: ["unknown is not running", result => {
+      expect(result.warnings).toEqual({}); expect(result.fires).toBe(0);
+    }],
+  });
+  component("stopped skyvw:6-like pane cannot warn or send based on old terminal context", {
+    given: ["a shell with stale large-context screen history", () => harness({ running: false })],
+    when: ["polling once", async ({ ac, state }) => {
+      await ac.tick(); return { warnings: ac.getWarnings(), fires: state.fires };
+    }],
+    then: ["no warning countdown and no provider request", result => {
+      expect(result.warnings).toEqual({}); expect(result.fires).toBe(0);
+    }],
+  });
   unit("limited status alerts on first observation and once per transition", {
     given: ["startup, steady limited, and recovery states", () => [undefined, "limited", "idle"]],
     when: ["checking entry into limited", ([startup, limited, idle]) => [
@@ -225,6 +242,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000099\n  discord: "chan-1"\n  panes:\n    - name: claude\n      cmd: claude\n`);
       const state = { content: CONTENT.full100, warns: 0, rootDir: dir };
       const agent = {
+        paneProcessState: async () => ({ running: true }),
         capturePane: async () => state.content,
         sendOnly: async () => {},
       };
@@ -249,7 +267,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     }],
   });
 
-  component("Codex panes use the same 60%-by-default compact request without a false completion notice", {
+  component("Codex panes use the absolute-token compact request without a false completion notice", {
     given: ["an agent with a claude pane (0) and a codex pane (1), both reading 100%", () => {
       const dir = mkdtempSync(join(tmpdir(), "amux-ac-codex-"));
       const fakeHome = mkdtempSync(join(tmpdir(), "amux-ac-codex-home-"));
@@ -272,6 +290,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       resetCodexSessionIndexForTests();
       const state = { content: CONTENT.full100, captures: [], fires: [] };
       const agent = {
+        paneProcessState: async () => ({ running: true }),
         capturePane: async (name, idx) => { state.captures.push(`${name}:${idx}`); return state.content; },
         sendOnly: async (name, cmd, pane) => {
           if (cmd === "/compact") state.fires.push(`${name}:${pane}`);

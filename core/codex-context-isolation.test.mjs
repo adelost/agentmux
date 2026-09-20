@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getContextPercent, resetCodexSessionIndexForTests } from "./context.mjs";
 
-function fixture(withPane = true) {
+function fixture(withPane = true, settingsOnly = false) {
   const root = mkdtempSync(join(tmpdir(), "amux-context-isolation-"));
   const key1 = "AMUX_CODEX_PROFILE_1_HOME", key2 = "AMUX_CODEX_PROFILE_2_HOME";
   const prior = [process.env[key1], process.env[key2]];
@@ -17,7 +17,8 @@ function fixture(withPane = true) {
     const path = join(sessions, `${name}.jsonl`);
     const events = [
       { type: "session_meta", payload: { cwd } },
-      { type: "turn_context", payload: { model, effort: "xhigh" } },
+      settingsOnly ? { type: "event_msg", payload: { type: "thread_settings_applied", thread_settings: { model, reasoning_effort: "xhigh" } } }
+        : { type: "turn_context", payload: { model, effort: "xhigh" } },
       { type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: tokens }, model_context_window: 800_000 } } },
       ...(compactAt ? [{ type: "compacted", timestamp: compactAt }] : []),
     ];
@@ -38,6 +39,14 @@ function fixture(withPane = true) {
 }
 
 feature("Codex model and compact evidence belongs to its exact pane", () => {
+  component("a compacted journal retains model evidence in applied thread settings", {
+    given: ["an exact pane with settings but no remaining turn_context", () => fixture(true, true)],
+    when: ["reading the session for guarded resume", ({ pane }) => getContextPercent(pane, "codex")],
+    then: ["the actual recorded model remains readable", (value, ctx) => {
+      try { expect(value).toMatchObject({ model: "gpt-5.6-sol", effort: "xhigh", tokens: 12_000 }); }
+      finally { ctx.cleanup(); }
+    }],
+  });
   component("a newer parent conversation cannot replace Sol or supply a compact receipt", {
     given: ["a Sol pane under a newer Astra conversation", () => fixture()],
     when: ["reading the panel used by Discord and model switching", ({ pane }) => getContextPercent(pane, "codex")],

@@ -1,7 +1,7 @@
 import { choice, decide, defineDecisionTable, on } from "@v1d/product-spec";
 
 /** WHAT: Defines context-cost thresholds. WHY: Keeps idle and wake decisions on the same documented budget. */
-export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 150_000, idleMs: 10 * 60_000, coldMs: 24 * 60 * 60_000 });
+export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 100_000, idleMs: 10 * 60_000, coldMs: 24 * 60 * 60_000 });
 
 /** WHAT: Reads operator cost-policy overrides. WHY: Keeps daytime and cold-wake thresholds consistent after restart. */
 export function readContextCostPolicy(env = process.env) {

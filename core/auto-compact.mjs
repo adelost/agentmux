@@ -9,6 +9,7 @@
 // pane, clear pending warning).
 
 import { isLiveStatus, isCompactUnsafe } from "./pane-status.mjs";
+import { CONTEXT_COST_POLICY, readContextCostPolicy } from "../policies/context-cost.mjs";
 
 /** WHAT: Defines automatic compaction defaults. WHY: Keeps every caller on one safety policy. */
 export const DEFAULT_CONFIG = {
@@ -16,8 +17,7 @@ export const DEFAULT_CONFIG = {
   codexEnabled: true,     // Codex supports /compact. Its journal watcher is
                           // the completion truth; the composer only proves the
                           // request left input, so no premature success notice.
-  threshold: 60,          // compact idle panes before large histories keep taxing input
-  maxTokens: 150_000,     // absolute budget independent from model window size
+  maxTokens: CONTEXT_COST_POLICY.maxTokens, // absolute budget, never window percentage
   graceMs: 60_000,        // 1 minute between warn and fire
   pollMs: 60_000,         // poll cadence in the bridge.
                           // Matched to graceMs so each pane gets one decide
@@ -62,8 +62,7 @@ export function parseAutoCompactConfig(env = process.env) {
   return {
     enabled: env.AUTO_COMPACT_ENABLED !== "false",
     codexEnabled: env.AUTO_COMPACT_CODEX !== "false",
-    threshold: parseInt(env.AUTO_COMPACT_WARN_THRESHOLD || DEFAULT_CONFIG.threshold, 10),
-    maxTokens: parseInt(env.AUTO_COMPACT_MAX_TOKENS || DEFAULT_CONFIG.maxTokens, 10),
+    maxTokens: readContextCostPolicy(env).maxTokens,
     graceMs: parseInt(env.AUTO_COMPACT_GRACE_MS || DEFAULT_CONFIG.graceMs, 10),
     pollMs: parseInt(env.AUTO_COMPACT_POLL_MS || DEFAULT_CONFIG.pollMs, 10),
     compactLockMs: parseInt(env.AUTO_COMPACT_LOCK_MS || DEFAULT_CONFIG.compactLockMs, 10),
@@ -161,7 +160,6 @@ export function resolveActivityMs({ turnMs = null, fileMtimeMs = null, fileFully
 export function decideAutoCompactAction({
   paneKey,
   status,
-  contextPercent,
   contextTokens = null,
   paneInMode,
   lastActivityMs = null,
@@ -192,14 +190,13 @@ export function decideAutoCompactAction({
     return { action: "none" };
   }
 
-  // No/unknown context% — can't decide.
-  const overTokenBudget = Number.isFinite(contextTokens) && contextTokens > config.maxTokens;
-  if ((contextPercent == null || !Number.isFinite(contextPercent)) && !overTokenBudget) {
+  // Percentages change with model windows and never authorize a paid compact.
+  if (!Number.isFinite(contextTokens) || contextTokens < 0) {
     return { action: existing ? "cancel" : "none", reason: "no context data" };
   }
 
   // Below threshold — pane doesn't need compacting; drop any stale warning.
-  if (contextPercent < config.threshold && !overTokenBudget) {
+  if (contextTokens <= config.maxTokens) {
     if (existing || compactFloors.has(paneKey)) return { action: "cancel", reason: "below threshold" };
     return { action: "none" };
   }
@@ -219,8 +216,8 @@ export function decideAutoCompactAction({
   // off until context actually changes — a working compact, a finished turn,
   // or /clear drops it below threshold, which clears the floor via "cancel".
   const floor = compactFloors.get(paneKey);
-  if (floor != null && contextPercent >= floor) {
-    return { action: "suppress", reason: `prior /compact ineffective: still ${contextPercent}% ≥ ${floor}% — not re-firing` };
+  if (floor != null && contextTokens >= floor) {
+    return { action: "suppress", reason: `prior /compact ineffective: still ${contextTokens} tokens >= ${floor}, not re-firing` };
   }
 
   // Min-idle gate: the pane might show the idle prompt char in tmux, but
@@ -240,11 +237,11 @@ export function decideAutoCompactAction({
 
   // Over threshold + idle long enough. First cross → warn. Second cross after grace → fire.
   if (!existing) {
-    return { action: "warn", reason: `idle at ${contextPercent}% ≥ ${config.threshold}%` };
+    return { action: "warn", reason: `idle at ${contextTokens} tokens > ${config.maxTokens}` };
   }
 
   if (now - existing.warned_at >= config.graceMs) {
-    return { action: "compact", reason: `grace elapsed, still ${contextPercent}% idle` };
+    return { action: "compact", reason: `grace elapsed, still ${contextTokens} tokens idle` };
   }
 
   const remaining = Math.ceil((config.graceMs - (now - existing.warned_at)) / 1000);
@@ -252,13 +249,12 @@ export function decideAutoCompactAction({
 }
 
 /**
- * Human-readable warning message posted to the pane's Discord channel.
- * Kept here so tests can assert exact format and so the bridge doesn't
- * own copy.
+ * WHAT: Formats the absolute-token compact warning.
+ * WHY: Keeps operators from mistaking window percentages for admission policy.
  */
-export function formatWarningMessage(paneKey, contextPercent, graceMs) {
+export function formatWarningMessage(paneKey, contextTokens, graceMs) {
   const secs = Math.round(graceMs / 1000);
-  return `⚠ Auto-compact in ${secs}s: **${paneKey}** is at ${contextPercent}% context and idle. Type anything (here or in tmux) to cancel.`;
+  return `⚠ Auto-compact in ${secs}s: **${paneKey}** has ${contextTokens} context tokens and is idle. Type anything (here or in tmux) to cancel.`;
 }
 
 export function formatCompactedMessage(paneKey, contextPercent) {

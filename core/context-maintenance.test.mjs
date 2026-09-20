@@ -11,7 +11,7 @@ function fixture({ fail = false, jobs = [] } = {}) {
   const append = e => appendFileSync(path, JSON.stringify(e) + "\n");
   const state = { get: (k, fallback) => data[k] ?? fallback, set: (k, v) => { data[k] = v; } };
   const deps = { state, now: () => 100_000_000,
-    agent: { getContext: async () => ({ tokens: 473_000 }), isBusy: async () => false,
+    agent: { paneProcessState: async () => ({ running: true }), getContext: async () => ({ tokens: 473_000 }), isBusy: async () => false,
       promptTransportState: async () => ({ state: "empty-idle" }) },
     queue: { list: () => jobs, acquireSessionLease: () => ({ release() {} }) },
     resolveTarget: () => ({ dir: root, engine: "claude" }),
@@ -72,6 +72,7 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
     given: ["an idle large context with a mocked provider", () => fixture()],
     when: ["compacting and checking again through a new controller", async ctx => {
       await ctx.maintenance.run("claw", 2);
+      ctx.agent.getContext = async () => ({ tokens: 120_000 });
       await createContextMaintenance(ctx).run("claw", 2, { cold: true, leaseHeld: true });
     }],
     then: ["only one provider call occurred", (_, ctx) => { try { expect(ctx.calls).toEqual(["compact"]); } finally { ctx.cleanup(); } }],

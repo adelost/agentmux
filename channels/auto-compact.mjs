@@ -317,15 +317,15 @@ export function createAutoCompact({
       .catch?.((err) => log(`limited push failed: ${err.message}`));
   }
 
-  async function postWarning(agentName, paneIdx, paneKey, contextPercent) {
+  async function postWarning(agentName, paneIdx, paneKey, contextTokens) {
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
     if (!channelId || !discord) {
       log(`no discord channel for ${paneKey}, warning suppressed (will still fire at grace end)`);
       return;
     }
     try {
-      await discord.send(channelId, formatWarningMessage(paneKey, contextPercent, config.graceMs));
-      log(`warned ${paneKey} at ${contextPercent}%`);
+      await discord.send(channelId, formatWarningMessage(paneKey, contextTokens, config.graceMs));
+      log(`warned ${paneKey} at ${contextTokens} tokens`);
     } catch (err) {
       log(`warning send failed for ${paneKey}: ${err.message}`);
     }
@@ -352,6 +352,16 @@ export function createAutoCompact({
       for (let i = 0; i < panes.length; i++) {
         const paneKey = `${a.name}:${i}`;
         if (compacting.has(paneKey)) continue;
+        // Exact compact receipts currently exist for these two engines only.
+        // Unsupported engines cannot spend paid attempts on an unverified loop.
+        if (!["claude", "codex"].includes(paneDialect(a, i))) continue;
+        // A shell may retain old context/quota text. No warning or paid
+        // maintenance is eligible without a currently running engine.
+        if (typeof agent.paneProcessState !== "function" || (await agent.paneProcessState(a.name, i).catch(() => null))?.running !== true) {
+          warnings.delete(paneKey);
+          compactFloors.delete(paneKey);
+          continue;
+        }
 
         const { status, contextPercent, contextTokens, contextSession, paneInMode, paneHeight, lastActivityMs,
                 limitBannerVisible } = await inspect(a, i);
@@ -384,7 +394,10 @@ export function createAutoCompact({
           continue;
         }
 
-        if (contextMaintenance && !contextMaintenance.canAttempt(a.name, i, contextSession)) continue;
+        if (contextMaintenance && !contextMaintenance.canAttempt(a.name, i, contextSession)) {
+          warnings.delete(paneKey);
+          continue;
+        }
         if (!contextMaintenance && attemptedActivity.has(paneKey) && attemptedActivity.get(paneKey) === lastActivityMs) continue;
         const decision = decideAutoCompactAction({
           paneKey,
@@ -408,7 +421,7 @@ export function createAutoCompact({
           const cooldown = config.warnCooldownMs ?? 0;
           if (lastPost == null || now - lastPost >= cooldown) {
             lastWarnPostAt.set(paneKey, now);
-            await postWarning(a.name, i, paneKey, contextPercent);
+            await postWarning(a.name, i, paneKey, contextTokens);
           }
         } else if (decision.action === "compact") {
           warnings.delete(paneKey);
@@ -416,7 +429,7 @@ export function createAutoCompact({
           // (after the in-flight lock clears) compares against it: if context
           // didn't drop below this, the compact was a no-op and decide returns
           // "suppress" instead of firing again.
-          compactFloors.set(paneKey, contextPercent);
+          compactFloors.set(paneKey, contextTokens);
           attemptedActivity.set(paneKey, lastActivityMs);
           await fireCompact(a.name, i, paneKey, contextPercent, paneDialect(a, i));
         } else if (decision.action === "suppress") {
@@ -442,7 +455,7 @@ export function createAutoCompact({
       return;
     }
     if (intervalId) return;
-    log(`enabled | threshold=${config.threshold}% or >${config.maxTokens} tokens grace=${Math.round(config.graceMs / 1000)}s poll=${Math.round(config.pollMs / 1000)}s min-idle=${Math.round(config.minIdleMs / 1000)}s`);
+    log(`enabled | >${config.maxTokens} tokens grace=${Math.round(config.graceMs / 1000)}s poll=${Math.round(config.pollMs / 1000)}s min-idle=${Math.round(config.minIdleMs / 1000)}s`);
     intervalId = setInterval(() => {
       tick().catch((err) => log(`tick failed: ${err.message}`));
     }, config.pollMs);

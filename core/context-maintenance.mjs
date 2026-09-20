@@ -57,7 +57,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   async function run(name, pane, { cold = false, leaseHeld = false, jobId = null } = {}) {
     const target = resolveTarget(name, pane);
     if (!target || !["claude", "codex"].includes(target.engine)) return { ok: true, skipped: "unsupported-engine" };
-    if (agent.paneProcessState && !(await agent.paneProcessState(name, pane)).running) {
+    if (typeof agent.paneProcessState !== "function" || (await agent.paneProcessState(name, pane).catch(() => null))?.running !== true) {
       return { ok: !cold, skipped: "not-running", reason: "context-cost:not-running" };
     }
     const identity = identityFor(target.engine, target.dir);
@@ -81,6 +81,10 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const pending = () => queue.list(name, pane).some(j => j.id !== jobId && !TERMINAL_DELIVERY_STATES.has(j.status) && (!cold || j.status !== "pending"));
     let submitted = false, intent = null;
     try {
+      const currentAttempt = existing(name, pane, identity);
+      if (currentAttempt) return currentAttempt.status === "VERIFIED"
+        ? { ok: true, cell: "receipt-exists" }
+        : { ok: false, reason: `context-cost:prior-${currentAttempt.status.toLowerCase()}:${currentAttempt.reason || "outcome-unknown"}` };
       if (pending()) {
         return { ok: false, reason: "context-cost:delivery-pending" };
       }

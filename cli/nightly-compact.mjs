@@ -17,7 +17,7 @@ import { codexComposerText } from "../core/codex-tui.mjs";
 import { findBlockingPrompt } from "../core/dismiss.mjs";
 import { createDeliveryQueue, TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
-import { compactAccessBlocker, nightlyCompactDecision, nightlyCompactOutcome, nightlyCompactPolicy } from "../core/nightly-compact.mjs";
+import { compactAccessBlocker, nightlyCompactDecision, nightlyCompactOutcome, nightlyCompactPolicy, sharedNightlyCompactOutcome } from "../core/nightly-compact.mjs";
 
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const dayKey = (now) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date(now));
@@ -131,8 +131,11 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     try { first = await observe(ctx, target, { queue, now }); }
     catch { rows.push({ pane: key, status: "skipped", reason: "observation-unavailable" }); continue; }
     const previous = readReport(receiptPath, dateKey).panes[key];
-    if (contextMaintenanceAttempt(ctx.state, target.agent.name, target.pane.index, { sessionId: first.sessionId })) {
-      rows.push({ pane: key, status: "skipped", reason: "compact-already-attempted-without-new-work" });
+    const sharedOutcome = () => sharedNightlyCompactOutcome(contextMaintenanceAttempt(ctx.state,
+      target.agent.name, target.pane.index, { sessionId: first.sessionId }), first, policy.maxTokens);
+    const priorShared = sharedOutcome();
+    if (priorShared) {
+      rows.push({ pane: key, ...priorShared });
       continue;
     }
     const reason = nightlyCompactDecision(first, policy, previous);
@@ -155,6 +158,10 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       writeReport(receiptPath, report);
     };
     try {
+      // Other controllers can complete while the lease is busy. This read
+      // and the intent below must share the same physical session lease.
+      const currentShared = sharedOutcome();
+      if (currentShared) { rows.push({ pane: key, ...currentShared }); continue; }
       const current = readReport(receiptPath, dateKey).panes[key];
       await sleep(200);
       const check = async () => {
@@ -218,7 +225,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     }
   }
   const reportPath = join(path, "runs", `${randomUUID()}.json`);
-  const unresolved = rows.filter((row) => row.status === "failed" || row.status.startsWith("compacted-")
+  const unresolved = rows.filter((row) => ["failed", "unverified"].includes(row.status) || row.status.startsWith("compacted-")
     || (row.beforeTokens > policy.maxTokens && /^(claude-subscription-access-disabled|provider-usage-limited|activity-unknown|already-attempted:(failed|attempting|compacted-))/u.test(row.reason || ""))).length;
   if (!flags.dry && targets.length) writeReport(reportPath, { dateKey, policy, rows, unresolved, observedAt: new Date(now()).toISOString() });
   console.log(`Nightly compact: ${flags.dry ? `${rows.filter((row) => row.status === "eligible").length} eligible` : `${rows.filter((row) => row.status === "within-budget").length} verified within budget`}; ${unresolved} unresolved; ${rows.filter((row) => row.status === "skipped").length} skipped. ${flags.dry ? "No receipt written" : `Report ${reportPath}`}`);

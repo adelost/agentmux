@@ -13,7 +13,7 @@ feature("context-cost decisions are total and fail closed", () => {
   });
   for (const [name, facts, action] of [
     ["a 473k idle panel is eligible despite its million-token window", { tokens: 473_000, idleMs: 600_000, safe: true }, "COMPACT"],
-    ["150k exactly is within the chosen budget", { tokens: 150_000, idleMs: 600_000, safe: true }, "CONTINUE"],
+    ["100k exactly is within the chosen budget", { tokens: 100_000, idleMs: 600_000, safe: true }, "CONTINUE"],
     ["a recent conversation is left alone", { tokens: 473_000, idleMs: 599_999, safe: true }, "CONTINUE"],
     ["24 hours and a large context require compact before work", { tokens: 473_000, idleMs: 86_400_000, cold: true, safe: true }, "COMPACT"],
     ["a failed compact blocks a cold wake", { tokens: 473_000, idleMs: 86_400_000, cold: true, safe: true, attempt: "FAILED" }, "HOLD"],

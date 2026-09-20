@@ -6,14 +6,14 @@ import { dialectFor, inspectPane } from "./inspect-pane.mjs";
 import { isCompactUnsafe } from "../core/pane-status.mjs";
 import { formatTokens } from "./format.mjs";
 import { runNightlyCompact } from "./nightly-compact.mjs";
+import { CONTEXT_COST_POLICY } from "../policies/context-cost.mjs";
 
-// Preserve the existing manual bulk threshold; nightly uses an absolute budget.
-const COMPACT_MIN_TOKENS = 200_000;
+const COMPACT_MIN_TOKENS = CONTEXT_COST_POLICY.maxTokens;
 
-/** WHAT: Routes manual and nightly compaction. WHY: Keeps explicit maintenance separate from daytime percentage policy. */
+/** WHAT: Routes manual and nightly compaction. WHY: Keeps explicit targeting separate from absolute-token admission. */
 export async function cmdCompact(ctx, flags = {}, positional = []) {
   if (flags.help || flags.h) {
-    console.log("Usage: amux compact [PERCENT | AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --nightly [AGENT -p N] [--dry]");
+    console.log("Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --nightly [AGENT -p N] [--dry]\nBulk default: over 100000 tokens. Percent thresholds are not supported.");
     return { help: true };
   }
   if (flags.nightly) {
@@ -39,12 +39,9 @@ export async function cmdCompact(ctx, flags = {}, positional = []) {
     return compactOnePane(ctx, String(positional[0]), flags, compactText);
   }
 
-  const threshold = positional[0] != null ? parseInt(positional[0]) : 20;
-  if (Number.isNaN(threshold) || threshold < 0 || threshold > 100) {
-    console.error(`Invalid threshold '${positional[0]}'. Must be 0-100.`);
-    process.exit(1);
-  }
-  const minTokens = flags["min-tokens"] != null ? parseInt(flags["min-tokens"]) : COMPACT_MIN_TOKENS;
+  if (positional[0] != null) throw new Error("Percentage thresholds are no longer supported; use --min-tokens N");
+  const minTokens = flags["min-tokens"] != null ? Number(flags["min-tokens"]) : COMPACT_MIN_TOKENS;
+  if (!Number.isSafeInteger(minTokens) || minTokens < 1) throw new Error("--min-tokens requires a positive integer");
   const dry = !!flags.dry;
   const force = !!flags.force;
 
@@ -62,8 +59,7 @@ export async function cmdCompact(ctx, flags = {}, positional = []) {
       if (!isCodingDialect(dialect)) continue;
       const { status, context } = await inspectPane(ctx, a, p);
       if (!context) continue;
-      if (context.percent < threshold) continue;
-      if (context.tokens < minTokens) continue;
+      if (!Number.isFinite(context.tokens) || context.tokens <= minTokens) continue;
       const unsafe = isCompactUnsafe(status);
       if (unsafe && !force) {
         skipped.push({ agent: a.name, pane: p.index, dialect, context, status });
@@ -73,7 +69,7 @@ export async function cmdCompact(ctx, flags = {}, positional = []) {
     }
   }
 
-  console.log(`Threshold: ≥${threshold}% and ≥${formatTokens(minTokens)} tokens  |  Action: ${dry ? "dry-run" : "compact"}${force ? "  |  FORCE (will compact working panes)" : ""}`);
+  console.log(`Threshold: >${formatTokens(minTokens)} tokens  |  Action: ${dry ? "dry-run" : "compact"}${force ? "  |  FORCE (will compact working panes)" : ""}`);
 
   if (targets.length) {
     console.log(`\nCompacting ${targets.length} pane(s):`);
@@ -88,7 +84,7 @@ export async function cmdCompact(ctx, flags = {}, positional = []) {
     }
   }
   if (!targets.length && !skipped.length) {
-    console.log(`\nNo claude/codex panes above ${threshold}%. Nothing to do.`);
+    console.log(`\nNo claude/codex panes above ${formatTokens(minTokens)} tokens. Nothing to do.`);
     return;
   }
 

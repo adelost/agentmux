@@ -14,6 +14,7 @@ const base = {
   paneKey: key,
   status: "idle",
   contextPercent: 80,
+  contextTokens: 200_000,
   paneInMode: "0",
   warnings: new Map(),
   config: cfg(),
@@ -22,6 +23,18 @@ const base = {
 };
 
 feature("decideAutoCompactAction — disabled config", () => {
+  unit("percentage alone never authorizes compact, even at 100 percent", {
+    when: ["reading a small or unknown absolute context", () => [90_000, null].map(contextTokens =>
+      decideAutoCompactAction({ ...base, contextPercent: 100, contextTokens }))],
+    then: ["neither observation starts the compact countdown", results => {
+      expect(results.map(r => r.action)).toEqual(["none", "none"]);
+    }],
+  });
+  unit("100001 tokens triggers the warning even at one percent", {
+    when: ["reading an idle context above the absolute budget", () =>
+      decideAutoCompactAction({ ...base, contextPercent: 1, contextTokens: 100_001 })],
+    then: ["the token policy applies", result => expect(result.action).toBe("warn")],
+  });
   unit("returns action:none when enabled=false", {
     given: ["auto-compact disabled", () => ({ ...base, config: cfg({ enabled: false }) })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
@@ -39,14 +52,14 @@ feature("decideAutoCompactAction — first crossing (warn)", () => {
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
   });
 
-  unit("exactly at threshold → warn", {
-    given: ["60% idle", () => ({ ...base, contextPercent: 60 })],
+  unit("exactly at token budget → none", {
+    given: ["100000 tokens idle", () => ({ ...base, contextTokens: 100_000 })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
-    then: ["action=warn", (r) => expect(r.action).toBe("warn")],
+    then: ["within the requested token budget", (r) => expect(r.action).toBe("none")],
   });
 
-  unit("1% below threshold → none", {
-    given: ["59% idle", () => ({ ...base, contextPercent: 59 })],
+  unit("below token budget → none", {
+    given: ["99000 tokens idle", () => ({ ...base, contextTokens: 99_000 })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=none", (r) => expect(r.action).toBe("none")],
   });
@@ -121,7 +134,7 @@ feature("decideAutoCompactAction — activity cancels warning", () => {
   unit("context dropped below threshold during grace → cancel", {
     given: ["warning + context=59%", () => {
       const warnings = new Map([[key, { warned_at: base.now - 20_000 }]]);
-      return { ...base, warnings, contextPercent: 59 };
+      return { ...base, warnings, contextTokens: 99_000 };
     }],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=cancel", (r) => expect(r.action).toBe("cancel")],
@@ -199,7 +212,7 @@ feature("decideAutoCompactAction — verify-before-refire (no-op /compact)", () 
     given: ["compactFloor=100, context still 100% (the observed runaway)", () => ({
       ...base,
       contextPercent: 100,
-      compactFloors: new Map([[key, 100]]),
+      compactFloors: new Map([[key, 200_000]]),
     })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=suppress", (r) => {
@@ -212,7 +225,7 @@ feature("decideAutoCompactAction — verify-before-refire (no-op /compact)", () 
     given: ["compactFloor=81, context now 100%", () => ({
       ...base,
       contextPercent: 100,
-      compactFloors: new Map([[key, 81]]),
+      compactFloors: new Map([[key, 180_000]]),
     })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=suppress (≥ floor)", (r) => expect(r.action).toBe("suppress")],
@@ -222,7 +235,7 @@ feature("decideAutoCompactAction — verify-before-refire (no-op /compact)", () 
     given: ["compactFloor=100, context now 80% (>threshold)", () => ({
       ...base,
       contextPercent: 80,
-      compactFloors: new Map([[key, 100]]),
+      compactFloors: new Map([[key, 300_000]]),
     })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=warn (floor no longer blocks; will re-record lower on fire)", (r) => expect(r.action).toBe("warn")],
@@ -232,7 +245,8 @@ feature("decideAutoCompactAction — verify-before-refire (no-op /compact)", () 
     given: ["compactFloor=100, context now 30%", () => ({
       ...base,
       contextPercent: 30,
-      compactFloors: new Map([[key, 100]]),
+      contextTokens: 90_000,
+      compactFloors: new Map([[key, 200_000]]),
     })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=cancel", (r) => {
@@ -246,7 +260,7 @@ feature("decideAutoCompactAction — verify-before-refire (no-op /compact)", () 
       ...base,
       status: "working",
       contextPercent: 100,
-      compactFloors: new Map([[key, 100]]),
+      compactFloors: new Map([[key, 200_000]]),
     })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=cancel, reason=pane active", (r) => {
@@ -416,8 +430,8 @@ feature("parseAutoCompactConfig — minIdleMs", () => {
 });
 
 feature("decideAutoCompactAction — missing context data", () => {
-  unit("null contextPercent → none", {
-    given: ["no context readable", () => ({ ...base, contextPercent: null })],
+  unit("null token count → none", {
+    given: ["no context readable", () => ({ ...base, contextTokens: null })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=none, reason=no context data", (r) => {
       expect(r.action).toBe("none");
@@ -425,8 +439,8 @@ feature("decideAutoCompactAction — missing context data", () => {
     }],
   });
 
-  unit("NaN contextPercent → none", {
-    given: ["NaN context", () => ({ ...base, contextPercent: NaN })],
+  unit("NaN token count → none", {
+    given: ["NaN context", () => ({ ...base, contextTokens: NaN })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=none", (r) => expect(r.action).toBe("none")],
   });
@@ -439,8 +453,8 @@ feature("parseAutoCompactConfig", () => {
     then: ["matches DEFAULT_CONFIG", (r) => {
       expect(r.enabled).toBe(true);
       expect(r.codexEnabled).toBe(true);
-      expect(r.threshold).toBe(60);
-      expect(r.threshold).toBe(DEFAULT_CONFIG.threshold);
+      expect(r.maxTokens).toBe(100_000);
+      expect(r.threshold).toBeUndefined();
       expect(r.graceMs).toBe(DEFAULT_CONFIG.graceMs);
       expect(r.pollMs).toBe(DEFAULT_CONFIG.pollMs);
     }],
@@ -458,25 +472,27 @@ feature("parseAutoCompactConfig", () => {
     then: ["codexEnabled=false", (r) => expect(r.codexEnabled).toBe(false)],
   });
 
-  unit("custom threshold + grace from env", {
+  unit("token override + grace from env; old percentage override has no effect", {
     given: ["env overrides", () => ({
-      env: { AUTO_COMPACT_WARN_THRESHOLD: "80", AUTO_COMPACT_GRACE_MS: "120000" },
+      env: { AUTO_COMPACT_WARN_THRESHOLD: "80", AUTO_COMPACT_MAX_TOKENS: "120000", AUTO_COMPACT_GRACE_MS: "120000" },
     })],
     when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
     then: ["values applied", (r) => {
-      expect(r.threshold).toBe(80);
+      expect(r.maxTokens).toBe(120_000);
+      expect(r.threshold).toBeUndefined();
       expect(r.graceMs).toBe(120_000);
     }],
   });
 });
 
 feature("format helpers", () => {
-  unit("warning message includes pane, percent, seconds", {
-    given: ["args", () => ({ key: "claw:3", pct: 78, grace: 60_000 })],
+  unit("warning message includes pane, absolute tokens, seconds", {
+    given: ["args", () => ({ key: "claw:3", pct: 178000, grace: 60_000 })],
     when: ["formatting", ({ key, pct, grace }) => formatWarningMessage(key, pct, grace)],
     then: ["contains all fields", (r) => {
       expect(r).toMatch(/claw:3/);
-      expect(r).toMatch(/78%/);
+      expect(r).toMatch(/178000 context tokens/);
+      expect(r).not.toContain("%");
       expect(r).toMatch(/60s/);
       expect(r).toMatch(/cancel/i);
     }],

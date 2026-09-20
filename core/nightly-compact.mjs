@@ -49,6 +49,19 @@ export function nightlyCompactOutcome(receipt, before, after, maxTokens) {
   };
 }
 
+/** WHAT: Reports a shared maintenance attempt without authorizing another call. WHY: Keeps failed or ambiguous work visible separately from retry prevention. */
+export function sharedNightlyCompactOutcome(record, facts, maxTokens) {
+  if (!record) return null;
+  const base = { sessionId: record.sessionId, sharedStatus: record.status,
+    beforeTokens: record.beforeTokens ?? facts.tokens, afterTokens: facts.tokens ?? null };
+  if (record.status === "VERIFIED") {
+    return { ...base, ...nightlyCompactOutcome({ ok: true, compactBoundary: true, sessionId: record.sessionId },
+      facts, facts, maxTokens), reason: "compact-already-verified-without-new-work" };
+  }
+  return { ...base, status: record.status === "FAILED" ? "failed" : "unverified",
+    reason: record.reason || (record.status === "FAILED" ? "previous-compact-failed" : "previous-compact-outcome-unknown") };
+}
+
 /** WHAT: Reads explicit compact refusal text. WHY: Keeps a provider access stop separate from a missing receipt. */
 export function compactAccessBlocker(screen) {
   const lines = String(screen || "").split("\n");
