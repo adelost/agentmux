@@ -28,7 +28,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
 private const val RECOVERED_AUDIO_TTL_MS = 10 * 60_000L
-
 internal class LinkCoordinator(
     private val context: Context,
 ) : AutoCloseable {
@@ -42,7 +41,12 @@ internal class LinkCoordinator(
     private val replyAudioIndex = LinkReplyAudioIndex.onDevice(context, AppContract.consumerId(preferences))
     private val linkSessions = KeystoreSessionStore(preferences)
     private val wearSessions = LinkWearSessionPublisher(context)
-    private val publicEvents = PublicMailboxFeed(linkSessions, { ledger.value }, ::applyPublicSync)
+    private val publicEvents = PublicMailboxFeed(
+        linkSessions,
+        { ledger.value },
+        ::applyPublicSync,
+        ::applyPublicTargets,
+    )
     private val discovery: ExecutorService = Executors.newFixedThreadPool(2)
     private val pendingDiscovery = AtomicInteger(2)
     private val drafts = ConcurrentHashMap<String, String>()
@@ -165,18 +169,16 @@ internal class LinkCoordinator(
         syncConnection()
     }
 
-    fun selectedTarget(): LinkTarget? =
-        ledger.value.targets.firstOrNull { it.id == ledger.value.selectedTargetId }
+    fun selectedTarget(): LinkTarget? = ledger.value.targets.firstOrNull { it.id == ledger.value.selectedTargetId }
 
     fun selectTarget(id: String) {
         dispatch(LinkAction.SelectTarget(id))
         preferences.edit().putString(AppContract.KEY_CONVERSATION_TARGET, id).apply()
     }
 
-    fun selectedVoiceByteLimit(): Long? =
-        VoiceUploadPolicy.PUBLIC_MAX_BYTES.takeIf {
-            targetForSelection()?.kind == ConversationTarget.Kind.PUBLIC
-        }
+    fun selectedVoiceByteLimit(): Long? = VoiceUploadPolicy.PUBLIC_MAX_BYTES.takeIf {
+        targetForSelection()?.kind == ConversationTarget.Kind.PUBLIC
+    }
 
     fun submitText(raw: String): String? {
         val text = raw.takeIf { it.length <= io.agentmux.linkcore.LinkHistoryPolicy.MAX_COMPOSE_CHARS }?.trim() ?: return null
@@ -256,8 +258,7 @@ internal class LinkCoordinator(
         preferences.edit().putBoolean(AppContract.KEY_SPEAK_REPLIES, enabled).apply()
     }
 
-    fun speaksReplies(): Boolean =
-        preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false)
+    fun speaksReplies(): Boolean = preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false)
 
     fun publicLoggedIn(): Boolean = linkAuth.loggedIn()
 
@@ -382,9 +383,7 @@ internal class LinkCoordinator(
         }
         try {
             val catalog = PublicLinkClient(linkSessions.baseUrl(), session).targetCatalog()
-            targetDirectory.replacePublic(catalog.targets.map {
-                ConversationTarget.publicLink(it.id, it.label, it.online)
-            })
+            replacePublicTargets(catalog.targets)
             catalog.privateDiscoveryUrls.forEach { candidate ->
                 ServerDiscovery.discover(listOf(candidate))?.let { found ->
                     applyDiscovery(
@@ -418,24 +417,24 @@ internal class LinkCoordinator(
     }
 
     private fun publishTargets() {
-        val chosen = targetDirectory.rebuild()
-        dispatch(
-            LinkAction.Targets(
-                chosen.map {
-                    LinkTarget(
-                        id = it.id,
-                        label = it.label,
-                        available = it.available(),
-                        acceptsMessages = it.kind == ConversationTarget.Kind.PUBLIC || it.available(),
-                    )
-                },
-            ),
-        )
+        dispatch(LinkAction.Targets(targetDirectory.rebuildLinkTargets()))
     }
 
     private fun applyPublicSync(result: LinkMailboxSyncResult) {
         targetDirectory.updatePublicAvailability(result.heartbeatStates)
         result.actions.forEach(::dispatch)
+    }
+
+    private fun applyPublicTargets(targets: List<PublicLinkClient.LinkTarget>) {
+        if (targets.isEmpty()) return
+        replacePublicTargets(targets)
+        publishTargets()
+    }
+
+    private fun replacePublicTargets(targets: List<PublicLinkClient.LinkTarget>) {
+        targetDirectory.replacePublic(targets.map {
+            ConversationTarget.publicLink(it.id, it.label, it.online, it.model)
+        })
     }
 
     private fun discoveryFinished() {

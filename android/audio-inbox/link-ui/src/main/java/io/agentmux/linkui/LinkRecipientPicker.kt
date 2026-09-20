@@ -17,10 +17,30 @@ import com.adelost.ringkit.ui.RenderRingScreen
 import com.adelost.ringkit.ui.RingRoundBackHost
 import kotlinx.coroutines.flow.MutableStateFlow
 import io.agentmux.linkcore.LinkTarget
+import io.agentmux.linkcore.LinkTargetModelStatus
 import io.agentmux.linkui.product.LinkTargetPresentation
 import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
-/** Stable addresses identify recipients; a mutable role/model label describes them. */
+private fun targetModelLabel(model: String, effort: String?): String =
+    listOfNotNull(model, effort?.takeIf(String::isNotBlank)).joinToString(" · ")
+
+/** WHAT: Formats qualified model evidence. WHY: Separates observed runtime truth from configured intent. */
+fun linkTargetModelLines(target: LinkTarget): List<String> {
+    val model = target.model ?: return emptyList()
+    val observed = model.observedModel?.let {
+        "${targetModelLabel(it, model.observedEffort)} · ${when (model.status) {
+            LinkTargetModelStatus.CURRENT -> "OBSERVED"
+            LinkTargetModelStatus.STALE -> "STALE"
+            LinkTargetModelStatus.UNKNOWN -> "UNKNOWN"
+        }}"
+    } ?: "MODEL UNKNOWN"
+    val configured = model.configuredModel?.let {
+        "${targetModelLabel(it, model.configuredEffort)} · CONFIGURED"
+    }
+    return listOfNotNull(observed, configured)
+}
+
+/** WHAT: Builds selectable recipient rows. WHY: Keeps model qualifiers attached to stable recipient addresses. */
 fun linkRecipientOptions(target: LinkTargetPresentation): List<RingSelectionOption> =
     target.targets.map { recipient ->
         RingSelectionOption(
@@ -30,6 +50,7 @@ fun linkRecipientOptions(target: LinkTargetPresentation): List<RingSelectionOpti
                 // The check icon alone did not say which row is the current recipient.
                 "TALKING TO NOW".takeIf { recipient.id == target.selectedTargetId },
                 recipient.label.takeIf { it.isNotBlank() && it != recipient.id },
+                *linkTargetModelLines(recipient).toTypedArray(),
                 "Unavailable".takeIf { !recipient.acceptsMessages },
                 "Replies may be delayed".takeIf { !recipient.available && recipient.acceptsMessages },
             ).joinToString("\n"),

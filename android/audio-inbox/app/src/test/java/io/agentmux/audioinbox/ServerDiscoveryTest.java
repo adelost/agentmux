@@ -16,7 +16,10 @@ public class ServerDiscoveryTest {
                 + "\"serverId\":\"abyss-wsl\",\"target\":\"1502949109491961917\","
                 + "\"targets\":[{\"id\":\"lsrc:3\",\"label\":\"L-source 3\","
                 + "\"kind\":\"agent\",\"agent\":\"lsrc\",\"pane\":3,"
-                + "\"audioTarget\":\"1502949109491961917\"}]}"
+                + "\"audioTarget\":\"1502949109491961917\","
+                + "\"model\":{\"status\":\"current\","
+                + "\"observed\":{\"model\":\"gpt-5.6-sol\",\"effort\":\"xhigh\"},"
+                + "\"configured\":{\"model\":\"gpt-6-astra\",\"effort\":\"max\"}}}]}"
         );
 
         assertEquals("https://relay.example.ts.net:8443", result.serverUrl);
@@ -26,6 +29,9 @@ public class ServerDiscoveryTest {
         assertEquals("lsrc:3", result.conversationTargets.get(0).id);
         assertEquals("L-source 3", result.conversationTargets.get(0).label);
         assertEquals(3, result.conversationTargets.get(0).pane);
+        assertEquals("current", result.conversationTargets.get(0).model.status);
+        assertEquals("gpt-5.6-sol", result.conversationTargets.get(0).model.observedModel);
+        assertEquals("gpt-6-astra", result.conversationTargets.get(0).model.configuredModel);
     }
 
     @Test

@@ -118,4 +118,46 @@ feature("the phone's target list is the fleet's", () => {
       expect(posts[3].body.targets).toEqual(posts[2].body.targets);
     }],
   });
+
+  component("a model-only change is announced without waiting an hour", {
+    given: ["one target whose model projection changes", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-link-model-poll-"));
+      const statePath = join(root, "connector.json");
+      const posts = [];
+      let status = "current";
+      return {
+        root,
+        posts,
+        stale: () => { status = "stale"; },
+        deps: {
+          fetchImpl: async (url, init) => {
+            posts.push(JSON.parse(init.body || "{}"));
+            return { ok: true, json: async () => ({ messages: [] }) };
+          },
+          linkBase: "https://link.v1d.io",
+          token: "wsl-token",
+          targets: () => [{
+            id: "lsrc:3",
+            label: "L-source 3",
+            model: { status, observed: { model: "gpt-5.6-sol", effort: "xhigh" }, configured: null },
+          }],
+          agent: { hasResponseForPrompt: () => false },
+          deliveryBroker: { enqueue: () => ({ id: "job-1" }) },
+          statePath,
+          sleep: async () => {},
+        },
+      };
+    }],
+    when: ["two cycles straddle the session qualification change", async (harness) => {
+      await runLinkConnectorCycle(harness.deps);
+      harness.stale();
+      await runLinkConnectorCycle(harness.deps);
+      rmSync(harness.root, { recursive: true, force: true });
+      return harness.posts;
+    }],
+    then: ["both cycles carry their distinct model truth", (posts) => {
+      expect(posts[0].targets[0].model.status).toBe("current");
+      expect(posts[1].targets[0].model.status).toBe("stale");
+    }],
+  });
 });

@@ -31,11 +31,13 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
         public final String id;
         public final String label;
         public final boolean online;
+        public final ConversationTarget.Model model;
 
-        LinkTarget(String id, String label, boolean online) {
+        LinkTarget(String id, String label, boolean online, ConversationTarget.Model model) {
             this.id = id;
             this.label = label;
             this.online = online;
+            this.model = model;
         }
     }
 
@@ -100,10 +102,12 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
     public static final class EventsPage {
         public final List<LinkEvent> events;
         public final Map<String, Boolean> heartbeats;
+        public final List<LinkTarget> targets;
 
-        EventsPage(List<LinkEvent> events, Map<String, Boolean> heartbeats) {
+        EventsPage(List<LinkEvent> events, Map<String, Boolean> heartbeats, List<LinkTarget> targets) {
             this.events = events;
             this.heartbeats = heartbeats;
+            this.targets = targets;
         }
     }
 
@@ -180,11 +184,7 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
         for (int index = 0; rows != null && index < rows.length(); index++) {
             JSONObject row = rows.optJSONObject(index);
             if (row == null) continue;
-            targets.add(new LinkTarget(
-                row.optString("id"),
-                row.optString("label", row.optString("id")),
-                row.optBoolean("online", false)
-            ));
+            targets.add(parseTarget(row));
         }
         JSONArray discoveryRows = response.optJSONArray("privateDiscoveryUrls");
         List<String> privateDiscoveryUrls = new ArrayList<>();
@@ -275,7 +275,35 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
                 heartbeats.put(target, heartbeatRows.optBoolean(target, false));
             }
         }
-        return new EventsPage(List.copyOf(events), Map.copyOf(heartbeats));
+        JSONArray targetRows = response.optJSONArray("targets");
+        List<LinkTarget> targets = new ArrayList<>();
+        for (int index = 0; targetRows != null && index < targetRows.length(); index++) {
+            JSONObject row = targetRows.optJSONObject(index);
+            if (row != null) targets.add(parseTarget(row));
+        }
+        return new EventsPage(List.copyOf(events), Map.copyOf(heartbeats), List.copyOf(targets));
+    }
+
+    static LinkTarget parseTarget(JSONObject row) {
+        return new LinkTarget(
+            row.optString("id"),
+            row.optString("label", row.optString("id")),
+            row.optBoolean("online", false),
+            parseTargetModel(row.optJSONObject("model"))
+        );
+    }
+
+    static ConversationTarget.Model parseTargetModel(JSONObject raw) {
+        if (raw == null) return null;
+        JSONObject observed = raw == null ? null : raw.optJSONObject("observed");
+        JSONObject configured = raw == null ? null : raw.optJSONObject("configured");
+        return new ConversationTarget.Model(
+            raw.optString("status", "unknown"),
+            observed == null ? null : observed.optString("model", null),
+            observed == null ? null : observed.optString("effort", null),
+            configured == null ? null : configured.optString("model", null),
+            configured == null ? null : configured.optString("effort", null)
+        );
     }
 
     public void revoke() {

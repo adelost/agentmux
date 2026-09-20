@@ -9,6 +9,7 @@ import { runLinkConnectorCycle } from "./link-connector.mjs";
 import { phoneTargets } from "./audio-targets.mjs";
 import { createVoiceBufferTranscriber } from "../core/voice-transcriber.mjs";
 import { normalizeServiceBaseUrl } from "../core/runtime-defaults.mjs";
+import { targetsWithModels } from "./link-target-models.mjs";
 
 /** WHAT: Builds the target list the connector announces. WHY: The phone should
  *  reach every pane the fleet maps to a channel, with the configured ids as the
@@ -46,6 +47,7 @@ export function startLinkConnectorIfConfigured({
   scheduleTimeout = setTimeout,
   agentsYamlPath = null,
   audioDiscovery = null,
+  targetModels = null,
 } = {}) {
   if (!process.env.LINK_BASE || !process.env.LINK_TOKEN_WSL) return false;
   if (!process.env.LINK_TARGETS_WSL) {
@@ -57,7 +59,11 @@ export function startLinkConnectorIfConfigured({
   });
   const seed = String(process.env.LINK_TARGETS_WSL)
     .split(",").map((value) => value.trim()).filter(Boolean);
-  const targets = () => announcedLinkTargets({ seed, agentsYamlPath, audioDiscovery });
+  const targets = async () => {
+    const listed = announcedLinkTargets({ seed, agentsYamlPath, audioDiscovery });
+    const models = typeof targetModels === "function" ? await targetModels(listed) : null;
+    return targetsWithModels(listed, models);
+  };
   const linkBase = normalizeServiceBaseUrl(process.env.LINK_BASE, "Link base URL", {
     allowHttpLoopback: true,
   });
@@ -82,6 +88,6 @@ export function startLinkConnectorIfConfigured({
     }
   };
   scheduleTimeout(cycle, 20_000);
-  log(`link-connector | enabled | base=${linkBase} targets=${targets().map((target) => target.id).join(",")}`);
+  log(`link-connector | enabled | base=${linkBase} targets=${seed.join(",")}`);
   return true;
 }

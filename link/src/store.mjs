@@ -134,16 +134,54 @@ export function createLinkStore(db) {
              label = excluded.label, kind = excluded.kind, source = excluded.source, seenAt = excluded.seenAt`,
           connectorId, entry.id, entry.label, entry.kind, source, nowMs,
         );
+        await run(
+          `INSERT INTO connector_target_models (
+             connectorId, target, status, observedModel, observedEffort,
+             configuredModel, configuredEffort, seenAt
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (connectorId, target) DO UPDATE SET
+             status = excluded.status,
+             observedModel = excluded.observedModel,
+             observedEffort = excluded.observedEffort,
+             configuredModel = excluded.configuredModel,
+             configuredEffort = excluded.configuredEffort,
+             seenAt = excluded.seenAt`,
+          connectorId,
+          entry.id,
+          entry.model.status,
+          entry.model.observed?.model ?? null,
+          entry.model.observed?.effort ?? null,
+          entry.model.configured?.model ?? null,
+          entry.model.configured?.effort ?? null,
+          nowMs,
+        );
       }
       // A pane the fleet stopped announcing disappears from the app after the
       // same window, so a removed pane does not linger as a dead row.
       await run("DELETE FROM connector_targets WHERE seenAt < ?", nowMs - keepMs);
+      await run(
+        `DELETE FROM connector_target_models
+         WHERE NOT EXISTS (
+           SELECT 1 FROM connector_targets AS target
+           WHERE target.connectorId = connector_target_models.connectorId
+             AND target.target = connector_target_models.target
+         )`,
+      );
     },
 
     announcedTargets: (freshAfterMs) =>
       all(
-        `SELECT target, label, kind, connectorId, MAX(seenAt) AS seenAt FROM connector_targets
-         WHERE seenAt >= ? GROUP BY target ORDER BY target`,
+        `SELECT target.target, target.label, target.kind, target.connectorId,
+                target.seenAt,
+                model.status AS modelStatus,
+                model.observedModel,
+                model.observedEffort,
+                model.configuredModel,
+                model.configuredEffort
+         FROM connector_targets AS target
+         LEFT JOIN connector_target_models AS model
+           ON model.connectorId = target.connectorId AND model.target = target.target
+         WHERE target.seenAt >= ? ORDER BY target.target`,
         freshAfterMs,
       ),
 

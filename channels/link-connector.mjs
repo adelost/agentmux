@@ -11,21 +11,23 @@ const JOURNAL_VERSION = 1;
  *  announce window, so a worker-side reset can never strand the phone's list. */
 const ANNOUNCE_REFRESH_MS = 60 * 60_000;
 
-/** WHAT: Normalises what the connector was given into announceable rows. WHY: The
- *  caller may pass ids, rows, or a function read fresh each cycle. */
+/** WHAT: Builds announceable target rows. WHY: Keeps accepted connector inputs behind one shape. */
 export function announcedTargetList(targets) {
   const rows = (typeof targets === "function" ? targets() : targets) || [];
   return rows.map((target) => (typeof target === "string"
     ? { id: target, label: target }
-    : { id: String(target.id), label: String(target.label ?? target.id) }));
+    : {
+      id: String(target.id),
+      label: String(target.label ?? target.id),
+      ...(target.model ? { model: target.model } : {}),
+    }));
 }
 
-/** WHAT: A stable fingerprint of one announced list. WHY: Announcing only on
- *  change needs a cheap comparison that notices a relabel as well as a new pane. */
+/** WHAT: Builds a stable target-list fingerprint. WHY: Keeps model-only changes visible to announcement polling. */
 export function listFingerprint(targets) {
   // JSON, not a separator byte: a literal NUL in the source turns this file
   // binary to git, which costs every future diff and blame on it.
-  const text = JSON.stringify(targets.map((target) => [target.id, target.label]));
+  const text = JSON.stringify(targets.map((target) => [target.id, target.label, target.model ?? null]));
   let hash = 0x811c9dc5;
   for (let index = 0; index < text.length; index++) {
     hash ^= text.charCodeAt(index);
@@ -272,7 +274,7 @@ export async function runLinkConnectorCycle({
   // worker's announce window can never expire it: sixty-five upserts every
   // fifteen seconds would be three quarters of a million D1 row writes a day for
   // a list that changes a few times a week.
-  const announced = announcedTargetList(targets);
+  const announced = announcedTargetList(await (typeof targets === "function" ? targets() : targets));
   const announceHash = listFingerprint(announced);
   const announceDue = journal.announce?.hash !== announceHash
     || !Number.isFinite(journal.announce?.atMs)

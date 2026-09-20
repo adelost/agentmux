@@ -51,6 +51,7 @@ import { createDeliveryBroker } from "./core/delivery-broker.mjs";
 import { createContextMaintenance } from "./core/context-maintenance.mjs";
 import { createDiscordInboundStore } from "./core/discord-inbound-store.mjs";
 import { startLinkConnectorIfConfigured } from "./channels/link-connector-start.mjs";
+import { observeLinkTargetModels } from "./channels/link-target-models.mjs";
 import { createPaneSleepWakeLifecycle } from "./core/pane-sleep-wake.mjs";
 import { createPaneSleepRepair } from "./core/pane-sleep-repair.mjs";
 import { findChannelForPane, listAgents, validateAgentPane } from "./cli/config.mjs";
@@ -160,6 +161,9 @@ const tmuxAgent = createAgent({
 });
 const nativeRuntime = createNativeRuntimeClient({ configPath: AGENTS_YAML });
 const agent = createAgentRouter({ tmuxAgent, nativeRuntime });
+const linkTargetModels = (targets) => observeLinkTargetModels({
+  targets, agents: listAgents(AGENTS_YAML), agent, state: appState,
+});
 const validateDeliveryTarget = (agentName, pane) =>
   validateAgentPane(AGENTS_YAML, agentName, pane);
 const deliveryQueue = createDeliveryQueue({ validateTarget: validateDeliveryTarget });
@@ -434,6 +438,7 @@ const voicePwa = createVoicePWA({
     : null,
   audioOutbox,
   audioDiscovery,
+  targetModels: linkTargetModels,
   staticDir: voicePwaStaticDir,
 });
 voicePwa.start()
@@ -490,4 +495,5 @@ startLinkConnectorIfConfigured({
   transcribeScript: TRANSCRIBE_SCRIPT,
   agentsYamlPath: AGENTS_YAML,
   audioDiscovery,
+  targetModels: linkTargetModels,
 });

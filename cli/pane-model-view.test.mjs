@@ -44,7 +44,7 @@ feature("Codex model visibility with missing or stale status", () => {
       box("65% left (98.4K used / 258K)").replace("Session: test-session", "Directory: ~/fixture"),
     )],
     then: ["neither a selected model nor usage is invented", (reading) =>
-      expect(reading).toEqual({ selected: null, context: null })],
+      expect(reading).toEqual({ selected: null, context: null, sessionId: null })],
   });
 
   unit("an unrelated later box cannot renew a status in scrollback", {
@@ -52,7 +52,7 @@ feature("Codex model visibility with missing or stale status", () => {
       `${box("65% left (98.4K used / 258K)")}\n• Later answer\n╭───╮\n│ another menu │\n╰───╯\n› Ask Codex to do anything`,
     )],
     then: ["the original status boundary remains stale", (reading) =>
-      expect(reading).toEqual({ selected: null, context: null })],
+      expect(reading).toEqual({ selected: null, context: null, sessionId: null })],
   });
 
   unit("a footer selection change invalidates preceding status usage", {
@@ -70,7 +70,28 @@ feature("Codex model visibility with missing or stale status", () => {
       "• Previously using gpt-5.6-sol max\n› Ask Codex to do anything\n? for shortcuts",
     )],
     then: ["missing evidence remains absent", (reading) =>
-      expect(reading).toEqual({ selected: null, context: null })],
+      expect(reading).toEqual({ selected: null, context: null, sessionId: null })],
+  });
+
+  unit("the reserve display label resolves to its wire model id", {
+    when: ["reading the label from the footer and status box", () => [
+      parseCodexPaneReading(
+        "› Ask Codex to do anything\n  Luna Reserve xhigh · ~/fixture",
+      ),
+      parseCodexPaneReading(
+        box().replace("gpt-6-astra (reasoning max)", "Luna Reserve (reasoning xhigh)"),
+      ),
+      parseCodexPaneReading(
+        box().replace("gpt-6-astra (reasoning max)", "GPT-Reserve (reasoning xhigh)"),
+      ),
+    ]],
+    then: ["the footer and both status labels report gpt-reserve without configuration", (readings) => {
+      expect(readings.map(({ selected }) => selected)).toEqual([
+        { model: "gpt-reserve", effort: "xhigh", source: "codex-footer" },
+        { model: "gpt-reserve", effort: "xhigh", source: "codex-status" },
+        { model: "gpt-reserve", effort: "xhigh", source: "codex-status" },
+      ]);
+    }],
   });
 
   unit("historical-only and configured-only readings retain their labels", {

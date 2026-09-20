@@ -10,10 +10,17 @@ class LinkTargetDirectoryTest {
         val directory = LinkTargetDirectory()
         val privateBeta = privateTarget("beta:2")
         val privateAlpha = privateTarget("alpha:1")
+        val observedModel = ConversationTarget.Model(
+            "current",
+            "gpt-5.6-sol",
+            "xhigh",
+            "gpt-6-astra",
+            "max",
+        )
         directory.addTailnet(listOf(privateBeta, privateAlpha))
         directory.replacePublic(
             listOf(
-                ConversationTarget.publicLink("alpha:1", "Public alpha", true),
+                ConversationTarget.publicLink("alpha:1", "Public alpha", true, observedModel),
                 ConversationTarget.publicLink("gamma:3", "Public gamma", true),
             ),
         )
@@ -21,7 +28,10 @@ class LinkTargetDirectoryTest {
         val rebuilt = directory.rebuild()
 
         assertEquals(listOf("beta:2", "alpha:1", "gamma:3"), rebuilt.map { it.id })
-        assertSame(privateAlpha, directory.target("alpha:1"))
+        val chosenAlpha = directory.target("alpha:1")
+        assertEquals(ConversationTarget.Kind.AGENT, chosenAlpha?.kind)
+        assertEquals("gpt-5.6-sol", chosenAlpha?.model?.observedModel)
+        assertEquals("gpt-6-astra", chosenAlpha?.model?.configuredModel)
     }
 
     @Test

@@ -66,6 +66,32 @@ export function targetsForApp(env) {
 export const AGENT_TARGET_RE = /^[a-z][a-z0-9_-]{0,31}:\d{1,3}$/u;
 const MAX_ANNOUNCED_TARGETS = 200;
 const MAX_LABEL_CHARS = 64;
+const MAX_MODEL_CHARS = 120;
+const MAX_EFFORT_CHARS = 24;
+
+function boundedModelValue(value, max) {
+  const clean = String(value || "").replace(/[\u0000-\u001f\u007f]/gu, "").trim();
+  return clean ? clean.slice(0, max) : null;
+}
+
+/** WHAT: Returns one bounded connector model projection. WHY: Keeps pane evidence typed and non-secret before D1 persistence. */
+export function announceableTargetModel(raw) {
+  const status = ["current", "stale", "unknown"].includes(raw?.status)
+    ? raw.status : "unknown";
+  const observedModel = boundedModelValue(raw?.observed?.model, MAX_MODEL_CHARS);
+  const configuredModel = boundedModelValue(raw?.configured?.model, MAX_MODEL_CHARS);
+  return {
+    status: observedModel ? status : "unknown",
+    observed: observedModel ? {
+      model: observedModel,
+      effort: boundedModelValue(raw?.observed?.effort, MAX_EFFORT_CHARS),
+    } : null,
+    configured: configuredModel ? {
+      model: configuredModel,
+      effort: boundedModelValue(raw?.configured?.effort, MAX_EFFORT_CHARS),
+    } : null,
+  };
+}
 
 /** WHAT: How long an announced target stays listed after its last poll. WHY: A
  *  bridge restart must not empty the phone's list, a removed pane must not linger. */
@@ -88,8 +114,7 @@ export function maxDeliveryAttempts(env) {
   return Number.isInteger(declared) && declared > 0 ? declared : 5;
 }
 
-/** WHAT: Keeps only the announced entries this worker will store. WHY: An
- *  announcement is connector input, so shape, kind and volume are bounded here. */
+/** WHAT: Filters announced entries before storage. WHY: Keeps untrusted connector input within worker bounds. */
 export function announceableTargets(raw) {
   const rows = Array.isArray(raw) ? raw : [];
   const seen = new Set();
@@ -102,20 +127,30 @@ export function announceableTargets(raw) {
     // a replace needs every control char gone, not just the first.
     const label = String(row?.label || "").replace(/[\u0000-\u0020\u007f]/gu, " ")
       .trim().slice(0, MAX_LABEL_CHARS);
-    targets.push({ id, label: label || id, kind: "agent" });
+    targets.push({
+      id,
+      label: label || id,
+      kind: "agent",
+      model: announceableTargetModel(row?.model),
+    });
     if (targets.length >= MAX_ANNOUNCED_TARGETS) break;
   }
   return targets;
 }
 
-/** WHAT: Merges the configured seed with what the fleet announced. WHY: One
- *  list for the app, with LINK_TARGETS still owning labels and foreign kinds. */
+/** WHAT: Builds one target list from configured and announced rows. WHY: Separates configured identity from live model evidence. */
 export function mergeTargets(seed, announced) {
   const merged = seed.map((target) => ({ ...target }));
   const byId = new Map(merged.map((target) => [target.id, target]));
   for (const row of announced) {
     const existing = byId.get(row.id);
-    if (existing) continue; // the configured label wins: it is the operator's own wording
+    if (existing) {
+      // The configured row still owns wording/kind. Live pane evidence belongs
+      // to the connector and must not disappear merely because the id is seeded.
+      existing.model = row.model || existing.model;
+      existing.connectorId = row.connectorId || existing.connectorId;
+      continue;
+    }
     const target = {
       id: row.id,
       label: row.label || row.id,

@@ -31,14 +31,14 @@ feature("Link connector starter", () => {
       await initial.callback();
       return { started, ctx, initial, scheduled };
     }],
-    then: ["the exact function and declarative targets reach the cycle", ({ started, ctx, initial, scheduled }) => {
+    then: ["the exact function and declarative targets reach the cycle", async ({ started, ctx, initial, scheduled }) => {
       expect(started).toBe(true);
       expect(initial.delayMs).toBe(20_000);
       expect(ctx.seen).toHaveLength(1);
       expect(ctx.seen[0].transcribe).toBe(ctx.transcribe);
       // Row 184: the list is read per cycle, so a pane added to agents.yaml is
       // announced without a restart. The configured ids stay its floor.
-      expect(ctx.seen[0].targets()).toEqual([
+      expect(await ctx.seen[0].targets()).toEqual([
         { id: "lsrc:3", label: "lsrc:3" },
         { id: "lsrc:10", label: "lsrc:10" },
       ]);

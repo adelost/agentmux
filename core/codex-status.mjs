@@ -38,14 +38,29 @@ function parseContext(value) {
   };
 }
 
-function parseModel(value) {
+/** WHAT: Resolves a visible Codex model label to its wire id. WHY: Separates display text from model identity. */
+function visibleModel(value) {
   const raw = String(value || "").trim();
-  const match = raw.match(/^(\S+)(?:\s+\(reasoning\s+([^,\)]+)(?:,\s*summaries\s+([^\)]+))?\))?/i);
+  const token = raw.match(/^(Luna Reserve|[^\s(]+)/i)?.[1] || raw;
+  const lower = token.toLowerCase();
   return {
-    id: match?.[1] || raw || null,
-    effort: match?.[2]?.trim().toLowerCase() || null,
-    summaries: match?.[3]?.trim().toLowerCase() || null,
     raw,
+    token,
+    id: lower === "luna reserve" ? "gpt-reserve"
+      : /^gpt-[\w.-]+$/i.test(token) ? lower
+        : token || null,
+  };
+}
+
+function parseModel(value) {
+  const model = visibleModel(value);
+  const match = model.raw.slice(model.token.length)
+    .match(/^\s*(?:\(reasoning\s+([^,\)]+)(?:,\s*summaries\s+([^\)]+))?\))?/i);
+  return {
+    id: model.id,
+    effort: match?.[1]?.trim().toLowerCase() || null,
+    summaries: match?.[2]?.trim().toLowerCase() || null,
+    raw: model.raw,
   };
 }
 
@@ -117,7 +132,7 @@ export function parseCodexStatus(text) {
   return status;
 }
 
-const MODEL_FOOTER_RE = /^\s*(?:•\s+)?(gpt-[\w.-]+)\s+(minimal|low|medium|high|xhigh|max|ultra)\s+·\s+.+$/i;
+const MODEL_FOOTER_RE = /^\s*(?:•\s+)?(gpt-[\w.-]+|Luna Reserve)\s+(minimal|low|medium|high|xhigh|max|ultra)\s+·\s+.+$/i;
 
 function tokenCount(value) {
   const match = String(value || "").match(/^(\d+(?:\.\d+)?)\s*([km])?$/i);
@@ -136,12 +151,13 @@ export function parseCodexPaneReading(text) {
   const current = bottom >= 0 && Boolean(status?.session) && lines.slice(bottom + 1).every((line) =>
     !line.trim() || /^\s*›/.test(line) || MODEL_FOOTER_RE.test(line)
     || /^\s*(?:\? for shortcuts|\d+% context left|q to quit)/i.test(line));
+  const footerModel = footer ? visibleModel(footer[1]).id : null;
   const selected = footer
-    ? { model: footer[1], effort: footer[2].toLowerCase(), source: "codex-footer" }
+    ? { model: footerModel, effort: footer[2].toLowerCase(), source: "codex-footer" }
     : current && status.model?.id
       ? { model: status.model.id, effort: status.model.effort, source: "codex-status" }
       : null;
-  const usage = current && (!footer || (footer[1] === status.model?.id && footer[2] === status.model?.effort))
+  const usage = current && (!footer || (footerModel === status.model?.id && footer[2] === status.model?.effort))
     ? status.context : null;
   const context = Number.isFinite(usage?.percentLeft) ? {
     percent: 100 - usage.percentLeft,
@@ -151,7 +167,7 @@ export function parseCodexPaneReading(text) {
     confidence: "reported",
     observedAt: new Date().toISOString(),
   } : null;
-  return { selected, context };
+  return { selected, context, sessionId: current ? status.session : null };
 }
 
 function statusMarker(text) {
