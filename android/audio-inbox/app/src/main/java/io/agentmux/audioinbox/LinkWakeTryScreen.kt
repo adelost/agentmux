@@ -33,6 +33,7 @@ import com.adelost.designkit.ui.CircleAccent
 import com.adelost.designkit.ui.CircleAccentStrength
 import com.adelost.designkit.ui.CircleText
 import com.adelost.designkit.ui.circleAccentColor
+import com.adelost.designkit.ui.circleResolvedTiming
 import com.adelost.ringkit.ui.PhoneScreenHeader
 import com.adelost.ringkit.ui.RingRow
 import io.agentmux.linkui.product.LinkNativeBindings
@@ -270,7 +271,7 @@ private fun StepRow(step: WakeSensitivity, showing: RecordedTry?, inUse: Boolean
         hint = wakeSensitivityHint(step),
         icon = LinkNativeBindings.requireIcon("target"),
         onTap = onUse.takeIf { !inUse },
-        actionTiming = GeneratedLinkControlTiming.WAKE_TRY_TRY_PHRASE,
+        timing = circleResolvedTiming(GeneratedLinkControlTiming.WAKE_TRY_TRY_PHRASE),
         trailing = {
             CircleText(
                 text = wakeTryStepWord(showing, step),

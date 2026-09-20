@@ -8,7 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.designkit.ui.CircleAccent
-import com.adelost.designkit.ui.CircleActionTiming
+import com.adelost.designkit.ui.circleResolvedTiming
 import com.adelost.ringkit.ui.RingRow
 import com.adelost.ringkit.ui.RingMessage
 import com.adelost.ringkit.ui.RingMessageSide
@@ -21,6 +21,10 @@ import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
+/**
+ * WHAT: Builds one retained exchange and its declared playback or link actions.
+ * WHY: Keeps conversation actions on the same timing declarations as the rest of Link.
+ */
 @Composable
 fun LinkConversationTurn(
     turn: LinkTurn,
@@ -43,11 +47,11 @@ fun LinkConversationTurn(
                 RingRow(row.length, "", onTap = play,
                     icon = if (row.icon == ReadAloudIcon.REFRESH) RingIcons.Refresh else RingIcons.Speaker,
                     accent = if (row.muted) CircleAccent.CLOUD else linkSenderAccent(sender),
-                    actionTiming = GeneratedLinkControlTiming.CONVERSATION_PLAY_TURN)
+                    timing = circleResolvedTiming(GeneratedLinkControlTiming.CONVERSATION_PLAY_TURN))
             }
             if (openLinks) attachmentUrls(turn.replyText).forEach { url ->
                 RingRow("OPEN LINK", Uri.parse(url).host.orEmpty(), icon = RingIcons.Link,
-                    actionTiming = GeneratedLinkControlTiming.CONVERSATION_OPEN_LINK,
+                    timing = circleResolvedTiming(GeneratedLinkControlTiming.CONVERSATION_OPEN_LINK),
                     onTap = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } })
             }
         }

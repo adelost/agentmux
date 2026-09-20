@@ -42,6 +42,7 @@ import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.LinkRouteOpenEvent
 import io.agentmux.linkui.product.LinkUpdateCommandEvent
 import com.adelost.designkit.ui.CircleActionTiming
+import com.adelost.designkit.ui.circleResolvedTiming
 import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponent
@@ -182,7 +183,7 @@ internal fun LinkPhoneSettings(
                                     icon = LinkNativeBindings.requireIcon(
                                         if (preference.key == LinkPreferenceKey.WAKE_WORD) "record" else "speaker",
                                     ),
-                                    actionTiming = linkPreferenceTiming(preference.key),
+                                    timing = circleResolvedTiming(linkPreferenceTiming(preference.key)),
                                     modifier = phoneRowModifier(),
                                 )
                             }
@@ -200,7 +201,7 @@ internal fun LinkPhoneSettings(
                                     LinkWakePhraseChoice.choose(context, WakePhrases.offered.first { wakePhraseLabel(it) == label })
                                 },
                                 icon = LinkNativeBindings.requireIcon("record"),
-                                actionTiming = GeneratedLinkControlTiming.SETTINGS_WAKE_PHRASE,
+                                timing = circleResolvedTiming(GeneratedLinkControlTiming.SETTINGS_WAKE_PHRASE),
                                 modifier = phoneRowModifier(),
                             )
                         }
