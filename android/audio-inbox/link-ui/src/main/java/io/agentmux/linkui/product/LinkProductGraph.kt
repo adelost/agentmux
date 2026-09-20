@@ -39,7 +39,7 @@ import kotlinx.coroutines.flow.stateIn
 
 private const val MIN_CAPTURE_NANOS = 500_000_000L
 
-/** The host-supplied native sinks behind the generated effect-owning service inputs. */
+/** WHAT: Carries host effects for generated service inputs. WHY: Keeps native work behind typed product ports. */
 class LinkProductSinks(
     val captureCommand: (LinkCaptureCommandEvent) -> Unit,
     val capturedTurn: (GeneratedLinkCapturedTurn) -> Unit,
@@ -51,15 +51,7 @@ class LinkProductSinks(
     val updateCommand: (LinkUpdateCommandEvent) -> Unit,
 )
 
-/**
- * The native half of the mandatory product graph for one Link host.
- *
- * The constructor mounts the whole boundary and proves it: every generated
- * service output is observed from the real host state, every node input has
- * exactly one native consumer, and every component model/destination
- * input and component event has its one native endpoint. Screens only read
- * the exposed component StateFlows and emit through the on... methods.
- */
+/** WHAT: Builds one Link host's native product graph. WHY: Keeps host effects behind generated ports and totality checks. */
 open class LinkProductGraph(
     protected val processScope: CoroutineScope,
     private val state: StateFlow<LinkState>,
@@ -67,6 +59,7 @@ open class LinkProductGraph(
     microphoneGranted: StateFlow<Boolean>,
     speakReplies: StateFlow<Boolean>,
     wakeWordEnabled: StateFlow<Boolean>,
+    listeningCueSound: StateFlow<Boolean>,
     wakeStatus: StateFlow<WakeStatus>,
     publicLinkActive: () -> Boolean,
     targetKindOf: (String) -> LinkTargetKind?,
@@ -166,9 +159,13 @@ open class LinkProductGraph(
         )
         runtime.observe(
             PreferencesStatusOutput,
-            combine(state, speakReplies, wakeWordEnabled) { current, replies, wakeWord ->
-                current.toPreferencesPresentation(replies, wakeWord)
-            }.hot { state.value.toPreferencesPresentation(speakReplies.value, wakeWordEnabled.value) },
+            combine(state, speakReplies, wakeWordEnabled, listeningCueSound) { current, replies, wakeWord, cueSound ->
+                current.toPreferencesPresentation(replies, wakeWord, cueSound)
+            }.hot {
+                state.value.toPreferencesPresentation(
+                    speakReplies.value, wakeWordEnabled.value, listeningCueSound.value,
+                )
+            },
         )
         runtime.observe(
             UpdatesStatusOutput,

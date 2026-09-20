@@ -196,6 +196,8 @@ class TheSettingsPageObeysItsDeclarationsTest {
             navigation = LinkNavigationController(GeneratedLinkArtifactRef.PHONE_FULL_UI),
             microphoneGranted = MutableStateFlow(true),
             wakeWord = LinkWakeWordControl(application) {},
+            listeningSound = LinkListeningSoundPreference(application),
+            listeningStarted = {},
         )
         compose.setContent {
             // The phone surface the qualifiers already describe. The app's own host resolves this from
@@ -303,6 +305,7 @@ class TheSettingsPageObeysItsDeclarationsTest {
             Control("READ REPLIES", GeneratedLinkControlTiming.SETTINGS_SPEAK_REPLIES, answersOnItsLabel = true),
             Control("ANNOUNCEMENTS", GeneratedLinkControlTiming.SETTINGS_HANDS_FREE),
             Control("WAKE WORD", GeneratedLinkControlTiming.SETTINGS_WAKE_WORD, answersOnItsLabel = true),
+            Control("LISTENING SOUND", GeneratedLinkControlTiming.SETTINGS_LISTENING_CUE_SOUND, answersOnItsLabel = true),
         )
     }
 }

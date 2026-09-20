@@ -13,7 +13,10 @@ export const linkTargetKinds = finiteValues("link.target-kind", ["none", "agent"
 export const linkConnectionStates = finiteValues("link.connection-state", [
   "off", "connecting", "connected", "disconnected", "configuration-required",
 ]);
-export const linkPreferenceKeys = finiteValues("link.preference-key", ["hands-free", "speak-replies", "wake-word"]);
+/** WHAT: Defines stable preference wire ids. WHY: Keeps generated and native toggle routing aligned. */
+export const linkPreferenceKeys = finiteValues("link.preference-key", [
+  "hands-free", "speak-replies", "wake-word", "listening-cue-sound",
+]);
 export const linkUpdateOperations = finiteValues("link.update-operation", ["check", "retry", "install"]);
 export const linkUpdatePhases = finiteValues("link.update-phase", [
   "idle", "checking", "up-to-date", "unavailable", "available",

@@ -4,7 +4,7 @@ import io.agentmux.linkcore.LinkPreferenceKey
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.linkui.product.LinkWakePresentation
 
-/** Existing audio capabilities, expressed once as content for the shared choice atom. */
+/** WHAT: Carries one audio preference row. WHY: Keeps shared choice content independent of its host renderer. */
 data class LinkAudioPreference(
     val key: LinkPreferenceKey,
     val title: String,
@@ -12,13 +12,21 @@ data class LinkAudioPreference(
     val enabled: Boolean,
 )
 
-fun linkAudioPreferences(readReplies: Boolean, announcements: Boolean, wakeWord: Boolean) = listOf(
+/** WHAT: Builds Link's audio preference rows. WHY: Keeps labels and values consistent across Settings renders. */
+fun linkAudioPreferences(
+    readReplies: Boolean,
+    announcements: Boolean,
+    wakeWord: Boolean,
+    listeningCueSound: Boolean,
+) = listOf(
     LinkAudioPreference(LinkPreferenceKey.SPEAK_REPLIES, "READ REPLIES",
         "• Replies play by themselves\n• Off: tap the speaker", readReplies),
     LinkAudioPreference(LinkPreferenceKey.HANDS_FREE, "ANNOUNCEMENTS",
         "• Plays updates sent to this phone\n• Not your replies", announcements),
     LinkAudioPreference(LinkPreferenceKey.WAKE_WORD, "WAKE WORD",
         "• Say the wake phrase, then ask\n• The answer is read aloud", wakeWord),
+    LinkAudioPreference(LinkPreferenceKey.LISTENING_CUE_SOUND, "LISTENING SOUND",
+        "• Soft cue when listening starts\n• Off keeps the haptic", listeningCueSound),
 )
 
 /**

@@ -21,6 +21,7 @@ import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
+import io.agentmux.linkui.AndroidLinkListeningCue
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -34,6 +35,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var host: LinkHostController
     private lateinit var productGraph: PhoneLinkProductGraph
     private lateinit var wakeWord: LinkWakeWordControl
+    private lateinit var listeningSound: LinkListeningSoundPreference
+    private lateinit var listeningCue: AndroidLinkListeningCue
     private val microphoneGranted = MutableStateFlow(false)
     private val microphonePermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -55,6 +58,8 @@ class MainActivity : ComponentActivity() {
         host.restoreOrientation()
         microphoneGranted.value = hasMicrophonePermission()
         coordinator.handlePublicAuth(intent?.data)
+        listeningSound = LinkListeningSoundPreference(this)
+        listeningCue = AndroidLinkListeningCue(this) { listeningSound.enabled.value }
         recorder = PushToTalkRecorder(this)
         wakeWord = LinkWakeWordControl(this, ::requestMicrophone)
         updater = LinkUpdater(
@@ -98,6 +103,8 @@ class MainActivity : ComponentActivity() {
                 navigation = navigation,
                 microphoneGranted = microphoneGranted,
                 wakeWord = wakeWord,
+                listeningSound = listeningSound,
+                listeningStarted = listeningCue::listeningStarted,
             )
         }
         setContent {
@@ -167,6 +174,7 @@ class MainActivity : ComponentActivity() {
         // work runs on lifecycleScope, which this activity cancels for us.
         productGraph.close()
         recorder.cancel()
+        listeningCue.close()
         LinkRuntime.release(coordinator)
         super.onDestroy()
     }

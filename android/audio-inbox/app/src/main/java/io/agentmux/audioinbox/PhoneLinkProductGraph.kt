@@ -44,6 +44,7 @@ internal class PhoneLinkProductGraph private constructor(
     microphoneGranted: StateFlow<Boolean>,
     speakReplies: StateFlow<Boolean>,
     wakeWordEnabled: StateFlow<Boolean>,
+    listeningCueSound: StateFlow<Boolean>,
     capturedTurns: Flow<GeneratedLinkCapturedTurn>,
     captureByteCount: () -> Long,
     sinks: LinkProductSinks,
@@ -58,6 +59,7 @@ internal class PhoneLinkProductGraph private constructor(
     microphoneGranted = microphoneGranted,
     speakReplies = speakReplies,
     wakeWordEnabled = wakeWordEnabled,
+    listeningCueSound = listeningCueSound,
     wakeStatus = LinkWakeStatus.status,
     publicLinkActive = coordinator::publicLoggedIn,
     targetKindOf = coordinator::targetKind,
@@ -95,8 +97,10 @@ internal class PhoneLinkProductGraph private constructor(
             navigation: LinkNavigationController,
             microphoneGranted: StateFlow<Boolean>,
             wakeWord: LinkWakeWordControl,
+            listeningSound: LinkListeningSoundPreference,
+            listeningStarted: () -> Unit,
         ): PhoneLinkProductGraph {
-            val captures = PhoneCaptureAdapter(coordinator, recorder)
+            val captures = PhoneCaptureAdapter(coordinator, recorder, listeningStarted)
             val composer = ComposerDraftStore()
             val speakReplies = MutableStateFlow(coordinator.speaksReplies())
             return PhoneLinkProductGraph(
@@ -107,6 +111,7 @@ internal class PhoneLinkProductGraph private constructor(
                 microphoneGranted = microphoneGranted,
                 speakReplies = speakReplies,
                 wakeWordEnabled = wakeWord.enabled,
+                listeningCueSound = listeningSound.enabled,
                 capturedTurns = captures.captured,
                 captureByteCount = recorder::currentBytes,
                 sinks = LinkProductSinks(
@@ -117,7 +122,9 @@ internal class PhoneLinkProductGraph private constructor(
                     },
                     playbackCommand = coordinatorPlayback(coordinator),
                     targetSelect = { event -> coordinator.selectTarget(event.targetId) },
-                    preferenceToggle = phonePreferenceToggle(coordinator, speakReplies, wakeWord::setEnabled),
+                    preferenceToggle = phonePreferenceToggle(
+                        coordinator, speakReplies, wakeWord::setEnabled, listeningSound::setEnabled,
+                    ),
                     historyClear = { event -> coordinator.clearConversation(event.targetId) },
                     updateCommand = updaterCommands(updater),
                 ),
@@ -136,6 +143,7 @@ internal class PhoneLinkProductGraph private constructor(
         ): PhoneLinkProductGraph {
             val composer = ComposerDraftStore()
             val wakeWordEnabled = MutableStateFlow(false)
+            val listeningCueSound = MutableStateFlow(true)
             val speakReplies = MutableStateFlow(coordinator.speaksReplies())
             return PhoneLinkProductGraph(
                 coordinator = coordinator,
@@ -145,6 +153,7 @@ internal class PhoneLinkProductGraph private constructor(
                 microphoneGranted = MutableStateFlow(true),
                 speakReplies = speakReplies,
                 wakeWordEnabled = wakeWordEnabled,
+                listeningCueSound = listeningCueSound,
                 // A mounted recorder is an idle event source, not a completed
                 // stream. Completion unmounts the real generated output port.
                 capturedTurns = MutableSharedFlow(),
@@ -172,7 +181,12 @@ internal class PhoneLinkProductGraph private constructor(
                     targetSelect = { event ->
                         qaState.update { it.copy(selectedTargetId = event.targetId) }
                     },
-                    preferenceToggle = phonePreferenceToggle(coordinator, speakReplies) { wakeWordEnabled.value = it },
+                    preferenceToggle = phonePreferenceToggle(
+                        coordinator,
+                        speakReplies,
+                        { wakeWordEnabled.value = it },
+                        { listeningCueSound.value = it },
+                    ),
                     historyClear = { event -> qaState.update { LinkReducer.reduce(it, LinkAction.ClearConversation(event.targetId)) } },
                     updateCommand = updaterCommands(updater),
                 ),
@@ -197,6 +211,7 @@ internal class PhoneLinkProductGraph private constructor(
             coordinator: LinkCoordinator,
             speakReplies: MutableStateFlow<Boolean>,
             setWakeWord: (Boolean) -> Unit,
+            setListeningCueSound: (Boolean) -> Unit,
         ): (LinkPreferenceToggleEvent) -> Unit = { event ->
             when (event.key) {
                 LinkPreferenceKey.HANDS_FREE -> coordinator.setHandsFree(event.enabled)
@@ -205,6 +220,7 @@ internal class PhoneLinkProductGraph private constructor(
                     speakReplies.value = event.enabled
                 }
                 LinkPreferenceKey.WAKE_WORD -> setWakeWord(event.enabled)
+                LinkPreferenceKey.LISTENING_CUE_SOUND -> setListeningCueSound(event.enabled)
             }
         }
 
@@ -243,6 +259,7 @@ private class ComposerDraftStore {
 private class PhoneCaptureAdapter(
     private val coordinator: LinkCoordinator,
     private val recorder: PushToTalkRecorder,
+    private val listeningStarted: () -> Unit,
 ) {
     private var pending: Pair<PushToTalkRecorder.Capture, GeneratedLinkCapturedTurn>? = null
     val captured = MutableSharedFlow<GeneratedLinkCapturedTurn>(extraBufferCapacity = 1)
@@ -281,6 +298,7 @@ private class PhoneCaptureAdapter(
         if (capture == null) {
             coordinator.capture(CapturePhase.FAILED)
         } else {
+            listeningStarted()
             coordinator.capture(CapturePhase.LISTENING, capture.startedAtMs)
         }
     }

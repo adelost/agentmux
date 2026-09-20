@@ -46,6 +46,7 @@ internal class WearLinkProductGraph private constructor(
     speakReplies = MutableStateFlow(false),
     // Wear keeps push-to-talk; the wake word is a phone-only service.
     wakeWordEnabled = MutableStateFlow(false),
+    listeningCueSound = MutableStateFlow(false),
     wakeStatus = MutableStateFlow(WakeStatus()),
     // The watch replicates targets from the phone without route provenance.
     publicLinkActive = controller::hasSession,
@@ -101,6 +102,8 @@ internal class WearLinkProductGraph private constructor(
                                 error("Wear has no speak-replies preference surface")
                             LinkPreferenceKey.WAKE_WORD ->
                                 error("Wear has no wake word preference surface")
+                            LinkPreferenceKey.LISTENING_CUE_SOUND ->
+                                error("Wear listening feedback is haptic only")
                         }
                     },
                     historyClear = { error("Wear has no local history surface") },
