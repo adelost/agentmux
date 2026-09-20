@@ -170,7 +170,8 @@ export const DRIFT_SECTIONS = [
     directive: "line 1 is the outcome in one sentence, prefixed SUMMARY: during " +
       "multi-reply work. Then GOAL, NOW and LEFT, one per line in caps, and stop " +
       "if NOW does not serve GOAL. Otherwise line 2 is your next step or the one " +
-      "decision you need. Then details. Nothing before line 1.",
+      "decision you need. Keep replies, docs and comments concise, with normal " +
+      "spacing and short paragraphs or bullets. Nothing before line 1.",
   },
   {
     file: ".agents/CLAUDE.md",

@@ -57,7 +57,8 @@ if you catch another pane drifting from this rule.
 - Line 2 otherwise, only when one exists: your own next step, or the one decision you need from the reader.
 - Then details.
 - Nothing before line 1. No process, no skill names, no bracketed labels.
-- Short replies too.
+- Keep replies, docs and comments concise. Use normal spacing and short paragraphs or bullets.
+- Comments explain intent, risks or constraints, not a work diary. Preserve exact requirements and quotes.
 - Why: compaction and amux done keep the head and drop the tail. Goal next to Now is what exposes drift.
 
 Bad: Jag använder orkestreringsskillen för att hitta rätt ansvarig innan jag pekar ut en orsak.

@@ -24,14 +24,20 @@ The executable decisions use Skyvw/CircleKit's existing `@v1d/product-spec` DSL 
 
 # Context and sleep
 
-1. Idle compact: after 10 minutes without work, above 100,000 tokens, using the existing daytime controller and safe-idle checks. A proven running process is required even for the warning. Percentages never authorize compact. A verified, failed or ambiguous attempt does not repeat until new work provides a new context generation, even if the result stays above budget.
+## Idle compact, latest decision
+
+- One quiet hour and over 100k tokens. The task need not be finished.
+- Keep the session and history. Never interrupt an active model turn.
+- New activity cancels the warning. No repeated attempt without new work.
+
+1. Idle compact: after one quiet hour, above 100,000 tokens. Unfinished tasks are allowed. A running engine and safe idle input are required. Idle time starts at the last reply, not the original request. Percentages never authorize compact. No repeated attempt without new work, including after restart.
 2. Sleep: retain the existing 24-hour threshold and conservative process-exit conditions. Dirty worktrees may block process exit but do not by themselves block idle compact. Current sleep support is Claude-only; this change does not silently promise Codex/Kimi process sleep.
 3. Cold wake: before a work prompt to a session idle at least 24 hours and above 100,000 tokens, require successful exact-session compact. Failure blocks automatic work and remains visible. A previously compacted session resumes without an automatic repeat, even if still above target.
 4. Dream: remains a memory digest with nightly maintenance as an additional check. An unavailable delivery lease may be retried without consuming a paid model attempt. A compact already submitted with an ambiguous outcome is not blindly repeated.
 
-The existing nighttime budget is 80,000 tokens after 30 minutes idle. That is a policy target, not a guaranteed compact output size.
+The nighttime target remains 80,000 tokens, now after one quiet hour by default. It is not a guaranteed output size.
 
-Runtime overrides: `AUTO_COMPACT_MAX_TOKENS` (default 100000), `AUTO_COMPACT_MIN_IDLE_MS` (default 600000), and `AMUX_COLD_CONTEXT_IDLE_MS` (default 86400000). The old `AUTO_COMPACT_WARN_THRESHOLD` percentage override no longer controls admission. Bulk `amux compact` uses absolute tokens too; a numeric percentage argument is refused with guidance to use `--min-tokens N`.
+Runtime overrides: `AUTO_COMPACT_MAX_TOKENS` (default 100000), `AUTO_COMPACT_MIN_IDLE_MS` (default 3600000), and `AMUX_COLD_CONTEXT_IDLE_MS` (default 86400000). The old `AUTO_COMPACT_WARN_THRESHOLD` percentage override no longer controls admission. Bulk `amux compact` uses absolute tokens too; a numeric percentage argument is refused with guidance to use `--min-tokens N`.
 
 The nighttime job retries a busy shared lease twice, two seconds apart. Explicit model changes wait for the shared lease for up to six minutes. These are lock checks, not model calls. Warm, cold and nightly maintenance re-read the same persisted context-generation fence under the acquired lease. No new work means no second automatic compact. A verified 120k result above the 80k nighttime target stays visible as above-budget, not permission to retry.
 

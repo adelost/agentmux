@@ -502,6 +502,7 @@ feature("generated agent policy", () => {
       expect(content).toContain("Managers are sidecars, not gateways");
       expect(content).toMatch(/do not need a manager round-trip to claim, update or\s+finish their own work/u);
       expect(content).toContain("A drained backlog is healthy idle");
+      expect(content).toContain("Keep replies, docs and comments concise");
       expect(content).toMatch(/On DONE or BLOCKED, re-read the existing queue/u);
       expect(content).toMatch(/Re-evaluate conditional deferrals against completed prerequisites/u);
       expect(content).toMatch(/Stay idle only when no authorised runnable work remains/u);

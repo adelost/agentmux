@@ -35,7 +35,7 @@ function recoverColdCodexTurn(reader, paneDir, path, stat) {
   } catch { return null; } // exhausted/unreadable history does not authorize maintenance
 }
 
-/** WHAT: Returns the newest real conversational turn. WHY: Keeps journal maintenance writes from posing as operator activity. */
+/** WHAT: Reads the last conversational activity time. WHY: Keeps housekeeping writes from extending idle timers. */
 export function latestConversationActivityMs(paneDir, dialect, {
   readers = DEFAULT_READERS,
   stat = statSync,
@@ -62,7 +62,8 @@ export function latestConversationActivityMs(paneDir, dialect, {
     if (!newest) return null;
   }
 
-  const turnMs = newest?.timestamp ? Date.parse(newest.timestamp) : NaN;
+  const times = [newest?.timestamp, newest?.endTimestamp].map(Date.parse).filter(Number.isFinite);
+  const turnMs = times.length ? Math.max(...times) : NaN;
   let fileMtimeMs = NaN;
   let fileFullyRead = false;
   if (result.jsonlFile) {

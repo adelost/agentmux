@@ -13,8 +13,8 @@ import { createState } from "../core/state.mjs";
 const now = () => Date.parse("2026-09-07T02:00:00Z");
 const facts = () => ({ engine: "claude", backend: "tmux", running: true,
   sessionId: "same-session", sessionPath: "/exact.jsonl", status: "idle",
-  composerEmpty: true, queued: 0, tokens: 227_000, percent: 28, idleMs: 31 * 60_000,
-  activity: now() - 31 * 60_000, model: "Fable 5.1", effort: "xhigh" });
+  composerEmpty: true, queued: 0, tokens: 227_000, percent: 28, idleMs: 61 * 60_000,
+  activity: now() - 61 * 60_000, model: "Fable 5.1", effort: "xhigh" });
 const policy = nightlyCompactPolicy();
 const target = { agent: { name: "claw", backend: "tmux" }, pane: { index: 4 }, engine: "claude", paneDir: "/pane" };
 
@@ -37,6 +37,11 @@ function fixture() {
 }
 
 feature("nightly context budget", () => {
+  unit("nightly maintenance also waits one quiet hour", {
+    when: ["a large pane has been quiet for 31 minutes", () =>
+      nightlyCompactDecision({ ...facts(), idleMs: 31 * 60_000 }, policy)],
+    then: ["it stays untouched", result => expect(result).toBe("recent-activity")],
+  });
   for (const status of ["VERIFIED", "FAILED", "ATTEMPTING"]) {
     component(`R2 rechecks a ${status} shared fence written by another state instance during lease wait`, {
       when: ["a competing maintenance path records the same generation before nightly acquires the lease", async () => {
@@ -87,7 +92,7 @@ feature("nightly context budget", () => {
   });
   unit("keeps active, uncertain, unsupported and already attempted sessions untouched", {
     when: ["checking all unsafe axes", () => [
-      { tokens: 80_000 }, { tokens: null }, { idleMs: 29 * 60_000 }, { idleMs: null },
+      { tokens: 80_000 }, { tokens: null }, { idleMs: 59 * 60_000 }, { idleMs: null },
       { status: "working" }, { status: "unknown" }, { status: "permission" },
       { composerEmpty: false }, { queued: 1 }, { queued: null }, { running: false },
       { sessionId: null }, { backend: "native" }, { engine: "kimi" },
@@ -114,7 +119,7 @@ feature("nightly context budget", () => {
       return { parsed, yaml: generateAgentsYaml(parsed.agents, new Map(), new Map(), null, null, parsed.dream) };
     }],
     then: ["the policy remains data, not a dropped generator field", ({ parsed, yaml }) => {
-      expect(parsed.dream.compact).toEqual(policy);
+      expect(parsed.dream.compact).toEqual({ ...policy, idleMinutes: 30 });
       expect(yaml).toContain("maxTokens: 80000");
       expect(() => nightlyCompactPolicy({ maxBytes: 80000 })).toThrow();
       expect(nightlyCompactPolicy(false).enabled).toBe(false);

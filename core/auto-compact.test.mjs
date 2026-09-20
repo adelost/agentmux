@@ -19,10 +19,19 @@ const base = {
   warnings: new Map(),
   config: cfg(),
   now: 1_700_000_000_000,
-  lastActivityMs: 1_700_000_000_000 - 10 * 60_000,
+  lastActivityMs: 1_700_000_000_000 - 60 * 60_000,
 };
 
 feature("decideAutoCompactAction — disabled config", () => {
+  unit("waiting for a worker does not prevent compact after one quiet hour", {
+    when: ["the waiting pane is idle above 100k", () => decideAutoCompactAction(base)],
+    then: ["the warning starts", result => expect(result.action).toBe("warn")],
+  });
+  unit("ten quiet minutes do not trigger compact", {
+    when: ["an idle 200k pane was active ten minutes ago", () =>
+      decideAutoCompactAction({ ...base, lastActivityMs: base.now - 600_000 })],
+    then: ["no warning starts", result => expect(result.action).toBe("none")],
+  });
   unit("percentage alone never authorizes compact, even at 100 percent", {
     when: ["reading a small or unknown absolute context", () => [90_000, null].map(contextTokens =>
       decideAutoCompactAction({ ...base, contextPercent: 100, contextTokens }))],
@@ -177,10 +186,10 @@ feature("decideAutoCompactAction — min-idle gate (conversation freshness)", ()
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
   });
 
-  unit("turn 10min ago passes gate → warn", {
-    given: ["last turn 10 min ago", () => ({
+  unit("one quiet hour allows a warning", {
+    given: ["last turn one hour ago", () => ({
       ...base,
-      lastActivityMs: base.now - 600_000,
+      lastActivityMs: base.now - 3_600_000,
     })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
@@ -422,10 +431,10 @@ feature("parseAutoCompactConfig — minIdleMs", () => {
     then: ["parsed to 2 min", (r) => expect(r.minIdleMs).toBe(120_000)],
   });
 
-  unit("minIdleMs defaults to the requested 10-minute cost policy", {
+  unit("minIdleMs defaults to one hour", {
     given: ["no env", () => ({ env: {} })],
     when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
-    then: ["default 600_000 ms", (r) => expect(r.minIdleMs).toBe(600_000)],
+    then: ["default 3_600_000 ms", (r) => expect(r.minIdleMs).toBe(3_600_000)],
   });
 });
 
