@@ -25,7 +25,7 @@ class LinkPttHostCostNativeTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
-    fun aShortPressBeginsThenCancelsBecauseItsDurationIsTheRecording() {
+    fun aShortPressBeginsOnDownAndReleasesWithoutAnArmingGate() {
         var begins = 0
         var releases = 0
         var cancels = 0
@@ -57,7 +57,7 @@ class LinkPttHostCostNativeTest {
         compose.waitForIdle()
 
         assertEquals("push-to-talk gained an arming gate before recording", 1, begins)
-        assertEquals("a short recording was sent instead of discarded", 0, releases)
-        assertEquals("an early release did not discard the short recording", 1, cancels)
+        assertEquals("the lifecycle did not end on finger release", 1, releases)
+        assertEquals("an ordinary finger release was misreported as cancellation", 0, cancels)
     }
 }

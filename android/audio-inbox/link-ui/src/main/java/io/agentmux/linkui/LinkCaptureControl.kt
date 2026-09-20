@@ -17,11 +17,10 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
-import com.adelost.designkit.ui.CircleActionTiming
+import com.adelost.designkit.ui.CirclePressStart
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
 import com.adelost.designkit.ui.CircleSurfaceClass
-import com.adelost.designkit.ui.circleResolvedTiming
 import com.adelost.ringkit.ui.IconRing
 import com.adelost.ringkit.ui.RingAudioCaptureFeedback
 import com.adelost.ringkit.ui.RingAudioCaptureFeedbackSpec
@@ -134,8 +133,8 @@ fun LinkCaptureControl(
             }
             else -> RingPressLifecycle(
                 spec = RingPressLifecycleSpec(
-                    // Push-to-talk begins immediately; its duration is the recording, not a confirm gate.
-                    timing = circleResolvedTiming(CircleActionTiming.IMMEDIATE),
+                    // Push-to-talk's duration is the recording, not a confirmation of it.
+                    start = CirclePressStart.ON_DOWN,
                     label = handsFree?.label ?: when (spec.phase) {
                         CapturePhase.LISTENING -> "RELEASE TO SEND"
                         CapturePhase.FINALIZING -> "SENDING"
