@@ -8,6 +8,13 @@ export const TERMINAL_DELIVERY_STATES = new Set([
   "acknowledged", "cancelled", DELIVERED_UNVERIFIED_STATE,
 ]);
 
+/** WHAT: Calculates bounded retries for blocked delivery. WHY: Keeps persistent safety holds from creating a busy retry loop. */
+export function blockedRetryMs(job, { drafted = false } = {}) {
+  const base = drafted ? 5_000 : 3_000;
+  const exponent = Math.min(5, Math.max(0, Number(job.attempts || 1) - 1));
+  return Math.min(60_000, base * (2 ** exponent));
+}
+
 /** WHAT: Checks for a terminal proven not sent. WHY: Keeps cancellation from masquerading as delivery. */
 export function isNotSentDeliveryJob(job) {
   return job?.status === "cancelled"

@@ -12,7 +12,9 @@ const NOTICE_AFTER_MS = 10_000;
 /** WHAT: Maps one durable blocked delivery to engine-neutral copy. WHY: Prevents a Claude wake from being mislabeled as a Codex composer wait. */
 export function blockedDeliveryNotice(job) {
   const reason = String(job?.lastReason || "").replace(/^wake-refused:/u, "");
-  const detail = reason === "memory-critical"
+  const detail = reason.startsWith("context-cost:")
+    ? `kostnadsskyddet stoppar leveransen (${reason}). Ingen ny automatisk compact görs efter ett misslyckat försök`
+    : reason === "memory-critical"
     ? "värden har kritisk minnespress"
     : reason === "memory-blocked" || reason === "memory-reserve-floor"
       ? "värden saknar säker minnesmarginal"

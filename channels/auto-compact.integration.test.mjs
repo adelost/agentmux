@@ -51,7 +51,7 @@ const CONTENT = {
 
 // Build the injected deps. `state.content` is read fresh each capture so a
 // test can simulate a compact succeeding (context drops) mid-run.
-function harness({ height = 50, content = CONTENT.full100 } = {}) {
+function harness({ height = 50, content = CONTENT.full100, maxTokens = DEFAULT_CONFIG.maxTokens } = {}) {
   const { path, dir } = writeYaml();
   const state = { content, fires: 0, rootDir: dir };
   const agent = {
@@ -63,7 +63,7 @@ function harness({ height = 50, content = CONTENT.full100 } = {}) {
   };
   const tmux = async () => ({ stdout: `0 ${height}` });
   const discord = { send: async () => {} };
-  const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
+  const config = { ...DEFAULT_CONFIG, maxTokens, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
   const ac = createAutoCompact({
     agent, agentsYamlPath: path, discord, tmux, config, log: () => {},
   });
@@ -194,7 +194,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       const oldHome = process.env.HOME;
       const fakeHome = mkdtempSync(join(tmpdir(), "amux-ac-home-"));
       process.env.HOME = fakeHome;
-      const h = harness({ content: CONTENT.narrow314k });
+      const h = harness({ content: CONTENT.narrow314k, maxTokens: 400_000 });
       writeClaudeModel(fakeHome, join(h.state.rootDir, ".agents", "0"), "claude-opus-4-8");
       return { ...h, oldHome, fakeHome };
     }],

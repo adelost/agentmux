@@ -13,7 +13,7 @@ import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
 import { readQuotaSnapshot } from "./core/quota-usage.mjs";
 import { formatQuotaSnapshot } from "./core/quota-format.mjs";
 import { prepareCodexIdle } from "./core/codex-tui.mjs";
-import { runCompactFirstCodexModelChange } from "./core/codex-model-command.mjs";
+import { runLockedCodexModelChange } from "./core/codex-model-command.mjs";
 import {
   clearCodexModelOverride,
   codexLoginCommand,
@@ -594,16 +594,10 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         const [, requestedModel, targetEffort] = spec;
         const targetModel = resolveCodexModelName(requestedModel);
         await msg.reply(`Compacting ${mapping.name}:${pane} before model change; the switch runs only after a fresh receipt.`);
-        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () => runCompactFirstCodexModelChange({
-          agent, state, name: mapping.name, pane, targetModel, targetEffort,
+        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () => runLockedCodexModelChange({
+          agent, state, deliveryBroker, name: mapping.name, pane, targetModel, targetEffort,
           statusDriver: codexStatusDriver,
           log: (message) => console.log(`[${ts()}] ${message}`),
-          sendCompact: () => deliveryBroker
-            ? deliveryBroker.enqueueAndWait({
-                agentName: mapping.name, pane, text: "/compact", kind: "slash", source: "model-switch",
-                metadata: { channelId: msg.channelId, messageId: msg.id },
-              })
-            : sendSlashVerified(agent, mapping.name, pane, "/compact"),
           ...modelChangeOptions,
         }));
         if (result.ok) {

@@ -12,6 +12,7 @@ export async function wakeDeliveryTarget({
   job,
   wakeGate,
   wakeLifecycle,
+  costAdmission,
   drafted,
   ownsPaneDraft,
   queue,
@@ -22,7 +23,6 @@ export async function wakeDeliveryTarget({
 }) {
   if (typeof agent.paneProcessState !== "function") return { proceed: true, job };
   const processState = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
-  if (!paneNeedsWake(processState)) return { proceed: true, job };
 
   const refuse = async (reason) => {
     const pending = queue.update(job, {
@@ -33,6 +33,13 @@ export async function wakeDeliveryTarget({
     queueEvent(pending, "wake_refused", { reason: String(reason) });
     return { proceed: false, job: await notifyBlocked(pending) };
   };
+
+  const costGate = async () => {
+    if (job.kind !== "prompt" || !costAdmission) return { proceed: true, job };
+    const verdict = await costAdmission(job).catch(error => ({ ok: false, reason: error.message }));
+    return verdict?.ok ? { proceed: true, job } : refuse(verdict?.reason || "context-cost-unverified");
+  };
+  if (!paneNeedsWake(processState)) return costGate();
 
   // Never type a prompt into a shell merely because this producer omitted
   // the optional wake policy. The durable queue can wait for a real CLI.
@@ -58,7 +65,7 @@ export async function wakeDeliveryTarget({
       });
       if (!completed?.ok) throw new Error(completed?.reason || "wake-verification-failed");
     }
-    return { proceed: true, job };
+    return costGate();
   } catch (error) {
     return refuse(error instanceof Error ? error.message : "wake-verification-failed");
   }

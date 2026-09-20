@@ -6,6 +6,41 @@ import {
   setCodexModelOverride,
 } from "./codex-profiles.mjs";
 import { compactThenSwitchCodex } from "./codex-model-switch.mjs";
+import { sendSlashVerified } from "./delivery.mjs";
+
+/** WHAT: Routes a model change under the session's physical lease. WHY: Prevents a compact from queueing behind the very broker lock that awaits it. */
+export async function runLockedCodexModelChange({ deliveryBroker, ...options }) {
+  const queue = deliveryBroker?.queue;
+  const lease = queue?.acquireSessionLease(options.name);
+  if (queue && !lease) return { ok: false, stage: "lease", reason: "delivery-lease-busy" };
+  try {
+    if (options.agent.paneProcessState && !(await options.agent.paneProcessState(options.name, options.pane)).running) {
+      const prior = await contextReader(options.agent, options.name, options.pane)();
+      await options.agent.ensureReady(options.name, options.pane, {
+        profile: selectedCodexProfile(options.state, options.name, options.pane),
+        model: prior?.model || options.targetModel, effort: prior?.effort || options.targetEffort,
+        retryModelChange: true,
+      });
+    }
+    const result = await runCompactFirstCodexModelChange({ ...options,
+      sendCompact: () => sendSlashVerified(options.agent, options.name, options.pane, "/compact", { settleMs: 200, maxRescues: 0 }),
+    });
+    if (!result.ok && ["compact", "delivery", "switch"].includes(result.stage)) blockModelChange(options, result);
+    return result;
+  } catch (error) {
+    const result = { ok: false, stage: "compact", error: error.message };
+    blockModelChange(options, result);
+    return result;
+  } finally { lease?.release(); }
+}
+
+function blockModelChange({ state, name, pane, targetModel, targetEffort }, result) {
+  const key = `${name}:${pane}@${selectedCodexProfile(state, name, pane).id}`;
+  const sessions = state.get("codex_session_by_pane_profile_v1", {});
+  state.set("codex_session_by_pane_profile_v1", { ...sessions, [key]: { ...sessions[key],
+    modelTransitionBlocked: { target: targetModel, reason: result.error || result.reason || result.stage } } });
+  setCodexModelOverride(state, name, pane, targetModel, targetEffort || null);
+}
 
 const contextReader = (agent, name, pane) => () =>
   agent.getContext?.(name, pane) ?? agent.getContextPercent(name, pane);
@@ -46,20 +81,21 @@ export async function runCompactFirstCodexModelChange({
     readContext,
     readOutput: () => agent.capturePane(name, pane),
     sendCompact,
+    compact: agent.compactCodex ? () => agent.compactCodex(name, pane, { sendCompact }) : null,
     wait,
     now,
     timeoutMs,
     pollMs,
-    switchModel: async ({ beforeContext }) => {
+    switchModel: async ({ beforeContext, compactReceipt }) => {
       const idle = await prepareCodexIdle({ agent, name, pane });
       if (!idle.ok) return { ok: false, stage: idle.stage, error: idle.error };
-      const previous = codexModelOverride(state, name, pane)
-        || (beforeContext?.model ? { model: beforeContext.model, effort: beforeContext.effort ?? null } : null);
+      const previous = beforeContext?.model ? { model: beforeContext.model, effort: beforeContext.effort ?? null }
+        : codexModelOverride(state, name, pane);
       const effort = targetEffort?.toLowerCase() || previous?.effort || null;
       const profile = selectedCodexProfile(state, name, pane);
       setCodexModelOverride(state, name, pane, targetModel, effort);
       try {
-        await agent.restartCodex(name, pane, { profile, model: targetModel, effort });
+        await agent.restartCodex(name, pane, { profile, model: targetModel, effort, compactReceipt, retryModelChange: true });
         const verified = await statusDriver({ agent, name, pane, log });
         if (!verified.ok) throw new Error(`native status: ${verified.stage}: ${verified.error}`);
         const actual = verified.status.model;

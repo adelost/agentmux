@@ -77,6 +77,7 @@ import {
 import { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
 import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
+import { assertCodexWorkModel, createCodexCompact, startCodexProcess } from "./core/codex-process-launch.mjs";
 export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchCommand } from "./core/agent-launch-command.mjs";
 export { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
@@ -97,7 +98,7 @@ export function paneDir(rootDir, pane) {
 // The marker lets ensureAgentHints detect stale copies on spawn; bump it
 // whenever AGENT_HINTS content changes. Appended content survives upgrades.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
-export const HINTS_VERSION = "1.25.13";
+export const HINTS_VERSION = "1.25.14";
 /** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
@@ -583,7 +584,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // resume authority above.
       persistSession({ sessionId: null, status: "awaiting-first-rollout", startedAt: Date.now() });
     } else {
-      persistSession({ sessionId: decision.sessionId, status: "ready", rolloutPath: discovered.path });
+      persistSession({ ...remembered, sessionId: decision.sessionId, status: "ready", rolloutPath: discovered.path });
     }
 
     const paneOverride = codexModelOverride(state, name, pane);
@@ -591,24 +592,20 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       launch, override: paneOverride, configured: agentConfig(name).panes?.[pane],
       previous: launch?.model || paneOverride ? null : getContextPercentByDialect(dir, "codex"),
     });
-    // Preserve legacy continuity only when no explicit config/choice exists.
-    // A config default remains a default, so later YAML changes can take effect.
-    if (override?.source === "history" && state) {
-      try { setCodexModelOverride(state, name, pane, override.model, override.effort); }
-      catch (err) { console.warn(`startCodex: could not pin ${name}:${pane} model: ${err.message}`); }
-    }
-    // Resume only the exact pane/profile-owned session selected above. A bare
-    // launch is permitted solely for the fenced first bootstrap.
-    const cmd = buildCodexLaunchCommand({
-      profileHome: profile.home,
-      model: override?.model || null,
-      effort: override?.effort || null,
-      resumeSessionId: decision.action === "resume" ? decision.sessionId : null,
-      allowFreshBootstrap: decision.action === "fresh",
+    const previous = remembered?.sessionId === decision.sessionId && remembered?.model
+      ? remembered : getContextPercentByDialect(dir, "codex");
+    await startCodexProcess({
+      t, wait, target, dir, profile, selected: override, previous,
+      remembered: remembered?.sessionId === decision.sessionId ? remembered : null, launchOptions: launch,
+      sessionId: decision.action === "resume" ? decision.sessionId : null,
+      compact: () => compactCodex(name, pane),
+      ready: () => waitForCodexUiReady(target, name, pane), screen: () => captureScreen(name, pane),
+      remember: persistSession, pin: (actual) => state && setCodexModelOverride(state, name, pane, actual.model, actual.effort),
     });
-    await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
-    await wait(2000);
   }
+
+  const compactCodex = createCodexCompact({ control: { sendOnly, dismissBlockingPrompt, capturePane, captureScreen, sendEnter },
+    dirFor: (name, pane) => paneDir(agentConfig(name).dir, pane), wait, state });
 
   /**
    * Restart one idle Codex pane under an explicit account/model selection.
@@ -1134,6 +1131,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (maintenanceGuard && await t.paneInMode(target)) throw new Error("maintenance-copy-mode-active");
     if (!maintenanceGuard) await exitCopyMode(target);
     const dialect = await livePaneDialectName(agentName, pane);
+    if (dialect === "codex") await assertCodexWorkModel({ state, name: agentName, pane, prompt,
+      configured: agentConfig(agentName).panes?.[pane], screen: () => captureScreen(agentName, pane) });
     let alreadyComposed = await promptAlreadyInComposer(agentName, pane, prompt, {
       ownedDraft: knownDrafted,
     });
@@ -1473,7 +1472,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   // --- Orchestration ---
 
-  async function ensureReady(agentName, pane) {
+  async function ensureReady(agentName, pane, launch = null) {
     const config = agentConfig(agentName);
     const isNew = !(await hasSession(agentName));
 
@@ -1495,8 +1494,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const target = `${agentName}:.${pane}`;
     const paneCmd = config.panes?.[pane]?.cmd || "bash";
 
-    // startClaude/startCodex are idempotent (they return early when the process
-    // is already up), but the wait-for-ready that follows is NOT: it sends a
+    // The wait-for-ready after process start sends a
     // reveal-Escape to surface the composer. Running that on a LIVE, working
     // pane re-Escaped a mid-thought Codex turn on EVERY delivery — the all-night
     // "Conversation interrupted" (2026-07-12). Only wait-for-ready when we
@@ -1516,7 +1514,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // Codex panes use the same wait-for-ready + dismiss pattern as
       // claude. Resume-hint is skipped because startCodex resumes the exact
       // provenance-matched pane session (global `resume --last` is forbidden).
-      await startCodex(agentName, target, config.dir, pane);
+      await startCodex(agentName, target, config.dir, pane, launch);
       if (!wasRunning) {
         const ready = await waitForCodexUiReady(target, agentName, pane);
         if (!ready) {
@@ -1824,6 +1822,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho, probeIngest,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession, paneProcessState: tuiRecovery.paneProcessState,
-    sanitizeTmuxGlobalEnv, restartCodex, restartKimi, restartClaudeAccount: tuiRecovery.restartClaudeAccount, restartPaneExact, restartFleet,
+    sanitizeTmuxGlobalEnv, restartCodex, compactCodex, restartKimi, restartClaudeAccount: tuiRecovery.restartClaudeAccount, restartPaneExact, restartFleet,
   };
 }

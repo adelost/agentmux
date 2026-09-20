@@ -1,19 +1,19 @@
 fileSize:
   caps:
-    agent.mjs: 1829
+    agent.mjs: 1827
     channels/jsonl-watcher.mjs: 953
     cli/commands.mjs: 3637
     core/codex-jsonl-reader.mjs: 831
     core/codex-tui.mjs: 546
-    core/context.mjs: 635
+    core/context.mjs: 633
     core/contract-lint.mjs: 640
-    core/delivery-broker.mjs: 703
+    core/delivery-broker.mjs: 699
     core/delivery-queue.mjs: 536
     core/jsonl-reader.mjs: 952
     core/native-runtime-client.mjs: 544
     core/suggestions-comment-bridge.mjs: 1131
     core/worktree-deps.mjs: 675
-    handlers.mjs: 1239
+    handlers.mjs: 1233
     spikes/web-ui/app.js: 1660
     spikes/web-ui/server.mjs: 2725
     spikes/web-ui/tools/native-canary-gate.mjs: 534

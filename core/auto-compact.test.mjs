@@ -156,9 +156,9 @@ feature("decideAutoCompactAction — min-idle gate (conversation freshness)", ()
   });
 
   unit("turn exactly at min-idle threshold passes gate → warn", {
-    given: ["last turn exactly 5min ago", () => ({
+    given: ["last turn exactly at the configured ten-minute boundary", () => ({
       ...base,
-      lastActivityMs: base.now - 300_000,
+      lastActivityMs: base.now - DEFAULT_CONFIG.minIdleMs,
     })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
@@ -408,10 +408,10 @@ feature("parseAutoCompactConfig — minIdleMs", () => {
     then: ["parsed to 2 min", (r) => expect(r.minIdleMs).toBe(120_000)],
   });
 
-  unit("minIdleMs defaults to 5 min when unset", {
+  unit("minIdleMs defaults to the requested 10-minute cost policy", {
     given: ["no env", () => ({ env: {} })],
     when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
-    then: ["default 300_000 ms", (r) => expect(r.minIdleMs).toBe(300_000)],
+    then: ["default 600_000 ms", (r) => expect(r.minIdleMs).toBe(600_000)],
   });
 });
 

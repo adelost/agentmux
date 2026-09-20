@@ -32,3 +32,4 @@ docs/*
 !docs/reliability.md
 !docs/cli.md
 !docs/public-distribution.md
+!docs/AMUX-COST-POLICY.md

@@ -16,6 +16,7 @@ export async function compactThenSwitchCodex({
   readContext,
   readOutput,
   sendCompact,
+  compact = null,
   switchModel,
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = Date.now,
@@ -23,6 +24,12 @@ export async function compactThenSwitchCodex({
   pollMs = 1_000,
 }) {
   const [beforeContext, beforeOutput] = await Promise.all([readContext(), readOutput()]);
+  if (compact) {
+    const receipt = await compact();
+    if (!receipt?.ok) return { ok: false, stage: "compact", reason: receipt?.reason || "missing-receipt" };
+    const switched = await switchModel({ beforeContext, afterContext: await readContext(), compactReceipt: receipt });
+    return switched?.ok === false ? switched : { ok: true, ...switched, compactReceipt: receipt };
+  }
   const sent = await sendCompact();
   if (!sent?.delivered || sent.pending) {
     return { ok: false, stage: "delivery", reason: sent?.reason || "compact-not-acknowledged" };

@@ -49,6 +49,7 @@ import {
 } from "../core/model-watch.mjs";
 import { driveCodexStatus } from "../core/codex-status.mjs";
 import {
+  isExpectedCodexModel,
   selectedCodexProfile,
   setCodexModelOverride,
 } from "../core/codex-profiles.mjs";
@@ -341,14 +342,13 @@ export function createJsonlWatcher({
    */
   async function watchModelChange({ name, idx, channelId, ctx, config = null }) {
     if (!ctx?.model) return;
-    // Head-sourced readings are the session's ORIGINAL model — potentially
-    // stale, good enough for a display label but NOT evidence of a switch.
-    // Acting on one parked two healthy panes (false downgrade, 2026-07-10).
+    // Only this pane's latest turn is model-change evidence.
     if (ctx.modelSource && ctx.modelSource !== "turn") return;
     const key = paneKey(name, idx);
     const prev = paneModelSelection(state, name, idx);
     const next = { model: ctx.model, effort: ctx.effort ?? null };
     setPaneModelSelection(state, name, idx, next.model, next.effort);
+    if (isExpectedCodexModel(state, name, idx, config?.[name]?.panes?.[idx], next)) return;
     if (!prev) return;
 
     const change = classifyModelChange(prev, next);

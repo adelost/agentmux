@@ -290,9 +290,10 @@ feature("/model dialect routing", () => {
       unlinkSync(path);
     }],
     then: ["restart carries Max and global-default guarantee", (_, { msg, agent, deliveryBroker }) => {
-      expect(deliveryBroker.enqueueAndWait).toHaveBeenCalledWith(expect.objectContaining({
-        text: "/compact", kind: "slash", source: "model-switch",
-      }));
+      // The model operation already owns the broker lane: nesting an enqueue
+      // would wait on itself, so its compact must use the locked transport.
+      expect(deliveryBroker.enqueueAndWait).not.toHaveBeenCalled();
+      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "/compact", 0, expect.any(Object));
       expect(agent.restartCodex).toHaveBeenCalledTimes(1);
       expect(agent.restartCodex.mock.calls[0][2]).toMatchObject({ model: "gpt-5.6-sol", effort: "max" });
       expect(msg.reply.mock.calls.at(-1)[0]).toContain("global default orörd");
@@ -333,15 +334,12 @@ feature("/model dialect routing", () => {
   component("codex rollback preserves a draft that appears during verification", {
     given: ["native verification fails after a local human starts typing", () => {
       const path = writeCodexYaml();
-      const driver = vi.fn(async () => ({ ok: false, stage: "parse", error: "status redraw" }));
+      let drafting = false;
+      const driver = vi.fn(async () => { drafting = true; return { ok: false, stage: "parse", error: "status redraw" }; });
       const s = setup({ agentsYamlPath: path, codexStatusDriver: driver });
       s.agent.isBusy.mockResolvedValue(false);
-      s.agent.capturePane
-        .mockResolvedValueOnce("\n› Ask Codex to do anything\n")
-        .mockResolvedValueOnce("\n› Ask Codex to do anything\n")
-        .mockResolvedValueOnce("\n› Ask Codex to do anything\n")
-        .mockResolvedValueOnce("\n› Ask Codex to do anything\n")
-        .mockResolvedValue("\n› keep my local draft\n");
+      s.agent.capturePane.mockImplementation(async () => drafting
+        ? "\n› keep my local draft\n" : "\n› Ask Codex to do anything\n");
       s.agent.getContextPercent
         .mockReturnValueOnce({
           percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",

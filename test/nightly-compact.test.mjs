@@ -95,6 +95,19 @@ feature("nightly context budget", () => {
       expect(result.rows[0].status).toBe("eligible"); expect(result.calls).toBe(0); expect(result.after).toEqual(result.before);
     }],
   });
+  component("temporary lease contention retries without spending the night's model attempt", {
+    when: ["two lease checks are busy and the third succeeds", async () => {
+      const fx = fixture();
+      const acquire = fx.deps.queue.acquireSessionLease;
+      let checks = 0;
+      fx.deps.queue.acquireSessionLease = (...args) => ++checks < 3 ? null : acquire(...args);
+      try { return { result: await runNightlyCompact(fx.ctx, {}, fx.deps), calls: fx.calls(), checks }; }
+      finally { fx.clean(); }
+    }],
+    then: ["one verified compact follows three cheap lock checks", ({ result, calls, checks }) => {
+      expect(result.rows[0].status).toBe("within-budget"); expect(calls).toBe(1); expect(checks).toBe(3);
+    }],
+  });
   component("runs through the shared lease and persists one exact result per night", {
     when: ["running twice with a later large context", async () => {
       const fx = fixture();

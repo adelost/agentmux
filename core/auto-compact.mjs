@@ -17,6 +17,7 @@ export const DEFAULT_CONFIG = {
                           // the completion truth; the composer only proves the
                           // request left input, so no premature success notice.
   threshold: 60,          // compact idle panes before large histories keep taxing input
+  maxTokens: 150_000,     // absolute budget independent from model window size
   graceMs: 60_000,        // 1 minute between warn and fire
   pollMs: 60_000,         // poll cadence in the bridge.
                           // Matched to graceMs so each pane gets one decide
@@ -39,7 +40,7 @@ export const DEFAULT_CONFIG = {
                           // a tiled layout of small panes and want more of them
                           // covered — the verify-before-refire guard still
                           // bounds any misfire.
-  minIdleMs: 300_000,     // 5 minutes. Conversation must have been silent
+  minIdleMs: 600_000,     // 10 minutes. Conversation must have been silent
                           // (no jsonl turns) this long before we even
                           // consider warning. Protects against "between
                           // turns" false-positives where the pane shows
@@ -62,6 +63,7 @@ export function parseAutoCompactConfig(env = process.env) {
     enabled: env.AUTO_COMPACT_ENABLED !== "false",
     codexEnabled: env.AUTO_COMPACT_CODEX !== "false",
     threshold: parseInt(env.AUTO_COMPACT_WARN_THRESHOLD || DEFAULT_CONFIG.threshold, 10),
+    maxTokens: parseInt(env.AUTO_COMPACT_MAX_TOKENS || DEFAULT_CONFIG.maxTokens, 10),
     graceMs: parseInt(env.AUTO_COMPACT_GRACE_MS || DEFAULT_CONFIG.graceMs, 10),
     pollMs: parseInt(env.AUTO_COMPACT_POLL_MS || DEFAULT_CONFIG.pollMs, 10),
     compactLockMs: parseInt(env.AUTO_COMPACT_LOCK_MS || DEFAULT_CONFIG.compactLockMs, 10),
@@ -155,10 +157,12 @@ export function resolveActivityMs({ turnMs = null, fileMtimeMs = null, fileFully
  *   "suppress" = clear any pending warning but KEEP the floor and do not fire;
  *   used when a prior /compact proved ineffective.
  */
+/** WHAT: Maps idle context evidence to a maintenance action. WHY: Prevents active, unobserved or already-compacted panes from receiving repeated compact requests. */
 export function decideAutoCompactAction({
   paneKey,
   status,
   contextPercent,
+  contextTokens = null,
   paneInMode,
   lastActivityMs = null,
   warnings,
@@ -189,12 +193,13 @@ export function decideAutoCompactAction({
   }
 
   // No/unknown context% — can't decide.
-  if (contextPercent == null || !Number.isFinite(contextPercent)) {
+  const overTokenBudget = Number.isFinite(contextTokens) && contextTokens > config.maxTokens;
+  if ((contextPercent == null || !Number.isFinite(contextPercent)) && !overTokenBudget) {
     return { action: existing ? "cancel" : "none", reason: "no context data" };
   }
 
   // Below threshold — pane doesn't need compacting; drop any stale warning.
-  if (contextPercent < config.threshold) {
+  if (contextPercent < config.threshold && !overTokenBudget) {
     if (existing || compactFloors.has(paneKey)) return { action: "cancel", reason: "below threshold" };
     return { action: "none" };
   }

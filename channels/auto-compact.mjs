@@ -103,6 +103,7 @@ export function seedLimitedFromLedger(prevStatus, {
   return prevStatus;
 }
 
+/** WHAT: Builds the idle compaction controller. WHY: Keeps quota alerts, admission and compaction effects on the shared pane evidence. */
 export function createAutoCompact({
   agent,
   deliveryBroker = null,
@@ -110,6 +111,7 @@ export function createAutoCompact({
   discord,
   tmux,      // tmux exec function, same signature as createTmuxContext provides
   config,
+  contextMaintenance = null,
   log = (msg) => console.log(`auto-compact | ${msg}`),
 }) {
   const warnings = new Map();
@@ -120,6 +122,7 @@ export function createAutoCompact({
   // threshold / pane went active).
   const compactFloors = new Map();
   const contextSessions = new Map();
+  const attemptedActivity = new Map();
   // paneKey → ms of the last WARNING posted to Discord. Bounds the user-facing
   // warning rate per pane: a pane that flickers status (codex stream redraws,
   // a flapping capture) makes decide() oscillate warn↔cancel, which would re-post
@@ -203,7 +206,7 @@ export function createAutoCompact({
     // Asked of the SAME captured tail the status came from, so the latch and
     // the classifier can never disagree about whether the banner is on screen.
     const limitBannerVisible = Boolean(content) && LIMIT_BANNER.test(content);
-    return { status, contextPercent, contextSession: ctxInfo?.sessionId ?? null, paneInMode, paneHeight, lastActivityMs,
+    return { status, contextPercent, contextTokens: dialect === "kimi" ? null : ctxInfo?.tokens ?? null, contextSession: ctxInfo?.sessionId ?? null, paneInMode, paneHeight, lastActivityMs,
              limitBannerVisible };
   }
 
@@ -211,6 +214,11 @@ export function createAutoCompact({
     if (compacting.has(paneKey)) return;
     compacting.add(paneKey);
     try {
+      if (contextMaintenance) {
+        const result = await contextMaintenance.run(agentName, paneIdx);
+        log(`${paneKey}: ${result.compacted ? "compact verified" : result.reason || result.cell || "within policy"}`);
+        return;
+      }
       const result = deliveryBroker
         ? await deliveryBroker.enqueueAndWait({
             agentName,
@@ -345,12 +353,13 @@ export function createAutoCompact({
         const paneKey = `${a.name}:${i}`;
         if (compacting.has(paneKey)) continue;
 
-        const { status, contextPercent, contextSession, paneInMode, paneHeight, lastActivityMs,
+        const { status, contextPercent, contextTokens, contextSession, paneInMode, paneHeight, lastActivityMs,
                 limitBannerVisible } = await inspect(a, i);
 
         if (contextSession && contextSessions.has(paneKey) && contextSessions.get(paneKey) !== contextSession) {
           warnings.delete(paneKey);
           compactFloors.delete(paneKey);
+          attemptedActivity.delete(paneKey);
         }
         if (contextSession) contextSessions.set(paneKey, contextSession);
 
@@ -375,10 +384,13 @@ export function createAutoCompact({
           continue;
         }
 
+        if (contextMaintenance && !contextMaintenance.canAttempt(a.name, i, contextSession)) continue;
+        if (!contextMaintenance && attemptedActivity.has(paneKey) && attemptedActivity.get(paneKey) === lastActivityMs) continue;
         const decision = decideAutoCompactAction({
           paneKey,
           status,
           contextPercent,
+          contextTokens,
           paneInMode,
           lastActivityMs,
           warnings,
@@ -405,6 +417,7 @@ export function createAutoCompact({
           // didn't drop below this, the compact was a no-op and decide returns
           // "suppress" instead of firing again.
           compactFloors.set(paneKey, contextPercent);
+          attemptedActivity.set(paneKey, lastActivityMs);
           await fireCompact(a.name, i, paneKey, contextPercent, paneDialect(a, i));
         } else if (decision.action === "suppress") {
           // Prior /compact didn't help. Clear the pending warning so it can't
@@ -429,7 +442,7 @@ export function createAutoCompact({
       return;
     }
     if (intervalId) return;
-    log(`enabled | threshold=${config.threshold}% grace=${Math.round(config.graceMs / 1000)}s poll=${Math.round(config.pollMs / 1000)}s min-idle=${Math.round(config.minIdleMs / 1000)}s`);
+    log(`enabled | threshold=${config.threshold}% or >${config.maxTokens} tokens grace=${Math.round(config.graceMs / 1000)}s poll=${Math.round(config.pollMs / 1000)}s min-idle=${Math.round(config.minIdleMs / 1000)}s`);
     intervalId = setInterval(() => {
       tick().catch((err) => log(`tick failed: ${err.message}`));
     }, config.pollMs);

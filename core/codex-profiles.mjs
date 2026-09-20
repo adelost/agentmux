@@ -84,11 +84,12 @@ export function codexModelOverride(state, name, pane) {
   return { model: String(value.model), effort };
 }
 
-/** WHAT: Resolves explicit launch, pane choice, configured default, then history.
- *  WHY: Prevents dormant history from overriding config or freezing its default as a manual choice. */
+/** WHAT: Resolves explicit launch, saved choice, previous session, then default.
+ *  WHY: A restart preserves a deliberate model choice; defaults initialize unselected panes. */
 export function resolveCodexModelSelection({ launch, override, configured, previous } = {}) {
   if (launch?.model) return { model: launch.model, effort: launch.effort ?? null, source: "launch" };
   if (override?.model) return { ...override, source: "override" };
+  if (previous?.model) return { model: previous.model, effort: previous.effort ?? null, source: "history" };
   if (configured?.model) return {
     model: configured.model,
     effort: configured.effort ?? previous?.effort ?? null,
@@ -97,6 +98,12 @@ export function resolveCodexModelSelection({ launch, override, configured, previ
   return previous?.model
     ? { model: previous.model, effort: previous.effort ?? null, source: "history" }
     : null;
+}
+
+/** WHAT: Checks a Codex observation against the requested selection. WHY: Prevents intentional Sol changes from being treated as involuntary downgrades. */
+export function isExpectedCodexModel(state, name, pane, configured, observed) {
+  const requested = codexModelOverride(state, name, pane) || configured;
+  return /codex/i.test(configured?.cmd || "") && observed?.model === requested?.model;
 }
 
 export function setCodexModelOverride(state, name, pane, model, effort = null) {

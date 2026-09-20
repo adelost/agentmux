@@ -248,13 +248,10 @@ function readCodexMeta(filePath) {
   return null;
 }
 
-// Process-lifetime cache of the codex session index: [{ path, mtime, cwd }]
-// newest-first. `amux ps`/`done` resolve a session per codex pane, and each
-// resolution used to re-walk + re-stat + re-head-read all of ~/.codex/sessions
-// (hundreds of files). Building it once per process collapses that N×
-// duplicate scan to a single pass. A CLI invocation lives ~1s, so staleness
-// is a non-issue; the cache dies with the process.
+// Share the index across one status sweep, then refresh for the long-lived
+// bridge. Panel model/compact evidence must never come from an ancestor.
 let _codexIndex = null;
+let _codexIndexUntil = 0;
 
 /** Test seam: the index is process-lifetime cached, but tests swap HOME. */
 export function resetCodexSessionIndexForTests() {
@@ -262,7 +259,8 @@ export function resetCodexSessionIndexForTests() {
 }
 
 function codexSessionIndex() {
-  if (_codexIndex) return _codexIndex;
+  if (_codexIndex && Date.now() < _codexIndexUntil) return _codexIndex;
+  _codexIndexUntil = Date.now() + 1_000;
   _codexIndex = codexSessionDirs().flatMap((dir) => findCodexJsonlFiles(dir, 0, []))
     .map((path) => ({ path, mtime: statSync(path).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime)
@@ -273,7 +271,7 @@ function codexSessionIndex() {
 function latestCodexSessionFor(paneDir) {
   for (const { path, cwd } of codexSessionIndex()) {
     if (!cwd) continue;
-    if (paneDir === cwd || paneDir.startsWith(cwd + "/") || cwd.startsWith(paneDir + "/")) {
+    if (paneDir === cwd) {
       return path;
     }
   }
@@ -335,7 +333,7 @@ function getContextFromCodexJsonl(paneDir) {
     turnCtx = headTurnContext(file);
     if (turnCtx) modelSource = "head";
   }
-  return { ...usage, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null,
+  return { ...usage, sessionId: readCodexMeta(file)?.id ?? null, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null,
     modelSource, lastCompactAt };
 }
 

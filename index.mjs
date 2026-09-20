@@ -48,6 +48,7 @@ import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
+import { createContextMaintenance } from "./core/context-maintenance.mjs";
 import { createDiscordInboundStore } from "./core/discord-inbound-store.mjs";
 import { startLinkConnectorIfConfigured } from "./channels/link-connector-start.mjs";
 import { createPaneSleepWakeLifecycle } from "./core/pane-sleep-wake.mjs";
@@ -233,12 +234,23 @@ if (repairedSleeps.length) {
     `${result.state.agentName}:${result.state.pane} ${result.state.status} (${result.reason})`).join(", ")}`);
 }
 
+const contextMaintenance = createContextMaintenance({
+  agent, state: appState, queue: deliveryQueue,
+  resolveTarget: (name, pane) => {
+    const config = listAgents(AGENTS_YAML).find(entry => entry.name === name);
+    const cmd = config?.panes?.[pane]?.cmd || "";
+    return config ? { engine: /codex/.test(cmd) ? "codex" : /claude/.test(cmd) ? "claude" : "unsupported",
+      dir: join(config.dir, ".agents", String(pane)) } : null;
+  },
+  log: message => console.log(`context-cost | ${message}`),
+});
 const deliveryBroker = createDeliveryBroker({
   agent,
   queue: deliveryQueue,
   validateTarget: validateDeliveryTarget,
   bridgeDir: __dir,
   wakeLifecycle: paneSleepWakeLifecycle,
+  costAdmission: contextMaintenance.beforeWork,
   resolveNotificationChannel: (job) => TOKEN
     ? findChannelForPane(AGENTS_YAML, job.agentName, job.pane) : null,
   notify: createDiscordDeliveryNotify({
@@ -321,6 +333,7 @@ const autoCompact = createAutoCompact({
   discord,
   tmux: (cmd) => tmuxExec(`tmux -S '${TMUX_SOCKET}' ${cmd}`),
   config: autoCompactConfig,
+  contextMaintenance,
 });
 autoCompact.start();
 

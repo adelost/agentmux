@@ -50,7 +50,8 @@ const ctx = {
 try {
   // Runtime config must exist before the command graph is evaluated: several
   // command modules intentionally snapshot environment-backed defaults.
-  if (argv[0] === "restarter") {
+  if (argv[0] === "model") await (await import("../cli/model.mjs")).cmdModel(argv.slice(1), ctx);
+  else if (argv[0] === "restarter") {
     await (await import("../cli/restarter.mjs")).cmdRestarter(argv.slice(1), ctx);
   }
   else if (argv[0] === "restart-ready") {

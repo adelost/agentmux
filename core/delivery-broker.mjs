@@ -20,12 +20,12 @@ import { wakeDeliveryTarget } from "./delivery-wake.mjs";
 import {
   DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
   NOT_INGESTING_UNVERIFIED_STREAK, isTargetProvenNotIngesting, waitForDeliveryJob,
+  blockedRetryMs,
 } from "./delivery-queue.mjs";
 import { recoverHiddenDeliveryTui, recoverSubmittedTui } from "./tui-stall-recovery.mjs";
 import { needsZoomFallback, terminalizeSlashRejection } from "./slash-ingest-guard.mjs";
 import { createDeliveryMemoryContext, deliveryMemoryReceiptText } from "./delivery-memory-context.mjs";
 const ACTIVE_RETRY_MS = 1_000;
-const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
 // Warn well before a legitimate long turn reaches the 60-minute verdict.
 const SUBMITTED_STALL_NOTICE_MS = 3 * 60_000;
@@ -49,11 +49,6 @@ const STALE_SUBMITTED_SLASH_TERMINAL_MS = 60_000;
  */
 export const submittedTerminalMs = (job) =>
   job?.kind === "slash" ? STALE_SUBMITTED_SLASH_TERMINAL_MS : STALE_SUBMITTED_TERMINAL_MS;
-function blockedRetryMs(job, { drafted = false } = {}) {
-  const base = drafted ? 5_000 : BLOCKED_RETRY_MS;
-  const exponent = Math.min(5, Math.max(0, Number(job.attempts || 1) - 1));
-  return Math.min(MAX_BLOCKED_RETRY_MS, base * (2 ** exponent));
-}
 function queueEvent(job, state, extra = {}) {
   try {
     appendEvent({
@@ -81,6 +76,7 @@ export function createDeliveryBroker({
   log = (message) => console.warn(message),
   wakeAdmission = null,
   wakeLifecycle = null,
+  costAdmission = null,
   bridgeDir = null,
   memoryContextOptions = {},
 } = {}) {
@@ -444,7 +440,7 @@ export function createDeliveryBroker({
     });
     queueEvent(job, "attempt", { attempt: job.attempts });
 
-    const wake = await wakeDeliveryTarget({ agent, job, wakeGate, wakeLifecycle,
+    const wake = await wakeDeliveryTarget({ agent, job, wakeGate, wakeLifecycle, costAdmission,
       drafted, ownsPaneDraft, queue, now, retryMs: blockedRetryMs,
       queueEvent, notifyBlocked: maybeNotifyBlocked });
     job = wake.job;

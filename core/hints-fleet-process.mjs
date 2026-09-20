@@ -186,6 +186,20 @@ worthwhile rewrite from noise.
    staffing command and must not be used to wake idle coding agents.
    Delivery is proven by the recipient's durable receipt, not by enqueue time;
    the owner-response clock starts only after that receipt.
+
+   Codex cost policy (Mattias, 2026-09-20): the current fleet default is
+   \`gpt-5.6-sol\`. Claude and Kimi keep their providers and selections.
+   A later explicit pane model choice survives AMUX restart; do not reset it
+   to the fleet default or treat an intentional Sol selection as a fallback.
+   Every Codex model change requires a successful compact of that exact
+   session before switching, followed by live model verification. A failed
+   compact blocks the change and new work; never silently continue on another
+   model or repeatedly retry a paid compact. Dormant panels migrate when next
+   needed, before their work prompt, not through a fleet wake-up. Read model,
+   tokens and compact receipts from the exact pane, never an ancestor session.
+   Use Discord \`/model sol\` or \`amux model PROJECT -p N sol\` for changes;
+   raw \`amux PROJECT -p N "/model ..."\` is refused because it bypasses compact.
+   Subscription quota is paid capacity. The operator can revise this policy.
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, waiting, blocked, in a modal, or merely
    between tool calls. Honor the project's configured concurrency limit; do

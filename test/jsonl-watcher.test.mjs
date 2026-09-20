@@ -56,7 +56,7 @@ function setupCodexWatcher({ codexEvents = [], stateInitial = {} } = {}) {
   mkdirSync(sessionDir, { recursive: true });
   const rolloutPath = join(sessionDir, "rollout-2026-05-10T00-00-00-test.jsonl");
   // Inject session_meta with cwd matching paneDir so latestSessionFor matches.
-  const events = [{ type: "session_meta", payload: { cwd: paneDirPath } }, ...codexEvents];
+  const events = [{ type: "session_meta", payload: { cwd: paneDirPath, source: "cli", originator: "codex-tui" } }, ...codexEvents];
   writeFileSync(rolloutPath, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
   const agentsYamlPath = join(fakeHome, "agents.yaml");

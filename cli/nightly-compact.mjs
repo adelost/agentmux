@@ -136,7 +136,11 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
 
     // Same cross-process lease as the broker. Enqueue remains possible; the
     // final observation sees it, or delivery waits until compact releases.
-    const lease = queue.acquireSessionLease(target.agent.name);
+    let lease = queue.acquireSessionLease(target.agent.name);
+    for (let retry = 0; !lease && retry < 2; retry++) {
+      await sleep(2_000);
+      lease = queue.acquireSessionLease(target.agent.name);
+    }
     if (!lease) { rows.push({ pane: key, status: "skipped", reason: "delivery-lease-busy" }); continue; }
     let intent;
     const save = (row) => {
