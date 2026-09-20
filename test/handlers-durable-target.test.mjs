@@ -1,5 +1,25 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHandlers } from "../handlers.mjs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { parkPane, readParkState } from "../core/pane-park.mjs";
+
+let parkDir, priorParkPath, priorEventsPath;
+beforeEach(() => {
+  parkDir = mkdtempSync(join(tmpdir(), "amux-target-park-"));
+  priorParkPath = process.env.AMUX_PARK_STATE_PATH;
+  priorEventsPath = process.env.AMUX_EVENTS_PATH;
+  process.env.AMUX_PARK_STATE_PATH = join(parkDir, "parks.jsonl");
+  process.env.AMUX_EVENTS_PATH = join(parkDir, "events.jsonl");
+});
+afterEach(() => {
+  if (priorParkPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
+  else process.env.AMUX_PARK_STATE_PATH = priorParkPath;
+  if (priorEventsPath === undefined) delete process.env.AMUX_EVENTS_PATH;
+  else process.env.AMUX_EVENTS_PATH = priorEventsPath;
+  rmSync(parkDir, { recursive: true, force: true });
+});
 
 function durableMessage() {
   return {
@@ -42,6 +62,35 @@ function setup() {
 }
 
 describe("durable Discord target routing", () => {
+  it("reports a saved pause in English without enqueueing or inventing its cause", async () => {
+    parkPane({ session: "skybar", pane: 3, detail: "operator pause" });
+    const { onMessage, deliveryBroker } = setup();
+    const msg = durableMessage();
+    await onMessage(msg);
+    expect(deliveryBroker.enqueue).not.toHaveBeenCalled();
+    expect(readParkState("skybar", 3)).not.toBeNull();
+    const text = msg.reply.mock.calls[0][0];
+    expect(text).toMatch(/^Message not sent to skybar:3:/);
+    expect(text).toContain("Recorded reason: operator pause");
+    expect(text).toContain(".3 //model <model>");
+    expect(text).not.toMatch(/fallback|downgrad|modell|--force|\/restore/);
+  });
+
+  it("confirms only the next message on the same target without replaying the blocked one", async () => {
+    parkPane({ session: "skybar", pane: 3, detail: "operator pause" });
+    const { onMessage, deliveryBroker } = setup();
+    await onMessage(durableMessage());
+    expect(deliveryBroker.enqueue).not.toHaveBeenCalled();
+    const next = { ...durableMessage(), id: "93002", text: "Continue on this model" };
+    await onMessage(next);
+    expect(deliveryBroker.enqueue).toHaveBeenCalledTimes(1);
+    expect(deliveryBroker.enqueue).toHaveBeenCalledWith(expect.objectContaining({
+      agentName: "skybar", pane: 3, text: "Continue on this model",
+      idempotencyKey: "discord:removed-channel:93002",
+    }));
+    expect(readParkState("skybar", 3)).toBeNull();
+  });
+
   it("enqueues the persisted pane even after its live channel mapping disappears", async () => {
     const { onMessage, deliveryBroker } = setup();
 

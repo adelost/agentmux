@@ -166,7 +166,7 @@ feature("decideParkedSend two-strike confirm", () => {
 });
 
 feature("blockedSendMessage", () => {
-  unit("names the pane, the downgrade and the override", {
+  unit("names the pane, the recorded model change and the override", {
     given: ["a parked pane 5 min ago", () => ({
       paneKey: "api:3",
       park: { sinceMs: Date.now() - 5 * 60_000, detail: "sol xhigh → luna low" },
@@ -177,6 +177,49 @@ feature("blockedSendMessage", () => {
       expect(r).toContain("luna");
       expect(r).toMatch(/5 min/);
       expect(r).toContain("--force");
+    }],
+  });
+});
+
+feature("blocked send evidence and recovery", () => {
+  const park = { sinceMs: 0, detail: "operator pause" };
+
+  unit("uses English without inferring a downgrade from a park", {
+    when: ["formatting an operator pause", () => blockedSendMessage("project:3", park, { now: 300_000 })],
+    then: ["reports non-delivery and the recorded cause", text => {
+      expect(text).toMatch(/^Message not sent to project:3:/);
+      expect(text).toContain("Recorded reason: operator pause");
+      expect(text).not.toMatch(/fallback|downgrad|modell/);
+    }],
+  });
+
+  unit("labels an absent reason instead of inventing one", {
+    when: ["formatting without a recorded reason", () => blockedSendMessage("project:3", { ...park, detail: "" })],
+    then: ["explicitly unknown", text => expect(text).toContain("Recorded reason: not recorded")],
+  });
+
+  unit("preserves UTF-8 recorded reasons", {
+    when: ["formatting a non-English reason", () => blockedSendMessage("project:3", { ...park, detail: "paus för åäö" })],
+    then: ["the recorded text is unchanged", text => expect(text).toContain("paus för åäö")],
+  });
+
+  unit("CLI recovery names the exact target and explicit override", {
+    when: ["formatting CLI recovery", () => blockedSendMessage("build-worker:12", park)],
+    then: ["CLI instructions only", text => {
+      expect(text).toContain("amux model build-worker -p 12 <model>");
+      expect(text).toContain("--force");
+      expect(text).not.toContain("//model");
+    }],
+  });
+
+  unit("Discord recovery names the pane and does not promise replay", {
+    when: ["formatting Discord recovery", () => blockedSendMessage("project:3", park, { surface: "discord" })],
+    then: ["explains next-message confirmation without CLI flags", text => {
+      expect(text).toContain(".3 //model <model>");
+      expect(text).toContain("Sending another regular message to project:3");
+      expect(text).toContain("The blocked message is not replayed.");
+      expect(text).not.toContain("--force");
+      expect(text).not.toContain("/restore");
     }],
   });
 });

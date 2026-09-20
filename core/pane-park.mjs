@@ -9,6 +9,7 @@
 // PARK_MAX_AGE_MS — a stale flag that outlives its incident (bridge died
 // before the upgrade was observed) must not dead-letter briefs forever.
 // Fail-open by time, fail-loud at send time.
+// Task handoff is not a park operation; see skills/amux-orchestrator/references/handoff.md.
 
 import { existsSync } from "fs";
 import { homedir } from "os";
@@ -112,7 +113,7 @@ export function shouldBlockSend({ text, park, force = false } = {}) {
  * silent work on a downgraded model, but the human is not always the one who
  * downgraded it and may deliberately want the new model (the operator: fable→opus is
  * fine now). So the FIRST brief after a park warns without delivering; a SECOND
- * brief is an explicit human confirmation ("send again") — deliver it and clear
+ * regular brief confirms use of the current model; deliver only that brief and clear
  * the park so the pane and every later brief flow normally. A newer park
  * (different timestamp) re-warns. `warnedSinceMs` is the park we already warned
  * about; null on the first brief this incident.
@@ -124,10 +125,13 @@ export function decideParkedSend({ park, warnedSinceMs = null } = {}) {
   return { action: "warn", sinceMs: park.sinceMs };
 }
 
-/** One-line explanation for the sender when a brief is blocked. */
-export function blockedSendMessage(paneKey, park, { now = Date.now() } = {}) {
+/** WHAT: Explains a blocked send and surface-specific recovery. WHY: Reports recorded evidence without inventing a model change or promising replay. */
+export function blockedSendMessage(paneKey, park, { now = Date.now(), surface = "cli" } = {}) {
   const mins = Math.max(0, Math.round((now - park.sinceMs) / 60000));
-  return `🅿 ${paneKey} är parkerad efter modell-nedgradering (${park.detail || "okänd"}, ${mins} min sedan). ` +
-    `Briefen levererades INTE — arbete nu skulle köras på fallback-modellen. ` +
-    `Byt tillbaka modellen först (/model), eller skicka om med --force om det är avsiktligt.`;
+  const [name, pane] = paneKey.split(":");
+  const recovery = surface === "discord"
+    ? `Sending another regular message to ${paneKey} accepts the current model and clears this pause. The blocked message is not replayed. To choose a model first, use \`.${pane} //model <model>\`.`
+    : `Choose a model with \`amux model ${name} -p ${pane} <model>\`, or resend with \`--force\` to confirm use of the current model.`;
+  return `Message not sent to ${paneKey}: new work messages are paused (${mins} min ago). ` +
+    `Recorded reason: ${park.detail || "not recorded"}. ` + recovery;
 }
