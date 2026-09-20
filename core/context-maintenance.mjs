@@ -57,6 +57,9 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   async function run(name, pane, { cold = false, leaseHeld = false, jobId = null } = {}) {
     const target = resolveTarget(name, pane);
     if (!target || !["claude", "codex"].includes(target.engine)) return { ok: true, skipped: "unsupported-engine" };
+    if (agent.paneProcessState && !(await agent.paneProcessState(name, pane)).running) {
+      return { ok: !cold, skipped: "not-running", reason: "context-cost:not-running" };
+    }
     const identity = identityFor(target.engine, target.dir);
     if (!identity) return { ok: true, skipped: "no-session" };
     const prior = existing(name, pane, identity);

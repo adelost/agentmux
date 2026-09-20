@@ -28,6 +28,17 @@ function fixture({ fail = false, jobs = [] } = {}) {
 }
 
 feature("warm and cold compaction share a durable one-attempt fence", () => {
+  component("old terminal history cannot wake a stopped pane for automatic compact", {
+    given: ["a stopped process with apparently idle historical context", () => {
+      const ctx = fixture();
+      ctx.agent.paneProcessState = async () => ({ running: false });
+      return ctx;
+    }],
+    when: ["the idle controller checks it", ctx => createContextMaintenance(ctx).run("claw", 2)],
+    then: ["the process stays stopped and no model call occurs", (result, ctx) => {
+      try { expect(result.skipped).toBe("not-running"); expect(ctx.calls).toHaveLength(0); } finally { ctx.cleanup(); }
+    }],
+  });
   component("a queued message arriving before paste aborts maintenance without consuming its model attempt", {
     given: ["new delivery arrives between the idle check and compact submit", () => {
       const ctx = fixture();
