@@ -21,6 +21,7 @@ import {
   targetSelectContract,
 } from "./contracts.js";
 import { linkNativeEmitter } from "./emit-kotlin.js";
+import { linkControls, linkGesturesWithoutATiming } from "./interactions.js";
 import { compileAgentmuxLinkProduct } from "./product.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -41,6 +42,7 @@ const manifest = buildOutputManifest(
     productJsonEmitter(jsonPath),
     linkNativeEmitter(kotlinRoot),
     linkContractTypesEmitter(),
+    linkControlTimingEmitter(),
     domainGraphEmitter({ domains: domainsPath, full: graphPath, productJsonPath: jsonPath }, linkCapabilityTable),
   ],
   [jsonPath, domainsPath, graphPath, kotlinRoot],
@@ -80,6 +82,59 @@ function linkContractTypesEmitter(): ProductEmitterPlugin {
         sourceFile: "product-spec/src/contracts.ts",
         sourceSha: createHash("sha256").update(JSON.stringify(contracts)).digest("hex"),
       }),
+    }],
+  };
+}
+
+/**
+ * Which kind of button each Link control is, as named Kotlin constants.
+ *
+ * Row 225. Named rather than a lookup by string, so a control whose declaration is missing fails the
+ * Kotlin build instead of quietly falling back to a default: the whole defect was a control taking
+ * its timing from something other than its own declaration.
+ */
+function linkControlTimingEmitter(): ProductEmitterPlugin {
+  const constantName = (id: string) => id.replace(/[.-]/g, "_").toUpperCase();
+  const timingConstant = (timing: string) => (timing === "immediate" ? "IMMEDIATE" : "DELIBERATE");
+  const sha = createHash("sha256")
+    .update(JSON.stringify([linkControls, linkGesturesWithoutATiming]))
+    .digest("hex");
+  const body = linkControls
+    .map(({ id, title, timing, why }) => [
+      `    /** ${title}. ${why} */`,
+      `    val ${constantName(id)}: CircleActionTiming = CircleActionTiming.${timingConstant(timing)}`,
+    ].join("\n"))
+    .join("\n\n");
+  const neither = linkGesturesWithoutATiming
+    .map(({ title, why }) => ` * - ${title}: ${why}`)
+    .join("\n");
+  const content = `// GENERATED FILE. DO NOT EDIT.
+// GENERATED FROM product-spec/src/interactions.ts
+// Product declaration SHA-256: ${sha}
+package ${"io.agentmux.linkui.product.generated"}
+
+import com.adelost.designkit.ui.CircleActionTiming
+
+/**
+ * Which kind of button each Link control is: touch or hold, and nothing between them.
+ *
+ * The two words and the rule that picks between them belong to the shared ProductSpec vocabulary.
+ * A control reads its own constant here, so nothing else can decide for it.
+ *
+ * GESTURES THAT DECLARE NO TIMING, because their duration is the content rather than a confirmation:
+${neither}
+ */
+object GeneratedLinkControlTiming {
+${body}
+}
+`;
+  return {
+    id: "link-control-timing",
+    emit: () => [{
+      id: "control-timing",
+      path: `${kotlinRoot}/GeneratedLinkControlTiming.kt`,
+      mediaType: "text/x-kotlin",
+      content,
     }],
   };
 }

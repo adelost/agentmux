@@ -18,6 +18,7 @@ import com.adelost.ringkit.ui.RingRoundBackHost
 import kotlinx.coroutines.flow.MutableStateFlow
 import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkui.product.LinkTargetPresentation
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
 /** Stable addresses identify recipients; a mutable role/model label describes them. */
 fun linkRecipientOptions(target: LinkTargetPresentation): List<RingSelectionOption> =
@@ -51,7 +52,7 @@ fun linkRecipientRow(target: LinkTargetPresentation, onOpen: () -> Unit): RowSpe
         icon = RingIcons.Target,
         accent = selected?.let { linkSenderAccent(it.id) } ?: CircleAccent.NEUTRAL,
         onTap = onOpen,
-        actionTiming = CircleActionTiming.IMMEDIATE,
+        actionTiming = GeneratedLinkControlTiming.HOME_RECIPIENT,
         multiline = true,
     )
 }
@@ -80,7 +81,7 @@ fun LinkRecipientPicker(
                     listOf(if (favorite) "FAVORITE · tap to remove" else "Tap to add to favorites", recipient.label)
                         .filter { it.isNotBlank() }.joinToString("\n"),
                     icon = if (favorite) RingIcons.Star else RingIcons.Target, accent = linkSenderAccent(recipient.id),
-                    multiline = true, actionTiming = CircleActionTiming.IMMEDIATE,
+                    multiline = true, actionTiming = GeneratedLinkControlTiming.RECIPIENTS_SELECT,
                     onTap = {
                         favorites = if (recipient.id in favorites) favorites - recipient.id else favorites + recipient.id
                         preferences.edit().putStringSet("ids", favorites).apply()
@@ -100,6 +101,6 @@ fun LinkRecipientPicker(
     onBack = onBack,
     emptyLabel = "No connected windows",
     extraRows = listOf(RowSpec("favorites", "FAVORITES", "", RingIcons.Star,
-        onTap = { editing = true }, actionTiming = CircleActionTiming.IMMEDIATE)),
+        onTap = { editing = true }, actionTiming = GeneratedLinkControlTiming.RECIPIENTS_FAVORITES)),
 )
 }

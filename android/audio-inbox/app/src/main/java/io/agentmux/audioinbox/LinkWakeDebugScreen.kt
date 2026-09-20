@@ -44,6 +44,7 @@ import io.agentmux.wakeword.WakeRefusal
 import io.agentmux.wakeword.WakeSensitivity
 import io.agentmux.wakeword.WakeRun
 import kotlinx.coroutines.delay
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
 /** The speech bar is this page's alone: only a watcher is told how sure the voice model was. */
 private val SPEECH_HEIGHT = 4.dp
@@ -94,7 +95,7 @@ internal fun LinkWakeDebugScreen(onBack: () -> Unit) {
                 title = if (watching) "WATCHING" else "NOT WATCHING",
                 sub = if (watching) "Tap to stop · costs one extra model call per 80 ms" else "Tap to see what it hears",
                 icon = LinkNativeBindings.requireIcon("record"),
-                onTap = { LinkWakeDebug.setWatching(context, !watching) },
+                press = LinkPress(GeneratedLinkControlTiming.DEBUG_WAKE_WATCHING) { LinkWakeDebug.setWatching(context, !watching) },
             )
         }
         item("phrase") {
@@ -115,7 +116,7 @@ internal fun LinkWakeDebugScreen(onBack: () -> Unit) {
                 title = "EXPORT",
                 sub = exported ?: "Writes ${runCount(trace.runs.size)} to one file · nothing is written otherwise",
                 icon = LinkNativeBindings.requireIcon("download"),
-                onTap = { exported = "Wrote ${LinkWakeDebug.export(context)}" },
+                press = LinkPress(GeneratedLinkControlTiming.DEBUG_WAKE_EXPORT) { exported = "Wrote ${LinkWakeDebug.export(context)}" },
             )
         }
         item("runs-heading") {

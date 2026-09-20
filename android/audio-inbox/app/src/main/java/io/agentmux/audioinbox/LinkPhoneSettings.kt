@@ -41,6 +41,8 @@ import io.agentmux.linkui.linkClearConversationRow
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.LinkRouteOpenEvent
 import io.agentmux.linkui.product.LinkUpdateCommandEvent
+import com.adelost.designkit.ui.CircleActionTiming
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponent
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponents
@@ -146,7 +148,7 @@ internal fun LinkPhoneSettings(
                                 ""
                             },
                             icon = LinkNativeBindings.requireIcon("link"),
-                            onTap = onPublicLink,
+                            press = LinkPress(GeneratedLinkControlTiming.SETTINGS_PUBLIC_LINK, onPublicLink),
                         )
                     }
                     GeneratedLinkSettingsComponent.PREFERENCES_TOGGLES -> {
@@ -175,6 +177,7 @@ internal fun LinkPhoneSettings(
                                     icon = LinkNativeBindings.requireIcon(
                                         if (preference.key == LinkPreferenceKey.WAKE_WORD) "record" else "speaker",
                                     ),
+                                    actionTiming = linkPreferenceTiming(preference.key),
                                     modifier = phoneRowModifier(),
                                 )
                             }
@@ -192,6 +195,7 @@ internal fun LinkPhoneSettings(
                                     LinkWakePhraseChoice.choose(context, WakePhrases.offered.first { wakePhraseLabel(it) == label })
                                 },
                                 icon = LinkNativeBindings.requireIcon("record"),
+                                actionTiming = GeneratedLinkControlTiming.SETTINGS_WAKE_PHRASE,
                                 modifier = phoneRowModifier(),
                             )
                         }
@@ -241,7 +245,9 @@ internal fun LinkPhoneSettings(
                             icon = LinkNativeBindings.requireIcon(
                                 GeneratedLinkRoutes.descriptor(LinkRoute.WAKE_TRY).iconAssetRef,
                             ),
-                            onTap = { graph.onWakeTryOpen(LinkRouteOpenEvent(LinkRoute.WAKE_TRY)) },
+                            press = LinkPress(GeneratedLinkControlTiming.SETTINGS_SENSITIVITY) {
+                                graph.onWakeTryOpen(LinkRouteOpenEvent(LinkRoute.WAKE_TRY))
+                            },
                         )
                     }
                     // The debug page belongs to the wake word, so it appears with it and not before it.
@@ -256,7 +262,7 @@ internal fun LinkPhoneSettings(
                                     title = route.title,
                                     sub = "What it hears, and what it refused",
                                     icon = LinkNativeBindings.requireIcon(route.iconAssetRef),
-                                    onTap = {
+                                    press = LinkPress(GeneratedLinkControlTiming.SETTINGS_WAKE_DEBUG) {
                                         graph.onWakeDebugOpen(LinkRouteOpenEvent(LinkRoute.WAKE_DEBUG))
                                     },
                                 )
@@ -267,7 +273,7 @@ internal fun LinkPhoneSettings(
                             title = "DISPLAY PREVIEW",
                             sub = "Phone layout or watch-size preview",
                             icon = LinkNativeBindings.requireIcon("phone"),
-                            onTap = {
+                            press = LinkPress(GeneratedLinkControlTiming.SETTINGS_DISPLAY_PREVIEW) {
                                 graph.onDevHostOpen(LinkRouteOpenEvent(LinkRoute.DEV_HOST))
                             },
                         )
@@ -298,3 +304,10 @@ internal fun wakeStatusDetail(wake: LinkWakePresentation): String = wake.detail.
 
 /** The picker shows exactly what to say. */
 internal fun wakePhraseLabel(phrase: WakePhrase): String = phrase.spoken.uppercase()
+
+/** Each audio preference toggle names its own declared kind; see product-spec/src/interactions.ts. */
+private fun linkPreferenceTiming(key: LinkPreferenceKey): CircleActionTiming = when (key) {
+    LinkPreferenceKey.WAKE_WORD -> GeneratedLinkControlTiming.SETTINGS_WAKE_WORD
+    LinkPreferenceKey.SPEAK_REPLIES -> GeneratedLinkControlTiming.SETTINGS_SPEAK_REPLIES
+    LinkPreferenceKey.HANDS_FREE -> GeneratedLinkControlTiming.SETTINGS_HANDS_FREE
+}

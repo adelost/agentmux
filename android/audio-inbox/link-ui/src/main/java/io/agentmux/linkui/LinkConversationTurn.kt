@@ -19,6 +19,7 @@ import com.adelost.ringkit.ui.RingPlaybackState
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkcore.PlaybackPhase
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
 @Composable
 fun LinkConversationTurn(
@@ -42,11 +43,11 @@ fun LinkConversationTurn(
                 RingRow(row.length, "", onTap = play,
                     icon = if (row.icon == ReadAloudIcon.REFRESH) RingIcons.Refresh else RingIcons.Speaker,
                     accent = if (row.muted) CircleAccent.CLOUD else linkSenderAccent(sender),
-                    actionTiming = CircleActionTiming.IMMEDIATE)
+                    actionTiming = GeneratedLinkControlTiming.CONVERSATION_PLAY_TURN)
             }
             if (openLinks) attachmentUrls(turn.replyText).forEach { url ->
                 RingRow("OPEN LINK", Uri.parse(url).host.orEmpty(), icon = RingIcons.Link,
-                    actionTiming = CircleActionTiming.IMMEDIATE,
+                    actionTiming = GeneratedLinkControlTiming.CONVERSATION_OPEN_LINK,
                     onTap = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } })
             }
         }

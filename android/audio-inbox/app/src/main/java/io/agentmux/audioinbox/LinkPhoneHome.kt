@@ -59,6 +59,7 @@ import io.agentmux.linkui.product.generated.GeneratedLinkTargetSelect
 import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponent
 import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponents
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
 @Composable
 internal fun LinkPhoneHome(
@@ -139,7 +140,7 @@ internal fun LinkPhoneHome(
                         } else {
                             null
                         },
-                        onTap = {
+                        press = LinkPress(GeneratedLinkControlTiming.HOME_WAKE_TOGGLE) {
                             graph.onWakeToggle(
                                 LinkPreferenceToggleEvent(
                                     LinkPreferenceKey.WAKE_WORD,

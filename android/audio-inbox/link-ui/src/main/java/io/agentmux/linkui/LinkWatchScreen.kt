@@ -52,6 +52,7 @@ import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponents
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.time.ZoneId
 import java.util.Locale
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
 @Composable
 fun LinkWatchScreen(
@@ -241,6 +242,7 @@ fun linkWatchRows(
                 sub = if (selected == null) "Choose a recipient" else "",
                 icon = LinkNativeBindings.requireIcon("record"),
                 onTap = onOpenCapture.takeIf { selected?.acceptsMessages == true },
+                actionTiming = GeneratedLinkControlTiming.HOME_VOICE_MESSAGE,
             )
             GeneratedLinkHomeComponent.CONVERSATION_LATEST -> {
                 val turns = linkConversationTurns(conversation.turns, target.selectedTargetId)
@@ -254,7 +256,7 @@ fun linkWatchRows(
                     if (turns.isEmpty()) "No messages yet" else "Recent messages",
                     icon = RingIcons.Activity,
                     onTap = onOpenHistory,
-                    actionTiming = com.adelost.designkit.ui.CircleActionTiming.IMMEDIATE,
+                    actionTiming = GeneratedLinkControlTiming.HOME_HISTORY,
                 )
             }
             GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> rows += linkSettingsRow(onOpenSettings)
@@ -287,6 +289,7 @@ private fun watchReplyRows(
             },
             icon = defaultIcon,
             onTap = onOpenReply.takeIf { latest.replyText.isNotBlank() },
+            actionTiming = GeneratedLinkControlTiming.HOME_REPLY,
         ),
     )
     if (latest.replyText.isBlank()) return@buildList

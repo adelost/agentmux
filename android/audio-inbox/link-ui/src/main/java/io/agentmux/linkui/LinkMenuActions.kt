@@ -4,6 +4,7 @@ import com.adelost.ringkit.ui.PhoneHeaderAction
 import com.adelost.ringkit.ui.RowSpec
 import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.generated.GeneratedLinkChromeActions
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
 /**
  * The settings-action component, rendered as phone header chrome and as the
@@ -40,5 +41,6 @@ fun linkSettingsRow(onOpenSettings: () -> Unit): RowSpec =
             sub = detail,
             icon = LinkNativeBindings.requireIcon(iconAssetRef),
             onTap = onOpenSettings,
+            actionTiming = GeneratedLinkControlTiming.CHROME_OPEN_SETTINGS,
         )
     }

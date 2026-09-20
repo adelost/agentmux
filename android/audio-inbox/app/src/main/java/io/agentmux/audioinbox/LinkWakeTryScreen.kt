@@ -49,6 +49,7 @@ import io.agentmux.wakeword.WakeSensitivity
 import io.agentmux.wakeword.WakeTryVerdict
 import io.agentmux.wakeword.showing
 import kotlinx.coroutines.delay
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 
 /**
  * WHAT: One page to try the wake phrase and choose how eagerly it answers. One utterance is judged under
@@ -269,6 +270,7 @@ private fun StepRow(step: WakeSensitivity, showing: RecordedTry?, inUse: Boolean
         hint = wakeSensitivityHint(step),
         icon = LinkNativeBindings.requireIcon("target"),
         onTap = onUse.takeIf { !inUse },
+        actionTiming = GeneratedLinkControlTiming.WAKE_TRY_TRY_PHRASE,
         trailing = {
             CircleText(
                 text = wakeTryStepWord(showing, step),
