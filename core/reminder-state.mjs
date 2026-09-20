@@ -183,9 +183,9 @@ export const DRIFT_SECTIONS = [
     file: ".agents/CLAUDE.md",
     section: "Staffing and review economics",
     label: "healthy idle (no invented tasks or maintenance loops)",
-    directive: "a drained backlog is healthy idle. Do not invent scope or " +
-      "wake unused panes. Follow the current direct task and leave idle " +
-      "agents alone until real work targets them.",
+    directive: "a drained backlog is healthy idle. On DONE or BLOCKED, re-read " +
+      "the existing queue and completed prerequisites. Take the next authorised " +
+      "independent READY item; if none, stay idle. No invented scope or extra panes.",
   },
 ];
 

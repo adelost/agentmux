@@ -502,10 +502,13 @@ feature("generated agent policy", () => {
       expect(content).toContain("Managers are sidecars, not gateways");
       expect(content).toMatch(/do not need a manager round-trip to claim, update or\s+finish their own work/u);
       expect(content).toContain("A drained backlog is healthy idle");
+      expect(content).toMatch(/On DONE or BLOCKED, re-read the existing queue/u);
+      expect(content).toMatch(/Re-evaluate conditional deferrals against completed prerequisites/u);
+      expect(content).toMatch(/Stay idle only when no authorised runnable work remains/u);
     }],
   });
 
-  unit("never stacks a new assignment onto an unfinished worker", {
+  unit("never interrupts active work but releases capacity after a blocked-task checkpoint", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -515,7 +518,9 @@ feature("generated agent policy", () => {
     }],
     then: ["availability comes from process truth, not a missing lease", (content) => {
       expect(content).toContain("One active feature per agent");
-      expect(content).toMatch(/working, waiting, blocked, in a modal, or merely\s+between tool calls/u);
+      expect(content).toMatch(/working, in a modal, or between tool calls/u);
+      expect(content).toMatch(/A blocked task does not reserve its pane indefinitely/u);
+      expect(content).toMatch(/checkpoint it and release its active resources before taking independent work/u);
       expect(content).toMatch(/A board lease alone does not prove a pane is\s+free/u);
       expect(content).toMatch(/Do not wake a fleet to look busy/u);
     }],
