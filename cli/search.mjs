@@ -16,11 +16,12 @@ import {
 import { defaultSearchStatePath, loadLastResults, saveLastResults } from "../core/search-state.mjs";
 import { defaultWorkspace } from "../core/runtime-defaults.mjs";
 import { expandMemoryTopic, isTopicPath, mergeTopicHits, searchMemoryTopics } from "../core/memory-topic-search.mjs";
+import { expandPassage, mergePassageHits, searchPassages } from "../core/search-passages.mjs";
 
 /** WHAT: Describes the search CLI contract. WHY: Keeps actual flags and user guidance in one place. */
 export const SEARCH_HELP = `Usage:
   amux search "term" [--max N] [--source NAME]
-  amux search "term" --raw          Original sources only, omit derived topics
+  amux search "term" --raw          Original lexical search, omit topics/passages
   amux search "term" --deep         Include large raw session archives
   amux search "term" --semantic     Add the slower local semantic layer
   amux search "term" --show N       Search, then expand result N
@@ -28,7 +29,8 @@ export const SEARCH_HELP = `Usage:
   amux search --reindex              Rebuild the optional semantic index
 
 Validated memory/topics pages provide compact orientation alongside original sources.
---raw disables this layer. Topic expansion rechecks the source hashes; use
+Current Markdown paragraphs also match natural questions without embeddings.
+--raw disables these layers. Topic/paragraph expansion rechecks source hashes; use
 amux memory topics --json to inspect states and decision cells. Topic text is
 derived, not a new instruction or proof that no later correction exists.
 Lexical search over memory and the durable AMUX delivery ledger remains available.
@@ -66,7 +68,7 @@ function showResults(last, show, context) {
       continue;
     }
     console.log(`── #${n} ${hit.path}:${hit.line}  (sökning: "${last.query}")`);
-    console.log(hit.topic ? expandMemoryTopic(hit) : expandHit(hit, { context: context ?? 10 }));
+    console.log(hit.topic ? expandMemoryTopic(hit) : hit.passage ? expandPassage(hit) : expandHit(hit, { context: context ?? 10 }));
     console.log("");
   }
 }
@@ -138,6 +140,11 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
   }
 
   hits = hits.filter(hit => !isTopicPath(hit.path, workspace));
+  if (!flags.raw && !hits.some(hit => hit.layer === "L1" && !hit.path.endsWith(".jsonl"))) {
+    hits = mergePassageHits(hits, searchPassages(query, lexicalRoots, {
+      max: flags.max ?? 12, excludePath: path => isTopicPath(path, workspace),
+    }));
+  }
   let topicHits = [];
   if (!flags.raw && (!flags.source || "memory-topics".includes(flags.source))) {
     try {
