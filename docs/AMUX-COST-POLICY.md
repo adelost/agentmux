@@ -1,4 +1,4 @@
-> AMUX 1.25.75 model and context-cost policy, its evidence boundaries, and operator recovery. Delivery evidence is tracked in TASKS.md.
+> AMUX 1.25.76 model and context-cost policy, its evidence boundaries, and operator recovery. Delivery evidence is tracked in TASKS.md.
 
 # Authority and scope
 

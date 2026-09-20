@@ -1,8 +1,17 @@
 import { feature, component, expect } from "bdd-vitest";
-import { assertCodexWorkModel } from "./codex-process-launch.mjs";
+import { assertCodexWorkModel, waitForCodexModelSelection } from "./codex-process-launch.mjs";
 import { resolveCodexModelSelection, isExpectedCodexModel } from "./codex-profiles.mjs";
 
 feature("Codex work uses the verified explicit model choice", () => {
+  component("an empty startup composer is not mistaken for a rendered model footer", {
+    given: ["two early empty frames before Sol's footer renders", () => {
+      let captures = 0;
+      return { screen: async () => ++captures < 3 ? "› Ask Codex to do anything" : "gpt-5.6-sol xhigh · /workspace",
+        wait: async () => {}, selected: { model: "gpt-5.6-sol", effort: "xhigh" }, attempts: 4 };
+    }],
+    when: ["verifying the selected model", args => waitForCodexModelSelection(args)],
+    then: ["the observed model is Sol without another model call", actual => expect(actual).toMatchObject({ model: "gpt-5.6-sol", effort: "xhigh" })],
+  });
   component("raw model administration cannot bypass compact-first controls", {
     when: ["a queued raw /model reaches the physical send boundary", () => assertCodexWorkModel({
       name: "claw", pane: 4, prompt: "/model gpt-6-astra",

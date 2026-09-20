@@ -1,5 +1,5 @@
 import { feature, unit, component, expect } from "bdd-vitest";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nightlyCompactPolicy, nightlyCompactDecision, nightlyCompactOutcome, compactAccessBlocker } from "../core/nightly-compact.mjs";
@@ -7,6 +7,7 @@ import { runNightlyCompact } from "../cli/nightly-compact.mjs";
 import { cmdDream } from "../cli/dream.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { parseConfig, generateAgentsYaml } from "../sync.mjs";
+import { rememberContextCompact } from "../core/context-maintenance.mjs";
 
 const now = () => Date.parse("2026-09-07T02:00:00Z");
 const facts = () => ({ engine: "claude", backend: "tmux", running: true,
@@ -93,6 +94,20 @@ feature("nightly context budget", () => {
     }],
     then: ["one candidate and zero mutations", (result) => {
       expect(result.rows[0].status).toBe("eligible"); expect(result.calls).toBe(0); expect(result.after).toEqual(result.before);
+    }],
+  });
+  component("nightly does not repeat the day's verified compact without new work", {
+    when: ["an earlier compact already proved this same context generation", async () => {
+      const fx = fixture(), data = {};
+      const path = join(fx.root, "session.jsonl");
+      writeFileSync(path, JSON.stringify({ type: "system", subtype: "compact_boundary" }) + "\n");
+      fx.ctx.state = { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
+      rememberContextCompact(fx.ctx.state, "claw", 4, { ok: true, sessionId: "same-session", cursor: { positions: { [path]: 0 } } });
+      try { return { result: await runNightlyCompact(fx.ctx, {}, fx.deps), calls: fx.calls() }; }
+      finally { fx.clean(); }
+    }],
+    then: ["nightly checks the receipt and spends no second compact", ({ result, calls }) => {
+      expect(result.rows[0].reason).toBe("compact-already-attempted-without-new-work"); expect(calls).toBe(0);
     }],
   });
   component("temporary lease contention retries without spending the night's model attempt", {

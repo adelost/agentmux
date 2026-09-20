@@ -467,10 +467,10 @@ export function getContextPushed(paneDir) {
  * WHAT: Reads context usage from the selected engine store.
  * WHY: Keeps cross-pane status from mixing unrelated session journals.
  */
-export function getContextPercent(paneDir, dialect) {
+export function getContextPercent(paneDir, dialect, { journalOnly = false } = {}) {
   if (dialect === "codex") return getContextFromCodexJsonl(paneDir);
   if (dialect === "kimi") return getContextFromKimiJsonl(paneDir);
-  if (dialect === "claude") return getContextPushed(paneDir) || getContextFromClaudeJsonl(paneDir);
+  if (dialect === "claude") return (!journalOnly && getContextPushed(paneDir)) || getContextFromClaudeJsonl(paneDir);
   return null;
 }
 

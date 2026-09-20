@@ -95,7 +95,9 @@ export async function runCompactFirstCodexModelChange({
       const profile = selectedCodexProfile(state, name, pane);
       setCodexModelOverride(state, name, pane, targetModel, effort);
       try {
-        await agent.restartCodex(name, pane, { profile, model: targetModel, effort, compactReceipt, retryModelChange: true });
+        if (previous?.model !== targetModel || (effort && previous?.effort !== effort)) {
+          await agent.restartCodex(name, pane, { profile, model: targetModel, effort, compactReceipt, retryModelChange: true });
+        }
         const verified = await statusDriver({ agent, name, pane, log });
         if (!verified.ok) throw new Error(`native status: ${verified.stage}: ${verified.error}`);
         const actual = verified.status.model;

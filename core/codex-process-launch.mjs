@@ -6,6 +6,17 @@ import { verifiedCodexCompact } from "./verified-compact.mjs";
 import { rememberContextCompact } from "./context-maintenance.mjs";
 import { esc } from "../lib.mjs";
 
+/** WHAT: Reads the requested live model after startup. WHY: Prevents an early empty composer from masquerading as a fully rendered startup. */
+export async function waitForCodexModelSelection({ screen, wait, selected, attempts = 40 }) {
+  let actual = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    actual = parseCodexPaneReading(await screen())?.selected || null;
+    if (actual?.model === selected.model && (!selected.effort || actual.effort === selected.effort)) return actual;
+    if (attempt + 1 < attempts) await wait(250);
+  }
+  return actual;
+}
+
 /** WHAT: Routes process launch through compact-first policy. WHY: Keeps every wake and recovery on the same session-preserving transition. */
 export async function startCodexProcess({
   t, wait, target, dir, profile, selected, sessionId, previous, remembered,
@@ -33,7 +44,7 @@ export async function startCodexProcess({
     },
     compact,
     reset,
-    verify: async () => parseCodexPaneReading(await screen())?.selected,
+    verify: () => waitForCodexModelSelection({ screen, wait, selected }),
     remember: (actual) => {
       remember({ sessionId, status: sessionId ? "ready" : "awaiting-first-rollout",
         model: actual.model, effort: actual.effort, modelTransitionBlocked: null });

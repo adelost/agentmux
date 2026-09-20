@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "../core/context-maintenance.mjs";
 import { listAgents, loadConfig, findChannelForPane } from "./config.mjs";
 import { listPanes } from "./tmux.mjs";
 import { dialectFor, inspectPane } from "./inspect-pane.mjs";
@@ -130,6 +131,10 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     try { first = await observe(ctx, target, { queue, now }); }
     catch { rows.push({ pane: key, status: "skipped", reason: "observation-unavailable" }); continue; }
     const previous = readReport(receiptPath, dateKey).panes[key];
+    if (contextMaintenanceAttempt(ctx.state, target.agent.name, target.pane.index, { sessionId: first.sessionId })) {
+      rows.push({ pane: key, status: "skipped", reason: "compact-already-attempted-without-new-work" });
+      continue;
+    }
     const reason = nightlyCompactDecision(first, policy, previous);
     if (reason) { rows.push({ pane: key, status: "skipped", reason, beforeTokens: first.tokens }); continue; }
     if (flags.dry) { rows.push({ pane: key, status: "eligible", beforeTokens: first.tokens }); continue; }
@@ -190,9 +195,11 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
         },
       };
       const compact = dependencies.compact || (target.engine === "claude" ? verifiedClaudeCompact : verifiedCodexCompact);
+      beginContextCompact(ctx.state, target.agent.name, target.pane.index, { sessionId: first.sessionId, path: first.sessionPath });
       const receipt = await compact({ agent: guardedAgent, agentName: target.agent.name, pane: target.pane.index,
         paneDir: target.paneDir, latestIdentity: (dir) => latestPaneSessionIdentity(target.engine, dir),
         command, sleep, maxRescues: 0 });
+      rememberContextCompact(ctx.state, target.agent.name, target.pane.index, receipt);
       await sleep(500);
       const after = await observe(ctx, target, { queue, now });
       const outcome = nightlyCompactOutcome(receipt, first, after, policy.maxTokens);

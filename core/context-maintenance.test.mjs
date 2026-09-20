@@ -23,11 +23,40 @@ function fixture({ fail = false, jobs = [] } = {}) {
       return { ok: true, compactBoundary: true, sessionId: "one" };
     },
   };
-  return { ...deps, calls, append, maintenance: createContextMaintenance(deps),
+  return { ...deps, calls, jobs, append, maintenance: createContextMaintenance(deps),
     cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 feature("warm and cold compaction share a durable one-attempt fence", () => {
+  component("a queued message arriving before paste aborts maintenance without consuming its model attempt", {
+    given: ["new delivery arrives between the idle check and compact submit", () => {
+      const ctx = fixture();
+      ctx.agent.sendOnly = async () => { ctx.calls.push("sent"); };
+      ctx.compactFor = () => async ({ agent }) => {
+        ctx.jobs.push({ id: "new-work", status: "pending" });
+        await agent.sendOnly("claw", "/compact", 2, {});
+        return { ok: true };
+      };
+      return ctx;
+    }],
+    when: ["starting idle maintenance", ctx => createContextMaintenance(ctx).run("claw", 2)],
+    then: ["nothing is submitted and a later safe attempt remains possible", (result, ctx) => {
+      try { expect(result.ok).toBe(false); expect(ctx.calls).toHaveLength(0); expect(createContextMaintenance(ctx).canAttempt("claw", 2, "one")).toBe(true); }
+      finally { ctx.cleanup(); }
+    }],
+  });
+  component("a recent provider usage receipt prevents a large active turn from being mistaken for a cold wake", {
+    given: ["a giant turn hides its opening user message but recent actual usage is readable", () => {
+      const ctx = fixture();
+      ctx.activityFor = () => null;
+      ctx.journalFor = () => ({ source: "claude-jsonl", observedAt: new Date(99_999_000).toISOString() });
+      return ctx;
+    }],
+    when: ["admitting work through the cost guard", ctx => createContextMaintenance(ctx).beforeWork({ agentName: "claw", pane: 2, id: "next" })],
+    then: ["no compact or false hold interrupts the active session", (result, ctx) => {
+      try { expect(result.ok).toBe(true); expect(ctx.calls).toHaveLength(0); } finally { ctx.cleanup(); }
+    }],
+  });
   component("no repeated paid compact without new work, including bridge restart", {
     given: ["an idle large context with a mocked provider", () => fixture()],
     when: ["compacting and checking again through a new controller", async ctx => {
