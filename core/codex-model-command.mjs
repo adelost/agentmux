@@ -8,10 +8,21 @@ import {
 import { compactThenSwitchCodex } from "./codex-model-switch.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
 
+/** WHAT: Returns a shared session lease after bounded waiting. WHY: Prevents unrelated pane maintenance from rejecting an explicit model choice immediately. */
+export async function waitForCodexModelLease(queue, name, { wait = ms => new Promise(resolve => setTimeout(resolve, ms)), attempts = 360 } = {}) {
+  if (!queue) return null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const lease = queue.acquireSessionLease(name);
+    if (lease) return lease;
+    if (attempt + 1 < attempts) await wait(1_000);
+  }
+  return null;
+}
+
 /** WHAT: Routes a model change under the session's physical lease. WHY: Prevents a compact from queueing behind the very broker lock that awaits it. */
 export async function runLockedCodexModelChange({ deliveryBroker, ...options }) {
   const queue = deliveryBroker?.queue;
-  const lease = queue?.acquireSessionLease(options.name);
+  const lease = await waitForCodexModelLease(queue, options.name, { wait: options.wait });
   if (queue && !lease) return { ok: false, stage: "lease", reason: "delivery-lease-busy" };
   try {
     if (options.agent.paneProcessState && !(await options.agent.paneProcessState(options.name, options.pane)).running) {

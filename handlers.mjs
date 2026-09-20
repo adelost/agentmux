@@ -593,7 +593,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         }
         const [, requestedModel, targetEffort] = spec;
         const targetModel = resolveCodexModelName(requestedModel);
-        await msg.reply(`Compacting ${mapping.name}:${pane} before model change; the switch runs only after a fresh receipt.`);
+        await msg.reply(`Preparing ${mapping.name}:${pane}: waiting for the session lock, then compacting before the model change. No switch runs without a fresh receipt.`);
         const result = await withPaneSendLock(`${mapping.name}:${pane}`, () => runLockedCodexModelChange({
           agent, state, deliveryBroker, name: mapping.name, pane, targetModel, targetEffort,
           statusDriver: codexStatusDriver,

@@ -1,8 +1,19 @@
 import { feature, component, expect } from "bdd-vitest";
 import { assertCodexWorkModel, waitForCodexModelSelection } from "./codex-process-launch.mjs";
 import { resolveCodexModelSelection, isExpectedCodexModel } from "./codex-profiles.mjs";
+import { waitForCodexModelLease } from "./codex-model-command.mjs";
 
 feature("Codex work uses the verified explicit model choice", () => {
+  component("an explicit model choice waits through another pane's compact lease", {
+    given: ["two lock checks are busy before the owner releases", () => {
+      let checks = 0, waits = 0;
+      const lease = { release() {} };
+      return { queue: { acquireSessionLease: () => ++checks < 3 ? null : lease }, lease,
+        wait: async () => { waits++; }, waits: () => waits };
+    }],
+    when: ["requesting the model-control lease", ctx => waitForCodexModelLease(ctx.queue, "ai", { wait: ctx.wait, attempts: 4 })],
+    then: ["the existing owner finishes before control proceeds", (lease, ctx) => { expect(lease).toBe(ctx.lease); expect(ctx.waits()).toBe(2); }],
+  });
   component("an empty startup composer is not mistaken for a rendered model footer", {
     given: ["two early empty frames before Sol's footer renders", () => {
       let captures = 0;

@@ -1,4 +1,4 @@
-> AMUX 1.25.76 model and context-cost policy, its evidence boundaries, and operator recovery. Delivery evidence is tracked in TASKS.md.
+> AMUX 1.25.77 model and context-cost policy, its evidence boundaries, and operator recovery. Delivery evidence is tracked in TASKS.md.
 
 # Authority and scope
 
@@ -29,7 +29,7 @@ The executable decisions use Skyvw/CircleKit's existing `@v1d/product-spec` DSL 
 
 The existing nighttime budget is 80,000 tokens after 30 minutes idle. That is a policy target, not a guaranteed compact output size.
 
-Runtime overrides: `AUTO_COMPACT_MAX_TOKENS` (default 150000), `AUTO_COMPACT_MIN_IDLE_MS` (default 600000), and `AMUX_COLD_CONTEXT_IDLE_MS` (default 86400000). The nighttime job retries a busy shared lease twice, two seconds apart, before reporting a skip. These are lock checks, not model calls.
+Runtime overrides: `AUTO_COMPACT_MAX_TOKENS` (default 150000), `AUTO_COMPACT_MIN_IDLE_MS` (default 600000), and `AMUX_COLD_CONTEXT_IDLE_MS` (default 86400000). The nighttime job retries a busy shared lease twice, two seconds apart, before reporting a skip. Explicit model changes wait for the shared lease for up to six minutes. These are lock checks, not model calls. Warm, cold and nightly maintenance reuse the same context-generation fence; no new work means no second automatic compact.
 
 Warm/cold compact admission currently supports Claude and Codex. Kimi keeps its prior behavior; no new verified-compaction or sleep guarantee is claimed for it.
 
@@ -56,5 +56,7 @@ Do not clear journals or delete delivery fences to recover a blocked transition.
 The parent-session regression failed before the fix: a 12k Sol pane was read as its parent's 181k Astra session, including the parent's compact receipt. The corrected reader passes both exact-pane and no-parent-fallback cases. The old daytime decision returned no action for 473k tokens at 56%; the updated decision starts the warning. The nightly lease-contention case failed before bounded retry and now performs one simulated compact after three lock checks.
 
 The broad targeted pass comprised 311 tests in about two seconds. Subsequent changes were checked with their affected files; no full repository suite, remote CI, churn gate or real model call was part of automated testing.
+
+Live receipts on 2026-09-20: the three active Codex panes compacted and showed Sol in the native UI. Current context afterwards was ai:3 87,510 tokens, claw:3 105,613, claw:4 95,412. The remaining 31 panes were not awakened for testing. All 34 received a durable Sol selection; Mattias then explicitly requested Astra for ai:3 at 15:55. That later choice was completed after another verified compact, with native `/status` showing `gpt-6-astra xhigh` on the same session at 16:02. It is an intentional exception, not a fallback.
 
 Codex supports an explicit model override when resuming an exact session: [official CLI reference](https://developers.openai.com/codex/cli/reference#codex-resume). AMUX adds the compact and verification requirements above.
