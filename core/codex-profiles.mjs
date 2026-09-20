@@ -21,6 +21,19 @@ import { CODEX_EXTERNAL_NAVIGATION_RULES } from "./execution-safety.mjs";
 export const CODEX_PROFILE_STATE_KEY = "codex_profile_by_pane";
 export const CODEX_MODEL_STATE_KEY = "codex_model_by_pane";
 
+const CODEX_MODEL_ALIASES = Object.freeze({
+  astra: "gpt-6-astra",
+  "gpt-6": "gpt-6-astra",
+  sol: "gpt-5.6-sol",
+  "gpt-5.6": "gpt-5.6-sol",
+});
+
+/** WHAT: Resolves friendly AMUX model names to stable wire ids. WHY: Keeps operator shorthand from reaching Codex as an invalid model. */
+export function resolveCodexModelName(requested) {
+  const name = String(requested || "").trim().toLowerCase();
+  return CODEX_MODEL_ALIASES[name] || name;
+}
+
 export const codexPaneKey = (name, pane) => `${name}:${Number(pane) || 0}`;
 
 export function codexProfileCatalog(env = process.env) {

@@ -451,7 +451,7 @@ Discord commands:
 | `/sync` | Create or update Discord channels from config |
 | `/status` | Claude: pane/context; Codex: native account, effective model, context and rolling usage limits |
 | `/switch [1\|2]` | Codex: toggle or explicitly select this pane's ChatGPT account profile |
-| `/model <name> [effort]` | Codex: restart/resume this pane with process-local model settings |
+| `/model <name> [effort]` | Codex: restart/resume this pane with process-local model settings. `astra` and `gpt-6` select `gpt-6-astra`; `sol` selects `gpt-5.6-sol` |
 | `/peek` | Show the last response from the target pane |
 | `/raw` | Show raw tmux pane output |
 | `/esc` | Send Escape to the target pane |

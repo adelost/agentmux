@@ -7,13 +7,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, extname } from "node:path";
 import { loadConfig } from "../cli/config.mjs";
+import { resolveCodexModelName } from "./codex-profiles.mjs";
 import { unparkPane } from "./pane-park.mjs";
 import { contextShape, readNativeHistory, responseSegments } from "./native-runtime-observation.mjs";
 
 const DEFAULT_RUNTIME_URL = "http://127.0.0.1:8811";
 const ATTACHMENT_PATTERN = /\[(image|file) attached:\s+([^\]\n]+)\]/gi;
 const NATIVE_COMMAND = /^native:(claude|codex)$/i;
-
 export class NativeRuntimeError extends Error {
   constructor(message, { status = null, code = null, retryable = false } = {}) {
     super(message);
@@ -333,7 +333,7 @@ export function createNativeRuntimeClient({
           return { accepted: true, replayed: Boolean(agent.replayed), via: "native-interrupt" };
         }
         const modelSpec = trimmed.match(/^\/model\s+([^\s]+)(?:\s+(low|medium|high|xhigh|max))?$/i);
-        const model = modelSpec?.[1]?.trim();
+        const model = modelSpec?.[1] ? resolveCodexModelName(modelSpec[1]) : null;
         const modelEffort = modelSpec?.[2]?.toLowerCase();
         const effort = trimmed.match(/^\/effort\s+(\w+)$/i)?.[1]?.trim();
         if (job.kind === "slash" && (model || modelEffort || effort)) {

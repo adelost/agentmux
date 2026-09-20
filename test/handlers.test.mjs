@@ -283,6 +283,31 @@ feature("/model dialect routing", () => {
     }],
   });
 
+  component("codex Astra shortcuts restart the pane with the exact model id", {
+    given: ["an idle Codex pane addressed with /model gpt-6", () => {
+      const path = writeCodexYaml();
+      const driver = vi.fn(async () => ({
+        ok: true,
+        status: nativeStatus({ model: "gpt-6-astra", effort: "xhigh" }),
+      }));
+      const s = setup({ agentsYamlPath: path, codexStatusDriver: driver });
+      s.agent.isBusy.mockResolvedValue(false);
+      s.agent.capturePane.mockResolvedValue("\n› Ask Codex to do anything\n");
+      s.agent.getContextPercent.mockReturnValue({
+        percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
+      });
+      return { ...s, path, msg: mockMsg({ content: "/model gpt-6" }) };
+    }],
+    when: ["onMessage is called", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["the process receives gpt-6-astra", (_, { msg, agent }) => {
+      expect(agent.restartCodex.mock.calls[0][2]).toMatchObject({ model: "gpt-6-astra", effort: "xhigh" });
+      expect(msg.reply.mock.calls[0][0]).toContain("gpt-6-astra");
+    }],
+  });
+
   component("codex rollback preserves a draft that appears during verification", {
     given: ["native verification fails after a local human starts typing", () => {
       const path = writeCodexYaml();

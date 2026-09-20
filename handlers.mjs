@@ -1,6 +1,5 @@
 // Message handling: commands, agent routing, reply pipeline.
 // Channel-agnostic. Works with any ChannelMessage from channels/*.mjs.
-
 import { splitMessage, parsePane, parseCommand, parseUseArg } from "./lib.mjs";
 import { readFileSync } from "fs";
 import { executeSync } from "./core/sync-discord.mjs";
@@ -20,7 +19,7 @@ import {
   codexModelOverride,
   codexProfileCatalog,
   isCodexProfileAuthenticated,
-  prepareCodexProfile,
+  prepareCodexProfile, resolveCodexModelName,
   resolveCodexProfile,
   selectedCodexProfile,
   setCodexModelOverride,
@@ -79,7 +78,7 @@ const HELP_TEXT = [
   "`/status` — native Codex account, model, context and usage limits",
   "`/quota` — shared account quota: Claude session/week/Fable + Codex week",
   "`/switch` — toggle this Codex pane between account profiles 1 and 2",
-  "`/model` — show current model; `/model <name>` — switch (fable/opus/sonnet/haiku)",
+  "`/model`: show current model; Codex aliases: astra/gpt-6/sol; Claude: fable/opus/sonnet/haiku",
   "`/restore` — restore the model that was active before the latest downgrade",
   "`/dismiss` — dismiss blocking prompt (survey etc.)",
   "`/esc` — interrupt (send Escape)",
@@ -590,7 +589,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           await msg.reply(`invalid codex model spec: \`${name}\` — expected \`<model> [minimal|low|medium|high|xhigh|max|ultra]\``);
           return;
         }
-        const [, targetModel, targetEffort] = spec;
+        const [, requestedModel, targetEffort] = spec;
+        const targetModel = resolveCodexModelName(requestedModel);
         const result = await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
           const idle = await prepareCodexIdle({ agent, name: mapping.name, pane });
           if (!idle.ok) return { ok: false, error: `${idle.stage}: ${idle.error}` };

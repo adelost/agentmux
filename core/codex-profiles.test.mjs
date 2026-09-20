@@ -10,6 +10,7 @@ import {
   codexProfileCatalog,
   isCodexProfileAuthenticated,
   prepareCodexProfile,
+  resolveCodexModelName,
   resolveCodexProfile,
   selectedCodexProfile,
   setCodexModelOverride,
@@ -109,6 +110,20 @@ feature("Codex profile filesystem boundary", () => {
 });
 
 feature("pane-local model overrides", () => {
+  unit("friendly model names resolve to exact Codex ids", {
+    given: ["the documented Astra shortcuts", () => ["astra", "gpt-6", "gpt-6-astra"]],
+    when: ["resolving each model name", (names) => names.map(resolveCodexModelName)],
+    then: ["every spelling selects GPT-6 Astra", (models) => {
+      expect(models).toEqual(["gpt-6-astra", "gpt-6-astra", "gpt-6-astra"]);
+    }],
+  });
+
+  unit("the Sol shortcut resolves back to the fleet default", {
+    given: ["the short Sol name", () => "sol"],
+    when: ["resolving it", resolveCodexModelName],
+    then: ["it selects GPT-5.6 Sol", (model) => expect(model).toBe("gpt-5.6-sol")],
+  });
+
   unit("model and effort persist without affecting a neighbour", {
     given: ["fresh state", () => ({ state: memoryState() })],
     when: ["setting claw:11 to max", ({ state }) => {
