@@ -16,7 +16,7 @@ The executable decisions use Skyvw/CircleKit's existing `@v1d/product-spec` DSL 
 
 - This migration selects Sol for the existing Codex panes. Claude and Kimi retain their engines and models.
 - A later explicit pane model selection is durable. Restart resumes that selection and the exact session, without resetting it to the fleet default.
-- A model change compacts the same session on its previous model, verifies a new compact boundary, then launches the selected model and verifies the live selection.
+- A model change requires a verified compact boundary for the same session, with no subsequent user work. Reuse that proof when present; otherwise compact on the previous model before launching the selected model. Verify the live selection. Selecting the already-active model and effort is a no-op, not another compact or restart.
 - Failed or unverified compact blocks the transition. Repeated delivery retries cannot repeat a failed paid compact automatically.
 - A new work prompt cannot proceed on an unknown or different live Codex model.
 - Dormant panes undergo the guarded transition when next needed. They are not all awakened merely to update a setting.
@@ -48,6 +48,14 @@ Do not claim that compact always adds exactly 80k tokens, that every cache has e
 The tmux delivery lease remains per session because pane delivery can zoom the shared window. Changing it to per pane without removing that shared effect is unsafe.
 
 # Verification and recovery
+
+## Duplicate model command incident, 2026-09-20
+
+Discord command `1551293166517362689` (`/model astra`, claw:3) was processed through Gateway and later REST recovery. Attachment preparation reset its completed intake record to `assets_ready`, allowing the same command to execute again. The exact session `019f5ffa-acf8-7703-8d71-34516b5da774` records real compact boundaries at 17:54:21Z, 18:05:26Z and 18:07:01Z, with no user work between them. These are not duplicate UI notices. Token billing for those operations was not measured.
+
+The 1.25.82 correction keeps `completed` terminal across preparation, late downloads, failure callbacks and restart. Model commands check the live selection before paid work. A matching model/effort does nothing; a real change reuses exact-session proof only when no new user work invalidates it. Receipt lookup occurs after taking the shared lease. Missing, foreign or stale proof still requires compact before switching. CLI and Discord distinguish all three outcomes.
+
+Five regressions failed before the fix. Targeted provider-mocked checks cover Gateway/REST/restart replay, late completion/failure, stale historical model, lock-wait receipts, effort changes and receipt invalidation. They make zero real model calls. No new state store, handoff restriction or DSL syntax is introduced. This closes the reproduced replay path, not a claim of exactly-once external effects across every possible crash.
 
 Unit/component tests create synthetic log files or mock the process/provider boundary. They do not invoke a model, start real coding sessions or consume AI quota. Real `/compact` checks are separate and must name the pane and receipt.
 

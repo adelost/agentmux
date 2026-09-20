@@ -13,7 +13,7 @@ import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
 import { readQuotaSnapshot } from "./core/quota-usage.mjs";
 import { formatQuotaSnapshot } from "./core/quota-format.mjs";
 import { prepareCodexIdle } from "./core/codex-tui.mjs";
-import { runLockedCodexModelChange } from "./core/codex-model-command.mjs";
+import { formatCodexModelChange, runLockedCodexModelChange } from "./core/codex-model-command.mjs";
 import {
   clearCodexModelOverride,
   codexLoginCommand,
@@ -593,7 +593,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         }
         const [, requestedModel, targetEffort] = spec;
         const targetModel = resolveCodexModelName(requestedModel);
-        await msg.reply(`Preparing ${mapping.name}:${pane}: waiting for the session lock, then compacting before the model change. No switch runs without a fresh receipt.`);
+        await msg.reply(`Preparing ${mapping.name}:${pane}: waiting for the session lock, then checking the selected model and compact receipt. Compact runs only if needed.`);
         const result = await withPaneSendLock(`${mapping.name}:${pane}`, () => runLockedCodexModelChange({
           agent, state, deliveryBroker, name: mapping.name, pane, targetModel, targetEffort,
           statusDriver: codexStatusDriver,
@@ -604,7 +604,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           if (readParkState(mapping.name, pane)) {
             unparkPane({ session: mapping.name, pane, detail: `explicit model switch: ${result.model} ${result.effort || ""}`.trim() });
           }
-          await msg.reply(`✅ compact verified, then model changed to ${result.model}${result.effort ? ` ${result.effort}` : ""}; bara ${mapping.name}:${pane}, global default orörd`);
+          await msg.reply(`✅ ${formatCodexModelChange(mapping.name, pane, result)}`);
         } else {
           const error = result.error || `${result.stage}: ${result.reason}`;
           const recovery = result.stage === "switch"

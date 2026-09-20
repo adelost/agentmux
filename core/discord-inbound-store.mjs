@@ -89,6 +89,7 @@ export function createDiscordInboundStore({
   function update(record, patch) {
     const current = read(record.channelId, record.messageId);
     if (!current) throw new Error(`Discord inbound record disappeared: ${record.identity}`);
+    if (current.status === "completed" && patch.status && patch.status !== "completed") return current;
     const next = {
       ...current,
       ...patch,
@@ -159,12 +160,15 @@ export function createDiscordInboundStore({
   /** WHAT: Copies every attachment into the private journal. WHY: Discord signed URLs may expire before transcription or pane delivery retries. */
   async function prepareAttachments(record) {
     let current = read(record.channelId, record.messageId) || record;
+    if (current.status === "completed") return current;
     for (const attachment of current.attachments || []) {
       if (attachment.durablePath && existsSync(attachment.durablePath)) continue;
       if (typeof downloadBuffer !== "function") {
         throw new Error(`Discord attachment downloader is unavailable for ${current.identity}`);
       }
       const bytes = await downloadDiscordAttachment(attachment, { downloadBuffer, sleep });
+      current = read(record.channelId, record.messageId) || current;
+      if (current.status === "completed") return current;
       const dir = join(assetsRoot, safeSegment(current.channelId), safeSegment(current.messageId));
       ensurePrivateDir(dir);
       const extension = extname(attachment.name || "").slice(0, 16) || ".bin";
@@ -247,6 +251,7 @@ export function createDiscordInboundStore({
   /** WHAT: Retains one failed inbound record for bounded retry. WHY: Attachment, STT, or queue failures must not advance to false completion. */
   function fail(record, error) {
     const current = read(record.channelId, record.messageId) || record;
+    if (current.status === "completed") return current;
     return update(current, {
       attempts: Number(current.attempts || 0) + 1,
       nextAttemptAt: now() + RETRY_MS,
