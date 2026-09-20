@@ -17,6 +17,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
+import com.adelost.designkit.ui.CirclePressStart
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
 import com.adelost.designkit.ui.CircleSurfaceClass
@@ -55,7 +56,10 @@ fun resolveLinkCaptureAvailability(
     else -> LinkCaptureAvailability.Ready
 }
 
-/** Host-neutral data for the one Phone/Wear capture component. */
+/**
+ * WHAT: Carries host-neutral state for the one Phone/Wear capture component.
+ * WHY: Keeps both hosts on one availability and recording vocabulary.
+ */
 data class LinkCaptureSpec(
     val phase: CapturePhase,
     val startedAtMs: Long,
@@ -66,8 +70,8 @@ data class LinkCaptureSpec(
 )
 
 /**
- * The only Link recording renderer. Begin immediately, with no arming sweep.
- * The shared graph discards accidental short presses; CircleKit owns the waveform.
+ * WHAT: Builds the one Link recording control and begins capture without an arming sweep.
+ * WHY: Keeps Phone and Wear on the shared graph while CircleKit owns the waveform.
  */
 @Composable
 fun LinkCaptureControl(
@@ -129,7 +133,8 @@ fun LinkCaptureControl(
             }
             else -> RingPressLifecycle(
                 spec = RingPressLifecycleSpec(
-                    holdMs = 0L,
+                    // Push-to-talk's duration is the recording, not a confirmation of it.
+                    start = CirclePressStart.ON_DOWN,
                     label = handsFree?.label ?: when (spec.phase) {
                         CapturePhase.LISTENING -> "RELEASE TO SEND"
                         CapturePhase.FINALIZING -> "SENDING"

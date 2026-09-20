@@ -19,6 +19,7 @@ import com.adelost.designkit.ui.LocalRoundBackLayer
 import com.adelost.designkit.ui.LocalRoundChromeReservation
 import com.adelost.designkit.ui.roundSafeRectHorizontalInsetsDp
 import com.adelost.designkit.ui.roundTitleTopPadding
+import com.adelost.designkit.ui.circleResolvedTiming
 import com.adelost.ringkit.ui.*
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
@@ -89,11 +90,12 @@ private fun WatchTurnReader(
                 if (activeTurn != null && activeTurn.turnId != turn.turnId) {
                     linkReadAloudRow(activeTurn, onCommand)?.let { row ->
                         RingRow(row.title, "${activeTurn.targetId} · ${row.sub}", row.onTap,
-                            icon = row.icon, actionTiming = row.actionTiming)
+                            icon = row.icon, timing = circleResolvedTiming(row.actionTiming, row.holdMs))
                     }
                 }
                 linkReadAloudRow(turn, onCommand)?.let { row ->
-                    RingRow(row.title, row.sub, row.onTap, icon = row.icon, actionTiming = row.actionTiming)
+                    RingRow(row.title, row.sub, row.onTap, icon = row.icon,
+                        timing = circleResolvedTiming(row.actionTiming, row.holdMs))
                 }
                 LinkConversationTurn(turn,
                     onPlayback = { onCommand(it, turn.turnId) }, showPlayAction = false, openLinks = false)

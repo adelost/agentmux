@@ -31,8 +31,10 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 
-/** Real pointer + MediaRecorder + product event graph; the only delivery sink
- * is a local list. No transport or recipient outside this test is reachable. */
+/**
+ * WHAT: Checks a real pointer, MediaRecorder and the local product event graph.
+ * WHY: Keeps push-to-talk proof isolated from transport and external recipients.
+ */
 class LinkPttGestureTest {
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -145,6 +147,7 @@ class LinkPttGestureTest {
                         isWatchDevice = round,
                         state = CircleHostPreviewState(mode = if (round) CircleHostMode.WATCH_EXACT else CircleHostMode.RESPONSIVE),
                         onStateChange = null,
+                        actionHostCosts = linkActionHostCosts,
                     ) {
                         LinkInteractionHost {
                             if (fixture.mounted) {
