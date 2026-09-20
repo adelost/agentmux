@@ -133,6 +133,8 @@ The review above is preserved as historical evidence. PR #395 was merged as `bf0
 
 These automated tests use synthetic logs/process doubles, not paid model calls. Source proof is not an installation or scheduled-nightly receipt. Live release/model/worker evidence is maintained in TASKS.md.
 
+1.25.79 additionally fixes Dream's early `sent.pending` rejection. Durable enqueue/submission now proceeds to the existing bounded exact-final-result check, without sending or compacting again. It still cannot commit on enqueue alone. The 2026-09-20 input `1998214a-b815-4ead-957b-b44da00b23a2` has a valid 5842-byte result and original `DREAM_OK` journal evidence; the old controller exited before committing it. Historical recovery must preserve later manual notes and must not replay that model task.
+
 ## Shared DSL boundary and DX handoff
 
 AMUX imports the same CircleKit `@v1d/product-spec` decision-table API used by Skyvw. This does not mean identical package pins or identical consumer lint/format/build pipelines. At inspection AMUX pinned 0.3.54 and the canonical Skyvw checkout pinned 0.3.63; active product branches may be newer. AMUX executes JavaScript decisions; Skyvw also compiles TypeScript and platform projections. There is no completed state-machine debugger here. Cell ids and facts make decisions inspectable; locks, retries and provider IO remain controller code.

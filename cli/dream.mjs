@@ -413,7 +413,10 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       waitMs: 30_000,
       mirror: false,
     });
-    if (!sent?.delivered || sent.pending || sent.unverified) {
+    // Enqueue/submit is not completion, but a late transport receipt must not
+    // discard a curator already working. The exact final product below is
+    // still mandatory; wait for it without sending or compacting again.
+    if (!sent?.delivered || sent.unverified) {
       throw new Error(`dream-owner-prompt-unverified:${sent?.reason || sent?.queueState || "unknown"}`);
     }
     const product = await (dependencies.waitForResult || waitForDreamOwnerResult)({

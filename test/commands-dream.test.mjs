@@ -89,11 +89,13 @@ feature("amux dream configured-pane orchestration", () => {
     }],
   });
 
-  component("verified compact and visible pane prompt precede one batch receipt", {
+  for (const pending of [false, true]) component(`verified final product commits once when initial delivery pending=${pending}`, {
     given: ["one active source", () => fixture()],
     when: ["running Dream", async (fx) => {
       const events = [];
       const deps = ownerDependencies(fx, events);
+      const send = deps.send;
+      deps.send = async (...args) => ({ ...await send(...args), pending, queueState: pending ? "submitted" : "acknowledged" });
       const result = await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
         workspace: fx.workspace, quiet: true, deferSentinel: true,
       }, {
