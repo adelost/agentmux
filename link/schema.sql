@@ -145,3 +145,18 @@ CREATE TABLE IF NOT EXISTS connector_targets (
   seenAt INTEGER NOT NULL,
   PRIMARY KEY (connectorId, target)
 );
+
+-- Session-qualified pane model evidence is a separate additive projection.
+-- Raw session ids never leave the connector; this table stores only the
+-- current/stale/unknown result and bounded display values.
+CREATE TABLE IF NOT EXISTS connector_target_models (
+  connectorId TEXT NOT NULL,
+  target TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('current', 'stale', 'unknown')),
+  observedModel TEXT,
+  observedEffort TEXT,
+  configuredModel TEXT,
+  configuredEffort TEXT,
+  seenAt INTEGER NOT NULL,
+  PRIMARY KEY (connectorId, target)
+);

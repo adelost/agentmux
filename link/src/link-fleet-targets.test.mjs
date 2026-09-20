@@ -114,6 +114,54 @@ feature("the phone's target list comes from the fleet", () => {
     }],
   });
 
+  component("observed and configured models stay qualified as the pane session changes", {
+    given: ["a seeded target with current observed model evidence", async () => {
+      const env = makeEnv();
+      await seedSession(env);
+      await poll(env, [{
+        id: "lsrc:3",
+        label: "connector wording must not win",
+        model: {
+          status: "current",
+          observed: { model: "gpt-5.6-sol", effort: "xhigh" },
+          configured: { model: "gpt-6-astra", effort: "max" },
+        },
+      }]);
+      return { env };
+    }],
+    when: ["the connector later marks the same observation stale", async ({ env }) => {
+      const before = await (await worker.fetch(
+        req("https://link.v1d.io/api/link/targets", { token: SESSION }), env,
+      )).json();
+      await poll(env, [{
+        id: "lsrc:3",
+        label: "still ignored",
+        model: {
+          status: "stale",
+          observed: { model: "gpt-5.6-sol", effort: "xhigh" },
+          configured: { model: "gpt-6-astra", effort: "max" },
+        },
+      }]);
+      const after = await (await worker.fetch(
+        req("https://link.v1d.io/api/link/events?after=0", { token: SESSION }), env,
+      )).json();
+      return { before, after };
+    }],
+    then: ["both intent and observation reach the existing target feed without relabelling", ({ before, after }) => {
+      const current = before.targets.find((target) => target.id === "lsrc:3");
+      const stale = after.targets.find((target) => target.id === "lsrc:3");
+      expect(current.label).toBe("L-source 3");
+      expect(current.model).toEqual({
+        status: "current",
+        observed: { model: "gpt-5.6-sol", effort: "xhigh" },
+        configured: { model: "gpt-6-astra", effort: "max" },
+      });
+      expect(stale.model.status).toBe("stale");
+      expect(stale.model.observed.model).toBe("gpt-5.6-sol");
+      expect(stale.model.configured.model).toBe("gpt-6-astra");
+    }],
+  });
+
   component("an announcement cannot invent a privileged kind or a bad address", {
     given: ["a worker and a session", async () => {
       const env = makeEnv();

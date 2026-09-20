@@ -39,7 +39,10 @@ public class PublicLinkClientTest {
     @Test
     public void targetCatalogCarriesOnlyValidatedServerProvidedDiscoveryUrls() throws Exception {
         PublicLinkClient.TargetCatalog catalog = PublicLinkClient.parseTargetCatalog(
-            "{\"targets\":[{\"id\":\"alpha:1\",\"label\":\"Alpha\",\"online\":true}],"
+            "{\"targets\":[{\"id\":\"alpha:1\",\"label\":\"Alpha\",\"online\":true,"
+                + "\"model\":{\"status\":\"current\","
+                + "\"observed\":{\"model\":\"gpt-5.6-sol\",\"effort\":\"xhigh\"},"
+                + "\"configured\":{\"model\":\"gpt-6-astra\",\"effort\":\"max\"}}}],"
                 + "\"privateDiscoveryUrls\":["
                 + "\"https://relay.example.ts.net:8443/\","
                 + "\"https://relay.example.ts.net:8443\","
@@ -48,6 +51,9 @@ public class PublicLinkClientTest {
 
         assertEquals(1, catalog.targets.size());
         assertEquals("alpha:1", catalog.targets.get(0).id);
+        assertEquals("current", catalog.targets.get(0).model.status);
+        assertEquals("gpt-5.6-sol", catalog.targets.get(0).model.observedModel);
+        assertEquals("gpt-6-astra", catalog.targets.get(0).model.configuredModel);
         assertEquals(
             java.util.List.of("https://relay.example.ts.net:8443"),
             catalog.privateDiscoveryUrls
@@ -83,7 +89,13 @@ public class PublicLinkClientTest {
                 "createdAt": 70,
                 "replyAt": 71
               }],
-              "heartbeats": {"agent:7": true, "agent:8": false}
+              "heartbeats": {"agent:7": true, "agent:8": false},
+              "targets": [{
+                "id": "agent:7",
+                "label": "Seven",
+                "online": true,
+                "model": {"status":"stale","observed":{"model":"claude-fable-5"}}
+              }]
             }
             """
         );
@@ -94,6 +106,8 @@ public class PublicLinkClientTest {
         assertEquals(71L, page.events.get(0).replyAtMs);
         assertEquals(Boolean.TRUE, page.heartbeats.get("agent:7"));
         assertEquals(Boolean.FALSE, page.heartbeats.get("agent:8"));
+        assertEquals("stale", page.targets.get(0).model.status);
+        assertEquals("claude-fable-5", page.targets.get(0).model.observedModel);
     }
 
     @Test

@@ -100,7 +100,7 @@ export function channelForPane(config, agentName, paneIndex) {
   return null;
 }
 
-/** List all agents sorted by name. */
+/** WHAT: Reads all configured agents sorted by name. WHY: Keeps generated fleet order deterministic. */
 export function listAgents(configPath) {
   const config = loadConfig(configPath);
   return Object.entries(config)
@@ -116,6 +116,8 @@ export function listAgents(configPath) {
       discord: conf.discord,
       backend: conf.backend || "tmux",
       runtimeUrl: conf.runtimeUrl || null,
+      claudeModel: conf.claudeModel || null,
+      codexModel: conf.codexModel || null,
       orchestrator: Number.isSafeInteger(conf.orchestrator) ? conf.orchestrator : null,
     }));
 }

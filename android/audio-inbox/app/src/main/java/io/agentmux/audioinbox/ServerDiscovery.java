@@ -112,7 +112,8 @@ final class ServerDiscovery {
                         || pane < 0 || !audioTarget.matches("^\\d{10,24}$")) continue;
                     targets.add(new ConversationTarget(
                         id, label.isEmpty() ? id : label, ConversationTarget.Kind.AGENT,
-                        normalized, audioTarget, agent, pane
+                        normalized, audioTarget, agent, pane,
+                        PublicLinkClient.parseTargetModel(row.optJSONObject("model"))
                     ));
                 }
             }

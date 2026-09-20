@@ -12,6 +12,7 @@ internal class PublicMailboxFeed(
     private val sessions: LinkSessionStore,
     private val state: () -> LinkState,
     private val onSync: (LinkMailboxSyncResult) -> Unit,
+    private val onTargets: (List<PublicLinkClient.LinkTarget>) -> Unit,
 ) : AutoCloseable {
     private val work = Executors.newSingleThreadScheduledExecutor()
     private var future: ScheduledFuture<*>? = null
@@ -40,6 +41,7 @@ internal class PublicMailboxFeed(
                 heartbeatStates = page.heartbeats,
             )
             afterSeq = result.afterSeq
+            onTargets(page.targets)
             onSync(result)
         }
     }

@@ -98,7 +98,7 @@ feature("model and process evidence in amux ps", () => {
     when: ["inspecting without changing either observation", (ctx) => inspectPane(ctx, agent, ctx.pane)],
     then: ["the engine-reported percentage wins while old model evidence stays labelled", (row) => {
       expect(row.context).toMatchObject({ percent: 35, tokens: 98_400, source: "codex-status", confidence: "reported" });
-      expect(row.modelView.observed).toEqual({ model: OLD.model, effort: OLD.effort });
+      expect(row.modelView.observed).toMatchObject({ model: OLD.model, effort: OLD.effort });
       expect(formatPaneModel(row)).toBe("gpt-6-astra·xhigh [selected]; last: gpt-5.6-sol·max");
     }],
   });
@@ -125,7 +125,13 @@ feature("model and process evidence in amux ps", () => {
     when: ["inspecting", (ctx) => inspectPane(ctx, agent, ctx.pane)],
     then: ["both readings are absent", (row) => {
       expect(row.context).toBeNull();
-      expect(row.modelView).toEqual({ running: true, observed: null, selected: null });
+      expect(row.modelView).toEqual({
+        running: true,
+        currentSessionId: null,
+        observed: null,
+        selected: null,
+        configured: null,
+      });
     }],
   });
 

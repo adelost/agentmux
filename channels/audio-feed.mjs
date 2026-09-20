@@ -10,7 +10,7 @@ export function createAudioFeedHandlers({
   pollIntervalMs,
   targets = () => [],
 }) {
-  function configuration(_req, res) {
+  async function configuration(_req, res) {
     const serverId = typeof discovery?.serverId === "string"
       ? discovery.serverId.trim()
       : "";
@@ -20,7 +20,7 @@ export function createAudioFeedHandlers({
     if (!serverId || !/^\d{10,24}$/.test(target)) {
       return json(res, 503, { error: "audio inbox discovery is not configured" });
     }
-    const available = targets();
+    const available = await targets();
     const defaultTarget = available.find((entry) => entry.audioTarget === target) || null;
     return json(res, 200, {
       service: "agentmux-audio-inbox",

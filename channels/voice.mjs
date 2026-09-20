@@ -26,6 +26,7 @@ import { esc } from "../lib.mjs";
 import { createAudioFeedHandlers } from "./audio-feed.mjs";
 import { createVoiceInput } from "./voice-input.mjs";
 import { phoneTargets } from "./audio-targets.mjs";
+import { targetsWithModels } from "./link-target-models.mjs";
 import { DEFAULT_TTS_VOICE } from "../core/runtime-defaults.mjs";
 
 // Minimal mime map for the static PWA bundle. Anything not listed gets
@@ -134,8 +135,12 @@ export function createVoicePWA(deps) {
     return null;
   }
 
-  function listPhoneTargets() {
-    return phoneTargets(deps.audioDiscovery, loadAgents());
+  async function listPhoneTargets() {
+    const targets = phoneTargets(deps.audioDiscovery, loadAgents());
+    const models = typeof deps.targetModels === "function"
+      ? await deps.targetModels(targets)
+      : null;
+    return targetsWithModels(targets, models);
   }
 
   function validatePane(name, pane) {

@@ -151,7 +151,7 @@ export function parseCodexPaneReading(text) {
     confidence: "reported",
     observedAt: new Date().toISOString(),
   } : null;
-  return { selected, context };
+  return { selected, context, sessionId: current ? status.session : null };
 }
 
 function statusMarker(text) {

@@ -1,5 +1,9 @@
 package io.agentmux.audioinbox
 
+import io.agentmux.linkcore.LinkTarget
+import io.agentmux.linkcore.LinkTargetModel
+import io.agentmux.linkcore.LinkTargetModelStatus
+
 /**
  * Owns the discovered routes for each logical Link target.
  *
@@ -44,7 +48,7 @@ internal class LinkTargetDirectory {
     @Synchronized
     fun updatePublicAvailability(states: Map<String, Boolean>) {
         publicTargets.replaceAll { id, target ->
-            ConversationTarget.publicLink(id, target.label, states[id] ?: false)
+            ConversationTarget.publicLink(id, target.label, states[id] ?: false, target.model)
         }
     }
 
@@ -58,10 +62,36 @@ internal class LinkTargetDirectory {
         val chosen = (tailnetTargets.keys + publicTargets.keys)
             .distinct()
             .mapNotNull { id ->
-                LinkTargetRoutePolicy.choose(tailnetTargets[id], publicTargets[id])
+                val chosen = LinkTargetRoutePolicy.choose(tailnetTargets[id], publicTargets[id])
+                    ?: return@mapNotNull null
+                val freshestModel = publicTargets[id]?.model ?: tailnetTargets[id]?.model
+                if (chosen.model === freshestModel) chosen else chosen.withModel(freshestModel)
             }
         targets.clear()
         chosen.forEach { targets[it.id] = it }
         return chosen
     }
+
+    @Synchronized
+    fun rebuildLinkTargets(): List<LinkTarget> = rebuild().map { target ->
+        LinkTarget(
+            id = target.id,
+            label = target.label,
+            available = target.available(),
+            acceptsMessages = target.kind == ConversationTarget.Kind.PUBLIC || target.available(),
+            model = target.model?.asDomainModel(),
+        )
+    }
+
+    private fun ConversationTarget.Model.asDomainModel() = LinkTargetModel(
+        status = when (status) {
+            "current" -> LinkTargetModelStatus.CURRENT
+            "stale" -> LinkTargetModelStatus.STALE
+            else -> LinkTargetModelStatus.UNKNOWN
+        },
+        observedModel = observedModel,
+        observedEffort = observedEffort,
+        configuredModel = configuredModel,
+        configuredEffort = configuredEffort,
+    )
 }

@@ -46,8 +46,17 @@ export async function inspectPane(ctx, agent, pane) {
         context,
         modelView: {
           running: true,
-          observed: { model: snapshot.agent.observedModel, effort: snapshot.agent.observedEffort },
+          currentSessionId: snapshot.agent.sessionId || null,
+          observed: snapshot.agent.observedModel ? {
+            model: snapshot.agent.observedModel,
+            effort: snapshot.agent.observedEffort,
+            sessionId: snapshot.agent.sessionId || null,
+            observedAt: snapshot.agent.observedAt || null,
+          } : null,
           selected: { model: snapshot.agent.model, effort: snapshot.agent.effort, source: "native-runtime" },
+          configured: snapshot.agent.model
+            ? { model: snapshot.agent.model, effort: snapshot.agent.effort, source: "native-runtime" }
+            : null,
         },
       };
     } catch {
@@ -97,10 +106,27 @@ export async function inspectPane(ctx, agent, pane) {
     configured: agent.panes?.[pane.index], previous: context,
   }) : null;
   const screen = dialect === "codex" && running === true && content ? parseCodexPaneReading(content) : null;
+  const declaredModel = agent.panes?.[pane.index]?.model
+    || (dialect === "claude" ? agent.claudeModel : dialect === "codex" ? agent.codexModel : null);
+  const configuredModel = configured?.source !== "history"
+    ? configured
+    : declaredModel ? {
+      model: declaredModel,
+      effort: agent.panes?.[pane.index]?.effort ?? context?.effort ?? null,
+      source: "config",
+    }
+      : null;
   const modelView = {
     running,
-    observed: context?.model ? { model: context.model, effort: context.effort } : null,
-    selected: screen?.selected || (configured?.source !== "history" ? configured : null),
+    currentSessionId: running === true ? screen?.sessionId || context?.sessionId || null : null,
+    observed: context?.model ? {
+      model: context.model,
+      effort: context.effort,
+      sessionId: context.sessionId || null,
+      observedAt: context.observedAt || null,
+    } : null,
+    selected: screen?.selected || configuredModel,
+    configured: configuredModel,
   };
   if (running === false) return { status: "unknown", preview, context: null, modelView };
   context = screen?.context || context;

@@ -44,7 +44,7 @@ feature("Codex model visibility with missing or stale status", () => {
       box("65% left (98.4K used / 258K)").replace("Session: test-session", "Directory: ~/fixture"),
     )],
     then: ["neither a selected model nor usage is invented", (reading) =>
-      expect(reading).toEqual({ selected: null, context: null })],
+      expect(reading).toEqual({ selected: null, context: null, sessionId: null })],
   });
 
   unit("an unrelated later box cannot renew a status in scrollback", {
@@ -52,7 +52,7 @@ feature("Codex model visibility with missing or stale status", () => {
       `${box("65% left (98.4K used / 258K)")}\n• Later answer\n╭───╮\n│ another menu │\n╰───╯\n› Ask Codex to do anything`,
     )],
     then: ["the original status boundary remains stale", (reading) =>
-      expect(reading).toEqual({ selected: null, context: null })],
+      expect(reading).toEqual({ selected: null, context: null, sessionId: null })],
   });
 
   unit("a footer selection change invalidates preceding status usage", {
@@ -70,7 +70,7 @@ feature("Codex model visibility with missing or stale status", () => {
       "• Previously using gpt-5.6-sol max\n› Ask Codex to do anything\n? for shortcuts",
     )],
     then: ["missing evidence remains absent", (reading) =>
-      expect(reading).toEqual({ selected: null, context: null })],
+      expect(reading).toEqual({ selected: null, context: null, sessionId: null })],
   });
 
   unit("historical-only and configured-only readings retain their labels", {

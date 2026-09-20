@@ -76,6 +76,28 @@ enum class PlaybackOperation {
 }
 
 /**
+ * WHAT: Tracks session qualification for one target's last engine-observed model.
+ * WHY: Prevents a previous session's model from appearing current.
+ */
+enum class LinkTargetModelStatus {
+    CURRENT,
+    STALE,
+    UNKNOWN,
+}
+
+/**
+ * WHAT: Stores observed model truth and configured launch intent.
+ * WHY: Separates runtime evidence from launch configuration.
+ */
+data class LinkTargetModel(
+    val status: LinkTargetModelStatus = LinkTargetModelStatus.UNKNOWN,
+    val observedModel: String? = null,
+    val observedEffort: String? = null,
+    val configuredModel: String? = null,
+    val configuredEffort: String? = null,
+)
+
+/**
  * WHAT: Describes one selectable agent target and its current availability.
  * WHY: Keeps favorite selection independent from transport implementation details.
  */
@@ -85,6 +107,7 @@ data class LinkTarget(
     val available: Boolean = true,
     /** Presence predicts latency; acceptance says whether a durable route can queue work. */
     val acceptsMessages: Boolean = available,
+    val model: LinkTargetModel? = null,
 )
 
 /**

@@ -1,6 +1,7 @@
 package io.agentmux.audioinbox.wear
 
 import android.content.Context
+import io.agentmux.audioinbox.ConversationTarget
 import io.agentmux.audioinbox.KeystoreSessionStore
 import io.agentmux.audioinbox.LinkSessionCredentials
 import io.agentmux.audioinbox.PublicLinkClient
@@ -11,6 +12,8 @@ import io.agentmux.linkcore.LinkMailboxSync
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkStateLedger
 import io.agentmux.linkcore.LinkTarget
+import io.agentmux.linkcore.LinkTargetModel
+import io.agentmux.linkcore.LinkTargetModelStatus
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import java.util.concurrent.Executors
@@ -201,6 +204,7 @@ internal class WearMailboxController(
                                 label = it.label,
                                 available = it.online,
                                 acceptsMessages = true,
+                                model = it.model?.asDomainModel(),
                             )
                         },
                     ),
@@ -209,6 +213,17 @@ internal class WearMailboxController(
             }
             val page = mailbox.events(afterSeq)
             if (generation.get() != expectedGeneration) return
+            if (page.targets.isNotEmpty()) {
+                dispatch(LinkAction.Targets(page.targets.map {
+                    LinkTarget(
+                        id = it.id,
+                        label = it.label,
+                        available = it.online,
+                        acceptsMessages = true,
+                        model = it.model?.asDomainModel(),
+                    )
+                }))
+            }
             val result = LinkMailboxSync.apply(
                 initial = ledger.value,
                 afterSeq = afterSeq,
@@ -249,6 +264,18 @@ internal class WearMailboxController(
 
     private fun selectedTarget(): LinkTarget? =
         ledger.value.targets.firstOrNull { it.id == ledger.value.selectedTargetId }
+
+    private fun ConversationTarget.Model.asDomainModel() = LinkTargetModel(
+        status = when (status) {
+            "current" -> LinkTargetModelStatus.CURRENT
+            "stale" -> LinkTargetModelStatus.STALE
+            else -> LinkTargetModelStatus.UNKNOWN
+        },
+        observedModel = observedModel,
+        observedEffort = observedEffort,
+        configuredModel = configuredModel,
+        configuredEffort = configuredEffort,
+    )
 
     private fun dispatch(action: LinkAction) = ledger.dispatch(action)
 

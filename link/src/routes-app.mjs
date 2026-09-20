@@ -15,9 +15,30 @@ async function appTargets({ store, env, nowMs }) {
   return mergeTargets(
     targetsForApp(env),
     announced.map((row) => ({
-      id: row.target, label: row.label, kind: row.kind, connectorId: row.connectorId,
+      id: row.target,
+      label: row.label,
+      kind: row.kind,
+      connectorId: row.connectorId,
+      model: {
+        status: row.modelStatus || "unknown",
+        observed: row.observedModel ? {
+          model: row.observedModel,
+          effort: row.observedEffort || null,
+        } : null,
+        configured: row.configuredModel ? {
+          model: row.configuredModel,
+          effort: row.configuredEffort || null,
+        } : null,
+      },
     })),
   );
+}
+
+function appTargetRows(targets, online) {
+  return targets.map(({ connectorId: _owner, ...target }) => ({
+    ...target,
+    online: Boolean(online[target.id]),
+  }));
 }
 
 /** WHAT: Which targets are online. WHY: Liveness is the connector's, one beat per
@@ -59,9 +80,7 @@ export async function handleAppRoutes({ request, env, store, url, nowMs }) {
     const online = await onlineTargets({ store, env, targets, nowMs });
     return json(null, 200, {
       // connectorId is who owns the pane, not something the app reads.
-      targets: targets.map(({ connectorId: _owner, ...target }) => ({
-        ...target, online: Boolean(online[target.id]),
-      })),
+      targets: appTargetRows(targets, online),
       privateDiscoveryUrls: privateDiscoveryUrlsForApp(env),
     });
   }
@@ -153,9 +172,11 @@ export async function handleAppRoutes({ request, env, store, url, nowMs }) {
     // The app still reads one boolean per target; the worker now derives them
     // from the owning connector's single beat instead of a row per target.
     const targets = await appTargets({ store, env, nowMs });
+    const online = await onlineTargets({ store, env, targets, nowMs });
     return json(null, 200, {
       events,
-      heartbeats: await onlineTargets({ store, env, targets, nowMs }),
+      heartbeats: online,
+      targets: appTargetRows(targets, online),
       now: nowMs,
     });
   }
