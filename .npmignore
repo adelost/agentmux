@@ -33,3 +33,4 @@ docs/*
 !docs/cli.md
 !docs/public-distribution.md
 !docs/AMUX-COST-POLICY.md
+!docs/memory.md
