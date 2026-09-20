@@ -148,8 +148,7 @@ internal fun LinkPhoneSettings(
                                 ""
                             },
                             icon = LinkNativeBindings.requireIcon("link"),
-                            onTap = onPublicLink,
-                            timing = GeneratedLinkControlTiming.SETTINGS_PUBLIC_LINK,
+                            press = LinkPress(GeneratedLinkControlTiming.SETTINGS_PUBLIC_LINK, onPublicLink),
                         )
                     }
                     GeneratedLinkSettingsComponent.PREFERENCES_TOGGLES -> {
@@ -246,8 +245,9 @@ internal fun LinkPhoneSettings(
                             icon = LinkNativeBindings.requireIcon(
                                 GeneratedLinkRoutes.descriptor(LinkRoute.WAKE_TRY).iconAssetRef,
                             ),
-                            onTap = { graph.onWakeTryOpen(LinkRouteOpenEvent(LinkRoute.WAKE_TRY)) },
-                            timing = GeneratedLinkControlTiming.SETTINGS_SENSITIVITY,
+                            press = LinkPress(GeneratedLinkControlTiming.SETTINGS_SENSITIVITY) {
+                                graph.onWakeTryOpen(LinkRouteOpenEvent(LinkRoute.WAKE_TRY))
+                            },
                         )
                     }
                     // The debug page belongs to the wake word, so it appears with it and not before it.
@@ -262,7 +262,7 @@ internal fun LinkPhoneSettings(
                                     title = route.title,
                                     sub = "What it hears, and what it refused",
                                     icon = LinkNativeBindings.requireIcon(route.iconAssetRef),
-                                    onTap = {
+                                    press = LinkPress(GeneratedLinkControlTiming.SETTINGS_WAKE_DEBUG) {
                                         graph.onWakeDebugOpen(LinkRouteOpenEvent(LinkRoute.WAKE_DEBUG))
                                     },
                                 )
@@ -273,10 +273,9 @@ internal fun LinkPhoneSettings(
                             title = "DISPLAY PREVIEW",
                             sub = "Phone layout or watch-size preview",
                             icon = LinkNativeBindings.requireIcon("phone"),
-                            onTap = {
+                            press = LinkPress(GeneratedLinkControlTiming.SETTINGS_DISPLAY_PREVIEW) {
                                 graph.onDevHostOpen(LinkRouteOpenEvent(LinkRoute.DEV_HOST))
                             },
-                            timing = GeneratedLinkControlTiming.SETTINGS_DISPLAY_PREVIEW,
                         )
                     }
                     GeneratedLinkSettingsComponent.RECOVERY_STATUS -> if (recovery.phase == LinkRecoveryPhase.QUARANTINED) {

@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM product-spec/src/interactions.ts
-// Product declaration SHA-256: 8d80992f00bb83e302dc236da0afaa3e9609313f76a9e66ccfffd47e13edac0c
+// Product declaration SHA-256: 79bff45a85816f38bbdb2cd2a3637f3e5739b00cb7705f621e4c3b6217d59f10
 package io.agentmux.linkui.product.generated
 
 import com.adelost.designkit.ui.CircleActionTiming
@@ -45,6 +45,15 @@ object GeneratedLinkControlTiming {
     /** TRY <PHRASE>. Trying again is the whole point of the page. */
     val WAKE_TRY_TRY_PHRASE: CircleActionTiming = CircleActionTiming.IMMEDIATE
 
+    /** WAKE DEBUG. Navigation: it opens the wake-debug page. */
+    val SETTINGS_WAKE_DEBUG: CircleActionTiming = CircleActionTiming.IMMEDIATE
+
+    /** WATCHING · NOT WATCHING. A toggle on the wake-debug page, which ordinary use recovers. */
+    val DEBUG_WAKE_WATCHING: CircleActionTiming = CircleActionTiming.IMMEDIATE
+
+    /** EXPORT. It writes one debug file the wearer asked for; nothing on the page changes and nothing is sent. */
+    val DEBUG_WAKE_EXPORT: CircleActionTiming = CircleActionTiming.IMMEDIATE
+
     /** HOST PREVIEW. Navigation. */
     val DEV_HOST_PREVIEW: CircleActionTiming = CircleActionTiming.IMMEDIATE
 
@@ -53,6 +62,9 @@ object GeneratedLinkControlTiming {
 
     /** SETTINGS. Navigation. */
     val CHROME_OPEN_SETTINGS: CircleActionTiming = CircleActionTiming.IMMEDIATE
+
+    /** <phrase>. A toggle on the home page, writing the same preference Settings writes, which ordinary use recovers. */
+    val HOME_WAKE_TOGGLE: CircleActionTiming = CircleActionTiming.IMMEDIATE
 
     /** VOICE MESSAGE. Navigation: it opens the capture screen and sends nothing. */
     val HOME_VOICE_MESSAGE: CircleActionTiming = CircleActionTiming.IMMEDIATE

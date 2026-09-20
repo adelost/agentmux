@@ -77,6 +77,9 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // Row 225: whether a control obeys its own declaration is a fact about a mounted control,
+        // and Robolectric draws a real page only with the merged resources.
+        unitTests.isIncludeAndroidResources = true
     }
     sourceSets.getByName("androidTest").java.srcDir("../link-ui/src/hostTest")
     // Row 217's native proof plays the same committed clips the JVM tests measure, through the real
@@ -116,5 +119,12 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")
     testImplementation("junit:junit:4.13.2")
+    // Row 225: the settings page is composed and pressed on the JVM, so a row that stops reading its
+    // own declaration is caught in seconds rather than on an emulator.
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    // Supplies the empty activity the mounted case composes into; debug-only, never shipped.
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("org.json:json:20240303")
 }

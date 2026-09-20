@@ -18,17 +18,8 @@ internal fun PhoneRow(
     title: String,
     sub: String,
     icon: ImageVector,
-    onTap: (() -> Unit)? = null,
-    /**
-     * Which kind of button this row is, from the product's own declaration
-     * ([io.agentmux.linkui.product.generated.GeneratedLinkControlTiming]).
-     *
-     * A row that says nothing is a touch. That is the safe direction and the one Link already had:
-     * until row 225 a host-wide override made every control immediate, so defaulting the other way
-     * would put an invisible gate on every row that never names itself. A row with no onTap draws no
-     * gesture at all, which is why most callers have nothing to say here.
-     */
-    timing: CircleActionTiming = CircleActionTiming.IMMEDIATE,
+    /** What happens when this row is pressed, and which kind of button that makes it. */
+    press: LinkPress? = null,
     progress: CircleLabelProgress? = null,
     /** Product-semantic pigment for a row that means something other than the page's ordinary voice. */
     semanticColor: Color? = null,
@@ -38,9 +29,9 @@ internal fun PhoneRow(
         sub = sub,
         icon = icon,
         semanticColor = semanticColor,
-        onTap = onTap,
+        onTap = press?.onTap,
         labelProgress = progress,
-        actionTiming = timing,
+        actionTiming = press?.timing ?: CircleActionTiming.IMMEDIATE,
         modifier = phoneRowModifier(),
     )
 }
@@ -67,3 +58,17 @@ internal fun PhoneRow(row: RowSpec) {
 
 internal fun phoneRowModifier(): Modifier =
     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+
+/**
+ * A press and the kind of button it makes, which travel together because they are one decision.
+ *
+ * Row 225, lsrc:0 on #393: a defaulted timing beside an optional onTap is the same hand-over the
+ * whole row is about. A row could then be pressable while saying nothing about its kind, and the
+ * next person to add a row that deletes something would get a touch for free. Neither field has a
+ * default, so a row that can be pressed cannot omit its kind, and a row that only reads says so by
+ * having no press at all.
+ *
+ * The timing comes from the product's own declaration,
+ * [io.agentmux.linkui.product.generated.GeneratedLinkControlTiming], never from a call site.
+ */
+internal data class LinkPress(val timing: CircleActionTiming, val onTap: () -> Unit)
