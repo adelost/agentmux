@@ -73,6 +73,23 @@ feature("Codex model visibility with missing or stale status", () => {
       expect(reading).toEqual({ selected: null, context: null, sessionId: null })],
   });
 
+  unit("the reserve display label resolves to its wire model id", {
+    when: ["reading the label from the footer and status box", () => [
+      parseCodexPaneReading(
+        "› Ask Codex to do anything\n  Luna Reserve xhigh · ~/fixture",
+      ),
+      parseCodexPaneReading(
+        box().replace("gpt-6-astra (reasoning max)", "Luna Reserve (reasoning xhigh)"),
+      ),
+    ]],
+    then: ["both observed surfaces report gpt-reserve without using configuration", (readings) => {
+      expect(readings.map(({ selected }) => selected)).toEqual([
+        { model: "gpt-reserve", effort: "xhigh", source: "codex-footer" },
+        { model: "gpt-reserve", effort: "xhigh", source: "codex-status" },
+      ]);
+    }],
+  });
+
   unit("historical-only and configured-only readings retain their labels", {
     when: ["formatting without context", () => [
       formatPaneModel({ command: "node", modelView: { running: true,
