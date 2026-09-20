@@ -8,11 +8,12 @@ enum class LinkTargetKind {
     PUBLIC,
 }
 
-/** The durable user preferences behind the typed preferences port. */
+/** WHAT: Names durable Link preferences. WHY: Keeps typed UI events independent of host storage keys. */
 enum class LinkPreferenceKey {
     HANDS_FREE,
     SPEAK_REPLIES,
     WAKE_WORD,
+    LISTENING_CUE_SOUND,
 }
 
 /** User operations accepted by the typed updates port. */

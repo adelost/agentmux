@@ -30,6 +30,7 @@ export const linkControls: readonly LinkControlDeclaration[] = [
   { id: "settings.wake-phrase", title: "WAKE PHRASE", timing: "immediate", why: recovers("A choice between declared phrases") },
   { id: "settings.speak-replies", title: "SPEAK REPLIES", timing: "immediate", why: recovers("A toggle") },
   { id: "settings.hands-free", title: "HANDS FREE", timing: "immediate", why: recovers("A toggle") },
+  { id: "settings.listening-cue-sound", title: "LISTENING SOUND", timing: "immediate", why: recovers("A toggle; haptic stays on") },
   { id: "settings.sensitivity", title: "SENSITIVITY", timing: "immediate", why: "Navigation: it opens the wake-try page." },
   { id: "settings.display-preview", title: "DISPLAY PREVIEW", timing: "immediate", why: "Navigation: it opens a preview." },
   {

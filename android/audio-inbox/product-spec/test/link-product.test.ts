@@ -12,12 +12,27 @@ import {
   productArtifactHostCoverage,
 } from "@v1d/product-spec";
 import { compileAgentmuxLinkProduct } from "../src/product.js";
+import { preferencesStatusContract } from "../src/contracts.js";
+import { linkPreferenceKeys } from "../src/finite-values.js";
+import { linkControls } from "../src/interactions.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const product = compileAgentmuxLinkProduct("0.0.0-test");
 const manifest = decodeNativeBindingManifest(
   JSON.parse(await readFile(resolve(packageRoot, "native-registry/link.json"), "utf8")),
 );
+
+test("the listening cue sound is one declared preference and one immediate control", () => {
+  assert.deepEqual(preferencesStatusContract.fields.map(({ name }) => name),
+    ["handsFree", "speakReplies", "wakeWord", "listeningCueSound"]);
+  assert.deepEqual(linkPreferenceKeys.values,
+    ["hands-free", "speak-replies", "wake-word", "listening-cue-sound"]);
+  assert.deepEqual(
+    linkControls.filter(({ id }) => id === "settings.listening-cue-sound")
+      .map(({ title, timing }) => ({ title, timing })),
+    [{ title: "LISTENING SOUND", timing: "immediate" }],
+  );
+});
 
 test("the mandatory graph has no parallel list and one binding per data input", () => {
   assert.equal(product.schemaVersion, PRODUCT_SPEC_SCHEMA_VERSION);

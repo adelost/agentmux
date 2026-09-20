@@ -41,13 +41,13 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
+import io.agentmux.linkui.AndroidLinkListeningCue
 
 private const val THINKING_TONE_LIMIT_MS = 30_000L
 
 /**
- * WHAT: Foreground microphone service for hands-free Link: the wake phrase, a question, a spoken answer, then the wake phrase again.
- * WHY: Questions go through the same process-wide conversation owner as push-to-talk,
- * so they work with the screen locked and appear in the normal history.
+ * WHAT: Builds Link's foreground hands-free microphone loop.
+ * WHY: Keeps wake questions on the same conversation path as push-to-talk.
  */
 class WakeWordService : Service(), WakeLoopListener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -56,6 +56,7 @@ class WakeWordService : Service(), WakeLoopListener {
     private var loop: WakeListeningLoop? = null
     private var micThread: Thread? = null
     private var earcons: WakeEarcons? = null
+    private var listeningCue: AndroidLinkListeningCue? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var thinkingTones: Job? = null
     private val readAloudRequested = mutableSetOf<String>()
@@ -92,7 +93,7 @@ class WakeWordService : Service(), WakeLoopListener {
         return START_NOT_STICKY
     }
 
-    private fun start(qaWav: String?) {
+    private fun start(qaWav: String?, cueWhenOpen: Boolean = false) {
         if (micThread != null) {
             // Already listening, and this start still has to post a notification: every start that asked
             // for the foreground must, and Android kills the app five seconds later if one does not.
@@ -112,33 +113,35 @@ class WakeWordService : Service(), WakeLoopListener {
         if (!goForeground(status)) return
         val held = LinkRuntime.acquire(this).also { coordinator = it }
         earcons = WakeEarcons()
+        listeningCue = AndroidLinkListeningCue(this) { LinkListeningSoundPreference.isEnabled(this) }
         wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "agentmux-link:wake-word").apply { acquire() }
         observeStatus()
         observeTurns(held)
-        startListening()
+        startListening(cueWhenOpen)
     }
 
-    private fun startListening() {
+    private fun startListening(cueWhenOpen: Boolean = false) {
         val phrase = LinkWakeStatus.status.value.phrase
-        micThread = Thread({ listen(phrase, qaWav) }, "link-wake-word").apply { start() }
+        micThread = Thread({ listen(phrase, qaWav, cueWhenOpen) }, "link-wake-word").apply { start() }
     }
 
     /** A new phrase needs its own model: the microphone loop closes and opens again with it. */
-    private fun relisten() {
+    private fun relisten(cueWhenOpen: Boolean = false) {
         if (micThread == null) return
         loop?.stop()
         micThread?.join(1_000)
         loop = null
-        startListening()
+        startListening(cueWhenOpen)
     }
 
-    private fun listen(phrase: WakePhrase, qaWav: String?) {
+    private fun listen(phrase: WakePhrase, qaWav: String?, cueWhenOpen: Boolean) {
         val sensitivity = LinkWakeStatus.status.value.sensitivity
         try {
             openModels(phrase).use { models ->
                 SileroSpeechProbability.load(assetBytes("silero_vad.onnx")).use { vad ->
                     openSource(qaWav).use { source ->
+                        if (cueWhenOpen) MainThread.run { listeningCue?.listeningStarted() }
                         val detector = WakeWordDetector(models)
                         WakeListeningLoop(
                             source = source,
@@ -201,7 +204,7 @@ class WakeWordService : Service(), WakeLoopListener {
             val interrupted = LinkWakeStatus.status.value.phase == WakePhase.SPEAKING
             LinkWakeStatus.apply(WakeEvent.Detected(score))
             if (interrupted) coordinator?.stopAudio()
-            earcons?.heard()
+            listeningCue?.listeningStarted()
         }
     }
 
@@ -235,11 +238,11 @@ class WakeWordService : Service(), WakeLoopListener {
     private fun openForTry() {
         if (micThread == null) {
             startedForTry = true
-            start(null)
+            start(null, cueWhenOpen = true)
             return
         }
         goForeground(LinkWakeStatus.status.value)
-        relisten()
+        relisten(cueWhenOpen = true)
     }
 
     /** The page is gone: the loop goes back to what it was, which is off when the page started it. */
@@ -365,6 +368,8 @@ class WakeWordService : Service(), WakeLoopListener {
         LinkWakeStatus.apply(if (reason == null) WakeEvent.Stop else WakeEvent.Blocked(reason))
         earcons?.close()
         earcons = null
+        listeningCue?.close()
+        listeningCue = null
         wakeLock?.takeIf { it.isHeld }?.release()
         wakeLock = null
         coordinator?.let(LinkRuntime::release)

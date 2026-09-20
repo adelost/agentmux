@@ -197,11 +197,16 @@ fun LinkState.toHistoryPresentation(): GeneratedLinkHistoryStatus = GeneratedLin
     clearableTurns = if (selectedTargetId.isBlank()) 0L else clearableTurns(selectedTargetId).toLong(),
 )
 
-fun LinkState.toPreferencesPresentation(speakReplies: Boolean, wakeWord: Boolean): GeneratedLinkPreferencesStatus =
+fun LinkState.toPreferencesPresentation(
+    speakReplies: Boolean,
+    wakeWord: Boolean,
+    listeningCueSound: Boolean,
+): GeneratedLinkPreferencesStatus =
     GeneratedLinkPreferencesStatus(
         handsFree = handsFree,
         speakReplies = speakReplies,
         wakeWord = wakeWord,
+        listeningCueSound = listeningCueSound,
     )
 
 fun WakeStatus.toWakePresentation(): LinkWakePresentation = LinkWakePresentation(

@@ -101,6 +101,7 @@ class LinkWakeToggleTest {
         microphoneGranted = MutableStateFlow(true),
         speakReplies = MutableStateFlow(false),
         wakeWordEnabled = MutableStateFlow(false),
+        listeningCueSound = MutableStateFlow(true),
         wakeStatus = wakeStatus,
         publicLinkActive = { false },
         targetKindOf = { null },
