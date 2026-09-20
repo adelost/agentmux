@@ -69,6 +69,8 @@ Read the views for what they are:
 
 ### Handoff stall rule
 
+For a requested queue/role/provider migration, read [the handoff checklist](references/handoff.md). Ordinary fleet checks do not need it.
+
 - `enqueued`, `pending`, retry counts = transport state, not a started worker.
 - Received = target acknowledgement plus live owner/process check.
 - Pre-submit job (`pending`, `pasting`, `drafted`): two failed attempts or ten

@@ -1,6 +1,6 @@
-> AMUX 1.25.77 model and context-cost policy, its evidence boundaries, and operator recovery. Delivery evidence is tracked in TASKS.md.
+> AMUX model and context-cost policy, its evidence boundaries, and operator recovery. Installed revision and live evidence are tracked in TASKS.md.
 
-> Review status, 2026-09-20: R1's immediate lease rejection and misleading start message are corrected in 1.25.77. Two outstanding maintenance/reporting findings remain in [the source review below](#review-2026-09-20-outstanding-controller-and-reporting-gaps). This is not an independent end-to-end release sign-off.
+> Review follow-through, 2026-09-20: R1 was corrected in 1.25.77; R2/R3 are corrected in 1.25.78 with repository-native red/green reproductions. The original review below remains as historical evidence. See the implementer follow-through for limits, not an independent end-to-end sign-off.
 
 # Authority and scope
 
@@ -24,16 +24,18 @@ The executable decisions use Skyvw/CircleKit's existing `@v1d/product-spec` DSL 
 
 # Context and sleep
 
-1. Idle compact: after 10 minutes without work, above 150,000 tokens, using the existing daytime controller and safe-idle checks. A completed or failed attempt does not repeat until new work provides a new context generation.
+1. Idle compact: after 10 minutes without work, above 100,000 tokens, using the existing daytime controller and safe-idle checks. A proven running process is required even for the warning. Percentages never authorize compact. A verified, failed or ambiguous attempt does not repeat until new work provides a new context generation, even if the result stays above budget.
 2. Sleep: retain the existing 24-hour threshold and conservative process-exit conditions. Dirty worktrees may block process exit but do not by themselves block idle compact. Current sleep support is Claude-only; this change does not silently promise Codex/Kimi process sleep.
-3. Cold wake: before a work prompt to a session idle at least 24 hours and above 150,000 tokens, require successful exact-session compact. Failure blocks automatic work and remains visible. A previously compacted, small session resumes normally.
+3. Cold wake: before a work prompt to a session idle at least 24 hours and above 100,000 tokens, require successful exact-session compact. Failure blocks automatic work and remains visible. A previously compacted session resumes without an automatic repeat, even if still above target.
 4. Dream: remains a memory digest with nightly maintenance as an additional check. An unavailable delivery lease may be retried without consuming a paid model attempt. A compact already submitted with an ambiguous outcome is not blindly repeated.
 
 The existing nighttime budget is 80,000 tokens after 30 minutes idle. That is a policy target, not a guaranteed compact output size.
 
-Runtime overrides: `AUTO_COMPACT_MAX_TOKENS` (default 150000), `AUTO_COMPACT_MIN_IDLE_MS` (default 600000), and `AMUX_COLD_CONTEXT_IDLE_MS` (default 86400000). The nighttime job retries a busy shared lease twice, two seconds apart, before reporting a skip. Explicit model changes wait for the shared lease for up to six minutes. These are lock checks, not model calls. Warm, cold and nightly maintenance reuse the same context-generation fence; no new work means no second automatic compact. That last sentence is the intended guarantee, not a complete implementation proof: the post-lease recheck gap in R2 below remains open.
+Runtime overrides: `AUTO_COMPACT_MAX_TOKENS` (default 100000), `AUTO_COMPACT_MIN_IDLE_MS` (default 600000), and `AMUX_COLD_CONTEXT_IDLE_MS` (default 86400000). The old `AUTO_COMPACT_WARN_THRESHOLD` percentage override no longer controls admission. Bulk `amux compact` uses absolute tokens too; a numeric percentage argument is refused with guidance to use `--min-tokens N`.
 
-Warm/cold compact admission currently supports Claude and Codex. Kimi keeps its prior behavior; no new verified-compaction or sleep guarantee is claimed for it.
+The nighttime job retries a busy shared lease twice, two seconds apart. Explicit model changes wait for the shared lease for up to six minutes. These are lock checks, not model calls. Warm, cold and nightly maintenance re-read the same persisted context-generation fence under the acquired lease. No new work means no second automatic compact. A verified 120k result above the 80k nighttime target stays visible as above-budget, not permission to retry.
+
+Warm/cold automatic compact admission supports Claude and Codex. Kimi engine/model choices remain unchanged; no automatic paid compact is issued without an implemented exact-receipt path. No verified-compaction or sleep guarantee is claimed for Kimi.
 
 # Cost evidence
 
@@ -118,3 +120,27 @@ The probe started with a same-session shared `FAILED` record, no new work and a 
 The operator's latest explicit per-pane selection is the target, not the earlier fleet migration default. Before reporting completion, bind the installed release and running heartbeat to the intended source SHA, verify the target model on the same session after the required compact, and establish the outcome of the already-pending request without replaying an ambiguously submitted prompt. Reuse existing receipts and passive observations wherever sufficient; additional quota-consuming proof is not authorized by this documentation review.
 
 Status on `5de489a`: **R1 corrected in source; R2 and R3 OPEN.** This change records feedback only. Host recovery is reported by the implementing agent but is not independently verified by this review.
+
+## Implementer follow-through, 2026-09-20
+
+The review above is preserved as historical evidence. PR #395 was merged as `bf0da29`. Follow-through in 1.25.78:
+
+- R2: nightly re-reads the shared persisted attempt under the session lease before an intent. Warm/cold admission does the same. Three repository-native cases use independent `createState` instances sharing one file and insert VERIFIED/FAILED/ATTEMPTING during lock waiting. Before: one extra simulated compact each. After: zero each.
+- R3: FAILED and ATTEMPTING remain failed/unverified with their cause and token evidence, and count as unresolved without another call. Two cases failed before with unresolved=0 and pass with unresolved=1. VERIFIED above budget remains `compacted-above-budget`, never permission to retry.
+- A 100% context with 90k or unknown tokens no longer warns; 100001 tokens at 1% does. A stopped skyvw:6-like process cannot receive a warning from old terminal text. All three regressions failed before correction. Missing process observation also fails closed.
+- Codex journals may retain `thread_settings_applied` after compaction removed `turn_context`. Reading that exact-pane event preserves recorded model evidence without borrowing a parent session. The compacted-journal regression failed before with model=null and now passes.
+- The shared-fence restart test also exercises a successful compact that leaves 120k tokens: no second automatic call, despite being over the new 100k daytime budget.
+
+These automated tests use synthetic logs/process doubles, not paid model calls. Source proof is not an installation or scheduled-nightly receipt. Live release/model/worker evidence is maintained in TASKS.md.
+
+## Shared DSL boundary and DX handoff
+
+AMUX imports the same CircleKit `@v1d/product-spec` decision-table API used by Skyvw. This does not mean identical package pins or identical consumer lint/format/build pipelines. At inspection AMUX pinned 0.3.54 and the canonical Skyvw checkout pinned 0.3.63; active product branches may be newer. AMUX executes JavaScript decisions; Skyvw also compiles TypeScript and platform projections. There is no completed state-machine debugger here. Cell ids and facts make decisions inspectable; locks, retries and provider IO remain controller code.
+
+Authoring DX belongs to [CircleKit PR #263](https://github.com/adelost/circlekit/pull/263), not a new AMUX DSL. Its canonical type/lint enforcement and shrink-only migration are acceptance criteria, not implemented behavior here. Pilot one family, preserve IR/wire ids or explicitly migrate the schema. Do not mix axis renaming with these controller fixes.
+
+## Handoff incident and correction
+
+A handoff transfers the job, its checkpoint and its automatic timers, not conversational access to the source. Sources keep their addresses and history and answer direct messages through normal wake behavior. Independently requested model changes still use compact-first controls.
+
+The implementer incorrectly parked eight source panes during this migration. That blocked Mattias's normal lsrc:0 message and displayed a misleading model-change warning. All eight handoff parks were removed and read back as unblocked. The additional permanent-retirement/redirect design and its two tests were removed before release. No new handoff state, router, channel remapping or availability restriction is included.
