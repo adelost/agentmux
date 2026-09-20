@@ -81,10 +81,14 @@ feature("Codex model visibility with missing or stale status", () => {
       parseCodexPaneReading(
         box().replace("gpt-6-astra (reasoning max)", "Luna Reserve (reasoning xhigh)"),
       ),
+      parseCodexPaneReading(
+        box().replace("gpt-6-astra (reasoning max)", "GPT-Reserve (reasoning xhigh)"),
+      ),
     ]],
-    then: ["both observed surfaces report gpt-reserve without using configuration", (readings) => {
+    then: ["the footer and both status labels report gpt-reserve without configuration", (readings) => {
       expect(readings.map(({ selected }) => selected)).toEqual([
         { model: "gpt-reserve", effort: "xhigh", source: "codex-footer" },
+        { model: "gpt-reserve", effort: "xhigh", source: "codex-status" },
         { model: "gpt-reserve", effort: "xhigh", source: "codex-status" },
       ]);
     }],
