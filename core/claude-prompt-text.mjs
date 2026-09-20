@@ -26,6 +26,12 @@ function promptContentText(content) {
   return texts.length ? texts.map((part) => part.text).join("\n") : null;
 }
 
+/** WHAT: Unwraps one complete Claude paste envelope. WHY: A received paste must acknowledge without accepting quoted substrings or mismatched IDs. */
+function unwrapPastedContent(text) {
+  const pasted = text.trim().match(/^<pasted_content id="([^"\r\n]+)">\s*([\s\S]*?)\s*<\/pasted_content id="\1">$/u);
+  return pasted ? pasted[2] : text;
+}
+
 /** WHAT: Extracts the comparable core of a prompt. WHY: Sender envelopes and Claude's paste rewrites must not hide a receipt. */
 export function normalizePrompt(text) {
   // Stripped from both sides: "[from agent:N]" envelopes, the voice-PWA
@@ -34,7 +40,7 @@ export function normalizePrompt(text) {
   // misses turns where one side gained decoration, and delivery receipts or
   // response extraction fall through to tmux scraping.
   if (!text) return "";
-  let s = String(text).replace(/\r\n?/g, "\n");
+  let s = unwrapPastedContent(String(text).replace(/\r\n?/g, "\n"));
   // Pasted image paths: Claude attaches some and keeps others as text, and
   // puts "[Image #N]" first, so both sides drop markers and image paths.
   s = s.replace(/\[Image #\d+\]/g, " ")
