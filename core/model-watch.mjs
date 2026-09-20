@@ -22,13 +22,14 @@ const normalizeModel = (model) => String(model || "").trim().toLowerCase();
 const normalizeEffort = (effort) => String(effort || "").trim().toLowerCase();
 
 /**
- * Comparable rank within a model family, or null for unknown strings.
- * Families never compare against each other (a pane keeps its harness);
- * callers treat cross-family or unknown as "lateral".
+ * WHAT: Maps known models and quota fallbacks to family-relative ranks.
+ * WHY: Keeps Reserve from silently passing the downgrade guard as an unknown model.
  */
 export function modelRank(model) {
   const m = normalizeModel(model);
   if (!m) return null;
+  // Reserve is the provider's explicit quota fallback, not an unknown peer.
+  if (m === "gpt-reserve") return { family: "gpt", score: 0 };
 
   const claude = Object.keys(CLAUDE_FAMILY).find((f) => m.includes(f));
   if (claude) {

@@ -1,5 +1,5 @@
 import { component, expect, feature } from "bdd-vitest";
-import { launchCodexWithPolicy } from "./codex-launch-policy.mjs";
+import { launchCodexWithPolicy, codexResumeEvidence } from "./codex-launch-policy.mjs";
 
 const fixture = (extra = {}) => {
   const events = [];
@@ -16,6 +16,17 @@ const fixture = (extra = {}) => {
 };
 
 feature("Codex wake cannot bypass compact-first model selection", () => {
+  component("resume observes Reserve instead of trusting an old Sol startup record", {
+    given: ["same-session provider fallback since startup", () => codexResumeEvidence({
+      sessionId: "session-a", remembered: {sessionId: "session-a", model: "gpt-5.6-sol"},
+      observed: {sessionId: "session-a", model: "gpt-reserve"},
+      maintenance: {sessionId: "session-a", status: "VERIFIED", cursor: {positions:{"/exact":42}}},
+    })],
+    then: ["latest model and existing receipt reach the launch policy", result => {
+      expect(result.previous.model).toBe("gpt-reserve");
+      expect(result.launchOptions.compactReceipt).toMatchObject({ok:true,sessionId:"session-a",compactBoundary:true});
+    }],
+  });
   component("a changed default compacts the old model before starting Sol", {
     given: ["a dormant Astra session selected for Sol", () => fixture()],
     when: ["waking its exact session", (ctx) => launchCodexWithPolicy(ctx)],
@@ -45,5 +56,24 @@ feature("Codex wake cannot bypass compact-first model selection", () => {
     given: ["the explicit /model command already compacted this session", () => fixture({ receipt: { ok: true, sessionId: "session-a" } })],
     when: ["performing its restart", (ctx) => launchCodexWithPolicy(ctx)],
     then: ["the target starts using that receipt", (_, ctx) => expect(ctx.events).toEqual(["launch:gpt-5.6-sol", "remember:gpt-5.6-sol"])],
+  });
+  component("a late exact compact receipt releases the earlier failed transition without another model call", {
+    given: ["compact completed after the earlier timeout", () => fixture({
+      blocked: { target: "gpt-5.6-sol", reason: "compact-boundary-missing" },
+      receipt: { ok: true, sessionId: "session-a" },
+    })],
+    when: ["a pending delivery retries after the new receipt", ctx => launchCodexWithPolicy(ctx)],
+    then: ["only the requested model launches", (_, ctx) =>
+      expect(ctx.events).toEqual(["launch:gpt-5.6-sol", "remember:gpt-5.6-sol"])],
+  });
+  component("another session's receipt cannot clear a failed transition", {
+    given: ["the receipt does not name this session", () => fixture({
+      blocked: { target: "gpt-5.6-sol", reason: "compact-boundary-missing" },
+      receipt: { ok: true, sessionId: "other-session" },
+    })],
+    when: ["an automatic retry is attempted", ctx => launchCodexWithPolicy(ctx).catch(e => e.message)],
+    then: ["nothing launches or spends compact quota", (error, ctx) => {
+      expect(error).toContain("compact-boundary-missing"); expect(ctx.events).toEqual([]);
+    }],
   });
 });

@@ -39,6 +39,13 @@ feature("modelRank — comparable within a family", () => {
 });
 
 feature("classifyModelChange — the warn/act decision", () => {
+  for (const model of ["gpt-5.6-sol", "gpt-6-astra"]) unit(`${model} to gpt-reserve is a quota fallback, not an unknown sidegrade`, {
+    when: ["the provider changes a requested model to Reserve", () => classifyModelChange(
+      { model, effort: "xhigh" }, { model: "gpt-reserve", effort: "xhigh" })],
+    then: ["the existing model-fallback guard sees the downgrade", change => {
+      expect(change.direction).toBe("downgrade"); expect(shouldStopPane(change)).toBe(true);
+    }],
+  });
   unit("quota drop gpt-5.6-sol max → gpt-5.5 is a downgrade", {
     given: ["the ai:3 incident", () => classifyModelChange(
       { model: "gpt-5.6-sol", effort: "max" },

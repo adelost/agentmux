@@ -1,6 +1,17 @@
 import { hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { codexLaunchDecision } from "../policies/context-cost.mjs";
 
+/** WHAT: Maps exact-session model and compact evidence to resume inputs. WHY: Prevents old remembered settings from hiding a later provider fallback. */
+export function codexResumeEvidence({ sessionId, observed, remembered, launch, maintenance }) {
+  return {
+    previous: observed?.sessionId === sessionId && observed?.model ? observed
+      : remembered?.sessionId === sessionId ? remembered : null,
+    launchOptions: { ...launch, compactReceipt: launch?.compactReceipt
+      || (maintenance?.status === "VERIFIED" && maintenance.sessionId === sessionId
+        ? { ...maintenance, ok: true, compactBoundary: true } : null) },
+  };
+}
+
 /** WHAT: Checks a compact receipt for the exact resumed session. WHY: Prevents another pane's compact from authorizing a model change. */
 export function validCodexCompactReceipt(receipt, sessionId) {
   if (!receipt?.ok || receipt.sessionId !== sessionId || !receipt.compactBoundary) return false;
@@ -21,8 +32,9 @@ export async function launchCodexWithPolicy({
   launch, compact, reset, verify, remember, recordBlocked,
   validReceipt = validCodexCompactReceipt,
 }) {
+  const verified = validReceipt(receipt, sessionId);
   const decision = codexLaunchDecision({ sessionId, previous, selected,
-    blocked: blocked?.target === selected.model && !retry, receipt: validReceipt(receipt, sessionId) });
+    blocked: blocked?.target === selected.model && !retry && !verified, receipt: verified });
   if (decision.values.action === "HOLD") throw new Error(`Codex model change blocked: ${decision.cell}: ${blocked?.reason || "previous model unknown"}`);
   try {
     if (decision.values.action === "COMPACT") {

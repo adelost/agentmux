@@ -6,6 +6,8 @@ import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi } from "./lib.mjs";
 import { TOOL_GUIDE_HINTS } from "./core/hints-tool-guide.mjs";
 import { FLEET_PROCESS_HINTS } from "./core/hints-fleet-process.mjs";
+import { contextMaintenanceAttempt } from "./core/context-maintenance.mjs";
+import { codexResumeEvidence } from "./core/codex-launch-policy.mjs";
 import { createTmuxAdapter } from "./core/tmux.mjs";
 import { ensureHeadlessWindow, settleTmuxWindowSize } from "./core/tmux-window-size.mjs";
 import { stripPaneChrome } from "./core/pane-chrome.mjs";
@@ -577,11 +579,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       });
     };
     if (decision.action === "fresh") {
-      // Codex creates its rollout identity only when the first prompt is
-      // submitted, not when the empty TUI opens. Fence that legitimate
-      // pre-rollout state before process creation; a later restart may retry
-      // the still-empty pane, while any discovered rollout becomes the exact
-      // resume authority above.
+      // First prompt creates the rollout. Fence the empty pre-rollout TUI;
+      // any subsequently discovered rollout is the exact resume authority.
       persistSession({ sessionId: null, status: "awaiting-first-rollout", startedAt: Date.now() });
     } else {
       persistSession({ ...remembered, sessionId: decision.sessionId, status: "ready", rolloutPath: discovered.path });
@@ -592,11 +591,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       launch, override: paneOverride, configured: agentConfig(name).panes?.[pane],
       previous: launch?.model || paneOverride ? null : getContextPercentByDialect(dir, "codex"),
     });
-    const previous = remembered?.sessionId === decision.sessionId && remembered?.model
-      ? remembered : getContextPercentByDialect(dir, "codex");
+    const { previous, launchOptions } = codexResumeEvidence({ sessionId: decision.sessionId, remembered, launch,
+      observed: getContextPercentByDialect(dir, "codex"),
+      maintenance: contextMaintenanceAttempt(state, name, pane, { sessionId: decision.sessionId }) });
     await startCodexProcess({
       t, wait, target, dir, profile, selected: override, previous,
-      remembered: remembered?.sessionId === decision.sessionId ? remembered : null, launchOptions: launch,
+      remembered: remembered?.sessionId === decision.sessionId ? remembered : null, launchOptions,
       sessionId: decision.action === "resume" ? decision.sessionId : null,
       compact: () => compactCodex(name, pane),
       ready: () => waitForCodexUiReady(target, name, pane), screen: () => captureScreen(name, pane),
