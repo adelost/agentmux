@@ -8,7 +8,7 @@ import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConf
 import { formatCatchupPreview } from "./core/catchup-format.mjs";
 import { shortModelName } from "./core/context.mjs";
 import { loadConfig } from "./cli/config.mjs";
-import { decideParkedSend, readParkState, unparkPane } from "./core/pane-park.mjs";
+import { blockedSendMessage, decideParkedSend, readParkState, unparkPane } from "./core/pane-park.mjs";
 import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
 import { readQuotaSnapshot } from "./core/quota-usage.mjs";
 import { formatQuotaSnapshot } from "./core/quota-format.mjs";
@@ -1032,15 +1032,15 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     // A normal message must not silently wake a pane on a downgraded model, but
     // the human may deliberately want the new model. Two-strike confirm: warn on
-    // the first brief, deliver + unpark on an explicit re-send.
+    // the first brief, deliver only the next regular message and unpark.
     if (!parsed) {
       const park = readParkState(mapping.name, pane);
       const key = `${mapping.name}:${pane}`;
       const decision = decideParkedSend({ park, warnedSinceMs: parkWarnedSince.get(key) ?? null });
       if (decision.action === "warn") {
         parkWarnedSince.set(key, decision.sinceMs);
-        await msg.reply(`⚠️ **${mapping.name}:${pane} är parkerad efter modellbyte** (${park.detail}). ` +
-          `Meddelandet skickades INTE. Skicka igen för att bekräfta och leverera ändå, eller kör \`/restore\` / \`//model\`.`);
+        await msg.reply(blockedSendMessage(key, park,
+          { surface: "discord", canSelectModel: isCodexPane(mapping, pane) }));
         return;
       }
       if (decision.action === "confirm") {
