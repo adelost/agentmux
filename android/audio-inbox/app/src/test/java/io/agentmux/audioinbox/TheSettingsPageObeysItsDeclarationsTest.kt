@@ -17,10 +17,12 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.up
 import com.adelost.designkit.ui.CircleActionTiming
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
+import com.adelost.designkit.ui.LocalCircleActionHostCost
 import com.adelost.designkit.ui.resolveCircleSurfaceLayout
 import io.agentmux.audioinbox.update.LinkReleaseCatalogs
 import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkui.LinkInteractionHost
+import io.agentmux.linkui.linkActionHostCosts
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
@@ -208,6 +210,7 @@ class TheSettingsPageObeysItsDeclarationsTest {
                     heightDp = 844f,
                     round = false,
                 ),
+                LocalCircleActionHostCost provides linkActionHostCosts.responsive,
             ) {
                 LinkInteractionHost {
                     Settings(graph)

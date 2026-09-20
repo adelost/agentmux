@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import com.adelost.designkit.ui.GraphiteTokens
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
+import com.adelost.designkit.ui.LocalCircleActionHostCost
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.designkit.ui.circleResolvedTiming
 import com.adelost.designkit.ui.resolveCircleSurfaceLayout
@@ -55,6 +56,7 @@ class LinkClearCueNativeTest {
         compose.setContent {
             CompositionLocalProvider(
                 LocalCircleSurfaceLayout provides resolveCircleSurfaceLayout(390f, 844f, false),
+                LocalCircleActionHostCost provides linkActionHostCosts.responsive,
                 LocalHapticFeedback provides haptics,
             ) {
                 Column(Modifier.fillMaxSize().background(GraphiteTokens.Canvas)) {

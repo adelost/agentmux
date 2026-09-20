@@ -1,7 +1,18 @@
 package io.agentmux.linkui
 
 import androidx.compose.runtime.Composable
+import com.adelost.designkit.ui.CircleActionHostCost
+import com.adelost.designkit.ui.CircleActionHostCosts
 import com.adelost.ringkit.ui.RingActionCueHost
+
+/**
+ * WHAT: Maps Link's responsive and exact-watch hosts to their measured touch costs.
+ * WHY: Keeps Android hardware from deciding whether a preview behaves like Phone or Wear.
+ */
+val linkActionHostCosts = CircleActionHostCosts(
+    responsive = CircleActionHostCost.NONE,
+    watchExact = CircleActionHostCost.WORN,
+)
 
 /**
  * Link's controls declare their own kind, so this host no longer decides for them.

@@ -15,9 +15,11 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.up
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
+import com.adelost.designkit.ui.LocalCircleActionHostCost
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.designkit.ui.resolveCircleSurfaceLayout
 import io.agentmux.linkui.linkClearConversationRow
+import io.agentmux.linkui.linkActionHostCosts
 import io.agentmux.linkui.product.generated.GeneratedLinkHistoryStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -58,6 +60,7 @@ class TheClearConversationShowsItsGateTest {
                     heightDp = 844f,
                     round = false,
                 ),
+                LocalCircleActionHostCost provides linkActionHostCosts.responsive,
                 LocalHapticFeedback provides haptics,
             ) {
                 PhoneRow(row)

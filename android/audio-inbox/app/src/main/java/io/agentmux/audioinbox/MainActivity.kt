@@ -22,6 +22,7 @@ import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import io.agentmux.linkui.AndroidLinkListeningCue
+import io.agentmux.linkui.linkActionHostCosts
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -113,6 +114,7 @@ class MainActivity : ComponentActivity() {
                 isWatchDevice = false,
                 state = preview,
                 onStateChange = host::update,
+                actionHostCosts = linkActionHostCosts,
             ) {
                 LinkPhoneScreen(
                     graph = productGraph,

@@ -16,6 +16,7 @@ import com.adelost.designkit.ui.CircleHostMode
 import com.adelost.designkit.ui.CircleHostPreviewState
 import com.adelost.designkit.ui.CircleHostSurface
 import io.agentmux.linkui.LinkInteractionHost
+import io.agentmux.linkui.linkActionHostCosts
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkAction
@@ -34,6 +35,10 @@ import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import kotlinx.coroutines.flow.MutableStateFlow
 
+/**
+ * WHAT: Builds the Wear Compose surface and its lifecycle-owned controllers.
+ * WHY: Keeps watch presentation setup separate from mailbox transport and recording state.
+ */
 class WearMainActivity : ComponentActivity() {
     private lateinit var controller: WearMailboxController
     private lateinit var productGraph: WearLinkProductGraph
@@ -91,6 +96,7 @@ class WearMainActivity : ComponentActivity() {
                     isWatchDevice = true,
                     state = CircleHostPreviewState(mode = CircleHostMode.WATCH_EXACT),
                     onStateChange = null,
+                    actionHostCosts = linkActionHostCosts,
                 ) {
                 LinkInteractionHost {
                     LinkWatchScreen(
