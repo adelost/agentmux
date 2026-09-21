@@ -1,12 +1,12 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.componentFamilies
-// Product declarations SHA-256: bc60e3a6743789c16dd3cd8c875d608813657a5e5f8338d29199e10921ec36bb
+// Product declarations SHA-256: 82fc5364686789e4273d775419659491d9602cf4d841b9672390ec453bfd1e08
 package io.agentmux.linkui.product.generated
 
 import com.adelost.designkit.ui.CircleSurfaceClass
 
 enum class GeneratedLinkHomeComponent(val id: GeneratedLinkComponentId) {
-    NAVIGATION_PAGE_HOST(GeneratedLinkComponentId.NAVIGATION_PAGE_HOST), TARGET_PICKER(GeneratedLinkComponentId.TARGET_PICKER), CAPTURE_TALK(GeneratedLinkComponentId.CAPTURE_TALK), CONVERSATION_LATEST(GeneratedLinkComponentId.CONVERSATION_LATEST), NAVIGATION_SETTINGS_ENTRY(GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY), WAKE_TOGGLE(GeneratedLinkComponentId.WAKE_TOGGLE), PLAYBACK_CONTROLS(GeneratedLinkComponentId.PLAYBACK_CONTROLS), CONVERSATION_COMPOSER(GeneratedLinkComponentId.CONVERSATION_COMPOSER)
+    NAVIGATION_PAGE_HOST(GeneratedLinkComponentId.NAVIGATION_PAGE_HOST), TARGET_PICKER(GeneratedLinkComponentId.TARGET_PICKER), CAPTURE_TALK(GeneratedLinkComponentId.CAPTURE_TALK), CONVERSATION_LATEST(GeneratedLinkComponentId.CONVERSATION_LATEST), NAVIGATION_SETTINGS_ENTRY(GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY), PREFERENCES_TOGGLES(GeneratedLinkComponentId.PREFERENCES_TOGGLES), WAKE_TOGGLE(GeneratedLinkComponentId.WAKE_TOGGLE), PLAYBACK_CONTROLS(GeneratedLinkComponentId.PLAYBACK_CONTROLS), CONVERSATION_COMPOSER(GeneratedLinkComponentId.CONVERSATION_COMPOSER)
 }
 enum class GeneratedLinkHomeRegion { HOST, CONTENT, CHROME, FOOTER, RAIL }
 
@@ -107,10 +107,19 @@ object GeneratedLinkHomeComponents {
                 required = true,
             ),
             GeneratedLinkHomeMount(
+                id = "preferences.toggles",
+                component = GeneratedLinkHomeComponent.PREFERENCES_TOGGLES,
+                region = GeneratedLinkHomeRegion.CONTENT,
+                order = 2,
+                priority = 0,
+                capacity = null,
+                required = true,
+            ),
+            GeneratedLinkHomeMount(
                 id = "wake.toggle",
                 component = GeneratedLinkHomeComponent.WAKE_TOGGLE,
                 region = GeneratedLinkHomeRegion.CONTENT,
-                order = 2,
+                order = 3,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -119,7 +128,7 @@ object GeneratedLinkHomeComponents {
                 id = "conversation.latest",
                 component = GeneratedLinkHomeComponent.CONVERSATION_LATEST,
                 region = GeneratedLinkHomeRegion.CONTENT,
-                order = 3,
+                order = 4,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -128,7 +137,7 @@ object GeneratedLinkHomeComponents {
                 id = "playback.controls",
                 component = GeneratedLinkHomeComponent.PLAYBACK_CONTROLS,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 4,
+                order = 5,
                 priority = 0,
                 capacity = null,
                 required = false,
@@ -137,7 +146,7 @@ object GeneratedLinkHomeComponents {
                 id = "conversation.composer",
                 component = GeneratedLinkHomeComponent.CONVERSATION_COMPOSER,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 5,
+                order = 6,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -146,7 +155,7 @@ object GeneratedLinkHomeComponents {
                 id = "capture.talk",
                 component = GeneratedLinkHomeComponent.CAPTURE_TALK,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 6,
+                order = 7,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -155,7 +164,7 @@ object GeneratedLinkHomeComponents {
                 id = "navigation.settings-entry",
                 component = GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY,
                 region = GeneratedLinkHomeRegion.CHROME,
-                order = 7,
+                order = 8,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -181,10 +190,19 @@ object GeneratedLinkHomeComponents {
                 required = true,
             ),
             GeneratedLinkHomeMount(
+                id = "preferences.toggles",
+                component = GeneratedLinkHomeComponent.PREFERENCES_TOGGLES,
+                region = GeneratedLinkHomeRegion.RAIL,
+                order = 2,
+                priority = 0,
+                capacity = null,
+                required = true,
+            ),
+            GeneratedLinkHomeMount(
                 id = "wake.toggle",
                 component = GeneratedLinkHomeComponent.WAKE_TOGGLE,
                 region = GeneratedLinkHomeRegion.RAIL,
-                order = 2,
+                order = 3,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -193,7 +211,7 @@ object GeneratedLinkHomeComponents {
                 id = "conversation.latest",
                 component = GeneratedLinkHomeComponent.CONVERSATION_LATEST,
                 region = GeneratedLinkHomeRegion.CONTENT,
-                order = 3,
+                order = 4,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -202,7 +220,7 @@ object GeneratedLinkHomeComponents {
                 id = "playback.controls",
                 component = GeneratedLinkHomeComponent.PLAYBACK_CONTROLS,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 4,
+                order = 5,
                 priority = 0,
                 capacity = null,
                 required = false,
@@ -211,7 +229,7 @@ object GeneratedLinkHomeComponents {
                 id = "conversation.composer",
                 component = GeneratedLinkHomeComponent.CONVERSATION_COMPOSER,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 5,
+                order = 6,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -220,7 +238,7 @@ object GeneratedLinkHomeComponents {
                 id = "capture.talk",
                 component = GeneratedLinkHomeComponent.CAPTURE_TALK,
                 region = GeneratedLinkHomeRegion.RAIL,
-                order = 6,
+                order = 7,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -229,7 +247,7 @@ object GeneratedLinkHomeComponents {
                 id = "navigation.settings-entry",
                 component = GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY,
                 region = GeneratedLinkHomeRegion.CHROME,
-                order = 7,
+                order = 8,
                 priority = 0,
                 capacity = null,
                 required = true,

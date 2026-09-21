@@ -34,6 +34,20 @@ test("the listening cue sound is one declared preference and one immediate contr
   );
 });
 
+test("Phone home mounts the existing preferences port for READ REPLIES only", () => {
+  const home = product.componentFamilies.find(({ screen }) => screen === "home");
+  assert.ok(home);
+  const preferenceSurfaces = home.family.trees
+    .filter(({ mounts }) => mounts.some(({ instance }) => instance === "preferences.toggles"))
+    .map(({ surface }) => surface);
+  assert.deepEqual(preferenceSurfaces, ["compact", "wide"]);
+  assert.deepEqual(
+    linkControls.filter(({ id }) => id === "home.speak-replies")
+      .map(({ title, timing }) => ({ title, timing })),
+    [{ title: "READ REPLIES", timing: "immediate" }],
+  );
+});
+
 test("the mandatory graph has no parallel list and one binding per data input", () => {
   assert.equal(product.schemaVersion, PRODUCT_SPEC_SCHEMA_VERSION);
   assert.equal(manifest.schemaVersion, NATIVE_BINDING_MANIFEST_SCHEMA_VERSION);

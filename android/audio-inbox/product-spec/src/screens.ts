@@ -4,9 +4,8 @@ import { linkComponentInstances } from "./components.js";
 const optional = { kind: "optional", fallback: "omit" } as const;
 
 /**
- * Pages and mounts, migrated one-to-one from the pre-graph component families.
- * The settings entry is chrome on every home surface; dev-host stays a
- * phone-only optional row wherever it was offered before.
+ * WHAT: Builds every Link screen's ordered component mounts per surface.
+ * WHY: Keeps host layout generated from one declaration.
  */
 export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
   linkComponentInstances,
@@ -26,6 +25,7 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
           { surface: "compact", mounts: [
             { instance: "navigation.page-host", region: "host" },
             { instance: "target.picker", region: "content" },
+            { instance: "preferences.toggles", region: "content" },
             { instance: "wake.toggle", region: "content" },
             { instance: "conversation.latest", region: "content" },
             { instance: "playback.controls", region: "footer", requirement: optional },
@@ -36,6 +36,7 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
           { surface: "wide", mounts: [
             { instance: "navigation.page-host", region: "host" },
             { instance: "target.picker", region: "rail" },
+            { instance: "preferences.toggles", region: "rail" },
             { instance: "wake.toggle", region: "rail" },
             { instance: "conversation.latest", region: "content" },
             { instance: "playback.controls", region: "footer", requirement: optional },

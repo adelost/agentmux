@@ -10,8 +10,8 @@ import org.junit.Test
 
 /**
  * The main page's wake row, held to what it says rather than to how it is built.
- * lsrc:0 M1 and M4, 2026-09-19: the row is titled by the phrase, its second line leads with the declared
- * phase word, and a wake word that is on but cannot hear is never shown as off.
+ * HOME names the feature, shows ON/OFF before the selected phrase and keeps an actual microphone
+ * blocker visible instead of presenting it as off.
  */
 class WakeRowTest {
     private fun wake(phase: WakePhase, detail: String? = null) = LinkWakePresentation(
@@ -19,23 +19,24 @@ class WakeRowTest {
     )
 
     @Test
-    fun everyPhaseLeadsWithItsDeclaredWord() {
-        WakePhase.entries.forEach { phase ->
-            val sub = wakeRowDetail(wake(phase), sendsInMs = null)
-            assertEquals(phase.name, io.agentmux.linkui.product.wakePhaseWord(phase), sub.substringBefore(" ·"))
+    fun everyEnabledPhaseLeadsWithOnUnlessItNeedsAction() {
+        WakePhase.entries.filterNot { it == WakePhase.OFF || it == WakePhase.BLOCKED }.forEach { phase ->
+            assertEquals("ON", wakeRowDetail(wake(phase), sendsInMs = null).substringBefore(" ·"))
         }
+        assertEquals("OFF", wakeRowDetail(wake(WakePhase.OFF), null).substringBefore(" ·"))
+        assertEquals("BLOCKED", wakeRowDetail(wake(WakePhase.BLOCKED), null).substringBefore(" ·"))
     }
 
     @Test
     fun theTwoTappableStatesSayWhichTapTheyTake() {
-        assertEquals("OFF · tap to listen", wakeRowDetail(wake(WakePhase.OFF), null))
-        assertEquals("LISTENING · tap to stop", wakeRowDetail(wake(WakePhase.LISTENING), null))
+        assertEquals("OFF · HEY JARVIS", wakeRowDetail(wake(WakePhase.OFF), null))
+        assertEquals("ON · HEY JARVIS", wakeRowDetail(wake(WakePhase.LISTENING), null))
     }
 
     @Test
     fun hearingCountsDownInWholeSecondsAndNeverShowsATrailingSeparator() {
-        assertEquals("HEARING · 3 s", wakeRowDetail(wake(WakePhase.CAPTURING), sendsInMs = 2_400))
-        assertEquals("HEARING", wakeRowDetail(wake(WakePhase.CAPTURING), sendsInMs = null))
+        assertEquals("ON · 3 s", wakeRowDetail(wake(WakePhase.CAPTURING), sendsInMs = 2_400))
+        assertEquals("ON · HEARING", wakeRowDetail(wake(WakePhase.CAPTURING), sendsInMs = null))
     }
 
     @Test

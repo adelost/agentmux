@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -93,8 +94,25 @@ internal fun LinkPhoneHome(
     val turns = linkConversationTurns(latest.turns, target.selectedTargetId)
     val selected = target.targets.firstOrNull { it.id == target.selectedTargetId }
     val listState = rememberLazyListState()
+    var followsLatest by remember(selected?.id) { mutableStateOf(true) }
+    LaunchedEffect(listState, selected?.id, turns.size) {
+        snapshotFlow {
+            Triple(
+                listState.isScrollInProgress,
+                listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index,
+                turns.size,
+            )
+        }.collect { (userScrolling, lastVisibleIndex, conversationItems) ->
+            followsLatest = updatedFollowLatest(
+                current = followsLatest,
+                userScrolling = userScrolling,
+                lastVisibleIndex = lastVisibleIndex,
+                conversationItems = conversationItems,
+            )
+        }
+    }
     LaunchedEffect(selected?.id, turns.size, turns.lastOrNull()?.replyText) {
-        if (turns.isNotEmpty()) listState.animateScrollToItem(turns.lastIndex)
+        if (turns.isNotEmpty() && followsLatest) listState.animateScrollToItem(turns.lastIndex)
     }
     BoxWithConstraints(Modifier.widthIn(max = 640.dp).fillMaxSize().imePadding()) {
         val compactEditing = maxHeight < 260.dp && WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -122,12 +140,24 @@ internal fun LinkPhoneHome(
                     GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> Unit
                     GeneratedLinkHomeComponent.TARGET_PICKER ->
                         PhoneRow(linkRecipientRow(target) { choosingRecipient = true })
-                    // Mattias 2026-09-19 asked to turn the wake word on and off "enklare ... på kanske
-                    // huvudsidan". One word for where it is, one tap for on or off, writing the same
-                    // preference Settings writes. Not the talk ring: a press there would fight it for the
-                    // microphone (decision 2026-09-14).
+                    GeneratedLinkHomeComponent.PREFERENCES_TOGGLES -> PhoneRow(
+                        title = "READ REPLIES",
+                        sub = if (preferences.speakReplies) "ON" else "OFF",
+                        icon = RingIcons.Speaker,
+                        semanticColor = if (preferences.speakReplies) null else {
+                            circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.INACTIVE)
+                        },
+                        press = LinkPress(GeneratedLinkControlTiming.HOME_SPEAK_REPLIES) {
+                            graph.onPreferencesToggle(
+                                LinkPreferenceToggleEvent(
+                                    LinkPreferenceKey.SPEAK_REPLIES,
+                                    !preferences.speakReplies,
+                                ),
+                            )
+                        },
+                    )
                     GeneratedLinkHomeComponent.WAKE_TOGGLE -> PhoneRow(
-                        title = wake.phrase.spoken.uppercase(),
+                        title = "WAKE WORD",
                         sub = wakeRowDetail(wake, captureSpec.wake.hearing?.sendsInMs),
                         // The declared phase glyph, the same four the status bar wears. Nothing is chosen
                         // here, BLOCKED included: it wears ATTENTION because the declaration says a phase
@@ -211,22 +241,24 @@ internal fun LinkPhoneHome(
     }
 }
 
-/**
- * The declared phase word first, then the one thing that word does not say. The row is titled by the
- * phrase, so the second line never repeats it.
- *
- * lsrc:0 M1, 2026-09-19: a row titled OFF under CHOOSE RECIPIENT does not say what is off, and the phrase
- * is exactly what a wearer has to say out loud. The blocked reason is the loop's own sentence, never a
- * guess made here, so the one place that knows why it is blocked is the only place that words it.
- */
-internal fun wakeRowDetail(wake: LinkWakePresentation, sendsInMs: Int?): String {
-    val word = wakePhaseWord(wake.phase)
-    val rest = when (wake.phase) {
-        WakePhase.OFF -> "tap to listen"
-        WakePhase.LISTENING -> "tap to stop"
-        // The countdown the talk ring draws as a digit, in words, for the row that has no ring.
-        WakePhase.CAPTURING -> sendsInMs?.let { "${(it + 999) / 1_000} s" }.orEmpty()
-        else -> wake.detail.orEmpty()
-    }
-    return if (rest.isBlank()) word else "$word · $rest"
+/** A new reply follows only while the reader is already following the end. */
+internal fun updatedFollowLatest(
+    current: Boolean,
+    userScrolling: Boolean,
+    lastVisibleIndex: Int?,
+    conversationItems: Int,
+): Boolean = if (!userScrolling) {
+    current
+} else {
+    conversationItems == 0 || (lastVisibleIndex ?: -1) >= conversationItems - 1
+}
+
+/** ON/OFF leads, the idle row names the phrase once, and live failure keeps the loop's own reason. */
+internal fun wakeRowDetail(wake: LinkWakePresentation, sendsInMs: Int?): String = when (wake.phase) {
+    WakePhase.OFF -> "OFF · ${wake.phrase.spoken.uppercase()}"
+    WakePhase.LISTENING -> "ON · ${wake.phrase.spoken.uppercase()}"
+    WakePhase.CAPTURING -> sendsInMs?.let { "ON · ${(it + 999) / 1_000} s" } ?: "ON · HEARING"
+    WakePhase.BLOCKED -> listOf(wakePhaseWord(wake.phase), wake.detail.orEmpty())
+        .filter(String::isNotBlank).joinToString(" · ")
+    else -> "ON · ${wakePhaseWord(wake.phase)}"
 }

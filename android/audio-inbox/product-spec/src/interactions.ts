@@ -51,6 +51,7 @@ export const linkControls: readonly LinkControlDeclaration[] = [
   { id: "dev.host-preview", title: "HOST PREVIEW", timing: "immediate", why: "Navigation." },
   { id: "dev.product-ports", title: "PRODUCT PORTS", timing: "immediate", why: "Navigation." },
   { id: "chrome.open-settings", title: "SETTINGS", timing: "immediate", why: "Navigation." },
+  { id: "home.speak-replies", title: "READ REPLIES", timing: "immediate", why: recovers("A home-page toggle, writing the same preference Settings writes") },
   { id: "home.wake-toggle", title: "<phrase>", timing: "immediate", why: recovers("A toggle on the home page, writing the same preference Settings writes") },
   { id: "home.voice-message", title: "VOICE MESSAGE", timing: "immediate", why: "Navigation: it opens the capture screen and sends nothing." },
   { id: "home.reply", title: "REPLY", timing: "immediate", why: "Navigation: it opens the reply and sends nothing." },

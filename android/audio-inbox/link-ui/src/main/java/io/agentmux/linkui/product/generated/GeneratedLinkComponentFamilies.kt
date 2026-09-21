@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.componentFamilies
-// Product declarations SHA-256: bc60e3a6743789c16dd3cd8c875d608813657a5e5f8338d29199e10921ec36bb
+// Product declarations SHA-256: 82fc5364686789e4273d775419659491d9602cf4d841b9672390ec453bfd1e08
 package io.agentmux.linkui.product.generated
 
 enum class GeneratedLinkComponentFamilyRef(val wireId: String) { LINK_HOME("link.home"), LINK_SETTINGS("link.settings"), LINK_DEV_HOST("link.dev-host"), LINK_WAKE_DEBUG("link.wake-debug"), LINK_WAKE_TRY("link.wake-try") }
@@ -21,7 +21,7 @@ object GeneratedLinkComponentFamilies {
         GeneratedLinkComponentFamilyBinding(
             route = GeneratedLinkPageId.HOME,
             family = GeneratedLinkComponentFamilyRef.LINK_HOME,
-            components = setOf(GeneratedLinkComponentId.NAVIGATION_PAGE_HOST, GeneratedLinkComponentId.TARGET_PICKER, GeneratedLinkComponentId.CAPTURE_TALK, GeneratedLinkComponentId.CONVERSATION_LATEST, GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY, GeneratedLinkComponentId.WAKE_TOGGLE, GeneratedLinkComponentId.PLAYBACK_CONTROLS, GeneratedLinkComponentId.CONVERSATION_COMPOSER),
+            components = setOf(GeneratedLinkComponentId.NAVIGATION_PAGE_HOST, GeneratedLinkComponentId.TARGET_PICKER, GeneratedLinkComponentId.CAPTURE_TALK, GeneratedLinkComponentId.CONVERSATION_LATEST, GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY, GeneratedLinkComponentId.PREFERENCES_TOGGLES, GeneratedLinkComponentId.WAKE_TOGGLE, GeneratedLinkComponentId.PLAYBACK_CONTROLS, GeneratedLinkComponentId.CONVERSATION_COMPOSER),
         ),
         GeneratedLinkComponentFamilyBinding(
             route = GeneratedLinkPageId.SETTINGS,

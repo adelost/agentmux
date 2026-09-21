@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM product-spec/src/interactions.ts
-// Product declaration SHA-256: 0c28340bd35049f9c5d55953cbd5a1365aba31c596040dd20d0a3dc6bc089a02
+// Product declaration SHA-256: 7914bdf5121d3b81cea81a545ce1fb72f6e64ad4f58e56b3722f345931f67851
 package io.agentmux.linkui.product.generated
 
 import com.adelost.designkit.ui.CircleActionTiming
@@ -65,6 +65,9 @@ object GeneratedLinkControlTiming {
 
     /** SETTINGS. Navigation. */
     val CHROME_OPEN_SETTINGS: CircleActionTiming = CircleActionTiming.IMMEDIATE
+
+    /** READ REPLIES. A home-page toggle, writing the same preference Settings writes, which ordinary use recovers. */
+    val HOME_SPEAK_REPLIES: CircleActionTiming = CircleActionTiming.IMMEDIATE
 
     /** <phrase>. A toggle on the home page, writing the same preference Settings writes, which ordinary use recovers. */
     val HOME_WAKE_TOGGLE: CircleActionTiming = CircleActionTiming.IMMEDIATE
