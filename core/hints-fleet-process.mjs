@@ -12,39 +12,23 @@
 // WHAT: Defines the fleet-process section of the generated agent policy. WHY: Keeps cross-project process rules in one layer so no per-repo copy can drift.
 export const FLEET_PROCESS_HINTS = `## Rule layers: who owns what
 
-Rules live in exactly one layer; a rule restated across layers WILL drift,
-and the stale copy becomes a trap. When you meet a duplicate, fix the
-split instead of obeying the older text.
+Keep each rule in one layer. Fix duplicate rules instead of obeying stale copies.
 
-1. **This file (amux layer):** fleet process: dispatch, ownership, merge
-   and review policy, communication discipline, memory logging. Synced
-   into every project by amux; edit it in the agentmux repo, never
-   per-project.
-2. **An optional work-board integration:** when the current repository exposes
-   its own workflow/API documents, those documents own ticket states and wire
-   mechanics. If no board is configured, every board-specific rule below is
-   simply inapplicable; AMUX core never assumes one exists.
-3. **Each code repo:** its own truths (data provenance, gates, commands,
-   deploy contracts) in the repo's \`AGENTS.md\` and linked docs. Repo
-   and workspace checkout restrictions remain authoritative; this template
-   does not override them or the user's current instructions.
+1. **This file (amux layer):** fleet process, ownership, delivery and memory
+   logging. Edit the shared source in agentmux, never its per-project copies.
+2. **An optional work-board integration:** repository workflow/API docs own
+   ticket states and wire mechanics. Without a configured board, board rules
+   are inapplicable; AMUX does not require one.
+3. **Each code repo:** \`AGENTS.md\` and linked docs own data, gates, commands
+   and deploy contracts. Current user instructions and repo/workspace checkout
+   restrictions remain authoritative; this template does not override them.
 
 ## Always lead with a recommendation
 
-When presenting options or asking "what should we do?":
-
-- **Don't** defer with "let me know which you prefer" / "up to you" / "whichever"
-- **Do** pick one and give a one-line reason tied to the user's history/goals
-- Template: \`→ Rekommenderar B. Varför: [specific tie-in]\`
-- In doubt: still pick, then add "säg till om du vill ha sanity check"
-
-Drift-prone: the rule sits in system-context but attention weights tunnas
-after many turns. The bridge's drift-guard sends you a \`[drift-guard]\`
-reminder roughly every 40 turns (or after a /compact). When you get one,
-re-read this section before responding.
-
-Manual refresh: \`amux remind <agent> -p <pane>\` (or \`--all\` / \`--stale\`)
-if you catch another pane drifting from this rule.
+Pick one option and explain it using the user's goals or evidence, not
+"up to you". State uncertainty when needed. Re-read this section on a
+\`[drift-guard]\` reminder. Manual refresh: \`amux remind <agent> -p <pane>\`
+(\`--all\` / \`--stale\` still require the staffing policy's scope).
 
 ## First line is the outcome
 
@@ -55,31 +39,15 @@ if you catch another pane drifting from this rule.
   LEFT: <what remains>
   If NOW does not serve GOAL, stop and say so.
 - Line 2 otherwise, only when one exists: your own next step, or the one decision you need from the reader.
-- Then details.
 - Nothing before line 1. No process, no skill names, no bracketed labels.
 - Keep replies, docs and comments concise. Use normal spacing and short paragraphs or bullets.
 - Comments explain intent, risks or constraints, not a work diary. Preserve exact requirements and quotes.
-- Why: compaction and amux done keep the head and drop the tail. Goal next to Now is what exposes drift.
-
-Bad: Jag använder orkestreringsskillen för att hitta rätt ansvarig innan jag pekar ut en orsak.
-Good: SUMMARY: Kompassfelet är fixat i v0.5.1144.
-GOAL: klockan väcker skärmen under fallet.
-NOW: verifierar väckningen på riktig klocka i kväll.
-LEFT: höjd-diffen.
 
 ## Root cause > symptoms
 
-Always fix the cause, not the symptom. Before patching, ask *why* it's happening.
-
-- ❌ Test fails → skip the test
-- ✅ Test fails → is the test wrong, or the code?
-- ❌ Hook blocks commit → \`--no-verify\`
-- ✅ Hook blocks → why? fix the underlying issue
-- ❌ Error in prod → wrap in try/catch and swallow
-- ✅ Error in prod → trace the path, fix the source
-
-Quick workaround is OK when deliberate (time pressure, experiment), but
-**call it out**: "patching surface, root cause is X, fix later."
+Find the cause before patching. Never skip a failing test, bypass a hook with
+\`--no-verify\`, or swallow an error to hide the symptom. A deliberate workaround
+must name the root cause and what remains unfixed.
 
 ## Verify before reporting
 
@@ -89,9 +57,7 @@ Especially on WSL 9p mounts where \`Path.exists()\` can lie. Combine e.g.
 
 ## You share this repo with other agents
 
-Multiple panes may be committing to the same repo in parallel, and so are
-past-you (from prior sessions). Git log is the ledger of who did what;
-treat it as your first source-of-truth when observing unexpected state.
+Check Git history before attributing unexpected shared-repo state to a bug.
 
 Before claiming "bug/race/data-loss" on any state anomaly:
 
@@ -101,12 +67,7 @@ Before claiming "bug/race/data-loss" on any state anomaly:
   git-timeline before hypothesizing.
 - \`grep\` commit-messages for keywords from the observed change.
 
-If a commit explains the anomaly → case closed, no bug. If no commit
-explains it → then consider race / data-loss hypotheses.
-
-Concrete pattern: a dedup commit landing between two deploys explains
-a "video count drop" without any race condition. Skipped git log +
-investigation spun up = noise to the user, wasted agent time.
+If an intentional commit explains the anomaly, do not invent a race or data loss.
 
 ## Multi-agent edit protocol
 
@@ -123,8 +84,7 @@ AMUX never authorizes extra checkouts against that policy.
    write, and flags them in the handoff or an explicitly requested review.
 3. **Version bumps must be unique:** before \`package.json\` bump, check
    \`git log --oneline -3\`: the version you're picking must NOT
-   already exist there. Same minor twice (e.g. two 1.16.2 commits)
-   confuses downstream tooling.
+   already exist there.
 
 Commit + push within 30 min of starting an edit. Long-running WIP that
 isn't in git is invisible to other agents.
@@ -143,9 +103,6 @@ engines run \`amux churn check\` before committing. The verdict demands
 reflection, not a rewrite: KEEP when the fixes came from constants, copy,
 upstream values or features; SPLIT or REWRITE when they came from the
 function's own branching or state. Do a small split in the same change.
-Why: measured 2026-09-16, churn predicted fixes (odds x2 per doubling after
-size) and complexity scores did not; only reading the fix history told a
-worthwhile rewrite from noise.
 
 ## Kommunikationsdisciplin
 

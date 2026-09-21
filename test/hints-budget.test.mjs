@@ -16,9 +16,13 @@ feature("bounded automatic instruction context", () => {
     }],
     then: ["both engines receive the complete policy without crowding out the repo", ([codex, claude]) => {
       expect(codex).toBe(claude);
+      expect(codex).toContain("<!-- amux-hints-end -->");
+      // Startup guidance must distinguish historical evidence from current code.
+      expect(codex).toMatch(/people, projects and decisions[\s\S]*amux search[\s\S]*--show N/u);
+      expect(codex).toMatch(/Current implementation[\s\S]*`rg` and Git[\s\S]*read the source/u);
+      expect(codex).toContain("If hits do not answer the question, refine the terms");
       // Byte budget, not a token estimate or a limit on user-owned operator tails.
       expect(Buffer.byteLength(codex, "utf8")).toBeLessThanOrEqual(16 * 1024);
-      expect(codex).toContain("<!-- amux-hints-end -->");
     }],
   });
 });

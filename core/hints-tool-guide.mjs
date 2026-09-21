@@ -2,9 +2,8 @@
 // crowding repository instructions out of an engine's startup context.
 export const TOOL_GUIDE_HINTS = `# agentmux
 
-Use installed \`amux --help\` and \`amux <cmd> --help\` for syntax; \`ax\` is
-an alias. This is an entry point, not an exhaustive manual. Load an applicable
-skill when needed; do not load every guide on startup.
+Use installed \`amux --help\` for commands and their supported help; \`ax\` is
+an alias. Load only the skills needed for the current task.
 
 ## Orient, then act
 
@@ -17,9 +16,12 @@ skill when needed; do not load every guide on startup.
   instructions and later replies before reviving a waiter. Unverified does not
   prove unfinished work. \`amux ps\` distinguishes configured/selected,
   historical and running model/context evidence.
-- \`amux search "specific terms"\`, then \`amux search --show N\`: retrieve
-  memory/history. Ranking is not authority: check sources, dates and later
-  corrections. Semantic/deep search is optional when ordinary retrieval misses.
+- Earlier people, projects and decisions: \`amux search "specific terms"\`,
+  then \`amux search --show N\`. Check original sources, dates and later
+  corrections; ranking is not authority. If hits do not answer the question, refine the terms
+  or use \`--semantic\`/\`--deep\`. Report remaining gaps instead of guessing.
+- Current implementation: use \`rg\` and Git in the relevant repository, then
+  read the source. Memory/history hits are not proof of current code.
 
 ## Send without corruption or duplicate execution
 
