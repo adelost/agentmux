@@ -1,0 +1,19 @@
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "intent": {
+      "type": "choice",
+      "choice": "agent_message",
+      "confidence": 0.9,
+      "probabilities": { "agent_message": 0.94, "amux_command": 0.03, "computer_action": 0.01, "unknown": 0.02 }
+    },
+    "target": {
+      "type": "choice",
+      "choice": "t0",
+      "confidence": 0.88,
+      "probabilities": { "t0": 0.94, "t1": 0.03, "unknown": 0.03 }
+    },
+    "needs_reasoning": { "type": "noul", "noul": 0.9 }
+  },
+  "usage": { "input_tokens": 0, "output_tokens": 0 }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "synthetic-review-001",
+  "text": "Kan kodgranskaren titta på senaste ändringen? Ändra inget och gör ingen deployment.",
+  "targets": [
+    { "id": "demo:review", "label": "Kodgranskare som läser ändringar och ger feedback" },
+    { "id": "demo:perf", "label": "Prestandaanalys av kod och tester" }
+  ],
+  "selectedTarget": "demo:review",
+  "reference": { "intent": "agent_message", "target": "demo:review" }
+}
