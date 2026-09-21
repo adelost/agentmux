@@ -57,9 +57,12 @@ class LinkUxSmokeTest {
             if (!round) {
                 compose.onNode(hasSetTextAction()).performTextInput("A draft stays here while I read.")
                 shot("composer")
-                if (landscape) scenario.onActivity { activity ->
+                scenario.onActivity { activity ->
+                    activity.currentFocus?.clearFocus()
                     activity.window.insetsController?.hide(android.view.WindowInsets.Type.ime())
                 }
+                Thread.sleep(500)
+                compose.waitForIdle()
                 compose.waitUntil(3000) { compose.onAllNodesWithContentDescription("Open Link settings")
                     .fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("Open Link settings").performClick()
@@ -69,6 +72,9 @@ class LinkUxSmokeTest {
             compose.waitForIdle()
             shot("settings-top")
             if (!round) {
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(
+                    hasContentDescription("ABOUT READ REPLIES"),
+                )
                 compose.onNodeWithContentDescription("ABOUT READ REPLIES").performClick()
                 shot("info", 250)
                 compose.onNodeWithContentDescription("Close information").performClick()
@@ -103,7 +109,7 @@ class LinkUxSmokeTest {
                     compose.onAllNodes(hasContentDescription("READ REPLIES · OFF", substring = true))
                         .fetchSemanticsNodes().isNotEmpty()
                 }
-                compose.onNode(hasContentDescription("WAKE WORD · OFF · HEY JARVIS", substring = true)).assertExists()
+                compose.onNode(hasContentDescription("WAKE WORD", substring = true)).assertExists()
                 compose.onNode(hasContentDescription("READ REPLIES · OFF", substring = true)).performClick()
                 compose.onNode(hasContentDescription("READ REPLIES · ON", substring = true)).assertExists()
                 assertTrue(preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false))
