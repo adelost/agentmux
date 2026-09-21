@@ -26,9 +26,11 @@ const CONFIG_PATH = runtimeAgentsPath();
 const LAST_FILE = resolve(process.env.HOME, ".config/agent/.last");
 const argv = process.argv.slice(2);
 const helpOnly = isDispatchHelp(argv);
+// Qwen is a bounded, config-reading command; never regenerate or start the tmux fleet.
+const qwenOnly = argv[0] === "qwen";
 
 // Syntax probes must also bypass config generation, not only the final handler.
-if (!helpOnly) {
+if (!helpOnly && !qwenOnly) {
   if (existsSync(configSources.agentmuxYaml.path) || existsSync(CONFIG_PATH)) {
     ensureRuntimeConfig({
       sourcePath: configSources.agentmuxYaml.path,
@@ -38,7 +40,7 @@ if (!helpOnly) {
   ensureConfig(CONFIG_PATH);
 }
 
-const tmuxCtx = helpOnly ? {} : createTmuxContext(SOCKET, CONFIG_PATH);
+const tmuxCtx = helpOnly || qwenOnly ? {} : createTmuxContext(SOCKET, CONFIG_PATH);
 const ctx = {
   ...tmuxCtx,
   configPath: CONFIG_PATH,
@@ -50,7 +52,11 @@ const ctx = {
 try {
   // Runtime config must exist before the command graph is evaluated: several
   // command modules intentionally snapshot environment-backed defaults.
-  if (argv[0] === "model") await (await import("../cli/model.mjs")).cmdModel(argv.slice(1), ctx);
+  if (qwenOnly) {
+    const { main } = await import("../experimental/qwen-code/cli.mjs");
+    process.exitCode = await main(argv.slice(1), { defaultConfigPath: configSources.agentmuxYaml.path });
+  }
+  else if (argv[0] === "model") await (await import("../cli/model.mjs")).cmdModel(argv.slice(1), ctx);
   else if (argv[0] === "restarter") {
     await (await import("../cli/restarter.mjs")).cmdRestarter(argv.slice(1), ctx);
   }
