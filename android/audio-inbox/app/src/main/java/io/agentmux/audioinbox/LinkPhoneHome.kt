@@ -46,6 +46,7 @@ import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.linkConnectionLabel
 import io.agentmux.linkui.LinkCaptureControl
 import io.agentmux.linkui.LinkConversationTurn
+import io.agentmux.linkui.linkAudioPreferences
 import io.agentmux.linkui.linkConversationTurns
 import io.agentmux.linkui.LinkRecipientPicker
 import io.agentmux.linkui.activeTurnId
@@ -79,6 +80,12 @@ internal fun LinkPhoneHome(
     val savedReplyAudio by graph.savedReplyAudio.collectAsStateWithLifecycle()
     val wake by graph.wakeToggleModel.collectAsStateWithLifecycle()
     val preferences by graph.preferences.collectAsStateWithLifecycle()
+    val readReplies = linkAudioPreferences(
+        preferences.speakReplies,
+        preferences.handsFree,
+        preferences.wakeWord,
+        preferences.listeningCueSound,
+    ).first { it.key == LinkPreferenceKey.SPEAK_REPLIES }
     var choosingRecipient by remember { mutableStateOf(false) }
     if (choosingRecipient) {
         LinkRecipientPicker(
@@ -141,17 +148,17 @@ internal fun LinkPhoneHome(
                     GeneratedLinkHomeComponent.TARGET_PICKER ->
                         PhoneRow(linkRecipientRow(target) { choosingRecipient = true })
                     GeneratedLinkHomeComponent.PREFERENCES_TOGGLES -> PhoneRow(
-                        title = "READ REPLIES",
-                        sub = if (preferences.speakReplies) "ON" else "OFF",
+                        title = readReplies.title,
+                        sub = readReplies.stateLabel,
                         icon = RingIcons.Speaker,
-                        semanticColor = if (preferences.speakReplies) null else {
+                        semanticColor = if (readReplies.enabled) null else {
                             circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.INACTIVE)
                         },
                         press = LinkPress(GeneratedLinkControlTiming.HOME_SPEAK_REPLIES) {
                             graph.onPreferencesToggle(
                                 LinkPreferenceToggleEvent(
                                     LinkPreferenceKey.SPEAK_REPLIES,
-                                    !preferences.speakReplies,
+                                    !readReplies.enabled,
                                 ),
                             )
                         },

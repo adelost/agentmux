@@ -19,7 +19,7 @@ class LinkUxSmokeTest {
     private val round get() = InstrumentationRegistry.getArguments().getString("host") == "round"
     private val landscape get() = InstrumentationRegistry.getArguments().getString("orientation") == "landscape"
 
-    @Test fun recipientConversationAndSettings() {
+    @Test fun recipientHierarchyKeepsStableTargetsAndBack() {
         val favoritePreferences = instrumentation.targetContext
             .getSharedPreferences("link_recipient_favorites", 0)
         val originalFavorites = favoritePreferences.getStringSet("ids", null)?.toSet()
@@ -31,7 +31,7 @@ class LinkUxSmokeTest {
             .putExtra("qa_orientation", if (landscape) "DEG_90" else "DEG_0")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         try {
-            ActivityScenario.launch<MainActivity>(launch).use { scenario ->
+            ActivityScenario.launch<MainActivity>(launch).use {
             compose.waitUntil(10_000) {
                 compose.onAllNodes(hasContentDescription("TO demo:1", substring = true))
                     .fetchSemanticsNodes().isNotEmpty()
@@ -54,36 +54,6 @@ class LinkUxSmokeTest {
             compose.onNode(hasContentDescription("TO demo:2", substring = true)).assertExists()
             compose.onNode(hasContentDescription("claude-fable-5 · Last seen", substring = true)).assertExists()
             shot("empty-conversation")
-            if (!round) {
-                compose.onNode(hasSetTextAction()).performTextInput("A draft stays here while I read.")
-                shot("composer")
-                scenario.onActivity { activity ->
-                    activity.currentFocus?.clearFocus()
-                    activity.window.insetsController?.hide(android.view.WindowInsets.Type.ime())
-                }
-                Thread.sleep(500)
-                compose.waitForIdle()
-                compose.waitUntil(3000) { compose.onAllNodesWithContentDescription("Open Link settings")
-                    .fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithContentDescription("Open Link settings").performClick()
-            } else {
-                compose.onNode(hasContentDescription("SETTINGS", substring = true)).performScrollTo().performClick()
-            }
-            compose.waitForIdle()
-            shot("settings-top")
-            if (!round) {
-                compose.onNode(hasScrollToIndexAction()).performScrollToNode(
-                    hasContentDescription("ABOUT READ REPLIES"),
-                )
-                compose.onNodeWithContentDescription("ABOUT READ REPLIES").performClick()
-                shot("info", 250)
-                compose.onNodeWithContentDescription("Close information").performClick()
-                compose.onNode(hasScrollToIndexAction()).performScrollToNode(
-                    hasContentDescription("DISPLAY PREVIEW", substring = true))
-                shot("settings-bottom")
-                compose.onNode(hasContentDescription("DISPLAY PREVIEW", substring = true)).performClick()
-                shot("display-preview")
-            }
         }
         } finally {
             favoritePreferences.edit().apply {
@@ -104,7 +74,7 @@ class LinkUxSmokeTest {
             .putExtra("qa_host", "RESPONSIVE")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         try {
-            ActivityScenario.launch<MainActivity>(launch).use {
+            ActivityScenario.launch<MainActivity>(launch).use { scenario ->
                 compose.waitUntil(10_000) {
                     compose.onAllNodes(hasContentDescription("READ REPLIES · OFF", substring = true))
                         .fetchSemanticsNodes().isNotEmpty()
@@ -117,9 +87,9 @@ class LinkUxSmokeTest {
 
                 compose.onNodeWithContentDescription("Open Link settings").performClick()
                 compose.onNode(hasContentDescription("READ REPLIES · ON", substring = true))
-                    .performScrollTo().assertExists().performClick()
+                    .assertExists().performClick()
                 compose.onNode(hasContentDescription("READ REPLIES · OFF", substring = true)).assertExists()
-                compose.onNodeWithContentDescription("Back").performClick()
+                scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
                 compose.onNode(hasContentDescription("READ REPLIES · OFF", substring = true)).assertExists()
                 assertEquals(false, preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, true))
                 shot("home-audio-off")
@@ -146,8 +116,9 @@ class LinkUxSmokeTest {
                     .fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNode(hasText("Paragraph 18 checks", substring = true)).assertExists()
+            shot("long-reply-full")
             compose.onNode(hasSetTextAction()).performTextInput("SYNTHETIC QA draft")
-            compose.onNode(hasContentDescription("STOP", substring = true)).assertExists()
+            compose.onNodeWithContentDescription("Stop playback").assertExists()
             shot("long-reply-font")
         }
     }

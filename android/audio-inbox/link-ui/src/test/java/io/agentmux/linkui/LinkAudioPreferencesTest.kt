@@ -15,6 +15,11 @@ class LinkAudioPreferencesTest {
         )
         assertEquals("LISTENING SOUND", preferences.last().title)
         assertEquals(false, preferences.last().enabled)
+        assertEquals("OFF", preferences.first().stateLabel)
+        assertEquals(
+            "ON",
+            linkAudioPreferences(true, false, false, false).first().stateLabel,
+        )
         preferences.forEach { preference ->
             val lines = preference.hint.lines()
             assertTrue("${preference.title}: ${lines.size} lines", lines.size in 1..2)

@@ -3,6 +3,7 @@ package io.agentmux.linkui
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.generated.GeneratedLinkChromeActions
+import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -32,6 +33,8 @@ class LinkMenuActionsTest {
         assertEquals(declared.a11y, phone.contentDescription)
         assertEquals(declared.rowKey, wear.key)
         assertSame(phone.icon, wear.icon)
+        assertEquals(GeneratedLinkControlTiming.CHROME_OPEN_SETTINGS, phone.timing)
+        assertEquals(GeneratedLinkControlTiming.CHROME_OPEN_SETTINGS, wear.actionTiming)
 
         phone.onTap()
         assertNotNull(wear.onTap)
