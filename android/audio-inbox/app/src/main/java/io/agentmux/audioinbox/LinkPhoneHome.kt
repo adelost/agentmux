@@ -1,19 +1,18 @@
 package io.agentmux.audioinbox
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,12 +21,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.ringkit.ui.PhoneScreenHeader
+import com.adelost.ringkit.ui.IconRing
 import io.agentmux.linkcore.LinkPreferenceKey
 import io.agentmux.linkui.product.LinkPreferenceToggleEvent
 import io.agentmux.linkui.product.LinkWakePresentation
@@ -101,6 +103,7 @@ internal fun LinkPhoneHome(
     val turns = linkConversationTurns(latest.turns, target.selectedTargetId)
     val selected = target.targets.firstOrNull { it.id == target.selectedTargetId }
     val listState = rememberLazyListState()
+    val keyboardEditing = platformImeVisible()
     var followsLatest by remember(selected?.id) { mutableStateOf(true) }
     LaunchedEffect(listState, selected?.id, turns.size) {
         snapshotFlow {
@@ -118,11 +121,10 @@ internal fun LinkPhoneHome(
             )
         }
     }
-    LaunchedEffect(selected?.id, turns.size, turns.lastOrNull()?.replyText) {
+    LaunchedEffect(selected?.id, turns.size, turns.lastOrNull()?.replyText, keyboardEditing) {
         if (turns.isNotEmpty() && followsLatest) listState.animateScrollToItem(turns.lastIndex)
     }
-    BoxWithConstraints(Modifier.widthIn(max = 640.dp).fillMaxSize().imePadding()) {
-        val compactEditing = maxHeight < 260.dp && WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    Box(Modifier.widthIn(max = 640.dp).fillMaxSize().imePadding()) {
         Column(
             verticalArrangement = Arrangement.spacedBy(4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -130,7 +132,7 @@ internal fun LinkPhoneHome(
         ) {
             val tree = GeneratedLinkHomeComponents.resolve(LocalCircleSurfaceLayout.current.surfaceClass)
             val route = GeneratedLinkRoutes.descriptor(LinkRoute.HOME)
-            if (!compactEditing) PhoneScreenHeader(
+            if (!keyboardEditing) PhoneScreenHeader(
                 title = route.title,
                 onBack = null,
                 backLabel = "Back",
@@ -145,16 +147,19 @@ internal fun LinkPhoneHome(
                 when (component) {
                     GeneratedLinkHomeComponent.NAVIGATION_PAGE_HOST,
                     GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> Unit
-                    GeneratedLinkHomeComponent.TARGET_PICKER ->
+                    GeneratedLinkHomeComponent.TARGET_PICKER -> if (!keyboardEditing) {
                         PhoneRow(linkRecipientRow(target) { choosingRecipient = true })
-                    GeneratedLinkHomeComponent.PREFERENCES_TOGGLES -> PhoneRow(
-                        title = readReplies.title,
+                    }
+                    GeneratedLinkHomeComponent.PREFERENCES_TOGGLES -> IconRing(
+                        label = readReplies.title,
                         sub = readReplies.stateLabel,
                         icon = RingIcons.Speaker,
+                        active = readReplies.enabled,
                         semanticColor = if (readReplies.enabled) null else {
                             circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.INACTIVE)
                         },
-                        press = LinkPress(GeneratedLinkControlTiming.HOME_SPEAK_REPLIES) {
+                        actionTiming = GeneratedLinkControlTiming.HOME_SPEAK_REPLIES,
+                        onTap = {
                             graph.onPreferencesToggle(
                                 LinkPreferenceToggleEvent(
                                     LinkPreferenceKey.SPEAK_REPLIES,
@@ -163,21 +168,18 @@ internal fun LinkPhoneHome(
                             )
                         },
                     )
-                    GeneratedLinkHomeComponent.WAKE_TOGGLE -> PhoneRow(
-                        title = "WAKE WORD",
+                    GeneratedLinkHomeComponent.WAKE_TOGGLE -> IconRing(
+                        label = "WAKE WORD",
                         sub = wakeRowDetail(wake, captureSpec.wake.hearing?.sendsInMs),
-                        // The declared phase glyph, the same four the status bar wears. Nothing is chosen
-                        // here, BLOCKED included: it wears ATTENTION because the declaration says a phase
-                        // that needs a person to do something looks unlike the ones that only report
-                        // (lsrc:0 M2 and its follow-up, 2026-09-19).
                         icon = ImageVector.vectorResource(wakeGlyphDrawable(wake.phase)),
-                        // A wake word that is off is not doing anything, and the row says so quietly.
+                        active = preferences.wakeWord,
                         semanticColor = if (wake.phase == WakePhase.OFF) {
                             circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.INACTIVE)
                         } else {
                             null
                         },
-                        press = LinkPress(GeneratedLinkControlTiming.HOME_WAKE_TOGGLE) {
+                        actionTiming = GeneratedLinkControlTiming.HOME_WAKE_TOGGLE,
+                        onTap = {
                             graph.onWakeToggle(
                                 LinkPreferenceToggleEvent(
                                     LinkPreferenceKey.WAKE_WORD,
@@ -231,7 +233,7 @@ internal fun LinkPhoneHome(
                         ),
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                     )
-                    GeneratedLinkHomeComponent.CAPTURE_TALK -> if (!compactEditing) LinkCaptureControl(
+                    GeneratedLinkHomeComponent.CAPTURE_TALK -> if (!keyboardEditing) LinkCaptureControl(
                         spec = captureSpec,
                         recordedBytes = recordedBytes,
                         recordedLevel = recordedLevel,
@@ -246,6 +248,25 @@ internal fun LinkPhoneHome(
             }
         }
     }
+}
+
+/** The root-window fact stays observable even after Compose consumes IME padding. */
+@Composable
+private fun platformImeVisible(): Boolean {
+    val view = LocalView.current
+    var visible by remember(view) { mutableStateOf(false) }
+    DisposableEffect(view) {
+        val update = {
+            visible = ViewCompat.getRootWindowInsets(view)
+                ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+        }
+        val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener(update)
+        val observer = view.viewTreeObserver
+        update()
+        observer.addOnGlobalLayoutListener(listener)
+        onDispose { if (observer.isAlive) observer.removeOnGlobalLayoutListener(listener) }
+    }
+    return visible
 }
 
 /** A new reply follows only while the reader is already following the end. */

@@ -13,19 +13,51 @@ import io.agentmux.linkui.product.generated.GeneratedLinkHomeTree
 @Composable
 internal fun LinkHomeRegions(
     tree: GeneratedLinkHomeTree,
-    content: @Composable ColumnScope.(GeneratedLinkHomeComponent) -> Unit,
+    content: @Composable (GeneratedLinkHomeComponent) -> Unit,
 ) {
     val (rail, body) = tree.orderedMounts.partition { it.region == GeneratedLinkHomeRegion.RAIL }
     if (rail.isEmpty()) {
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-            body.forEach { content(it.component) }
+            groupedHomeComponents(body.map { it.component }, content)
         }
     } else {
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(0.30f), horizontalAlignment = Alignment.CenterHorizontally) {
-                rail.forEach { content(it.component) }
+                groupedHomeComponents(rail.map { it.component }, content)
             }
-            Column(Modifier.weight(0.70f)) { body.forEach { content(it.component) } }
+            Column(Modifier.weight(0.70f)) {
+                groupedHomeComponents(body.map { it.component }, content)
+            }
+        }
+    }
+}
+
+/** WHAT: Groups the two declared audio controls on one Phone quick-control row. WHY: Keeps conversation height primary. */
+@Composable
+private fun ColumnScope.groupedHomeComponents(
+    components: List<GeneratedLinkHomeComponent>,
+    content: @Composable (GeneratedLinkHomeComponent) -> Unit,
+) {
+    var index = 0
+    while (index < components.size) {
+        val component = components[index]
+        val next = components.getOrNull(index + 1)
+        if (
+            component == GeneratedLinkHomeComponent.PREFERENCES_TOGGLES &&
+            next == GeneratedLinkHomeComponent.WAKE_TOGGLE
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) { content(component) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) { content(next) }
+            }
+            index += 2
+        } else {
+            content(component)
+            index += 1
         }
     }
 }

@@ -2,6 +2,10 @@ package io.agentmux.audioinbox
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.view.KeyEvent
+import android.view.WindowInsets
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ActivityScenario
@@ -110,16 +114,62 @@ class LinkUxSmokeTest {
             .putExtra("qa_playback", "active")
             .putExtra("qa_host", "RESPONSIVE")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        ActivityScenario.launch<MainActivity>(launch).use {
-            compose.waitUntil(10_000) {
-                compose.onAllNodes(hasText("Paragraph 18 checks", substring = true))
+        ActivityScenario.launch<MainActivity>(launch).use { scenario ->
+            compose.waitUntil(5_000) {
+                imeVisible(scenario) || compose.onAllNodesWithContentDescription("HOLD TO TALK")
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onNode(hasText("Paragraph 18 checks", substring = true)).assertExists()
-            shot("long-reply-full")
+            if (imeVisible(scenario)) {
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            }
+            compose.waitUntil(5_000) { !imeVisible(scenario) }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithContentDescription("HOLD TO TALK")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.waitUntil(10_000) {
+                compose.onAllNodes(hasText("FINAL SYNTHETIC PARAGRAPH", substring = true))
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNode(hasText("FINAL SYNTHETIC PARAGRAPH", substring = true)).assertExists()
+            assertRoundControl(
+                "hold to talk",
+                compose.onNodeWithContentDescription("HOLD TO TALK").assertIsDisplayed()
+                    .fetchSemanticsNode().boundsInRoot,
+            )
+            shot("long-reply-full", 2_000)
             compose.onNode(hasSetTextAction()).performTextInput("SYNTHETIC QA draft")
-            compose.onNodeWithContentDescription("Stop playback").assertExists()
-            shot("long-reply-font")
+            compose.waitUntil(5_000) { imeVisible(scenario) }
+
+            val composer = compose.onNode(hasSetTextAction()).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val pause = compose.onNodeWithContentDescription("Pause playback").assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            val stop = compose.onNodeWithContentDescription("Stop playback").assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            val send = compose.onNodeWithContentDescription("Send message").assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            compose.onAllNodesWithContentDescription("HOLD TO TALK").assertCountEquals(0)
+            assertRoundControl("pause", pause)
+            assertRoundControl("stop", stop)
+            assertRoundControl("send", send)
+
+            val conversation = compose.onNode(hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
+            val viewportBottom = minOf(composer.top, pause.top, stop.top)
+            assertReadableReplyPixels(conversation.top, viewportBottom, "while the keyboard is open")
+            shot("long-reply-font", 2_000)
+
+            repeat(8) {
+                compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp() }
+                compose.waitForIdle()
+            }
+            val finalBounds = longReplyBounds()
+            assertTrue(
+                "the final synthetic paragraph never reached the readable viewport: $finalBounds / $viewportBottom",
+                finalBounds.bottom <= viewportBottom + 2f && finalBounds.bottom > 0f,
+            )
+            assertTrue("scrolling the reply dismissed the keyboard", imeVisible(scenario))
+            assertReadableReplyPixels(conversation.top, viewportBottom, "at the final paragraph")
+            shot("long-reply-end")
         }
     }
 
@@ -260,5 +310,52 @@ class LinkUxSmokeTest {
             "ux-${if (round) "round" else if (landscape) "wide" else "phone"}-$name.png")
         path.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         image.recycle()
+    }
+
+    private fun imeVisible(scenario: ActivityScenario<MainActivity>): Boolean {
+        var visible = false
+        scenario.onActivity { activity ->
+            visible = activity.window.decorView.rootWindowInsets
+                ?.isVisible(WindowInsets.Type.ime()) == true
+        }
+        return visible
+    }
+
+    private fun longReplyBounds(): Rect = compose
+        .onNode(hasText("FINAL SYNTHETIC PARAGRAPH", substring = true))
+        .fetchSemanticsNode().boundsInRoot
+
+    private fun assertRoundControl(name: String, bounds: Rect) {
+        val ratio = bounds.width / bounds.height
+        assertTrue("$name was deformed to $bounds", bounds.width >= 44f && ratio in 0.90f..1.10f)
+    }
+
+    private fun assertReadableReplyPixels(viewportTop: Float, viewportBottom: Float, state: String) {
+        val bounds = longReplyBounds()
+        val image = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        try {
+            val left = bounds.left.toInt().coerceIn(0, image.width)
+            val right = bounds.right.toInt().coerceIn(left, image.width)
+            val top = maxOf(bounds.top, viewportTop).toInt().coerceIn(0, image.height)
+            val bottom = minOf(bounds.bottom, viewportBottom).toInt().coerceIn(top, image.height)
+            assertTrue("no readable reply viewport $state: $bounds / $viewportBottom", bottom - top >= 32)
+            var readable = 0
+            var readableRows = 0
+            for (y in top until bottom) {
+                var rowPixels = 0
+                for (x in left until right) {
+                    val pixel = image.getPixel(x, y)
+                    if (Color.red(pixel) > 110 && Color.green(pixel) > 110 && Color.blue(pixel) > 110) {
+                        readable += 1
+                        rowPixels += 1
+                    }
+                }
+                if (rowPixels >= 20) readableRows += 1
+            }
+            assertTrue("reply text had only $readable readable pixels $state", readable >= 200)
+            assertTrue("reply text covered only $readableRows image rows $state", readableRows >= 8)
+        } finally {
+            image.recycle()
+        }
     }
 }

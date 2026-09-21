@@ -100,6 +100,7 @@ internal fun phoneActivePreviewState(playbackActive: Boolean, scenario: String? 
                     repeat(18) { index ->
                         append("Paragraph ${index + 1} checks readable wrapping at larger system text without clipping. ")
                     }
+                    append("FINAL SYNTHETIC PARAGRAPH.")
                 },
             )
         })
