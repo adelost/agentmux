@@ -3232,7 +3232,7 @@ export async function dispatch(argv, ctx) {
       const { flags } = parseFlags(rest.slice(1), {
         dry: "boolean", json: "boolean", max: "number", workspace: "string",
         reportDaily: "boolean", "report-daily": "boolean", compacted: "number",
-        p: "string", pane: "string",
+        p: "string", pane: "string", publish: "string",
       });
       if (flags["report-daily"]) flags.reportDaily = true;
       return cmdMemory(ctx, subcommand, flags);
@@ -3240,7 +3240,7 @@ export async function dispatch(argv, ctx) {
 
     case "search": {
       const { flags, positional } = parseFlags(rest, {
-        max: "number", show: "string", context: "number",
+        max: "number", show: "string", context: "number", raw: "boolean", workspace: "string",
         source: "string", fast: "boolean", deep: "boolean", semantic: "boolean", reindex: "boolean", help: "boolean", h: "boolean",
       });
       return cmdSearch(ctx, positional.join(" "), flags);

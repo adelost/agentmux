@@ -42,6 +42,7 @@ import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.LinkRouteOpenEvent
 import io.agentmux.linkui.product.LinkUpdateCommandEvent
 import com.adelost.designkit.ui.CircleActionTiming
+import com.adelost.designkit.ui.circleResolvedTiming
 import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponent
@@ -152,7 +153,12 @@ internal fun LinkPhoneSettings(
                         )
                     }
                     GeneratedLinkSettingsComponent.PREFERENCES_TOGGLES -> {
-                        linkAudioPreferences(preferences.speakReplies, preferences.handsFree, preferences.wakeWord).forEach { preference ->
+                        linkAudioPreferences(
+                            preferences.speakReplies,
+                            preferences.handsFree,
+                            preferences.wakeWord,
+                            preferences.listeningCueSound,
+                        ).forEach { preference ->
                             item("${mount.id}.${preference.key}") {
                                 // The wake word's toggle says what it is listening for, so the page needs
                                 // no status row of its own (lsrc:0 S1, 2026-09-19). The labels are the
@@ -177,7 +183,7 @@ internal fun LinkPhoneSettings(
                                     icon = LinkNativeBindings.requireIcon(
                                         if (preference.key == LinkPreferenceKey.WAKE_WORD) "record" else "speaker",
                                     ),
-                                    actionTiming = linkPreferenceTiming(preference.key),
+                                    timing = circleResolvedTiming(linkPreferenceTiming(preference.key)),
                                     modifier = phoneRowModifier(),
                                 )
                             }
@@ -195,7 +201,7 @@ internal fun LinkPhoneSettings(
                                     LinkWakePhraseChoice.choose(context, WakePhrases.offered.first { wakePhraseLabel(it) == label })
                                 },
                                 icon = LinkNativeBindings.requireIcon("record"),
-                                actionTiming = GeneratedLinkControlTiming.SETTINGS_WAKE_PHRASE,
+                                timing = circleResolvedTiming(GeneratedLinkControlTiming.SETTINGS_WAKE_PHRASE),
                                 modifier = phoneRowModifier(),
                             )
                         }
@@ -310,4 +316,5 @@ private fun linkPreferenceTiming(key: LinkPreferenceKey): CircleActionTiming = w
     LinkPreferenceKey.WAKE_WORD -> GeneratedLinkControlTiming.SETTINGS_WAKE_WORD
     LinkPreferenceKey.SPEAK_REPLIES -> GeneratedLinkControlTiming.SETTINGS_SPEAK_REPLIES
     LinkPreferenceKey.HANDS_FREE -> GeneratedLinkControlTiming.SETTINGS_HANDS_FREE
+    LinkPreferenceKey.LISTENING_CUE_SOUND -> GeneratedLinkControlTiming.SETTINGS_LISTENING_CUE_SOUND
 }

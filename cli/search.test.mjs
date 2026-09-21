@@ -6,6 +6,41 @@ import { vi } from "vitest";
 import { cmdSearch } from "./search.mjs";
 
 feature("search CLI contract", () => {
+  component("a natural question retrieves the original answer paragraph", {
+    given: ["a current memory note, not a matching full question", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-search-answer-"));
+      const configPath = join(root, "config.yaml");
+      writeFileSync(configPath, JSON.stringify({ search: { roots: [
+        { name: "memory", path: root, glob: "*.md", semantic: true },
+      ] } }));
+      writeFileSync(join(root, "notes.md"), "# Vardagen\n\nNär jag städade hjälpte ljudboken. Social kontakt minskade ensamheten.\n");
+      writeFileSync(join(root, "events.jsonl"), "");
+      return { root, configPath };
+    }],
+    when: ["asking and opening the first source", async ({ root, configPath }) => {
+      const previous = process.env.AMUX_EVENTS_PATH;
+      process.env.AMUX_EVENTS_PATH = join(root, "events.jsonl");
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await cmdSearch({ configPath }, "Vad hjälpte mig när jag städade och kände mig ensam?", {
+          workspace: root, show: "1", max: 3,
+        }, { statePath: join(root, "result.json") });
+        return output.mock.calls.flat().join("\n");
+      } finally {
+        output.mockRestore();
+        if (previous === undefined) delete process.env.AMUX_EVENTS_PATH;
+        else process.env.AMUX_EVENTS_PATH = previous;
+      }
+    }],
+    then: ["the actual helpful actions and original source are returned", (text, { root }) => {
+      try {
+        expect(text).toContain("ljudboken");
+        expect(text).toContain("Social kontakt minskade ensamheten");
+        expect(text).toContain(join(root, "notes.md"));
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+  });
+
   unit("help is handled before config access", {
     when: ["requesting help without a CLI context", async () => {
       const output = vi.spyOn(console, "log").mockImplementation(() => {});

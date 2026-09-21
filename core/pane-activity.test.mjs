@@ -3,7 +3,16 @@ import { it, vi } from "vitest";
 import { latestConversationActivityMs } from "./pane-activity.mjs";
 
 feature("pane conversation activity", () => {
-  unit("an older real turn wins over a fresh housekeeping mtime", {
+  unit("idle time starts at the last reply", {
+    when: ["a two-hour job has just finished", () => latestConversationActivityMs("/pane", "codex", {
+      readers: { codex: () => ({ jsonlFile: "/session.jsonl", turns: [{
+        timestamp: "2026-09-20T10:00:00Z", endTimestamp: "2026-09-20T12:00:00Z", isComplete: true,
+      }] }) },
+      stat: () => ({ size: 100, mtimeMs: Date.parse("2026-09-20T12:00:01Z") }),
+    })],
+    then: ["the end of the work starts the idle clock", value => expect(value).toBe(Date.parse("2026-09-20T12:00:00Z"))],
+  });
+  unit("housekeeping does not reset idle time", {
     given: ["one real turn and a freshly touched journal", () => ({
       readers: { claude: () => ({
         turns: [{ timestamp: "2026-07-20T10:00:00.000Z" }],

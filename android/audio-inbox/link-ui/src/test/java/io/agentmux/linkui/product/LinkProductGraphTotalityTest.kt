@@ -99,10 +99,28 @@ class LinkProductGraphTotalityTest {
         }
     }
 
+    @Test
+    fun listeningCueSoundFlowsThroughTheExistingPreferencesPort() {
+        val cueSound = MutableStateFlow(true)
+        val graph = graph(
+            state = MutableStateFlow(LinkState()),
+            sinks = LinkProductSinks({}, {}, {}, {}, {}, {}, {}, {}),
+            cueSound = cueSound,
+        )
+        try {
+            assertEquals(true, graph.preferences.value.listeningCueSound)
+            cueSound.value = false
+            assertEquals(false, graph.preferences.value.listeningCueSound)
+        } finally {
+            graph.close()
+        }
+    }
+
     private fun graph(
         state: MutableStateFlow<LinkState>,
         sinks: LinkProductSinks,
         clock: () -> Long = { 0L },
+        cueSound: MutableStateFlow<Boolean> = MutableStateFlow(true),
     ) = LinkProductGraph(
         processScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         state = state,
@@ -112,6 +130,7 @@ class LinkProductGraphTotalityTest {
         microphoneGranted = MutableStateFlow(false),
         speakReplies = MutableStateFlow(false),
         wakeWordEnabled = MutableStateFlow(false),
+        listeningCueSound = cueSound,
         wakeStatus = MutableStateFlow(io.agentmux.wakeword.WakeStatus()),
         publicLinkActive = { false },
         targetKindOf = { null },

@@ -53,12 +53,28 @@ transfer it to managed background ownership.
 ```bash
 amux search "restart WSL"
 amux search --show 2
+amux search "previous decision" --raw # original lexical search only
 amux search "old raw pane detail" --deep
 amux search "recovery contract" --semantic
 amux search --reindex
 ```
 
-Lexical search over memory and the durable ledger is the fast, current default.
+Source-bound notes in `memory/topics/`, when published, provide a compact
+orientation layer alongside lexical memory and durable-ledger results. `--raw`
+omits it; `amux memory topics --json` shows each note's state and deciding DSL
+cell. Topic expansion revalidates both page and original sources. See [memory](memory.md).
+
+When there is no exact Markdown phrase match, the same command also ranks
+current Markdown paragraphs from configured curated (`semantic: true`) roots.
+This uses local word matching with inflections, headings and BM25-style scores,
+not a database or an embedding call. Exclusions remain in force; topic files
+cannot enter through this original-source path. Exact receipts and validated
+topics retain their existing priority. `--raw` also omits paragraph ranking.
+`--show N` checks the original file hash before returning the bounded paragraph;
+if the file changed, search again. A relevant passage is evidence, not an
+automatic answer or proof that every later correction has been found. A new
+query reads current sources, without waiting for the semantic index rebuild.
+
 `--deep` adds the much larger raw session archives. Result state is isolated per
 terminal or tmux pane, so one agent cannot replace another agent's `--show N`
 list. `--semantic` is explicit because loading the embedding layer is slower;

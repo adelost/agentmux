@@ -132,7 +132,7 @@ Usage:
   agent memory context            Dated memory references, no diary text (--json, -p agent:pane)
   agent memory lint               Structured memory lint (--json, exit 1 on warnings)
   agent memory compact --dry      Preview old daily-file backlog (automatic model rewrite disabled)
-  agent search "term"             Fast lexical search of memory + ledger; --show N expands
+  agent search "term"             Source-bound topics + memory/ledger; --show N expands, --raw omits topics
     --deep                        Include large raw session archives
     --semantic                    Opt into slower semantic search (index age is always shown)
     --reindex                     Rebuild the semantic index explicitly

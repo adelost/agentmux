@@ -16,7 +16,7 @@ The executable decisions use Skyvw/CircleKit's existing `@v1d/product-spec` DSL 
 
 - This migration selects Sol for the existing Codex panes. Claude and Kimi retain their engines and models.
 - A later explicit pane model selection is durable. Restart resumes that selection and the exact session, without resetting it to the fleet default.
-- A model change compacts the same session on its previous model, verifies a new compact boundary, then launches the selected model and verifies the live selection.
+- A model change requires a verified compact boundary for the same session, with no subsequent user work. Reuse that proof when present; otherwise compact on the previous model before launching the selected model. Verify the live selection. Selecting the already-active model and effort is a no-op, not another compact or restart.
 - Failed or unverified compact blocks the transition. Repeated delivery retries cannot repeat a failed paid compact automatically.
 - A new work prompt cannot proceed on an unknown or different live Codex model.
 - Dormant panes undergo the guarded transition when next needed. They are not all awakened merely to update a setting.
@@ -24,14 +24,20 @@ The executable decisions use Skyvw/CircleKit's existing `@v1d/product-spec` DSL 
 
 # Context and sleep
 
-1. Idle compact: after 10 minutes without work, above 100,000 tokens, using the existing daytime controller and safe-idle checks. A proven running process is required even for the warning. Percentages never authorize compact. A verified, failed or ambiguous attempt does not repeat until new work provides a new context generation, even if the result stays above budget.
+## Idle compact, latest decision
+
+- One quiet hour and over 100k tokens. The task need not be finished.
+- Keep the session and history. Never interrupt an active model turn.
+- New activity cancels the warning. No repeated attempt without new work.
+
+1. Idle compact: after one quiet hour, above 100,000 tokens. Unfinished tasks are allowed. A running engine and safe idle input are required. Idle time starts at the last reply, not the original request. Percentages never authorize compact. No repeated attempt without new work, including after restart.
 2. Sleep: retain the existing 24-hour threshold and conservative process-exit conditions. Dirty worktrees may block process exit but do not by themselves block idle compact. Current sleep support is Claude-only; this change does not silently promise Codex/Kimi process sleep.
 3. Cold wake: before a work prompt to a session idle at least 24 hours and above 100,000 tokens, require successful exact-session compact. Failure blocks automatic work and remains visible. A previously compacted session resumes without an automatic repeat, even if still above target.
 4. Dream: remains a memory digest with nightly maintenance as an additional check. An unavailable delivery lease may be retried without consuming a paid model attempt. A compact already submitted with an ambiguous outcome is not blindly repeated.
 
-The existing nighttime budget is 80,000 tokens after 30 minutes idle. That is a policy target, not a guaranteed compact output size.
+The nighttime target remains 80,000 tokens, now after one quiet hour by default. It is not a guaranteed output size.
 
-Runtime overrides: `AUTO_COMPACT_MAX_TOKENS` (default 100000), `AUTO_COMPACT_MIN_IDLE_MS` (default 600000), and `AMUX_COLD_CONTEXT_IDLE_MS` (default 86400000). The old `AUTO_COMPACT_WARN_THRESHOLD` percentage override no longer controls admission. Bulk `amux compact` uses absolute tokens too; a numeric percentage argument is refused with guidance to use `--min-tokens N`.
+Runtime overrides: `AUTO_COMPACT_MAX_TOKENS` (default 100000), `AUTO_COMPACT_MIN_IDLE_MS` (default 3600000), and `AMUX_COLD_CONTEXT_IDLE_MS` (default 86400000). The old `AUTO_COMPACT_WARN_THRESHOLD` percentage override no longer controls admission. Bulk `amux compact` uses absolute tokens too; a numeric percentage argument is refused with guidance to use `--min-tokens N`.
 
 The nighttime job retries a busy shared lease twice, two seconds apart. Explicit model changes wait for the shared lease for up to six minutes. These are lock checks, not model calls. Warm, cold and nightly maintenance re-read the same persisted context-generation fence under the acquired lease. No new work means no second automatic compact. A verified 120k result above the 80k nighttime target stays visible as above-budget, not permission to retry.
 
@@ -48,6 +54,14 @@ Do not claim that compact always adds exactly 80k tokens, that every cache has e
 The tmux delivery lease remains per session because pane delivery can zoom the shared window. Changing it to per pane without removing that shared effect is unsafe.
 
 # Verification and recovery
+
+## Duplicate model command incident, 2026-09-20
+
+Discord command `1551293166517362689` (`/model astra`, claw:3) was processed through Gateway and later REST recovery. Attachment preparation reset its completed intake record to `assets_ready`, allowing the same command to execute again. The exact session `019f5ffa-acf8-7703-8d71-34516b5da774` records real compact boundaries at 17:54:21Z, 18:05:26Z and 18:07:01Z, with no user work between them. These are not duplicate UI notices. Token billing for those operations was not measured.
+
+The 1.25.82 correction keeps `completed` terminal across preparation, late downloads, failure callbacks and restart. Model commands check the live selection before paid work. A matching model/effort does nothing; a real change reuses exact-session proof only when no new user work invalidates it. Receipt lookup occurs after taking the shared lease. Missing, foreign or stale proof still requires compact before switching. CLI and Discord distinguish all three outcomes.
+
+Five regressions failed before the fix. Targeted provider-mocked checks cover Gateway/REST/restart replay, late completion/failure, stale historical model, lock-wait receipts, effort changes and receipt invalidation. They make zero real model calls. No new state store, handoff restriction or DSL syntax is introduced. This closes the reproduced replay path, not a claim of exactly-once external effects across every possible crash.
 
 Unit/component tests create synthetic log files or mock the process/provider boundary. They do not invoke a model, start real coding sessions or consume AI quota. Real `/compact` checks are separate and must name the pane and receipt.
 

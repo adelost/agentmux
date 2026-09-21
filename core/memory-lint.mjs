@@ -4,6 +4,7 @@ import {
 import { spawnSync } from "child_process";
 import { basename, join, relative } from "path";
 import { dailyPolicyFor, loadMemoryPolicy, localDateKey } from "./memory-policy.mjs";
+import { inspectTopics } from "./memory-topics.mjs";
 
 const DAILY_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
 const TEMPLATE_BY_TAG = {
@@ -322,6 +323,12 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
       `nightly digest missing (${dreamGap.time}): ${dreamGap.reason}`);
   }
 
+  try {
+    for (const topic of inspectTopics(root)) {
+      if (topic.state !== "READY") add(topic.state === "SUPERSEDED" ? "info" : "warning", `topic_${topic.state.toLowerCase()}`,
+        topic.path, `${topic.cell}${topic.reason ? `: ${topic.reason}` : ""}`);
+    }
+  } catch (error) { add("warning", "topic_unavailable", join(memoryDir, "topics"), error.message); }
   const warningCount = findings.filter((finding) => finding.severity === "warning").length;
   const infoCount = findings.length - warningCount;
   return {

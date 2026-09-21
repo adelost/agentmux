@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM product-spec/src/contracts.ts
-// Product declaration SHA-256: 994066c4527b0e5f37f24e090950bb146092d4fb6b5b202623aacfa154eda2ed
+// Product declaration SHA-256: 2d68351e9225d875f88b845843a65cd2a9b942563de1d261ec7bf604577ab4ea
 package io.agentmux.linkui.product.generated
 
 /** Contract `link.captured-turn`. */
@@ -40,4 +40,5 @@ data class GeneratedLinkPreferencesStatus(
     val handsFree: Boolean,
     val speakReplies: Boolean,
     val wakeWord: Boolean,
+    val listeningCueSound: Boolean,
 )

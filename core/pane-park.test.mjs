@@ -180,3 +180,52 @@ feature("blockedSendMessage", () => {
     }],
   });
 });
+
+feature("blocked send evidence and engine-safe recovery", () => {
+  const park = { sinceMs: 0, detail: "operator pause" };
+
+  unit("labels an absent reason instead of inventing one", {
+    when: ["formatting a pause without recorded detail", () =>
+      blockedSendMessage("project:3", { ...park, detail: "" }, { now: 300_000 })],
+    then: ["the cause is explicitly unknown", (text) =>
+      expect(text).toContain("Recorded reason: not recorded")],
+  });
+
+  unit("preserves the recorded UTF-8 reason", {
+    when: ["formatting a non-English recorded reason", () =>
+      blockedSendMessage("project:3", { ...park, detail: "paus för åäö" }, { now: 300_000 })],
+    then: ["the evidence is unchanged", (text) => expect(text).toContain("paus för åäö")],
+  });
+
+  unit("CLI confirms without suggesting a Codex-only model command", {
+    when: ["formatting a blocked CLI send with no engine qualification", () =>
+      blockedSendMessage("project:3", park, { now: 300_000, surface: "cli" })],
+    then: ["the recorded cause and universal force override are shown", (text) => {
+      expect(text).toMatch(/^Message not sent to project:3:/);
+      expect(text).toContain("Recorded reason: operator pause");
+      expect(text).toContain("--force");
+      expect(text).not.toContain("amux model");
+      expect(text).not.toMatch(/fallback|downgrad|modell/);
+    }],
+  });
+
+  unit("Discord confirms the next message without promising replay or model control", {
+    when: ["formatting recovery for an unqualified engine", () =>
+      blockedSendMessage("project:3", park, { surface: "discord", canSelectModel: false })],
+    then: ["only the engine-neutral recovery is shown", (text) => {
+      expect(text).toContain("Sending another regular message to project:3");
+      expect(text).toContain("The blocked message is not replayed.");
+      expect(text).not.toContain("//model");
+      expect(text).not.toContain("amux model");
+    }],
+  });
+
+  unit("Discord names model selection only for a qualified Codex pane", {
+    when: ["formatting recovery for Codex", () =>
+      blockedSendMessage("project:3", park, { surface: "discord", canSelectModel: true })],
+    then: ["the existing pane-local Codex command is shown", (text) => {
+      expect(text).toContain(".3 //model <model>");
+      expect(text).not.toContain("--force");
+    }],
+  });
+});

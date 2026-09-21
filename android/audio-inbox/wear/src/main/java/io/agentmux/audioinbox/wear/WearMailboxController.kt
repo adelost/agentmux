@@ -20,6 +20,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import io.agentmux.linkui.AndroidLinkListeningCue
 
 internal class WearMailboxController(
     context: Context,
@@ -31,6 +32,7 @@ internal class WearMailboxController(
     private val ledger = LinkStateLedger(initialState) { }
     private val work = Executors.newScheduledThreadPool(2)
     private val recorder = WearVoiceRecorder(context.applicationContext)
+    private val listeningCue = AndroidLinkListeningCue(context) { false }
     private val generation = AtomicLong()
     private val spokenTurns = mutableSetOf<String>()
     private var polling: ScheduledFuture<*>? = null
@@ -115,6 +117,7 @@ internal class WearMailboxController(
             dispatch(LinkAction.Capture(CapturePhase.FAILED))
             return false
         }
+        listeningCue.listeningStarted()
         dispatch(LinkAction.Capture(CapturePhase.LISTENING, capture.startedAtMs))
         return true
     }
@@ -165,6 +168,7 @@ internal class WearMailboxController(
 
     fun cancelCapture() {
         recorder.cancel()
+        listeningCue.close()
         dispatch(LinkAction.Capture(CapturePhase.IDLE))
     }
 

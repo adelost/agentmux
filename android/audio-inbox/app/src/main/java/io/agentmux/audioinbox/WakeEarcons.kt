@@ -8,7 +8,6 @@ internal class WakeEarcons : AutoCloseable {
     private val tones = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
     private val quiet = ToneGenerator(AudioManager.STREAM_MUSIC, 35)
 
-    fun heard() = tones.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
     fun sent() = tones.startTone(ToneGenerator.TONE_PROP_ACK, 150)
     fun thinking() = quiet.startTone(ToneGenerator.TONE_PROP_BEEP, 60)
     fun failed() = tones.startTone(ToneGenerator.TONE_PROP_NACK, 200)

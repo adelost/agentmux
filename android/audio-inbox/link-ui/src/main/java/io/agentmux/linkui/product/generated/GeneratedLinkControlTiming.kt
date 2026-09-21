@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM product-spec/src/interactions.ts
-// Product declaration SHA-256: 79bff45a85816f38bbdb2cd2a3637f3e5739b00cb7705f621e4c3b6217d59f10
+// Product declaration SHA-256: 0c28340bd35049f9c5d55953cbd5a1365aba31c596040dd20d0a3dc6bc089a02
 package io.agentmux.linkui.product.generated
 
 import com.adelost.designkit.ui.CircleActionTiming
@@ -26,6 +26,9 @@ object GeneratedLinkControlTiming {
 
     /** HANDS FREE. A toggle, which ordinary use recovers. */
     val SETTINGS_HANDS_FREE: CircleActionTiming = CircleActionTiming.IMMEDIATE
+
+    /** LISTENING SOUND. A toggle; haptic stays on, which ordinary use recovers. */
+    val SETTINGS_LISTENING_CUE_SOUND: CircleActionTiming = CircleActionTiming.IMMEDIATE
 
     /** SENSITIVITY. Navigation: it opens the wake-try page. */
     val SETTINGS_SENSITIVITY: CircleActionTiming = CircleActionTiming.IMMEDIATE

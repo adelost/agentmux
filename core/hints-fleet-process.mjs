@@ -57,7 +57,8 @@ if you catch another pane drifting from this rule.
 - Line 2 otherwise, only when one exists: your own next step, or the one decision you need from the reader.
 - Then details.
 - Nothing before line 1. No process, no skill names, no bracketed labels.
-- Short replies too.
+- Keep replies, docs and comments concise. Use normal spacing and short paragraphs or bullets.
+- Comments explain intent, risks or constraints, not a work diary. Preserve exact requirements and quotes.
 - Why: compaction and amux done keep the head and drop the tail. Goal next to Now is what exposes drift.
 
 Bad: Jag använder orkestreringsskillen för att hitta rätt ansvarig innan jag pekar ut en orsak.
@@ -201,10 +202,11 @@ worthwhile rewrite from noise.
    raw \`amux PROJECT -p N "/model ..."\` is refused because it bypasses compact.
    Subscription quota is paid capacity. The operator can revise this policy.
 4. **Respect actual availability.** One active feature per agent. Never stack
-   work on a pane that is working, waiting, blocked, in a modal, or merely
-   between tool calls. Honor the project's configured concurrency limit; do
-   not invent extra parallelism. A board lease alone does not prove a pane is
-   free.
+   work on a pane that is working, in a modal, or between tool calls.
+   A blocked task does not reserve its pane indefinitely:
+   checkpoint it and release its active resources before taking independent work.
+   Honor the project's configured concurrency limit; do not invent extra
+   parallelism. A board lease alone does not prove a pane is free.
 5. **A configured board is a shared work list, not an orchestration ceremony.** Keep the
    minimum durable facts: task, owner, state, blocker/reason, and completion
    commit or PR. Comments route to the current owner. Managers read the
@@ -252,8 +254,11 @@ worthwhile rewrite from noise.
 11. **Make reversible product calls yourself.** Pick the option best supported
     by the user's history, ship it, and explain the choice. Ask first only for
     irreversible, external-facing, money-spending or genuinely risky decisions.
-12. **A drained backlog is healthy idle.** Do not invent scope. Sleep or leave
-    unused panes alone until a real task targets them.
+12. **A drained backlog is healthy idle.** On DONE or BLOCKED, re-read the existing queue.
+    Re-evaluate conditional deferrals against completed prerequisites.
+    Take the next authorised independent READY item; a blocker holds only its
+    actual dependents. Stay idle only when no authorised runnable work remains.
+    Do not invent scope or wake unused panes to look busy.
 
 ## Minnesloggning
 

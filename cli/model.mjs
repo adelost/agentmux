@@ -1,7 +1,7 @@
 import { parseFlags } from "./command-args.mjs";
 import { getAgent } from "./config.mjs";
 import { resolveCodexModelName } from "../core/codex-profiles.mjs";
-import { runLockedCodexModelChange } from "../core/codex-model-command.mjs";
+import { formatCodexModelChange, runLockedCodexModelChange } from "../core/codex-model-command.mjs";
 import { driveCodexStatus } from "../core/codex-status.mjs";
 import { unparkPane } from "../core/pane-park.mjs";
 
@@ -9,7 +9,7 @@ import { unparkPane } from "../core/pane-park.mjs";
 export async function cmdModel(args, ctx) {
   const { flags, positional } = parseFlags(args, { p: "number", help: "boolean" });
   if (flags.help) {
-    console.log("Usage: amux model AGENT [-p N] MODEL [EFFORT]\nCompacts the exact Codex session before changing model; failed compact blocks work.");
+    console.log("Usage: amux model AGENT [-p N] MODEL [EFFORT]\nVerifies the current model and exact-session compact receipt; compacts only when a change needs new proof.");
     return;
   }
   const [name, model, effort] = positional, pane = flags.p ?? 0;
@@ -23,5 +23,5 @@ export async function cmdModel(args, ctx) {
     targetModel, targetEffort: effort, deliveryBroker: { queue: ctx.deliveryQueue }, statusDriver: driveCodexStatus });
   if (!result.ok) throw new Error(`model change blocked: ${result.error || result.reason || result.stage}`);
   unparkPane({ session: name, pane, detail: `explicit verified model selection: ${result.model}` });
-  console.log(`${name}:${pane}: compact verified; selected ${result.model} ${result.effort || ""}`.trim());
+  console.log(formatCodexModelChange(name, pane, result));
 }

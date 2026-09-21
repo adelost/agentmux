@@ -14,17 +14,26 @@ import {
   dedupeByFile,
 } from "../core/search.mjs";
 import { defaultSearchStatePath, loadLastResults, saveLastResults } from "../core/search-state.mjs";
+import { defaultWorkspace } from "../core/runtime-defaults.mjs";
+import { expandMemoryTopic, isTopicPath, mergeTopicHits, searchMemoryTopics } from "../core/memory-topic-search.mjs";
+import { expandPassage, mergePassageHits, searchPassages } from "../core/search-passages.mjs";
 
 /** WHAT: Describes the search CLI contract. WHY: Keeps actual flags and user guidance in one place. */
 export const SEARCH_HELP = `Usage:
   amux search "term" [--max N] [--source NAME]
+  amux search "term" --raw          Original lexical search, omit topics/passages
   amux search "term" --deep         Include large raw session archives
   amux search "term" --semantic     Add the slower local semantic layer
   amux search "term" --show N       Search, then expand result N
   amux search --show N [--context N] Expand the last search result
   amux search --reindex              Rebuild the optional semantic index
 
-Lexical search over memory and the durable AMUX delivery ledger is the fast, current default.
+Validated memory/topics pages provide compact orientation alongside original sources.
+Current Markdown paragraphs also match natural questions without embeddings.
+--raw disables these layers. Topic/paragraph expansion rechecks source hashes; use
+amux memory topics --json to inspect states and decision cells. Topic text is
+derived, not a new instruction or proof that no later correction exists.
+Lexical search over memory and the durable AMUX delivery ledger remains available.
 --deep adds large raw session archives. --semantic adds the local embedding
 index and always reports its age.
 
@@ -59,7 +68,7 @@ function showResults(last, show, context) {
       continue;
     }
     console.log(`── #${n} ${hit.path}:${hit.line}  (sökning: "${last.query}")`);
-    console.log(expandHit(hit, { context: context ?? 10 }));
+    console.log(hit.topic ? expandMemoryTopic(hit) : hit.passage ? expandPassage(hit) : expandHit(hit, { context: context ?? 10 }));
     console.log("");
   }
 }
@@ -73,6 +82,7 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
   }
 
   const config = loadConfig(ctx.configPath);
+  const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE || defaultWorkspace(process.env.HOME);
   let roots = withEventLedgerRoot(loadSearchRoots(config), eventsPath());
 
   if (flags.reindex) {
@@ -103,7 +113,8 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
   // giant transcripts, and avoids a multi-second scan through unrelated
   // words in different turns. Exact phrase search still runs everywhere.
   const lexicalRoots = roots.filter((root) => root.kind !== "event-ledger"
-    && (flags.deep || root.semantic));
+    && !isTopicPath(root.path, workspace) && (flags.deep || root.semantic))
+    .map(root => ({ ...root, exclude: [...root.exclude, `${workspace}/memory/topics/**`] }));
   let hits = lexicalSearch(query, lexicalRoots, {
     includeFileAnd: ledgerHits.length === 0,
   });
@@ -119,7 +130,7 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
       }
       const semanticHits = await sem.semanticSearch(query, { k: 8 });
       const allowedRoots = new Set(roots.map((root) => root.name));
-      const scoped = (semanticHits || []).filter((hit) => allowedRoots.has(hit.root));
+      const scoped = (semanticHits || []).filter((hit) => allowedRoots.has(hit.root) && !isTopicPath(hit.path, workspace));
       if (scoped.length) {
         hits = dedupeByFile([...hits, ...scoped.map((hit) => withScore({ ...hit, layer: "sem" }))]);
       }
@@ -128,7 +139,21 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
     }
   }
 
-  const top = hits.slice(0, flags.max ?? 12);
+  hits = hits.filter(hit => !isTopicPath(hit.path, workspace));
+  if (!flags.raw && !hits.some(hit => hit.layer === "L1" && !hit.path.endsWith(".jsonl"))) {
+    hits = mergePassageHits(hits, searchPassages(query, lexicalRoots, {
+      max: flags.max ?? 12, excludePath: path => isTopicPath(path, workspace),
+    }));
+  }
+  let topicHits = [];
+  if (!flags.raw && (!flags.source || "memory-topics".includes(flags.source))) {
+    try {
+      const result = searchMemoryTopics(query, workspace);
+      topicHits = result.hits;
+      if (result.excluded.length) console.warn(`Topics omitted: ${result.excluded.map(row => `${row.id}=${row.state}`).join(", ")}. Original-source search remains available.`);
+    } catch (error) { console.warn(`Topic lookup unavailable: ${error.message}. Showing original-source results.`); }
+  }
+  const top = mergeTopicHits(hits, topicHits, flags.max ?? 12);
   if (!top.length) {
     console.log(`0 träffar för "${query}" (${Date.now() - startedAt}ms)`);
     return;
@@ -136,6 +161,6 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
   const current = { query, ts: new Date().toISOString(), hits: top };
   saveLastResults(query, top, statePath);
   console.log(formatHits(top));
-  console.log(`\n${top.length}/${hits.length} träffar, ${Date.now() - startedAt}ms  ·  expandera: amux search --show N`);
+  console.log(`\n${top.length}/${hits.length + topicHits.length} träffar, ${Date.now() - startedAt}ms  ·  expandera: amux search --show N`);
   if (flags.show != null) showResults(current, flags.show, flags.context);
 }

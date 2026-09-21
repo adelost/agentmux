@@ -2277,6 +2277,12 @@
                 "name": "wakeWord",
                 "nullable": false,
                 "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "listeningCueSound",
+                "nullable": false,
+                "value": "boolean"
               }
             ],
             "id": "link.preferences-status",
@@ -3149,7 +3155,8 @@
       "values": [
         "hands-free",
         "speak-replies",
-        "wake-word"
+        "wake-word",
+        "listening-cue-sound"
       ]
     },
     {
@@ -4891,6 +4898,12 @@
                 "name": "wakeWord",
                 "nullable": false,
                 "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "listeningCueSound",
+                "nullable": false,
+                "value": "boolean"
               }
             ],
             "id": "link.preferences-status",
@@ -5659,6 +5672,12 @@
                 "name": "wakeWord",
                 "nullable": false,
                 "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "listeningCueSound",
+                "nullable": false,
+                "value": "boolean"
               }
             ],
             "id": "link.preferences-status",
@@ -5689,6 +5708,12 @@
               {
                 "clockDomain": "none",
                 "name": "wakeWord",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "listeningCueSound",
                 "nullable": false,
                 "value": "boolean"
               }
@@ -8301,6 +8326,12 @@
           {
             "clockDomain": "none",
             "name": "wakeWord",
+            "nullable": false,
+            "value": "boolean"
+          },
+          {
+            "clockDomain": "none",
+            "name": "listeningCueSound",
             "nullable": false,
             "value": "boolean"
           }

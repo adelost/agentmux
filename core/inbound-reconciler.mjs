@@ -127,6 +127,8 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
     if (current.status === "completed") return { duplicate: true };
     try {
       current = await preparedRecord(prepared || prepare(current));
+      current = store.read(current.channelId, current.messageId) || current;
+      if (current.status === "completed") return { duplicate: true };
       const outcome = await onMessage(durableMessage(current, store, channel, baseMessage));
       if (outcome?.delivered === false) {
         store.fail(current, outcome.reason || "handler did not durably accept the message");
@@ -223,6 +225,7 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
         const record = observe(msg);
         if (!record) throw new Error(`Discord target disappeared for ${msg.channelId}:${msg.id}`);
         fetchedById.set(record.messageId, msg);
+        if (record.status === "completed") continue;
         if (!before) newlyObserved.add(record.messageId);
         staged.push(prepare(record));
       }

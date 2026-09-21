@@ -8,12 +8,12 @@ import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConf
 import { formatCatchupPreview } from "./core/catchup-format.mjs";
 import { shortModelName } from "./core/context.mjs";
 import { loadConfig } from "./cli/config.mjs";
-import { decideParkedSend, readParkState, unparkPane } from "./core/pane-park.mjs";
+import { blockedSendMessage, decideParkedSend, readParkState, unparkPane } from "./core/pane-park.mjs";
 import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
 import { readQuotaSnapshot } from "./core/quota-usage.mjs";
 import { formatQuotaSnapshot } from "./core/quota-format.mjs";
 import { prepareCodexIdle } from "./core/codex-tui.mjs";
-import { runLockedCodexModelChange } from "./core/codex-model-command.mjs";
+import { formatCodexModelChange, runLockedCodexModelChange } from "./core/codex-model-command.mjs";
 import {
   clearCodexModelOverride,
   codexLoginCommand,
@@ -593,7 +593,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         }
         const [, requestedModel, targetEffort] = spec;
         const targetModel = resolveCodexModelName(requestedModel);
-        await msg.reply(`Preparing ${mapping.name}:${pane}: waiting for the session lock, then compacting before the model change. No switch runs without a fresh receipt.`);
+        await msg.reply(`Preparing ${mapping.name}:${pane}: waiting for the session lock, then checking the selected model and compact receipt. Compact runs only if needed.`);
         const result = await withPaneSendLock(`${mapping.name}:${pane}`, () => runLockedCodexModelChange({
           agent, state, deliveryBroker, name: mapping.name, pane, targetModel, targetEffort,
           statusDriver: codexStatusDriver,
@@ -604,7 +604,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           if (readParkState(mapping.name, pane)) {
             unparkPane({ session: mapping.name, pane, detail: `explicit model switch: ${result.model} ${result.effort || ""}`.trim() });
           }
-          await msg.reply(`✅ compact verified, then model changed to ${result.model}${result.effort ? ` ${result.effort}` : ""}; bara ${mapping.name}:${pane}, global default orörd`);
+          await msg.reply(`✅ ${formatCodexModelChange(mapping.name, pane, result)}`);
         } else {
           const error = result.error || `${result.stage}: ${result.reason}`;
           const recovery = result.stage === "switch"
@@ -1032,15 +1032,15 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     // A normal message must not silently wake a pane on a downgraded model, but
     // the human may deliberately want the new model. Two-strike confirm: warn on
-    // the first brief, deliver + unpark on an explicit re-send.
+    // the first brief, deliver only the next regular message and unpark.
     if (!parsed) {
       const park = readParkState(mapping.name, pane);
       const key = `${mapping.name}:${pane}`;
       const decision = decideParkedSend({ park, warnedSinceMs: parkWarnedSince.get(key) ?? null });
       if (decision.action === "warn") {
         parkWarnedSince.set(key, decision.sinceMs);
-        await msg.reply(`⚠️ **${mapping.name}:${pane} är parkerad efter modellbyte** (${park.detail}). ` +
-          `Meddelandet skickades INTE. Skicka igen för att bekräfta och leverera ändå, eller kör \`/restore\` / \`//model\`.`);
+        await msg.reply(blockedSendMessage(key, park,
+          { surface: "discord", canSelectModel: isCodexPane(mapping, pane) }));
         return;
       }
       if (decision.action === "confirm") {

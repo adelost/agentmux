@@ -170,7 +170,8 @@ export const DRIFT_SECTIONS = [
     directive: "line 1 is the outcome in one sentence, prefixed SUMMARY: during " +
       "multi-reply work. Then GOAL, NOW and LEFT, one per line in caps, and stop " +
       "if NOW does not serve GOAL. Otherwise line 2 is your next step or the one " +
-      "decision you need. Then details. Nothing before line 1.",
+      "decision you need. Keep replies, docs and comments concise, with normal " +
+      "spacing and short paragraphs or bullets. Nothing before line 1.",
   },
   {
     file: ".agents/CLAUDE.md",
@@ -183,9 +184,9 @@ export const DRIFT_SECTIONS = [
     file: ".agents/CLAUDE.md",
     section: "Staffing and review economics",
     label: "healthy idle (no invented tasks or maintenance loops)",
-    directive: "a drained backlog is healthy idle. Do not invent scope or " +
-      "wake unused panes. Follow the current direct task and leave idle " +
-      "agents alone until real work targets them.",
+    directive: "a drained backlog is healthy idle. On DONE or BLOCKED, re-read " +
+      "the existing queue and completed prerequisites. Take the next authorised " +
+      "independent READY item; if none, stay idle. No invented scope or extra panes.",
   },
 ];
 

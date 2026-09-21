@@ -4,6 +4,10 @@ import { observeDreamHealth } from "../core/dream-health.mjs";
 /** WHAT: Dispatches memory lookup or explicit maintenance. WHY: Keeps read-only context retrieval separate from compaction effects. */
 export async function cmdMemory(ctx, subcommand, flags = {}) {
   const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE || defaultWorkspace(process.env.HOME);
+  if (subcommand === "topics") {
+    const { cmdMemoryTopics } = await import("./memory-topics.mjs");
+    return cmdMemoryTopics(workspace, flags);
+  }
   if (subcommand === "context") {
     const { readMemoryContext } = await import("../core/memory-context.mjs");
     const result = readMemoryContext(workspace, { pane: flags.pane || flags.p || null });
@@ -39,6 +43,8 @@ export async function cmdMemory(ctx, subcommand, flags = {}) {
   }
   console.error(`Usage:
   amux memory context [-p agent:pane] [--json] [--workspace PATH]
+  amux memory topics [--json] [--workspace PATH]
+  amux memory topics --publish FILE [--json] [--workspace PATH]
   amux memory status [--json] [--workspace PATH]
   amux memory lint [--json] [--report-daily] [--compacted N] [--workspace PATH]
   amux memory compact --dry [--json] [--max N] [--workspace PATH]`);

@@ -108,9 +108,13 @@ export const historyClearContract = {
   fields: [field("targetId", "string")],
 } as const;
 
+/** WHAT: Defines Link preference state. WHY: Keeps Settings projections on one typed host contract. */
 export const preferencesStatusContract = {
   id: "link.preferences-status", kind: "state", boundary: "presentation",
-  fields: [field("handsFree", "boolean"), field("speakReplies", "boolean"), field("wakeWord", "boolean")],
+  fields: [
+    field("handsFree", "boolean"), field("speakReplies", "boolean"), field("wakeWord", "boolean"),
+    field("listeningCueSound", "boolean"),
+  ],
 } as const;
 export const preferenceToggleContract = {
   id: "link.preference-toggle", kind: "event", boundary: "ui-event",

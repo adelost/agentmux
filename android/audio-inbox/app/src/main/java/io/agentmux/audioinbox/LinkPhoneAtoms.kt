@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.CircleActionTiming
 import com.adelost.designkit.ui.CircleLabelProgress
+import com.adelost.designkit.ui.circleResolvedTiming
 import com.adelost.ringkit.ui.RingRow
 import com.adelost.ringkit.ui.RowSpec
 
@@ -31,7 +32,7 @@ internal fun PhoneRow(
         semanticColor = semanticColor,
         onTap = press?.onTap,
         labelProgress = progress,
-        actionTiming = press?.timing ?: CircleActionTiming.IMMEDIATE,
+        timing = circleResolvedTiming(press?.timing ?: CircleActionTiming.IMMEDIATE),
         modifier = phoneRowModifier(),
     )
 }
@@ -49,7 +50,7 @@ internal fun PhoneRow(row: RowSpec) {
         labelProgress = row.labelProgress,
         holdToConfirm = row.holdToConfirm,
         holdMs = row.holdMs,
-        actionTiming = row.actionTiming,
+        timing = circleResolvedTiming(row.actionTiming, row.holdMs),
         hint = row.hint,
         multiline = row.multiline,
         modifier = phoneRowModifier(),

@@ -17,10 +17,12 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.up
 import com.adelost.designkit.ui.CircleActionTiming
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
+import com.adelost.designkit.ui.LocalCircleActionHostCost
 import com.adelost.designkit.ui.resolveCircleSurfaceLayout
 import io.agentmux.audioinbox.update.LinkReleaseCatalogs
 import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkui.LinkInteractionHost
+import io.agentmux.linkui.linkActionHostCosts
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import io.agentmux.linkui.product.generated.GeneratedLinkControlTiming
@@ -196,6 +198,8 @@ class TheSettingsPageObeysItsDeclarationsTest {
             navigation = LinkNavigationController(GeneratedLinkArtifactRef.PHONE_FULL_UI),
             microphoneGranted = MutableStateFlow(true),
             wakeWord = LinkWakeWordControl(application) {},
+            listeningSound = LinkListeningSoundPreference(application),
+            listeningStarted = {},
         )
         compose.setContent {
             // The phone surface the qualifiers already describe. The app's own host resolves this from
@@ -206,6 +210,7 @@ class TheSettingsPageObeysItsDeclarationsTest {
                     heightDp = 844f,
                     round = false,
                 ),
+                LocalCircleActionHostCost provides linkActionHostCosts.responsive,
             ) {
                 LinkInteractionHost {
                     Settings(graph)
@@ -303,6 +308,7 @@ class TheSettingsPageObeysItsDeclarationsTest {
             Control("READ REPLIES", GeneratedLinkControlTiming.SETTINGS_SPEAK_REPLIES, answersOnItsLabel = true),
             Control("ANNOUNCEMENTS", GeneratedLinkControlTiming.SETTINGS_HANDS_FREE),
             Control("WAKE WORD", GeneratedLinkControlTiming.SETTINGS_WAKE_WORD, answersOnItsLabel = true),
+            Control("LISTENING SOUND", GeneratedLinkControlTiming.SETTINGS_LISTENING_CUE_SOUND, answersOnItsLabel = true),
         )
     }
 }

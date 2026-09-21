@@ -31,8 +31,10 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 
-/** Real pointer + MediaRecorder + product event graph; the only delivery sink
- * is a local list. No transport or recipient outside this test is reachable. */
+/**
+ * WHAT: Checks a real pointer, MediaRecorder and the local product event graph.
+ * WHY: Keeps push-to-talk proof isolated from transport and external recipients.
+ */
 class LinkPttGestureTest {
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -145,6 +147,7 @@ class LinkPttGestureTest {
                         isWatchDevice = round,
                         state = CircleHostPreviewState(mode = if (round) CircleHostMode.WATCH_EXACT else CircleHostMode.RESPONSIVE),
                         onStateChange = null,
+                        actionHostCosts = linkActionHostCosts,
                     ) {
                         LinkInteractionHost {
                             if (fixture.mounted) {
@@ -203,7 +206,7 @@ private class CaptureFixture(activity: MainActivity, round: Boolean) {
         processScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), state = state,
         updateState = MutableStateFlow(UpdateState.UpToDate("test", publishedAtEpochMillis = null)),
         microphoneGranted = MutableStateFlow(true), speakReplies = MutableStateFlow(false),
-        wakeWordEnabled = MutableStateFlow(false), wakeStatus = wake,
+        wakeWordEnabled = MutableStateFlow(false), listeningCueSound = MutableStateFlow(true), wakeStatus = wake,
         publicLinkActive = { false }, targetKindOf = { null },
         captureByteCount = recorder::currentBytes, captureByteLimit = { null }, capturedTurns = captured,
         navigation = LinkNavigationController(if (round) GeneratedLinkArtifactRef.WEAR_FULL_UI else GeneratedLinkArtifactRef.PHONE_FULL_UI),

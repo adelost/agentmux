@@ -296,7 +296,7 @@ feature("/model dialect routing", () => {
       expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "/compact", 0, expect.any(Object));
       expect(agent.restartCodex).toHaveBeenCalledTimes(1);
       expect(agent.restartCodex.mock.calls[0][2]).toMatchObject({ model: "gpt-5.6-sol", effort: "max" });
-      expect(msg.reply.mock.calls.at(-1)[0]).toContain("global default orörd");
+      expect(msg.reply.mock.calls.at(-1)[0]).toContain("global default unchanged");
     }],
   });
 

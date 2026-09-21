@@ -380,7 +380,7 @@ const HOME_RE = () => new RegExp(`^${escapeRegex(process.env.HOME)}/`);
 export function formatHits(hits) {
   return hits.map((h, i) => {
     const shortPath = h.path.replace(HOME_RE(), "~/");
-    const layer = h.layer === "sem" ? "≈" : h.layer === "L2" ? "&" : "=";
+    const layer = h.layer === "topic" ? "topic" : h.layer === "sem" ? "≈" : h.layer === "L2" ? "&" : "=";
     return `#${String(i + 1).padStart(2)} ${(h.date || "unknown time").padEnd(10)} ${h.root.padEnd(9)} ${layer} ${shortPath}:${h.line}\n     ${h.snippet.slice(0, 160)}`;
   }).join("\n");
 }

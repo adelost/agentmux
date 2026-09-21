@@ -7,6 +7,18 @@ import {
 } from "./codex-profiles.mjs";
 import { compactThenSwitchCodex } from "./codex-model-switch.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
+import { parseCodexPaneReading } from "./codex-status.mjs";
+import { contextMaintenanceAttempt } from "./context-maintenance.mjs";
+import { validCodexCompactReceipt } from "./codex-launch-policy.mjs";
+
+/** WHAT: Reports the verified model action. WHY: Prevents a no-op or reused receipt from claiming another paid compact. */
+export function formatCodexModelChange(name, pane, result) {
+  const selected = `${result.model}${result.effort ? ` ${result.effort}` : ""}`;
+  const action = result.unchanged ? `already using ${selected}; no compact or restart`
+    : result.reusedCompact ? `selected ${selected}; reused the existing compact receipt`
+      : `compact verified; selected ${selected}`;
+  return `${name}:${pane}: ${action}; global default unchanged`;
+}
 
 /** WHAT: Returns a shared session lease after bounded waiting. WHY: Prevents unrelated pane maintenance from rejecting an explicit model choice immediately. */
 export async function waitForCodexModelLease(queue, name, { wait = ms => new Promise(resolve => setTimeout(resolve, ms)), attempts = 360 } = {}) {
@@ -88,11 +100,35 @@ export async function runCompactFirstCodexModelChange({
   const initialIdle = await prepareCodexIdle({ agent, name, pane });
   if (!initialIdle.ok) return { ok: false, stage: initialIdle.stage, error: initialIdle.error };
 
-  return compactThenSwitchCodex({
+  const live = parseCodexPaneReading(initialIdle.snapshot)?.selected;
+  const matches = model => model?.id === targetModel && (!targetEffort || model.effort === targetEffort.toLowerCase());
+  if (matches(live && { id: live.model, effort: live.effort })) {
+    const verified = await statusDriver({ agent, name, pane, log });
+    if (!verified.ok) return verified;
+    if (!matches(verified.status.model)) return { ok: false, stage: "status", error: "live model changed during verification" };
+    const actual = verified.status.model;
+    setCodexModelOverride(state, name, pane, actual.id, actual.effort);
+    const key = `${name}:${pane}@${selectedCodexProfile(state, name, pane).id}`;
+    const sessions = state.get("codex_session_by_pane_profile_v1", {});
+    if (sessions[key]?.sessionId === verified.status.session) state.set("codex_session_by_pane_profile_v1",
+      { ...sessions, [key]: { ...sessions[key], model: actual.id, effort: actual.effort, modelTransitionBlocked: null } });
+    return { ok: true, unchanged: true, model: actual.id, effort: actual.effort, status: verified.status };
+  }
+
+  let reusedCompact = false;
+  const compact = agent.compactCodex ? async () => {
+    const context = await readContext();
+    const prior = context?.sessionId ? contextMaintenanceAttempt(state, name, pane, context) : null;
+    const receipt = prior?.status === "VERIFIED" ? { ...prior, ok: true, compactBoundary: true } : null;
+    if (validCodexCompactReceipt(receipt, context?.sessionId)) { reusedCompact = true; return receipt; }
+    return agent.compactCodex(name, pane, { sendCompact });
+  } : null;
+
+  const result = await compactThenSwitchCodex({
     readContext,
     readOutput: () => agent.capturePane(name, pane),
     sendCompact,
-    compact: agent.compactCodex ? () => agent.compactCodex(name, pane, { sendCompact }) : null,
+    compact,
     wait,
     now,
     timeoutMs,
@@ -100,8 +136,8 @@ export async function runCompactFirstCodexModelChange({
     switchModel: async ({ beforeContext, compactReceipt }) => {
       const idle = await prepareCodexIdle({ agent, name, pane });
       if (!idle.ok) return { ok: false, stage: idle.stage, error: idle.error };
-      const previous = beforeContext?.model ? { model: beforeContext.model, effort: beforeContext.effort ?? null }
-        : codexModelOverride(state, name, pane);
+      const previous = live || (beforeContext?.model ? { model: beforeContext.model, effort: beforeContext.effort ?? null }
+        : codexModelOverride(state, name, pane));
       const effort = targetEffort?.toLowerCase() || previous?.effort || null;
       const profile = selectedCodexProfile(state, name, pane);
       setCodexModelOverride(state, name, pane, targetModel, effort);
@@ -124,4 +160,5 @@ export async function runCompactFirstCodexModelChange({
       }
     },
   });
+  return { ...result, reusedCompact };
 }

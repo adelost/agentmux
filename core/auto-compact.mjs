@@ -40,12 +40,7 @@ export const DEFAULT_CONFIG = {
                           // a tiled layout of small panes and want more of them
                           // covered — the verify-before-refire guard still
                           // bounds any misfire.
-  minIdleMs: 600_000,     // 10 minutes. Conversation must have been silent
-                          // (no jsonl turns) this long before we even
-                          // consider warning. Protects against "between
-                          // turns" false-positives where the pane shows
-                          // the idle prompt char but the operator is just
-                          // thinking about the next message.
+  minIdleMs: CONTEXT_COST_POLICY.idleMs, // One quiet hour; unfinished work is allowed.
   warnCooldownMs: 600_000, // 10 minutes. Minimum spacing between Discord
                           // WARNING posts for the SAME pane (bridge-enforced).
                           // The decision loop still runs every poll, so

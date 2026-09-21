@@ -24,6 +24,8 @@ amux dream --dry            # source inventory + exact prompt, no side effects
 amux memory status          # sizes, warnings, backlog and latest run
 amux memory context         # small dated references, no diary contents
 amux memory context -p project:3 --json # exact pane commands + file versions
+amux memory topics --json  # source freshness, states and deciding DSL cells
+amux memory topics --publish /path/topic-id.md # validate and atomically publish one reviewed note
 amux memory lint [--json]   # read-only policy findings
 amux memory compact --dry   # inspect old daily-file compaction candidates
 ```
@@ -78,6 +80,60 @@ Dream blocks retain their original strict verification until explicitly migrated
 an edited legacy block must not be silently blessed or overwritten.
 
 ## Retrieval after startup or compaction
+
+### Source-bound topic pilot
+
+The optional private `memory/topics/` directory contains small, curated Markdown
+notes. Publishing a note enables its use in ordinary `amux search`; no provider,
+vector service or extra model turn runs during lookup. Search presents up to two
+relevant topic pointers beside original-source hits. Expand one relevant result
+with `--show N`, then follow its original evidence when exact wording or later
+corrections matter. Reading every matching topic is not a context-saving guarantee.
+`amux search "query" --raw` omits this layer and preserves the original workflow.
+
+The same Skyvw/CircleKit `@v1d/product-spec` decision-table API decides all 18
+combinations in `policies/memory-topics.mjs`. `READY` requires valid metadata,
+an `ACTIVE` editorial status and matching readable source hashes. `STALE`,
+`UNAVAILABLE`, `INVALID`, `CONFLICT` and `SUPERSEDED` are visible states, never
+quietly treated as current. Both new searches and saved `--show` results check
+the source again. Lexical/semantic retrieval excludes the whole derived subtree,
+including archives, so rejected summaries cannot bypass the policy through grep.
+`amux memory lint` reports the same states. `topics --json` shows facts and cell IDs.
+
+Each note uses this deliberately small YAML-frontmatter contract:
+
+```yaml
+version: 1
+id: topic-id                         # filename topic-id.md
+title: A short topic title
+summary: One sentence describing the covered question
+asOf: 2026-09-20
+status: ACTIVE                      # or SUPERSEDED, CONFLICT
+aliases: [natural query terms]
+sources:
+  - path: memory/references/topic.md # relative, inside the private workspace
+    sha256: <SHA256 of complete original file>
+    from: 1                         # inclusive cited line range
+    to: 20
+```
+
+The Markdown body follows a closing `---`. A note is at most 120 lines/8000
+bytes, references 1 to 8 bounded original files and carries no automatic model
+authority. It must be substantively checked against its cited ranges by its
+curator: hash/range validation cannot prove that a paraphrase is true or that
+no later decision exists elsewhere. Historical source dates remain explicit.
+
+`topics --publish FILE` requires matching source versions even for an editorial
+status change. It takes a kernel lease, validates, preserves previous exact bytes
+under `.history/`, then atomically replaces one note. Interrupted temporary files
+are never retrieved. Republishing identical bytes is a no-op. Restore by submitting
+the archived version to the same validator, never by silently blessing old hashes.
+Source changes require substantive review before the curator updates the note.
+The pilot deliberately uses stable reference files rather than ever-growing daily
+files; any cited file change conservatively marks its notes stale. There is no
+automatic hash refresh, fleet wake-up or hidden editorial worker.
+
+### Bounded orientation
 
 `amux memory context` is a read-only entry for every CLI harness. It exposes
 today/yesterday paths and versions, not copied diary text. Read only the material

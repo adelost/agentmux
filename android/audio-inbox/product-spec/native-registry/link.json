@@ -425,7 +425,7 @@
     },
     {
       "id": "link.preference-key",
-      "values": ["hands-free", "speak-replies", "wake-word"]
+      "values": ["hands-free", "listening-cue-sound", "speak-replies", "wake-word"]
     },
     {
       "id": "link.recovery-phase",
