@@ -36,7 +36,7 @@ ${qwen ? "    qwen: 1\n    qwenModel: qwen3.8-max\n" : ""}`;
 }
 
 feature("Qwen source pane plan", () => {
-  unit("appends Qwen after every existing pane without changing old indices", {
+  unit("keeps Claude and Codex fixed while grouping one Kimi and one Qwen before utility panes", {
     given: ["the same mixed category before and after Qwen is enabled", () => {
       const before = parseConfig(source()).agents;
       const after = parseConfig(source({ qwen: true })).agents;
@@ -48,12 +48,14 @@ feature("Qwen source pane plan", () => {
       };
     }],
     when: ["the runtime pane plan is generated", (fixture) => fixture],
-    then: ["the five old panes stay byte-equivalent and Qwen becomes pane five", ({ before, after, channels }) => {
-      expect(after.slice(0, before.length)).toEqual(before);
-      expect(after[5]).toMatchObject({ name: "qwen", engine: "qwen", model: "qwen3.8-max" });
-      expect(after[5].cmd).toContain("qwen");
+    then: ["the coding engines are contiguous and only service/shell indices move", ({ before, after, channels }) => {
+      expect(after.slice(0, 3)).toEqual(before.slice(0, 3));
+      expect(after[3]).toMatchObject({ name: "qwen", engine: "qwen", model: "qwen3.8-max" });
+      expect(after[4]).toEqual(before[3]);
+      expect(after[5]).toEqual(before[4]);
+      expect(after[3].cmd).toContain("qwen");
       expect(channels).toContainEqual(expect.objectContaining({
-        agentName: "demo", pane: 5, dialect: "qwen", channelName: "demo-5-qwen",
+        agentName: "demo", pane: 3, dialect: "qwen", channelName: "demo-3-qwen",
       }));
     }],
   });

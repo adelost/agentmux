@@ -106,7 +106,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
     }
     const codingPaneCount = claudeCount + codexCount + kimiCount + qwenCount;
     const legacyCodingCount = claudeCount + codexCount + kimiCount;
-    const qwenPaneStart = legacyCodingCount + (config.services?.length || 0) + (config.shells ?? 0);
+    const qwenPaneStart = legacyCodingCount;
     const orchestrator = config.orchestrator;
     if (orchestrator !== undefined
         && (!Number.isSafeInteger(orchestrator) || orchestrator < 0
@@ -431,6 +431,19 @@ export function generateAgentsYaml(
       panes.push(pane);
       paneIdx++;
     }
+    for (let i = 0; i < (config.qwenCount ?? 0); i++) {
+      const model = config.qwenModel || DEFAULT_QWEN_MODEL;
+      const pane = {
+        name: i === 0 ? "qwen" : `qwen-${i + 1}`,
+        cmd: DEFAULT_QWEN_CMD.replace(`--model ${DEFAULT_QWEN_MODEL}`, `--model ${model}`),
+        engine: "qwen",
+        model,
+      };
+      const label = labelFor(paneIdx);
+      if (label) pane.label = label;
+      panes.push(pane);
+      paneIdx++;
+    }
     // Native services are process-supervised outside tmux and therefore do
     // not consume an addressable agent pane. Interactive shell panes have no
     // native equivalent and are rejected above instead of disappearing.
@@ -444,19 +457,6 @@ export function generateAgentsYaml(
       }
       for (let i = 0; i < config.shells; i++) {
         const pane = { name: `shell-${i + 1}`, cmd: "bash" };
-        const label = labelFor(paneIdx);
-        if (label) pane.label = label;
-        panes.push(pane);
-        paneIdx++;
-      }
-      for (let i = 0; i < (config.qwenCount ?? 0); i++) {
-        const model = config.qwenModel || DEFAULT_QWEN_MODEL;
-        const pane = {
-          name: i === 0 ? "qwen" : `qwen-${i + 1}`,
-          cmd: DEFAULT_QWEN_CMD.replace(`--model ${DEFAULT_QWEN_MODEL}`, `--model ${model}`),
-          engine: "qwen",
-          model,
-        };
         const label = labelFor(paneIdx);
         if (label) pane.label = label;
         panes.push(pane);

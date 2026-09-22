@@ -1,4 +1,4 @@
-/** WHAT: Returns source-config coding panes with physical indices. WHY: Prevents appended Qwen panes from moving legacy services and shells. */
+/** WHAT: Returns source-config coding panes with physical indices. WHY: Keeps every coding engine contiguous before services and shells. */
 export function sourceCodingPaneSlots(config) {
   const slots = [];
   let index = 0;
@@ -8,12 +8,9 @@ export function sourceCodingPaneSlots(config) {
     ["claude", claudeCount],
     ["codex", codexCount],
     ["kimi", config.kimiCount || 0],
+    ["qwen", config.qwenCount || 0],
   ]) {
     for (let ordinal = 0; ordinal < count; ordinal++) slots.push({ pane: index++, engine, ordinal });
-  }
-  index += (config.services?.length || 0) + (config.shells || 0);
-  for (let ordinal = 0; ordinal < (config.qwenCount || 0); ordinal++) {
-    slots.push({ pane: index++, engine: "qwen", ordinal });
   }
   return slots;
 }
@@ -31,7 +28,7 @@ export function sourcePaneChannelName(name, pane, config) {
   return dialect === "claude" ? `${name}-${pane}` : `${name}-${pane}-${dialect}`;
 }
 
-/** WHAT: Builds Discord names from actual coding slots. WHY: Prevents appended Qwen panes from inheriting legacy prefix assumptions. */
+/** WHAT: Builds Discord names from actual coding slots. WHY: Prevents channel routing from duplicating engine-order arithmetic. */
 export function generateSourceChannelNames(agents) {
   const result = [];
   for (const name of [...agents.keys()].sort()) {
