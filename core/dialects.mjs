@@ -161,6 +161,8 @@ export const KIMI = {
   modals: [
     { id: "workspace-trust", status: "menu", re: /Trust this folder\?[\s\S]*Don't trust/u },
     { id: "cache-expiry-hint", status: "menu", re: /Cache expired[\s\S]*Compact and continue/u },
+    { id: "update-available", status: "menu", keys: "Escape",
+      re: /Kimi Code Update Available[\s\S]*Continue with current version/u },
   ],
   modalVetoLineRe: /^\s*(?:[│┃]\s*)?>\s*(?:[│┃]\s*)?$/mu,
 };
