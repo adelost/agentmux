@@ -1,53 +1,65 @@
-# Product Studio: one command from this checkout
+# Product Studio from AMUX
 
-Use the matching CircleKit `feat/studio-contracts-takeover-20260922` branch.
-Keep the ordinary AMUX bridge and its agents running unchanged.
+Use sibling checkouts of the matching CircleKit evidence branch and this AMUX branch.
 
 ```bash
-# Once, in the shared Studio checkout:
 (cd ../circlekit/product-studio && npm ci)
-# AMUX's normal locked dependencies must already be installed.
+npm ci
+
 node studio.mjs check
+node studio.mjs laws --product amux-link --output test-results/link-laws.json
+node scripts/verify-studio.mjs
 node studio.mjs
 ```
 
-Non-sibling checkout locations: set `STUDIO_ROOT` to `circlekit/product-studio`
-and `AMUX_ROOT` to this AMUX checkout. Missing packages produce an actionable
-error; opening Studio never installs anything or calls a provider.
+For non-sibling layouts set `STUDIO_ROOT` to `circlekit/product-studio`. AMUX is itself the wording-grammar owner, so `AMUX_ROOT` normally resolves to this checkout.
 
-The source check validates **11 Link service declarations**, including the
-parameterized wake-word factory. WHAT/WHY belongs above each actual `service()`
-call. The factory's source contract is checked without inventing `${product}`.
-Its concrete model identity needs the product owner's exact source map.
+## Service intent
 
-The checker reuses `core/contract-lint.mjs`. Existing one-line comments and
-optional policy-table intent remain valid; no new service obligation is imposed
-on decision tables, instances, ports or cells. `tools/product-contracts.mjs`
-remains supported. No bridge startup, generic lint, release hook or dependency
-pin was changed.
+The source check covers the **11 Link ProductSpec service declarations**, including the parameterized wake-word factory. WHAT/WHY is attached to the actual `service()` source call. A computed concrete ID is an identity limitation, not a reason to execute the factory.
 
-## Optional evidence from an ordinary selected test run
+The checker still delegates wording to `core/contract-lint.mjs`. Decision tables, instances, ports and cells do not gain a second ProductSpec-specific prose obligation.
 
-The shared reporter supports the installed Vitest 4 public reporter API and
-existing bdd-vitest 2 source descriptions. It preserves failed/skipped/retried
-results instead of manufacturing a current-model pass:
+## Generated declaration laws
 
 ```bash
-STUDIO_REPOSITORY=adelost/agentmux node node_modules/vitest/vitest.mjs run \
-  test/product-contracts.test.mjs \
-  --reporter default --reporter ../circlekit/product-studio/reporters/vitest.mjs
-node studio.mjs laws --product amux-link --output test-results/link-laws.json
+node studio.mjs laws   --product amux-link   --output test-results/link-laws.json
 ```
 
-These are explicit test/check commands, never run by the viewer. Reports use
-`bdd.run.v1`; unknown or dirty Git revision stays unknown. Existing Kotlin JUnit
-XML can be imported with `node studio.mjs junit ...`; the shared guide documents
-source roots, timezone validation and generated-ID association.
+The report is generated from the currently loaded ProductSpec model. Link has real node types even when it has no decision-table facets, so node-type structural laws remain meaningful.
 
-Open **More views > Intent & behavior**, or select a node. Shared library
-selections are attached separately; they are not silently treated as the
-currently installed package revision. Source references, optional `@covers`,
-generated declaration laws and recorded traces retain distinct labels.
+A matching ProductSpec evaluator is required for a pass. Version mismatch is reported as skipped, not silently revalidated with Studio's compiler.
 
-Design, limits and full acceptance checklist:
-`../circlekit/product-studio/LIVING-DOCUMENTATION.md`.
+## Existing Vitest runs
+
+The viewer never starts Vitest. To collect one owner-selected run:
+
+```bash
+STUDIO_REPOSITORY=adelost/agentmux STUDIO_REPOSITORY_ROOT="$PWD" STUDIO_BDD_REPORT=test-results/bdd-run.json node node_modules/vitest/vitest.mjs run test/product-contracts.test.mjs   --reporter default   --reporter ../circlekit/product-studio/reporters/vitest.mjs
+```
+
+The custom reporter is optional. Failed/skipped/pending status is preserved. A test-body ProductSpec ID is only a source-reference association.
+
+## Existing Kotlin/JUnit results
+
+After a normal Android/Gradle owner has already produced JUnit XML, import it without rerunning tests:
+
+```bash
+node studio.mjs junit   --input path/to/TEST-suite.xml   --source-root android/audio-inbox/link-ui/src/test/java   --repository adelost/agentmux   --output test-results/link-junit.json
+```
+
+The workspace explicitly attaches the generated Link port-ID catalog so literal references such as `GeneratedLinkNativeLegoCatalog.PortIds.*` can be associated with exact ProductSpec IDs.
+
+No name-to-ID guessing is allowed. Optional `@covers` and `@proof` are available only when exact source references are insufficient.
+
+## Evidence boundary
+
+- generated law = declaration/compiler evidence
+- Vitest/JUnit = producer-reported test evidence
+- source-reference / `@covers` = association only
+- recorded trace = observed execution evidence
+
+None of these is promoted into another category.
+
+Shared semantics: `../circlekit/product-studio/EVIDENCE.md`.
+Living-documentation rationale: `../circlekit/product-studio/LIVING-DOCUMENTATION.md`.

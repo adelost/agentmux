@@ -30,7 +30,11 @@
         "repository": "adelost/agentmux",
         "bddReports": [
           "test-results/bdd-run.json",
+          "test-results/link-junit.json",
           "test-results/link-laws.json"
+        ],
+        "idSources": [
+          "android/audio-inbox/link-ui/src/main/java/io/agentmux/linkui/product/generated/GeneratedLinkNativeLegoCatalog.kt"
         ]
       }
     }

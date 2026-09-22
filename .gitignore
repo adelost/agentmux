@@ -7,3 +7,6 @@ test/recordings/
 spikes/web-ui/artifacts/
 .link-release/
 link/wrangler.toml
+
+# Local Product Studio evidence reports
+test-results/
