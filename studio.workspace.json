@@ -27,7 +27,11 @@
         "sourceRoots": [
           "android/audio-inbox/product-spec/src"
         ],
-        "repository": "adelost/agentmux"
+        "repository": "adelost/agentmux",
+        "bddReports": [
+          "test-results/bdd-run.json",
+          "test-results/link-laws.json"
+        ]
       }
     }
   ]
