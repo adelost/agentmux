@@ -142,7 +142,7 @@ feature("Qwen exact-session launch", () => {
         respawnPane: async () => {},
         isAlreadyRunning: async () => false,
         isShellProcess: () => true,
-        captureScreen: async () => "> Type your message or @path/to/file",
+        captureScreen: async () => "*   Type your message or @path/to/file",
         stateRoot,
       });
       return { root, runtime, commands };

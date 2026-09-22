@@ -71,7 +71,10 @@ export function createQwenAgentRuntime({
         continue;
       }
       const processReady = /^(?:qwen|node)$/u.test(command);
-      const composerReady = />\s+Type your message/u.test(screen);
+      // Qwen 0.23.x renders the composer as "*   Type your message"; earlier
+      // builds used ">". A ">"-only pattern made every restart fail its ready
+      // check, so restartQwen killed and respawned the pane forever.
+      const composerReady = /[*>]\s+Type your message/u.test(screen);
       if (processReady && composerReady && handshakeMatches(files.eventsPath, files)) return true;
       await wait(250);
     }
