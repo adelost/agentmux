@@ -84,11 +84,12 @@ export function createQwenAgentRuntime({
 
   async function startQwen(name, target, rootDir, pane = 0, launch = null) {
     if (await isPaneDead(target)) await respawnPane(target);
-    if (await isAlreadyRunning(target)) return { started: false, identity: latestQwenSessionIdentity(paneDir(rootDir, pane), { stateRoot }) };
+    if (await isAlreadyRunning(target)) return { started: false, identity: latestQwenSessionIdentity(paneDir(rootDir, pane), { stateRoot, strict: true }) };
     const dir = paneDir(rootDir, pane);
     const paneConfig = agentConfig(name).panes?.[pane] || {};
-    const previous = latestQwenSessionIdentity(dir, { stateRoot });
-    const sessionId = launch?.resumeSessionId || paneConfig.resumeSessionId || previous?.sessionId || randomUUID();
+    const previous = latestQwenSessionIdentity(dir, { stateRoot, strict: true });
+    const resumeSessionId = launch?.resumeSessionId || paneConfig.resumeSessionId || previous?.sessionId;
+    const sessionId = resumeSessionId || randomUUID();
     const model = launch?.model || paneConfig.model || previous?.model || "qwen3.8-max";
     const executable = process.env.QWEN_CODE_BIN || `${process.env.HOME}/.local/bin/qwen`;
     if (!existsSync(executable)) throw new Error(`Qwen Code CLI is not installed at ${executable}`);
@@ -97,12 +98,12 @@ export function createQwenAgentRuntime({
       executable,
       model,
       sessionId,
-      resume: Boolean(previous || launch?.resumeSessionId),
-      allowFreshBootstrap: !previous && !launch?.resumeSessionId,
+      resume: Boolean(resumeSessionId),
+      allowFreshBootstrap: !resumeSessionId,
       eventPath: files.eventsPath,
       inputPath: files.inputPath,
     });
-    await t.runShell(target, `cd ${esc(dir)} && ${command}`);
+    await t.runShell(target, `cd '${esc(dir)}' && ${command}`);
     if (!await waitForQwenUiReady(target, name, pane, files)) {
       throw new Error(`Qwen process started but its composer/sidecar never became ready in ${name}:${pane}`);
     }
@@ -117,7 +118,7 @@ export function createQwenAgentRuntime({
 
   async function restartQwen(agentName, pane) {
     const config = agentConfig(agentName);
-    const identity = latestQwenSessionIdentity(paneDir(config.dir, pane), { stateRoot });
+    const identity = latestQwenSessionIdentity(paneDir(config.dir, pane), { stateRoot, strict: true });
     if (!identity?.sessionId) {
       throw new Error(`Qwen continuity blocked for ${agentName}:${pane}: exact persisted session not found`);
     }

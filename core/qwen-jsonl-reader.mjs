@@ -19,11 +19,11 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { describeToolCall } from "./tool-display.mjs";
+import { readQwenJournalWindow } from "./qwen-journal-window.mjs";
 
 const QWEN_PROMPT_CURSOR_KIND = "qwen-dual-output-v1";
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const GENERATION = /^[A-Za-z0-9._-]{1,160}$/u;
-const MAX_FILE_BYTES = 16 * 1024 * 1024;
 
 const sha256 = (value) => createHash("sha256").update(String(value)).digest("hex");
 const stateBase = (stateRoot) => resolve(stateRoot || join(homedir(), ".agentmux", "qwen-panes"));
@@ -37,40 +37,44 @@ function paneRoot(paneDir, options = {}) {
   return join(stateBase(options.stateRoot), sha256(resolve(paneDir)));
 }
 
-function parseLines(file) {
-  try {
-    const stat = statSync(file);
-    if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return [];
-    return readFileSync(file, "utf8").split("\n").filter(Boolean).flatMap((line) => {
-      try { return [{ ...JSON.parse(line), __file: file, __id: sha256(line).slice(0, 20) }]; }
-      catch { return []; }
-    });
-  } catch { return []; }
+function parseLines(file, options = {}) {
+  return readQwenJournalWindow(file, options).events;
 }
 
 function metadataFor(paneDir, options = {}) {
   const root = paneRoot(paneDir, options);
   try {
     const value = JSON.parse(readFileSync(join(root, "runtime.json"), "utf8"));
-    if (value?.paneDir !== resolve(paneDir) || !SESSION_ID.test(String(value?.sessionId || ""))) return null;
-    if (value?.root !== root || !GENERATION.test(String(value?.generation || ""))) return null;
+    if (value?.version !== 1 || value.paneDir !== resolve(paneDir)
+        || !SESSION_ID.test(String(value.sessionId || ""))
+        || value.root !== root || !GENERATION.test(String(value.generation || ""))
+        || value.eventsPath !== join(root, `events-${value.generation}.jsonl`)
+        || value.inputPath !== join(root, `input-${value.generation}.jsonl`)) {
+      throw new Error("invalid Qwen runtime binding");
+    }
     return value;
-  } catch { return null; }
+  } catch (error) {
+    if (options.strict && error.code !== "ENOENT") {
+      throw new Error("Qwen continuity blocked: invalid runtime receipt; preserve it for inspection");
+    }
+    return null;
+  }
 }
 
-function eventFiles(paneDir, options = {}) {
-  const root = paneRoot(paneDir, options);
-  try {
-    return readdirSync(root)
-      .filter((name) => /^events-[A-Za-z0-9._-]+\.jsonl$/u.test(name))
-      .map((name) => join(root, name))
-      .filter((file) => statSync(file).isFile())
-      .sort((left, right) => statSync(left).mtimeMs - statSync(right).mtimeMs || left.localeCompare(right));
-  } catch { return []; }
+function rootEvent(event, sessionId) {
+  return event?.parent_tool_use_id == null
+    && (event.session_id ?? event.sessionId) === sessionId;
 }
 
-function allEvents(paneDir, options = {}) {
-  return eventFiles(paneDir, options).flatMap(parseLines);
+function activeWindow(paneDir, options = {}) {
+  const metadata = metadataFor(paneDir, options);
+  if (!metadata) return { events: [], truncated: false };
+  const window = readQwenJournalWindow(metadata.eventsPath, options);
+  return { ...window, events: window.events.filter((event) => rootEvent(event, metadata.sessionId)) };
+}
+
+function activeEvents(paneDir, options = {}) {
+  return activeWindow(paneDir, options).events;
 }
 
 function qwenHome(options = {}) {
@@ -185,9 +189,11 @@ function groupChatTurns(records) {
     current.usage = record.usageMetadata || current.usage;
     current.endTimestamp = record.timestamp || current.endTimestamp;
     let usesTool = false;
-    for (const part of record.message.parts || []) {
+    let textIndex = 0;
+    for (const [partIndex, part] of (record.message.parts || []).entries()) {
       if (typeof part?.text === "string" && part.thought !== true && part.text.trim()) {
-        current.items.push({ type: "text", content: part.text.trim(), id: record.__id });
+        current.items.push({ type: "text", content: part.text.trim(),
+          id: textIndex++ === 0 ? record.__id : `${record.__id}:text:${partIndex}` });
       }
       if (part?.functionCall?.name) {
         const display = describeToolCall(part.functionCall.name, part.functionCall.args || {});
@@ -205,8 +211,15 @@ function groupChatTurns(records) {
 function qwenTurns(paneDir, options = {}) {
   const identity = latestQwenSessionIdentity(paneDir, options);
   const chatPath = chatPathForSession(identity?.sessionId, options);
-  if (chatPath) return { turns: groupChatTurns(parseLines(chatPath)), chatPath };
-  return { turns: groupTurns(allEvents(paneDir, options)), chatPath: identity?.path || null };
+  const windowOptions = { ...options, maxBytes: options.tailBytes };
+  if (chatPath) {
+    const window = readQwenJournalWindow(chatPath, windowOptions);
+    return { turns: groupChatTurns(window.events.filter((event) => rootEvent(event, identity.sessionId))),
+      chatPath, truncated: window.truncated };
+  }
+  const window = activeWindow(paneDir, windowOptions);
+  return { turns: groupTurns(window.events), chatPath: identity?.path || null,
+    truncated: window.truncated };
 }
 
 /** WHAT: Builds private generation files before Qwen starts. WHY: Prevents old commands and events from replaying into a new process. */
@@ -232,7 +245,7 @@ export function prepareQwenRuntimeFiles(paneDir, {
 
 /** WHAT: Builds a handshake-verified generation receipt. WHY: Prevents delivery from appending to an unobserved Qwen process. */
 export function publishQwenRuntime(files) {
-  const handshake = parseLines(files.eventsPath).find((event) =>
+  const handshake = parseLines(files.eventsPath, { head: true, maxBytes: 64 * 1024 }).find((event) =>
     event.type === "system" && event.subtype === "session_start");
   if (handshake?.session_id !== files.sessionId
       || resolve(handshake?.data?.cwd || "") !== files.paneDir
@@ -276,23 +289,37 @@ export function latestQwenSessionIdentity(paneDir, options = {}) {
 /** WHAT: Builds a Qwen event cursor before one delivery. WHY: Keeps repeated identical prompts distinct without wall-clock guesses. */
 export function captureQwenPromptEchoCursor(paneDir, promptText, options = {}) {
   if (!promptText?.trim()) return null;
-  return captureJsonlAppendCursor(QWEN_PROMPT_CURSOR_KIND, eventFiles(paneDir, options));
+  const metadata = metadataFor(paneDir, options);
+  if (!metadata) return null;
+  return { ...captureJsonlAppendCursor(QWEN_PROMPT_CURSOR_KIND, [metadata.eventsPath]),
+    sessionId: metadata.sessionId, generation: metadata.generation };
 }
 
-/** WHAT: Checks Qwen's event stream for one exact prompt. WHY: Keeps TUI paint separate from delivery acknowledgement. */
+/** WHAT: Checks one exact generation's root prompt receipt. WHY: Child or replacement processes must not acknowledge another delivery. */
 export function isPromptInQwenJsonl(paneDir, promptText, { cursor = null, ...options } = {}) {
   const needle = promptText?.trim();
   if (!needle) return null;
-  const files = eventFiles(paneDir, options);
+  const metadata = metadataFor(paneDir, options);
+  if (!metadata) return false;
   if (cursor?.kind === QWEN_PROMPT_CURSOR_KIND) {
-    return hasJsonlEventAfterCursor(files, cursor, (event) => userPromptFromEvent(event) === needle);
+    const bound = SESSION_ID.test(String(cursor.sessionId || ""))
+      && GENERATION.test(String(cursor.generation || ""));
+    const path = bound ? join(metadata.root, `events-${cursor.generation}.jsonl`) : metadata.eventsPath;
+    const sessionId = bound ? cursor.sessionId : metadata.sessionId;
+    // Legacy byte cursors remain valid only for files they actually captured.
+    if (!Object.hasOwn(cursor.positions || {}, path)) return false;
+    const handshake = parseLines(path, { head: true, maxBytes: 64 * 1024 }).find((event) =>
+      event.type === "system" && event.subtype === "session_start");
+    if (handshake?.session_id !== sessionId || handshake.data?.cwd !== resolve(paneDir)) return false;
+    return hasJsonlEventAfterCursor([path], cursor, (event) =>
+      rootEvent(event, sessionId) && userPromptFromEvent(event) === needle);
   }
-  return allEvents(paneDir, options).some((event) => userPromptFromEvent(event) === needle);
+  return activeEvents(paneDir, options).some((event) => userPromptFromEvent(event) === needle);
 }
 
 /** WHAT: Reads Qwen turn activity. WHY: Keeps busy state grounded in structured engine events. */
 export function isBusyFromQwenJsonl(paneDir, options = {}) {
-  const turns = groupTurns(allEvents(paneDir, options));
+  const turns = groupTurns(activeEvents(paneDir, options));
   return turns.length ? !turns.at(-1).isComplete : null;
 }
 
@@ -322,7 +349,8 @@ export function extractFromQwenJsonl(paneDir, prompt = null, options = {}) {
 export function getContextFromQwenJsonl(paneDir, options = {}) {
   const identity = latestQwenSessionIdentity(paneDir, options);
   const chatPath = chatPathForSession(identity?.sessionId, options);
-  const records = chatPath ? parseLines(chatPath) : allEvents(paneDir, options);
+  const records = chatPath ? parseLines(chatPath).filter((event) => rootEvent(event, identity.sessionId))
+    : activeEvents(paneDir, options);
   let model = null;
   let sessionId = identity?.sessionId || null;
   let usage = null;
@@ -357,7 +385,7 @@ export function getContextFromQwenJsonl(paneDir, options = {}) {
 /** WHAT: Reads Qwen journal metadata. WHY: Keeps watcher freshness separate from terminal rendering. */
 export function latestQwenJsonlInfo(paneDir, options = {}) {
   const identity = latestQwenSessionIdentity(paneDir, options);
-  const file = chatPathForSession(identity?.sessionId, options) || eventFiles(paneDir, options).at(-1);
+  const file = chatPathForSession(identity?.sessionId, options) || identity?.path;
   if (!file) return null;
   try {
     const stat = statSync(file);
@@ -399,5 +427,5 @@ export function readLastTurnsQwen(paneDir, opts = {}) {
   if (grep) turns = turns.filter((turn) => grep.test(turn.userPrompt)
     || turn.items.some((item) => grep.test(item.content)));
   if (turns.length > limit) turns = turns.slice(-limit);
-  return turns.length ? { turns, compactions: [], jsonlFile: result.chatPath } : null;
+  return turns.length ? { turns, compactions: [], jsonlFile: result.chatPath, truncated: result.truncated } : null;
 }
