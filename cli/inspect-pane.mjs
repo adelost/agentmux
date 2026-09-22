@@ -11,6 +11,7 @@ import { alternateEngineForCommand, latestAlternateMtime } from "../core/alterna
 import { groupNativeTurns } from "../channels/native-runtime-watcher.mjs";
 import { nativeContextReading } from "../core/suggestions-context-telemetry.mjs";
 import { kimiObservedStatus } from "../core/kimi-status-truth.mjs";
+import { getContextFromQwenJsonl } from "../core/qwen-jsonl-reader.mjs";
 import { codexModelOverride, resolveCodexModelSelection } from "../core/codex-profiles.mjs";
 import { parseCodexPaneReading } from "../core/codex-status.mjs";
 import { isShellProcess } from "../core/tui-stall-recovery.mjs";
@@ -98,7 +99,9 @@ export async function inspectPane(ctx, agent, pane) {
   let context = null;
   if (dialect === "claude") {
     context = getContextFromPane(content, paneDir);
-  } else if (dialect === "codex" || dialect === "kimi" || dialect === "qwen") {
+  } else if (dialect === "qwen") {
+    context = getContextFromQwenJsonl(paneDir);
+  } else if (dialect === "codex" || dialect === "kimi") {
     context = getContextPercent(paneDir, dialect);
   }
   const configured = dialect === "codex" ? resolveCodexModelSelection({
