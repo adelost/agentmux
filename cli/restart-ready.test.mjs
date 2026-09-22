@@ -14,7 +14,7 @@ feature("restart-ready inventory adapters", () => {
       expect(restartPaneEngine({ engine: "kimi", cmd: "anything" })).toBe("kimi");
       expect(restartPaneEngine({ cmd: "codex --yolo" })).toBe("codex");
       expect(restartPaneEngine({ cmd: "/opt/kimi-code --auto" })).toBe("kimi");
-      expect(restartPaneEngine({ cmd: "/opt/qwen --approval-mode auto" })).toBe("qwen");
+      expect(restartPaneEngine({ cmd: "/opt/qwen --approval-mode yolo --exclude-tools ask_user_question" })).toBe("qwen");
       expect(restartPaneEngine({ cmd: "bash" })).toBeNull();
     }],
   });
