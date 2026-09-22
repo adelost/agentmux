@@ -17,10 +17,12 @@ export const KIMI_AUTONOMOUS_ARGS = Object.freeze([
   "--auto",
 ]);
 
-/** WHAT: Defines Qwen's autonomous mode. WHY: Keeps Qwen's classifier and fast-model routing inside its own harness. */
+/** WHAT: Defines Qwen's unattended pane mode. WHY: Prevents Discord-delivered work from waiting on a TUI approval or question dialog. */
 export const QWEN_AUTONOMOUS_ARGS = Object.freeze([
   "--approval-mode",
-  "auto",
+  "yolo",
+  "--exclude-tools",
+  "ask_user_question",
 ]);
 
 export const CODEX_APP_SERVER_ARGS = Object.freeze([
