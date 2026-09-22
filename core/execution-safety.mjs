@@ -17,10 +17,12 @@ export const KIMI_AUTONOMOUS_ARGS = Object.freeze([
   "--auto",
 ]);
 
-/** WHAT: Defines Qwen's autonomous mode. WHY: Keeps Qwen's classifier and fast-model routing inside its own harness. */
+/** WHAT: Defines Qwen's unattended mode. WHY: YOLO removes tool-approval dialogs, while ask_user_question must be excluded separately because Qwen keeps that HITL tool interactive even in YOLO. */
 export const QWEN_AUTONOMOUS_ARGS = Object.freeze([
   "--approval-mode",
-  "auto",
+  "yolo",
+  "--exclude-tools",
+  "ask_user_question",
 ]);
 
 export const CODEX_APP_SERVER_ARGS = Object.freeze([
