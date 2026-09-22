@@ -102,8 +102,9 @@ export function createKimiAgentRuntime({
    * selects: "Trust" — it only ever trusts the pane's own launch directory,
    * which the operator already trusted by launching the pane there — and
    * "Compact and continue", the fleet's standing manual answer and the
-   * product's cheapest keep-topic option. Rate-limited and capped so an
-   * unknown dialog never gets hammered.
+   * product's cheapest keep-topic option. The update offer declares Escape,
+   * which continues the installed version without mutating the CLI. Rate-
+   * limited and capped so an unknown dialog never gets hammered.
    */
   function createKimiModalAnswerer(target) {
     let lastAnswerAt = 0;
@@ -113,12 +114,13 @@ export function createKimiAgentRuntime({
       const modal = kimiModalForScreen(screen);
       if (!modal) return null;
       seen.add(modal);
+      const keys = KIMI.modals.find((entry) => entry.id === modal)?.keys || "Enter";
       const now = Date.now();
       if (answers < KIMI_MODAL_ANSWER_MAX && now - lastAnswerAt >= KIMI_MODAL_ANSWER_INTERVAL_MS) {
         lastAnswerAt = now;
         answers++;
-        console.warn(`kimi modal "${modal}" on ${target}; answering with its preselected first option (Enter)`);
-        await t.sendKeys(target, "Enter").catch(() => {});
+        console.warn(`kimi modal "${modal}" on ${target}; answering with ${keys}`);
+        await t.sendKeys(target, keys).catch(() => {});
       }
       return modal;
     }

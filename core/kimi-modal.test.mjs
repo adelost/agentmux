@@ -33,6 +33,16 @@ const KIMI_CACHE_HINT_MODAL = [
   " auto  K3 thinking: max  ~/proj/.agents/8  master",
 ].join("\n");
 
+const KIMI_UPDATE_MODAL = [
+  "Kimi Code Update Available",
+  "Kimi Code has a newer release ready.",
+  "Current  0.41.0",
+  "Target   2.0.2",
+  "↑↓ choose · Enter confirm · Esc continue",
+  " ❯ Install update now (2.0.2)",
+  "   Continue with current version",
+].join("\n");
+
 // A Kimi pane that TALKS about the dialogs: its boxed composer row vetoes the
 // modal match. Must never read as a modal.
 const KIMI_BUSY_QUOTING = [
@@ -67,6 +77,12 @@ feature("kimi modal recognition in detectPaneStatus", () => {
     then: ["menu", (status) => expect(status).toBe("menu")],
   });
 
+  unit("update offer is a held pane, not an idle one", {
+    given: ["the real 0.41 to 2.0 update screen", () => KIMI_UPDATE_MODAL],
+    when: ["classifying", detectPaneStatus],
+    then: ["menu", (status) => expect(status).toBe("menu")],
+  });
+
   unit("a kimi pane quoting the dialogs with a visible composer is not a modal", {
     given: ["quoting screen", () => KIMI_BUSY_QUOTING],
     when: ["classifying", detectPaneStatus],
@@ -91,6 +107,12 @@ feature("kimiModalForScreen", () => {
     given: ["cache hint", () => KIMI_CACHE_HINT_MODAL],
     when: ["detecting", kimiModalForScreen],
     then: ["cache-expiry-hint", (id) => expect(id).toBe("cache-expiry-hint")],
+  });
+
+  unit("names the update offer", {
+    given: ["update offer", () => KIMI_UPDATE_MODAL],
+    when: ["detecting", kimiModalForScreen],
+    then: ["update-available", (id) => expect(id).toBe("update-available")],
   });
 
   unit("a visible composer vetoes detection", {

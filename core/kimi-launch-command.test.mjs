@@ -175,4 +175,29 @@ describe("Kimi workspace-trust pre-seed and modal backstop", () => {
     await expect(runtime.waitForKimiPromptReady("ai", 7)).resolves.toMatchObject({ busy: false });
     expect(keys).toEqual([["ai:.7", "Enter"]]);
   });
+
+  it("dismisses the update offer with Escape instead of installing it", async () => {
+    const keys = [];
+    let screen = [
+      "Kimi Code Update Available",
+      "Current  0.41.0",
+      "Target   2.0.2",
+      "↑↓ choose · Enter confirm · Esc continue",
+      " ❯ Install update now (2.0.2)",
+      "   Continue with current version",
+    ].join("\n");
+    const runtime = createKimiAgentRuntime({
+      t: { sendKeys: async (target, key) => {
+        keys.push([target, key]);
+        if (key === "Escape") screen = " │ >  │ ";
+      } },
+      wait: async () => {}, paneDir: () => "/tmp/kimi-pane",
+      agentConfig: () => ({ dir: "/tmp", panes: [] }), isBusy: async () => false,
+      isPaneDead: async () => false, respawnPane: async () => {}, isAlreadyRunning: async () => true,
+      isShellProcess: () => false, captureScreen: async () => screen,
+      promptAlreadyInComposer: async () => false,
+    });
+    await expect(runtime.waitForKimiPromptReady("lsrc", 10)).resolves.toMatchObject({ busy: false });
+    expect(keys).toEqual([["lsrc:.10", "Escape"]]);
+  });
 });
