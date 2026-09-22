@@ -1,5 +1,7 @@
 # Review: persistent Qwen AMUX integration
 
+**Agent entrypoint:** read [HANDOFF.md](HANDOFF.md) first for the exact execution order, stop conditions and remaining acceptance boundary.
+
 **Recommendation: retain the persistent Qwen CLI architecture, but apply the reader/continuity fixes in this change before relying on unattended delivery and recovery.** This is not a replacement harness or a return to experimental headless workers.
 
 Reviewed 2026-09-22. PRs #405 and #406 are merged. Initial reading point was `93e810690022c8b12c593327c07f7f988d3a1939`; PR #407 arrived during review, moving master to `06dffc03b9caa2be626aa2767a7859ced5614ab9`. The two production modules fixed here are unchanged between those revisions. This change is based on the latter and preserves #407.
