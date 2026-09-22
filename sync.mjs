@@ -1,6 +1,5 @@
 // Sync logic: parse agentmux.yaml, generate channel names, build sync plans,
 // generate legacy agents.yaml. Pure functions, no Discord API calls.
-
 import yaml from "js-yaml";
 import { expandTilde } from "./core/runtime-defaults.mjs";
 export { expandTilde };
@@ -8,11 +7,16 @@ import { randomUUID } from "crypto";
 import { resolveTmuxLayout } from "./core/layout.mjs";
 import { resolveClaudeModel } from "./core/claude-model.mjs";
 import { nightlyCompactPolicy } from "./core/nightly-compact.mjs";
+import { CLAUDE_AUTONOMOUS_FLAGS, CODEX_AUTONOMOUS_FLAGS, KIMI_AUTONOMOUS_FLAGS,
+  QWEN_AUTONOMOUS_FLAGS } from "./core/execution-safety.mjs";
 import {
-  CLAUDE_AUTONOMOUS_FLAGS,
-  CODEX_AUTONOMOUS_FLAGS,
-  KIMI_AUTONOMOUS_FLAGS,
-} from "./core/execution-safety.mjs";
+  generateSourceChannelNames as generateChannelNames,
+  sourceCodingPaneSlots,
+  sourcePaneChannelName as paneChannelName,
+  sourcePaneDialect as paneDialect,
+  sourcePaneSlot,
+} from "./core/source-pane-plan.mjs";
+export { generateChannelNames };
 
 const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model ${resolveClaudeModel()}`;
 // Never `codex resume --last`: it resumes the globally most-recent rollout, not
@@ -24,8 +28,11 @@ const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model 
 const DEFAULT_CODEX_CMD = `codex ${CODEX_AUTONOMOUS_FLAGS}`;
 const DEFAULT_KIMI_MODEL = "kimi-code/k3";
 const DEFAULT_KIMI_CMD = `${process.env.HOME}/.kimi-code/bin/kimi --model ${DEFAULT_KIMI_MODEL} ${KIMI_AUTONOMOUS_FLAGS}`;
+const DEFAULT_QWEN_MODEL = "qwen3.8-max";
+const DEFAULT_QWEN_CMD = `${process.env.HOME}/.local/bin/qwen --model ${DEFAULT_QWEN_MODEL} ${QWEN_AUTONOMOUS_FLAGS}`;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const KIMI_MODEL_PATTERN = /^[a-z0-9._-]+(?:\/[a-z0-9._-]+)?$/iu;
+const QWEN_MODEL_PATTERN = /^[a-z0-9._:-]+$/iu;
 
 function paneCount(value, label, agentName) {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -78,27 +85,40 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
     //   - claudeCount: claude-cli panes, indices [0, claudeCount)
     //   - codexCount:  codex-cli panes, indices [claudeCount, panes)
     //   - kimiCount:   Kimi Code panes after Codex
-    //   - panes:       total agent panes, excluding services/shells
+    //   - qwenCount:   Qwen Code panes appended after existing services/shells
+    //   - panes:       total coding panes, excluding services/shells
     // Discord suffixes make non-Claude engines explicit at a glance.
     const claudeCount = paneCount(
-      config.panes ?? config.claude ?? (config.codex || config.kimi ? 0 : 1),
+      config.panes ?? config.claude ?? (config.codex || config.kimi || config.qwen ? 0 : 1),
       "claude",
       name,
     );
     const codexCount = paneCount(config.codex ?? 0, "codex", name);
     const kimiCount = paneCount(config.kimi ?? 0, "kimi", name);
+    const qwenCount = paneCount(config.qwen ?? 0, "qwen", name);
     const kimiModel = config.kimiModel || DEFAULT_KIMI_MODEL;
     if (!KIMI_MODEL_PATTERN.test(kimiModel)) {
       throw new Error(`agentmux.yaml: agent '${name}' has invalid kimiModel '${kimiModel}'`);
     }
-    const codingPaneCount = claudeCount + codexCount + kimiCount;
+    const qwenModel = config.qwenModel || DEFAULT_QWEN_MODEL;
+    if (!QWEN_MODEL_PATTERN.test(qwenModel)) {
+      throw new Error(`agentmux.yaml: agent '${name}' has invalid qwenModel '${qwenModel}'`);
+    }
+    const codingPaneCount = claudeCount + codexCount + kimiCount + qwenCount;
+    const legacyCodingCount = claudeCount + codexCount + kimiCount;
+    const qwenPaneStart = legacyCodingCount + (config.services?.length || 0) + (config.shells ?? 0);
     const orchestrator = config.orchestrator;
     if (orchestrator !== undefined
-        && (!Number.isSafeInteger(orchestrator) || orchestrator < 0 || orchestrator >= codingPaneCount)) {
+        && (!Number.isSafeInteger(orchestrator) || orchestrator < 0
+          || !(orchestrator < legacyCodingCount
+            || (orchestrator >= qwenPaneStart && orchestrator < qwenPaneStart + qwenCount)))) {
       throw new Error(`agentmux.yaml: agent '${name}' has invalid orchestrator pane`);
     }
     if (backend === "native" && kimiCount > 0) {
       throw new Error(`agentmux.yaml: native agent '${name}' cannot define Kimi tmux panes`);
+    }
+    if (backend === "native" && qwenCount > 0) {
+      throw new Error(`agentmux.yaml: native agent '${name}' cannot define Qwen tmux panes`);
     }
     if (backend === "native" && codingPaneCount < 1) {
       throw new Error(`agentmux.yaml: native agent '${name}' needs at least one Claude or Codex pane`);
@@ -124,6 +144,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
       claudeCount,
       codexCount,
       kimiCount,
+      qwenCount,
       services: config.services ?? [],
       shells: config.shells ?? 0,
       layout: resolveTmuxLayout(config.layout),
@@ -137,6 +158,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
       claudeModel: config.claudeModel || null,
       codexModel: config.codexModel || null,
       kimiModel,
+      qwenModel,
       effort: config.effort || null,
       nativeAgentIds,
     });
@@ -146,7 +168,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
   if (doc.dream !== undefined) {
     const validateDreamPane = (agent, pane, label) => {
       const target = agents.get(agent);
-      if (!agent || !Number.isSafeInteger(pane) || pane < 0 || !target || pane >= target.panes) {
+      if (!agent || !Number.isSafeInteger(pane) || pane < 0 || !target || !sourcePaneSlot(target, pane)) {
         throw new Error(`agentmux.yaml: '${label}' must name one configured agent and pane`);
       }
       if (target.backend !== "tmux") {
@@ -206,40 +228,6 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
  * Build the desired channel name for a pane, applying the engine suffix
  * when the pane index lands outside the Claude range.
  */
-function paneDialect(config, pane) {
-  const claudeCount = config.claudeCount ?? config.panes ?? 0;
-  const codexCount = config.codexCount ?? Math.max(0, (config.panes ?? 0) - claudeCount);
-  if (pane < claudeCount) return "claude";
-  if (pane < claudeCount + codexCount) return "codex";
-  return "kimi";
-}
-
-function paneChannelName(name, pane, config) {
-  const dialect = paneDialect(config, pane);
-  return dialect === "claude" ? `${name}-${pane}` : `${name}-${pane}-${dialect}`;
-}
-
-/** WHAT: Builds pane channel names. WHY: Keeps engine suffixes stable across Discord syncs. */
-export function generateChannelNames(agents) {
-  const result = [];
-  const sortedNames = [...agents.keys()].sort();
-
-  for (const name of sortedNames) {
-    const config = agents.get(name);
-    const { panes } = config;
-    for (let i = 0; i < panes; i++) {
-      const dialect = paneDialect(config, i);
-      result.push({
-        agentName: name,
-        channelName: paneChannelName(name, i, config),
-        pane: i,
-        dialect,
-      });
-    }
-  }
-  return result;
-}
-
 /** WHAT: Parses pane channel names. WHY: Keeps legacy migrations separate from engine suffix parsing. */
 export function classifyAgentChannel(channelName, agentNames, existingNamesLower) {
   const lower = channelName.toLowerCase();
@@ -253,8 +241,8 @@ export function classifyAgentChannel(channelName, agentNames, existingNamesLower
     const prefix = nameLower + "-";
     if (!lower.startsWith(prefix)) continue;
     const rest = lower.slice(prefix.length);
-    // Match plain `{agent}-{N}` (claude), `-codex`, or `-kimi`.
-    const match = rest.match(/^(\d+)(?:-(codex|kimi))?$/);
+    // Match plain `{agent}-{N}` (claude), or an explicit non-Claude suffix.
+    const match = rest.match(/^(\d+)(?:-(codex|kimi|qwen))?$/);
     if (!match) continue;
     const n = parseInt(match[1], 10);
     const dialect = match[2] || "claude";
@@ -299,12 +287,12 @@ export function buildMigrationPlan(agents, existingChannels) {
     // If multiple channels claim the same pane, keep first-seen; rest are extras.
     const byPane = new Map();
     for (const c of claimed) {
-      if (c.pane >= config.panes) { extras.push(c); continue; }
+      if (!sourcePaneSlot(config, c.pane)) { extras.push(c); continue; }
       if (byPane.has(c.pane)) { extras.push(c); continue; }
       byPane.set(c.pane, c);
     }
 
-    for (let p = 0; p < config.panes; p++) {
+    for (const { pane: p } of sourceCodingPaneSlots(config)) {
       const target = paneChannelName(name, p, config);
       const ch = byPane.get(p);
       if (!ch) {
@@ -370,7 +358,7 @@ export function generateAgentsYaml(
     // Discord channel mapping. Non-Claude suffixes are part of the name.
     const claudeCount = config.claudeCount ?? config.panes;
     const discord = {};
-    for (let i = 0; i < config.panes; i++) {
+    for (const { pane: i } of sourceCodingPaneSlots(config)) {
       const channelName = paneChannelName(name, i, config);
       const channelId = channelMap.get(channelName);
       if (channelId) discord[channelId] = i;
@@ -456,6 +444,19 @@ export function generateAgentsYaml(
       }
       for (let i = 0; i < config.shells; i++) {
         const pane = { name: `shell-${i + 1}`, cmd: "bash" };
+        const label = labelFor(paneIdx);
+        if (label) pane.label = label;
+        panes.push(pane);
+        paneIdx++;
+      }
+      for (let i = 0; i < (config.qwenCount ?? 0); i++) {
+        const model = config.qwenModel || DEFAULT_QWEN_MODEL;
+        const pane = {
+          name: i === 0 ? "qwen" : `qwen-${i + 1}`,
+          cmd: DEFAULT_QWEN_CMD.replace(`--model ${DEFAULT_QWEN_MODEL}`, `--model ${model}`),
+          engine: "qwen",
+          model,
+        };
         const label = labelFor(paneIdx);
         if (label) pane.label = label;
         panes.push(pane);

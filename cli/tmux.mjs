@@ -1,6 +1,5 @@
 // Tmux facade for agent CLI. Bridges agent.mjs primitives with CLI-specific operations.
 // Stateless: all functions take socket + target explicitly.
-
 import { exec as execCb, execSync, fork } from "child_process";
 import { randomUUID } from "crypto";
 import { mkdtempSync, writeFileSync } from "fs";
@@ -22,14 +21,12 @@ import {
 } from "../core/delivery-queue.mjs";
 import { parseSenderHeader } from "../core/sender-detect.mjs";
 import { detectPaneStatus } from "./format.mjs";
-import { findChannelForPane, validateAgentPane } from "./config.mjs";
-import { loadConfig } from "./config.mjs";
+import { findChannelForPane, loadConfig, validateAgentPane } from "./config.mjs";
 import { createNativeRuntimeClient } from "../core/native-runtime-client.mjs";
 import { createAgentRouter } from "../core/agent-router.mjs";
 import { createState } from "../core/state.mjs";
 
 const exec = promisify(execCb);
-
 /** WHAT: Builds tmux execution helpers bound to one socket. WHY: Keeps CLI process and pane state on the bridge's shared boundaries. */
 export function createTmuxContext(socket, configPath) {
   const tmuxExec = (cmd) => exec(cmd, { timeout: 5000 });
@@ -63,7 +60,6 @@ export function createTmuxContext(socket, configPath) {
     }),
   };
 }
-
 /** Check if a tmux session exists. */
 export async function hasSession(ctx, name) {
   if (ctx.agent?.isNativeTarget?.(name, 0)) {
@@ -77,12 +73,10 @@ export async function hasSession(ctx, name) {
     return false;
   }
 }
-
 /** Attach to a tmux session. Must not be called from inside tmux. */
 export function attachSession(socket, name) {
   execSync(`tmux -S '${esc(socket)}' attach-session -t '${esc(name)}'`, { stdio: "inherit" });
 }
-
 /**
  * WHAT: Builds or locates the tmux session, starts only its primary coding pane, and reapplies layout.
  * WHY: Keeps an attach from waking every sleeping engine while targeted delivery owns later pane wakes.
@@ -95,17 +89,12 @@ export async function ensureAndAttach(ctx, name, configPath) {
     await Promise.all(panes.map((_, pane) => ctx.agent.nativeRuntime.ensureTarget(name, pane)));
     return { native: true, runtimeUrl: config[name].runtimeUrl };
   }
-  const agentPanes = panes
-    .map((p, i) => (
-      /(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u.test(p?.cmd || "") ? i : -1
-    ))
+  const agentPanes = panes.map((p, i) =>
+    /(?:^|[/\s])(claude|codex|kimi(?:-code)?|qwen)(?:\s|$)/u.test(p?.cmd || "") ? i : -1)
     .filter((i) => i >= 0);
-
   // Step 1: create session + panes (sequential, once)
   await ctx.agent.ensureReady(name, agentPanes[0] ?? 0);
-
-  const existingPanes = await listPanes(ctx, name);
-  const existingCount = existingPanes.length;
+  const existingPanes = await listPanes(ctx, name), existingCount = existingPanes.length;
   const missingAgentPanes = existingCount
     ? agentPanes.filter((i) => i >= existingCount)
     : [];

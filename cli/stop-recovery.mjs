@@ -8,7 +8,7 @@ import {
 } from "../core/fleet-stop-recovery.mjs";
 import { getPaneStatus, listPanes } from "./tmux.mjs";
 
-const CODING_COMMAND = /(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u;
+const CODING_COMMAND = /(?:^|[/\s])(claude|codex|kimi(?:-code)?|qwen)(?:\s|$)/u;
 
 function readPaneTurns(agent, pane, options) {
   const paneDir = panePathFor(agent, pane);

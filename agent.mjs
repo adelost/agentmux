@@ -13,6 +13,7 @@ import { ensureHeadlessWindow, settleTmuxWindowSize } from "./core/tmux-window-s
 import { stripPaneChrome } from "./core/pane-chrome.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect, COMPOSER_LINE_RE, foreignComposerText } from "./core/dialects.mjs";
+import { createPaneDialectResolver } from "./core/pane-dialect.mjs";
 import {
   captureClaudePromptEchoCursor,
   captureClaudeSlashReceiptCursor,
@@ -30,6 +31,7 @@ import {
   latestCodexSessionIdentity,
 } from "./core/codex-jsonl-reader.mjs";
 import { createKimiAgentRuntime, kimiComposerHasCollapsedPaste, kimiJournal } from "./core/kimi-agent-runtime.mjs";
+import { createQwenAgentRuntime, qwenJournal } from "./core/qwen-agent-runtime.mjs";
 import { createKimiIngestProbe } from "./core/kimi-ingest-probe.mjs";
 import { createPromptEcho } from "./core/prompt-echo.mjs";
 import { createPaneMemorySnapshot, resolveMemoryResponsePrompt } from "./core/delivery-memory-context.mjs";
@@ -73,6 +75,7 @@ import {
   isClaudePaneCommand as isClaudeCmd,
   isCodexPaneCommand as isCodexCmd,
   isKimiPaneCommand as isKimiCmd,
+  isQwenPaneCommand as isQwenCmd,
   isCodingPaneCommand as isAgentCmd,
   isShellProcess as isShellProc,
 } from "./core/tui-stall-recovery.mjs";
@@ -80,7 +83,7 @@ import { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
 import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
 import { assertCodexWorkModel, createCodexCompact, startCodexProcess } from "./core/codex-process-launch.mjs";
-export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchCommand } from "./core/agent-launch-command.mjs";
+export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchCommand, buildQwenLaunchCommand } from "./core/agent-launch-command.mjs";
 export { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
@@ -383,8 +386,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (isClaudeCmd(wantCmd)) return /^(claude|node)$/.test(currCmd);
     if (isCodexCmd(wantCmd)) return /^(codex|node)$/.test(currCmd);
     if (isKimiCmd(wantCmd)) return /^(kimi|kimi-code)$/.test(currCmd);
+    if (isQwenCmd(wantCmd)) return /^(qwen|node)$/.test(currCmd);
     if (wantCmd === "bash") return isShellProc(currCmd);
-    return !isShellProc(currCmd) && !/^(claude|codex|kimi|kimi-code|node)$/.test(currCmd);
+    return !isShellProc(currCmd) && !/^(claude|codex|kimi|kimi-code|qwen|node)$/.test(currCmd);
   }
 
   async function removeIdleExtraPanes(name, wantedCount, actualCount) {
@@ -486,7 +490,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // if config says something else. User may have active work there;
       // forcing a slot into a shell would destroy context. Report as a
       // mismatch instead.
-      if (/^(claude|codex|kimi|kimi-code|node)$/.test(currCmd)) {
+      if (/^(claude|codex|kimi|kimi-code|qwen|node)$/.test(currCmd)) {
         summary.mismatches = summary.mismatches || [];
         summary.mismatches.push({ pane: i, has: currCmd, expected: want.name });
         continue;
@@ -769,46 +773,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return extractText(raw) || "(empty response)";
   }
 
-  /** Derive which agent dialect a pane runs from its configured cmd. */
-  function paneDialectName(agentName, pane) {
-    try {
-      const config = agentConfig(agentName);
-      const cmd = config.panes?.[pane]?.cmd || "";
-      if (/kimi(?:-code)?/i.test(cmd)) return "kimi";
-      if (cmd.includes("codex")) return "codex";
-      if (cmd.includes("claude")) return "claude";
-      return null;
-    } catch (err) {
-      console.warn(`paneDialectName(${agentName}) failed: ${err.message}`);
-      return null;
-    }
-  }
-
-  /**
-   * Derive dialect from the live pane when config is stale.
-   *
-   * Some long-running panes can be repurposed without agents.yaml changing
-   * first. Example: ai:p3 is configured as a service pane, but currently runs
-   * Codex (node). Config-only dialect detection then misses Codex-specific
-   * echo checks and send quirks. Keep this as a fallback so configured Claude
-   * panes remain fast and deterministic.
-   */
-  async function livePaneDialectName(agentName, pane) {
-    const configured = paneDialectName(agentName, pane);
-    if (configured) return configured;
-
-    const target = `${agentName}:.${pane}`;
-    try {
-      if ((await t.currentCommand(target)) !== "node") return null;
-
-      const raw = await capturePane(agentName, pane, 120);
-      const dialect = detectDialect(raw);
-      return dialect?.name || null;
-    } catch (err) {
-      console.warn(`livePaneDialectName(${agentName}:${pane}) failed: ${err.message}`);
-      return null;
-    }
-  }
+  const { paneDialectName, livePaneDialectName } = createPaneDialectResolver({
+    configFor: agentConfig, currentCommand: (target) => t.currentCommand(target), capture: capturePane,
+  });
 
   async function isBusy(agentName, pane, promptText = null) {
     // Source of truth: read the agent's own session file instead of parsing
@@ -824,6 +791,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         if (r !== null) return r;
       } else if (dialect === "kimi") {
         const r = kimiJournal.isBusy(dir); if (r !== null) return r;
+      } else if (dialect === "qwen") {
+        const r = qwenJournal.isBusy(dir); if (r !== null) return r;
       } else if (dialect === "claude") {
         const r = isBusyFromJsonl(dir, promptText);
         if (r !== null) return r;
@@ -866,6 +835,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     t, state, wait, paneDir, agentConfig, isBusy, isPaneDead, respawnPane,
     isAlreadyRunning, isShellProcess: isShellProc, captureScreen, promptAlreadyInComposer,
   });
+  const { restartQwen, startQwen, submitPrompt: submitQwenPrompt } = createQwenAgentRuntime({
+    t, wait, paneDir, agentConfig, isBusy, isPaneDead, respawnPane,
+    isAlreadyRunning, isShellProcess: isShellProc, captureScreen,
+  });
   const maybeRescueClaudeSubmit = createClaudeSubmitRescue({
     t, wait, paneDir, agentConfig, paneDialectName, isBusy, capturePane,
   });
@@ -905,6 +878,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       if (codex && codex.items.length > 0) return codex;
     } else if (dialect === "kimi") {
       const kimi = kimiJournal.extract(dir, promptText); if (kimi?.items.length) return kimi;
+    } else if (dialect === "qwen") {
+      const qwen = qwenJournal.extract(dir, promptText); if (qwen?.items.length) return qwen;
     } else if (dialect === "claude") {
       const claude = extractFromJsonl(dir, promptText);
       if (claude && claude.items.length > 0) return claude;
@@ -955,6 +930,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       return Boolean(codex?.items?.some((item) => item.type === "text" && item.content?.trim()));
     }
     if (dialect === "kimi") return Boolean(kimiJournal.extract(dir, promptText)?.items?.some((item) => item.type === "text" && item.content?.trim()));
+    if (dialect === "qwen") return Boolean(qwenJournal.extract(dir, promptText)?.items?.some((item) => item.type === "text" && item.content?.trim()));
     if (dialect === "claude") {
       const claude = extractFromJsonl(dir, promptText);
       return Boolean(claude?.items?.some((item) => item.type === "text" && item.content?.trim()));
@@ -977,7 +953,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   const waitForPromptEcho = createPromptEcho({
-    paneDir, agentConfig, paneDialectName, isPromptInJsonl, isPromptInCodexJsonl, kimiJournal, wait,
+    paneDir, agentConfig, paneDialectName, isPromptInJsonl, isPromptInCodexJsonl, kimiJournal, qwenJournal, wait,
   });
 
   /**
@@ -991,6 +967,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (dialect === "claude") return captureClaudePromptEchoCursor(dir, promptText);
     if (dialect === "codex") return captureCodexPromptEchoCursor(dir, promptText);
     if (dialect === "kimi") return kimiJournal.capturePromptCursor(dir, promptText);
+    if (dialect === "qwen") return qwenJournal.capturePromptCursor(dir, promptText);
     return null;
   }
 
@@ -1133,6 +1110,16 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const dialect = await livePaneDialectName(agentName, pane);
     if (dialect === "codex") await assertCodexWorkModel({ state, name: agentName, pane, prompt,
       configured: agentConfig(agentName).panes?.[pane], screen: () => captureScreen(agentName, pane) });
+    if (dialect === "qwen") {
+      if (maintenanceGuard) await maintenanceGuard("submit");
+      await submitWithDurableFence({
+        onSubmitting,
+        sendEnter: () => submitQwenPrompt(agentName, pane, prompt),
+        onSubmitted,
+      });
+      return { busyAtSend: Boolean(await isBusy(agentName, pane).catch(() => false)),
+        queued: false, exactDraft: true, submitted: true, tuiHint: "structured-input" };
+    }
     let alreadyComposed = await promptAlreadyInComposer(agentName, pane, prompt, {
       ownedDraft: knownDrafted,
     });
@@ -1526,6 +1513,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       if (!wasRunning && !await waitForKimiUiReady(target, agentName, pane)) {
         throw new Error(`Kimi process started but its composer never became ready in ${agentName}:${pane}`);
       }
+    } else if (isQwenCmd(paneCmd)) {
+      await startQwen(agentName, target, config.dir, pane, launch);
     }
   }
 
@@ -1694,6 +1683,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const dir = paneDir(config.dir, pane);
       const dialect = paneDialectName(agentName, pane);
       if (dialect === "kimi") return kimiJournal.context(dir);
+      if (dialect === "qwen") return qwenJournal.context(dir);
       return getContextPercentByDialect(dir, dialect);
     } catch (err) {
       console.warn(`getContextPercent(${agentName}) failed: ${err.message}`);
@@ -1813,6 +1803,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     promptTransportState,
     restartCodex,
     restartKimi,
+    restartQwen,
   });
   return {
     ensureReady, sendAndWait, sendOnly,
@@ -1822,6 +1813,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho, probeIngest,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession, paneProcessState: tuiRecovery.paneProcessState,
-    sanitizeTmuxGlobalEnv, restartCodex, compactCodex, restartKimi, restartClaudeAccount: tuiRecovery.restartClaudeAccount, restartPaneExact, restartFleet,
+    sanitizeTmuxGlobalEnv, restartCodex, compactCodex, restartKimi, restartQwen, restartClaudeAccount: tuiRecovery.restartClaudeAccount, restartPaneExact, restartFleet,
   };
 }

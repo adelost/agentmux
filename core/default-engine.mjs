@@ -14,5 +14,6 @@ export function defaultCodingEngine(options = {}) {
   const homeKimi = join(options.env?.HOME || process.env.HOME || "", ".kimi-code", "bin", "kimi");
   if (executableAvailable("kimi", options) || executableAvailable("kimi-code", options)
     || (options.exists || existsSync)(homeKimi)) return "kimi";
-  throw new Error("no supported coding engine found (Claude Code, Codex, or Kimi Code)");
+  if (executableAvailable("qwen", options)) return "qwen";
+  throw new Error("no supported coding engine found (Claude Code, Codex, Kimi Code, or Qwen Code)");
 }

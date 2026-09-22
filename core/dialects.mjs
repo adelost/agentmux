@@ -165,10 +165,36 @@ export const KIMI = {
   modalVetoLineRe: /^\s*(?:[│┃]\s*)?>\s*(?:[│┃]\s*)?$/mu,
 };
 
+// --- Qwen Code -----------------------------------------------------------
+
+/** WHAT: Defines Qwen Code's persistent TUI. WHY: Keeps human-visible rendering separate from structured receipts. */
+export const QWEN = {
+  name: "qwen",
+  compactReceiptIsAuthoritative: false,
+  promptChar: ">",
+  bullet: "◆",
+  toolResultPrefix: "│",
+  toolCallPattern: /^◆\s+(?:Run|Read|Write|Edit|Search|Fetch|Use)\b/u,
+  idleWhenPromptEmpty: false,
+  busySignals: ["esc to interrup", "esc to cancel", /\bThinking…/u],
+  noise: [
+    /^>_ Qwen Code/u,
+    /^Token Plan\s+\|/u,
+    /^Qwen Code update available!/u,
+    /^>\s+Type your message/u,
+    /^\s*➜\s+\d+\s+·/u,
+    /^\s*(?:plan|auto|yolo) mode/u,
+    /^\s*Enter to steer/u,
+  ],
+  modals: [
+    { id: "provider-update", status: "menu", re: /Built-in Provider Update[\s\S]*Update all/u },
+  ],
+};
+
 // --- Registry ------------------------------------------------------------
 
 /** WHAT: Defines supported TUI dialects. WHY: Keeps fallback detection aligned with every engine. */
-export const ALL_DIALECTS = [CLAUDE, CODEX, KIMI];
+export const ALL_DIALECTS = [CLAUDE, CODEX, KIMI, QWEN];
 
 // A new engine opts OUT by staying off the registry, never in by editing a
 // call site. dialectFor returns null for shell panes, which is what the
@@ -197,6 +223,7 @@ export const compactReceiptIsAuthoritative = (dialect) =>
  * WHY: Keeps scrollback parsing from applying another engine's markers.
  */
 export function detectDialect(raw) {
+  if (raw.includes(">_ Qwen Code") || /Token Plan\s+\|.*qwen/iu.test(raw)) return QWEN;
   if (raw.includes("Welcome to Kimi Code") || /\bSession\s+session_[0-9a-f-]+/iu.test(raw)) return KIMI;
   // Strong signal: Codex banner somewhere
   if (raw.includes(">_ OpenAI Codex")) return CODEX;

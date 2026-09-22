@@ -6,6 +6,7 @@ import { statSync } from "node:fs";
 import { readLastTurns } from "./jsonl-reader.mjs";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
+import { readLastTurnsQwen } from "./qwen-jsonl-reader.mjs";
 import { resolveActivityMs } from "./auto-compact.mjs";
 
 // A measured 201 MB Claude journal needed a 256 KiB tail to recover its last
@@ -18,6 +19,7 @@ const DEFAULT_READERS = Object.freeze({
   claude: readLastTurns,
   codex: readLastTurnsCodex,
   kimi: readLastTurnsKimi,
+  qwen: readLastTurnsQwen,
 });
 
 function journalStamp(stat, path) {

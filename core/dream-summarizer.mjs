@@ -23,8 +23,8 @@ export const DREAM_SUMMARY_LINES = 60;
 
 /** WHAT: Resolves supported journal dialects. WHY: Keeps unsupported panes from entering Dream input. */
 export function dreamPaneEngine(pane = {}) {
-  if (["claude", "codex", "kimi"].includes(pane.engine)) return pane.engine;
-  const match = String(pane.cmd || "").match(/(?:^|[\s/])(claude|codex|kimi(?:-code)?)(?:\s|$)/u);
+  if (["claude", "codex", "kimi", "qwen"].includes(pane.engine)) return pane.engine;
+  const match = String(pane.cmd || "").match(/(?:^|[\s/])(claude|codex|kimi(?:-code)?|qwen)(?:\s|$)/u);
   if (!match) return null;
   return match[1].startsWith("kimi") ? "kimi" : match[1];
 }

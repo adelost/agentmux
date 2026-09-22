@@ -17,6 +17,12 @@ export const KIMI_AUTONOMOUS_ARGS = Object.freeze([
   "--auto",
 ]);
 
+/** WHAT: Defines Qwen's autonomous mode. WHY: Keeps Qwen's classifier and fast-model routing inside its own harness. */
+export const QWEN_AUTONOMOUS_ARGS = Object.freeze([
+  "--approval-mode",
+  "auto",
+]);
+
 export const CODEX_APP_SERVER_ARGS = Object.freeze([
   "app-server",
   "--stdio",
@@ -58,3 +64,5 @@ export const CLAUDE_AUTONOMOUS_FLAGS = renderShellArgs(CLAUDE_AUTONOMOUS_ARGS);
 export const CODEX_AUTONOMOUS_FLAGS = renderShellArgs(CODEX_AUTONOMOUS_ARGS);
 /** WHAT: Formats Kimi autonomous flags. WHY: Keeps shell boundaries centralized. */
 export const KIMI_AUTONOMOUS_FLAGS = renderShellArgs(KIMI_AUTONOMOUS_ARGS);
+/** WHAT: Formats Qwen autonomous flags. WHY: Keeps generated descriptors and exact-session launches aligned. */
+export const QWEN_AUTONOMOUS_FLAGS = renderShellArgs(QWEN_AUTONOMOUS_ARGS);

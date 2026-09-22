@@ -13,6 +13,7 @@ export function createPromptEcho({
   isPromptInJsonl,
   isPromptInCodexJsonl,
   kimiJournal,
+  qwenJournal,
   wait,
 }) {
   /** WHAT: Checks the journal for the exact prompt until timeout. WHY: Prevents screen echoes from becoming delivery receipts. */
@@ -42,6 +43,8 @@ export function createPromptEcho({
         found = kimiJournal.promptAccepted(dir, promptText, {
           notBeforeMs, cursor, allowPastePlaceholder: Boolean(cursor),
         });
+      } else if (dialect === "qwen") {
+        found = qwenJournal.promptAccepted(dir, promptText, { cursor });
       }
       if (found === true) return true;
 

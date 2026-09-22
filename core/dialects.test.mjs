@@ -1,6 +1,6 @@
 import { feature, unit, expect } from "bdd-vitest";
 import {
-  CLAUDE, CODEX, KIMI, ALL_DIALECTS, detectDialect, isCodingDialect,
+  CLAUDE, CODEX, KIMI, QWEN, ALL_DIALECTS, detectDialect, isCodingDialect,
   matchesAnyBullet, matchesAnyToolResult, matchesAnyToolCall,
   matchesAnyPromptPrefix, matchesAnyPromptWithText, stripBullet,
   COMPOSER_LINE_RE, foreignComposerText,
@@ -49,15 +49,17 @@ feature("dialect data integrity", () => {
     }],
   });
 
-  unit("dialect glyphs are unique across dialects", {
-    given: ["all dialects", () => ALL_DIALECTS],
-    when: ["collecting glyphs", (ds) => ({
-      prompts: ds.map((d) => d.promptChar),
-      bullets: ds.map((d) => d.bullet),
+  unit("shared Kimi/Qwen glyphs are disambiguated by their real banners", {
+    given: ["the two upstream TUIs that both render > and ◆", () => ({ KIMI, QWEN })],
+    when: ["detecting their banner-backed panes", () => ({
+      kimi: detectDialect("Welcome to Kimi Code\nSession session_12345678-1234-4234-9234-123456789abc\n> "),
+      qwen: detectDialect(">_ Qwen Code (v0.23.3)\nToken Plan | qwen3.8-max\n> Type your message"),
     })],
-    then: ["no duplicates", ({ prompts, bullets }) => {
-      expect(new Set(prompts).size).toBe(prompts.length);
-      expect(new Set(bullets).size).toBe(bullets.length);
+    then: ["AMUX never guesses from the shared glyph alone", ({ kimi, qwen }) => {
+      expect(KIMI.promptChar).toBe(QWEN.promptChar);
+      expect(KIMI.bullet).toBe(QWEN.bullet);
+      expect(kimi).toBe(KIMI);
+      expect(qwen).toBe(QWEN);
     }],
   });
 });
@@ -87,6 +89,12 @@ feature("detectDialect", () => {
     given: ["raw with Kimi banner", () => "Welcome to Kimi Code\nSession session_12345678-1234-4234-9234-123456789abc\n\n> "],
     when: ["detecting", (raw) => detectDialect(raw)],
     then: ["returns KIMI", (d) => expect(d).toBe(KIMI)],
+  });
+
+  unit("detects Qwen via its banner before the shared Kimi prompt marker", {
+    given: ["raw with Qwen banner", () => ">_ Qwen Code (v0.23.3)\nToken Plan | qwen3.8-max\n\n> Type your message"],
+    when: ["detecting", (raw) => detectDialect(raw)],
+    then: ["returns QWEN", (d) => expect(d).toBe(QWEN)],
   });
 
   unit("defaults to CLAUDE when nothing matches", {

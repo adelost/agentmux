@@ -9,5 +9,6 @@ test("starter engine follows the installed CLI rather than one vendor", () => {
   expect(defaultCodingEngine(options(new Set(["/bin/kimi-code"])))).toBe("kimi");
   expect(defaultCodingEngine({ env: { PATH: "", HOME: "/home/tester" },
     exists: (path) => path === "/home/tester/.kimi-code/bin/kimi" })).toBe("kimi");
+  expect(defaultCodingEngine(options(new Set(["/bin/qwen"])))).toBe("qwen");
   expect(() => defaultCodingEngine(options(new Set()))).toThrow("no supported coding engine");
 });

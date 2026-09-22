@@ -18,6 +18,7 @@ import { getPaneStatus } from "./tmux.mjs";
 import { readLastTurns } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "../core/kimi-jsonl-reader.mjs";
+import { readLastTurnsQwen } from "../core/qwen-jsonl-reader.mjs";
 import {
   needsDeliveryTerminalNotice,
   TERMINAL_DELIVERY_STATES,
@@ -33,8 +34,8 @@ const TAIL_BYTES = 8 * 1024 * 1024;
 
 /** WHAT: Resolves one configured pane engine. WHY: Keeps restart inventory limited to stateful coding runtimes. */
 export function restartPaneEngine(pane = {}) {
-  if (["claude", "codex", "kimi"].includes(pane.engine)) return pane.engine;
-  const match = String(pane.cmd || "").match(/(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u);
+  if (["claude", "codex", "kimi", "qwen"].includes(pane.engine)) return pane.engine;
+  const match = String(pane.cmd || "").match(/(?:^|[/\s])(claude|codex|kimi(?:-code)?|qwen)(?:\s|$)/u);
   if (!match) return null;
   return match[1].startsWith("kimi") ? "kimi" : match[1];
 }
@@ -115,7 +116,8 @@ function readBootId() {
 function readTurns(engine, paneDir) {
   const reader = engine === "codex"
     ? readLastTurnsCodex
-    : engine === "kimi" ? readLastTurnsKimi : readLastTurns;
+    : engine === "kimi" ? readLastTurnsKimi
+      : engine === "qwen" ? readLastTurnsQwen : readLastTurns;
   return reader(paneDir, { limit: 1, tailBytes: TAIL_BYTES, headless: true })?.turns || [];
 }
 

@@ -869,7 +869,7 @@ async function cmdLog(name, flags, ctx) {
   if (!jsonl) {
     console.error(
       `no jsonl found for '${paneDir}'. ` +
-      `Pane may not have run claude/codex/kimi yet, or session is in a different cwd. ` +
+      `Pane may not have run claude/codex/kimi/qwen yet, or session is in a different cwd. ` +
       `Try --tmux for raw capture.`,
     );
     process.exit(1);
@@ -1275,7 +1275,7 @@ async function cmdAsks(ctx, flags, positional = []) {
     for (let paneIdx = 0; paneIdx < (a.panes || []).length; paneIdx++) {
       if (paneFilter != null && paneIdx !== paneFilter) continue;
       const cmd = a.panes[paneIdx]?.cmd || "";
-      if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u.test(cmd)) continue;
+      if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?|qwen)(?:\s|$)/u.test(cmd)) continue;
       targets.push({ agent: a, pane: paneIdx });
     }
   }
@@ -1859,7 +1859,7 @@ async function cmdMorningDigest(ctx, args) {
   for (const agent of listAgents(ctx.configPath)) {
     for (let paneIdx = 0; paneIdx < (agent.panes || []).length; paneIdx++) {
       const cmd = agent.panes[paneIdx]?.cmd || "";
-      if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u.test(cmd)) continue;
+      if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?|qwen)(?:\s|$)/u.test(cmd)) continue;
       const paneDir = panePathFor(agent, paneIdx);
       const res = readLastTurnsForPane(agent, paneIdx, paneDir,
         { limit: 20, tailBytes: 4 * 1024 * 1024 });
@@ -2095,22 +2095,22 @@ async function cmdPs(ctx, flags = {}) {
     const runtime = (p) => paneRuntimeLabel(engine(p), a.backend, SHELL_CMDS.test(p.command));
     const claudeCount = panes.filter((p) => engine(p) === "claude").length;
     const codexCount = panes.filter((p) => engine(p) === "codex").length;
-    const kimiCount = panes.filter((p) => engine(p) === "kimi").length;
+    const kimiCount = panes.filter((p) => engine(p) === "kimi").length,
+      qwenCount = panes.filter((p) => engine(p) === "qwen").length;
     const shellCount = panes.filter((p) => SHELL_CMDS.test(p.command) && !engine(p)).length;
-    const otherCount = panes.length - claudeCount - codexCount - kimiCount - shellCount;
+    const otherCount = panes.length - claudeCount - codexCount - kimiCount - qwenCount - shellCount;
     const summary = [
       claudeCount && `${claudeCount} claude`,
       codexCount && `${codexCount} codex`,
-      kimiCount && `${kimiCount} kimi`,
+      kimiCount && `${kimiCount} kimi`, qwenCount && `${qwenCount} qwen`,
       otherCount && `${otherCount} svc`,
       shellCount && `${shellCount} shell`,
     ].filter(Boolean).join(" · ");
-
     console.log(`\n● ${a.name.padEnd(12)} ${a.dir}  [${summary}]`);
 
     // Quick path: agent has zero coding-agent panes (claude or codex)
     // AND none active → "all idle".
-    if (!showAll && claudeCount === 0 && codexCount === 0 && kimiCount === 0 && !panes.some((p) => ACTIVE_STATUS(p.status))) {
+    if (!showAll && claudeCount === 0 && codexCount === 0 && kimiCount === 0 && qwenCount === 0 && !panes.some((p) => ACTIVE_STATUS(p.status))) {
       console.log(`  ⚪ all idle (${panes.length})`);
       continue;
     }
