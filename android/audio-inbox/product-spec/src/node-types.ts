@@ -49,6 +49,10 @@ const runtime = <
  * exactly one upstream output, so the settings row and the dev-host row each
  * get their own port instead of sharing a ambiguous one.
  */
+/**
+ * WHAT: Routes page-opening requests and exposes the active Link page.
+ * WHY: Keeps route-state mutation separate from the controls emitting navigation requests.
+ */
 export const navigationService = service({
   id: "link.navigation",
   inputs: [
@@ -61,6 +65,10 @@ export const navigationService = service({
   runtime: runtime("instance", "instance", "transient", "none", [], ["navigation.route-state"]),
 } as const);
 
+/**
+ * WHAT: Stores captured microphone turns and exposes capture status.
+ * WHY: Keeps microphone permission and recording effects outside conversation delivery.
+ */
 export const captureService = service({
   id: "link.capture",
   inputs: [port("command", captureCommandContract)],
@@ -69,6 +77,10 @@ export const captureService = service({
   runtime: runtime("external", "operation", "durable", "monotonic", ["microphone.permission"], ["audio.capture", "storage.write"]),
 } as const);
 
+/**
+ * WHAT: Dispatches captured or composed turns and tracks conversation delivery.
+ * WHY: Keeps durable transport retries separate from microphone capture and reply playback.
+ */
 export const conversationService = service({
   id: "link.conversation",
   inputs: [port("turn", capturedTurnContract), port("compose", composeTurnContract)],
@@ -77,6 +89,10 @@ export const conversationService = service({
   runtime: runtime("external", "process", "durable", "wall", ["network.connectivity"], ["storage.write", "transport.send", "transport.receive", "retry.schedule"]),
 } as const);
 
+/**
+ * WHAT: Dispatches reply audio playback and exposes playback status.
+ * WHY: Keeps audio-focus ownership separate from message transport and page rendering.
+ */
 export const playbackService = service({
   id: "link.playback",
   inputs: [port("command", playbackCommandContract)],
@@ -86,6 +102,10 @@ export const playbackService = service({
 } as const);
 
 /** Owns the tailnet/public route table; route policy math stays native. */
+/**
+ * WHAT: Stores the selected agent target and exposes available routes.
+ * WHY: Keeps routing preferences separate from mailbox authentication and conversation delivery.
+ */
 export const targetDirectoryService = service({
   id: "link.target-directory",
   inputs: [port("select", targetSelectContract)],
@@ -94,6 +114,10 @@ export const targetDirectoryService = service({
 } as const);
 
 /** Public mailbox session and connection truth; polling and auth transports stay native. */
+/**
+ * WHAT: Tracks mailbox connection state through authenticated polling.
+ * WHY: Keeps session credentials and authentication transport outside conversation presentation.
+ */
 export const sessionService = service({
   id: "link.session",
   inputs: [],
@@ -102,6 +126,10 @@ export const sessionService = service({
 } as const);
 
 /** Local history retention truth and its one clear; the retention policy constant stays native. */
+/**
+ * WHAT: Stores local conversation history and processes clear requests.
+ * WHY: Keeps retention and deletion ownership separate from history rendering.
+ */
 export const historyService = service({
   id: "link.history",
   inputs: [port("clear", historyClearContract)],
@@ -115,6 +143,10 @@ export const historyService = service({
  * the main page. A service input takes exactly one upstream, so each names its own, and the service stays
  * the single place that writes the stored preference.
  */
+/**
+ * WHAT: Stores user preferences requested by settings and wake controls.
+ * WHY: Keeps one persistence owner when several controls change the same preference.
+ */
 export const preferencesService = service({
   id: "link.preferences",
   inputs: [port("toggle", preferenceToggleContract), port("wakeToggle", preferenceToggleContract)],
@@ -123,6 +155,10 @@ export const preferencesService = service({
 } as const);
 
 /** Release check and install flow; manifest verification and APK handling stay native. */
+/**
+ * WHAT: Fetches release information and dispatches installation requests.
+ * WHY: Keeps manifest and APK handling outside update controls and status presentation.
+ */
 export const updatesService = service({
   id: "link.updates",
   inputs: [port("command", updateCommandContract)],
@@ -131,6 +167,10 @@ export const updatesService = service({
 } as const);
 
 /** State-repository recovery truth; quarantine mechanics stay native. */
+/**
+ * WHAT: Reads state-repository recovery status for presentation.
+ * WHY: Keeps quarantine mechanics inside the repository rather than its status consumers.
+ */
 export const recoveryService = service({
   id: "link.recovery",
   inputs: [],
