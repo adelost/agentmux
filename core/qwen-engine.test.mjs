@@ -90,8 +90,8 @@ feature("Qwen exact-session launch", () => {
       expect(command).toContain("--model 'qwen3.8-max'");
       expect(command).toContain("--json-file '/state/events.jsonl'");
       expect(command).toContain("--input-file '/state/input.jsonl'");
-      expect(command).toContain("--approval-mode auto");
-      expect(command).not.toContain("--exclude-tools");
+      expect(command).toContain("--approval-mode yolo");
+      expect(command).toContain("--exclude-tools ask_user_question");
     }],
   });
 
