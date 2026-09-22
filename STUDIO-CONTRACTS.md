@@ -7,7 +7,7 @@ Use sibling checkouts of the matching CircleKit evidence branch and this AMUX br
 npm ci
 
 node studio.mjs check
-node studio.mjs laws --product amux-link --output test-results/link-laws.json
+node studio.mjs laws --product amux-link --kernel-root android/audio-inbox/product-spec --output test-results/link-laws.json
 node scripts/verify-studio.mjs
 node studio.mjs
 ```
@@ -28,7 +28,7 @@ node studio.mjs laws   --product amux-link   --output test-results/link-laws.jso
 
 The report is generated from the currently loaded ProductSpec model. Link has real node types even when it has no decision-table facets, so node-type structural laws remain meaningful.
 
-A matching ProductSpec evaluator is required for a pass. Version mismatch is reported as skipped, not silently revalidated with Studio's compiler.
+The command resolves Link's installed ProductSpec from `android/audio-inbox/product-spec`, verifies it against that package's lockfile, and requires its **0.3.64** version to match the artifact's embedded producer version. Mismatch is skipped, never silently revalidated with Studio's compiler.
 
 ## Existing Vitest runs
 
