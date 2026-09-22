@@ -18,7 +18,7 @@ import { isShellProcess } from "../core/tui-stall-recovery.mjs";
 // `node` as a tmux process name is too generic to trust as Codex by itself,
 // so we resolve its dialect via agents.yaml cmd field instead — see
 // dialectFor().
-const CONTEXT_DIALECT = { claude: "claude", codex: "codex", kimi: "kimi", "kimi-code": "kimi" };
+const CONTEXT_DIALECT = { claude: "claude", codex: "codex", kimi: "kimi", "kimi-code": "kimi", qwen: "qwen" };
 
 /** WHAT: Resolves a pane's coding-agent dialect from process name and configured cmd. WHY: Prevents a generic node process from hiding its true engine. */
 export function dialectFor(agent, pane) {
@@ -98,7 +98,7 @@ export async function inspectPane(ctx, agent, pane) {
   let context = null;
   if (dialect === "claude") {
     context = getContextFromPane(content, paneDir);
-  } else if (dialect === "codex" || dialect === "kimi") {
+  } else if (dialect === "codex" || dialect === "kimi" || dialect === "qwen") {
     context = getContextPercent(paneDir, dialect);
   }
   const configured = dialect === "codex" ? resolveCodexModelSelection({
@@ -108,7 +108,7 @@ export async function inspectPane(ctx, agent, pane) {
   const screen = dialect === "codex" && running === true && content ? parseCodexPaneReading(content) : null;
   const declaredModel = agent.panes?.[pane.index]?.model
     || (dialect === "claude" ? agent.claudeModel : dialect === "codex" ? agent.codexModel : null);
-  const configuredModel = configured?.source !== "history"
+  const configuredModel = configured && configured.source !== "history"
     ? configured
     : declaredModel ? {
       model: declaredModel,

@@ -6,6 +6,7 @@ import {
   CLAUDE_AUTONOMOUS_FLAGS,
   CODEX_AUTONOMOUS_FLAGS,
   KIMI_AUTONOMOUS_FLAGS,
+  QWEN_AUTONOMOUS_FLAGS,
 } from "./execution-safety.mjs";
 
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -101,4 +102,39 @@ export function buildKimiLaunchCommand({
   const profile = profileHome ? `KIMI_CODE_HOME=${shellQuote(profileHome)} ` : "";
   return `${profile}KIMI_MODEL_THINKING_EFFORT=${shellQuote("max")} ${shellQuote(executable)} ` +
     `--model ${shellQuote(model)} ${KIMI_AUTONOMOUS_FLAGS}${sessionFlag}`;
+}
+
+/**
+ * WHAT: Builds one persistent Qwen Code TUI with an exact session and structured AMUX sidecar.
+ * WHY: AMUX owns pane/session delivery while Qwen Code keeps its provider, tools, fast model and subagents.
+ */
+export function buildQwenLaunchCommand({
+  executable,
+  model = "qwen3.8-max",
+  sessionId,
+  resume = false,
+  allowFreshBootstrap = false,
+  eventPath,
+  inputPath,
+} = {}) {
+  if (!executable || !String(executable).startsWith("/")) {
+    throw new Error("Qwen executable must be an absolute path");
+  }
+  if (!/^[a-z0-9._:-]+$/iu.test(String(model || ""))) {
+    throw new Error(`invalid Qwen model: ${model}`);
+  }
+  const exactSession = exactSessionId(sessionId, "Qwen");
+  if (!exactSession) throw new Error("Qwen launch requires an exact pane session id");
+  if (!resume && !allowFreshBootstrap) {
+    throw new Error("Qwen fresh bootstrap was not authorized");
+  }
+  if (![eventPath, inputPath].every((value) => typeof value === "string" && value.startsWith("/"))) {
+    throw new Error("Qwen Dual Output paths must be absolute");
+  }
+  const continuity = resume
+    ? `--resume ${shellQuote(exactSession)}`
+    : `--session-id ${shellQuote(exactSession)}`;
+  return `${shellQuote(executable)} ${continuity} --model ${shellQuote(model)} ` +
+    `${QWEN_AUTONOMOUS_FLAGS} --chat-recording ` +
+    `--json-file ${shellQuote(eventPath)} --input-file ${shellQuote(inputPath)}`;
 }

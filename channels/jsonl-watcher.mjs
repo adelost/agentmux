@@ -891,7 +891,7 @@ export function createJsonlWatcher({
       if (entry.backend === "native") continue;
       for (let i = 0; i < entry.panes.length; i++) {
         const cmd = entry.panes[i]?.cmd || "";
-        if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u.test(cmd)) continue;
+        if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?|qwen)(?:\s|$)/u.test(cmd)) continue;
         attachFsWatch(name, i, entry.dir, config);
         enqueuePane(name, i, entry.dir, config);
       }
@@ -917,7 +917,7 @@ export function createJsonlWatcher({
       if (entry.backend === "native") continue;
       for (let i = 0; i < entry.panes.length; i++) {
         const cmd = entry.panes[i]?.cmd || "";
-        if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u.test(cmd)) continue;
+        if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?|qwen)(?:\s|$)/u.test(cmd)) continue;
         const dir = paneDir(entry.dir, i);
         // Dialect-dispatched mtime: codex sessions live under
         // ~/.codex/sessions, not ~/.claude/projects. Without this, codex

@@ -9,6 +9,7 @@ import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { isDreamActivityTurn } from "./dream-eligibility.mjs";
 import { groupIntoTurns, listJsonlFiles, parseJsonlWindow } from "./jsonl-reader.mjs";
 import { readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
+import { readLastTurnsQwen } from "./qwen-jsonl-reader.mjs";
 
 /** WHAT: Defines the first journal window. WHY: Keeps a quiet pane's nightly read as cheap as a live tail. */
 const FIRST_WINDOW_BYTES = 512 * 1024;
@@ -52,7 +53,8 @@ export function readClaudeTurnsSince(paneDir, {
 
 /** WHAT: Reads a Codex or Kimi tail grown until it reaches a window start. WHY: Keeps the newest prompt from standing in for a whole night's work. */
 export function readTailTurnsSince(engine, paneDir, {
-  since, limit = DREAM_HISTORY_TURNS, stat = statSync, reader = engine === "codex" ? readLastTurnsCodex : readLastTurnsKimi,
+  since, limit = DREAM_HISTORY_TURNS, stat = statSync,
+  reader = engine === "codex" ? readLastTurnsCodex : engine === "qwen" ? readLastTurnsQwen : readLastTurnsKimi,
 } = {}) {
   const sinceMs = since.getTime();
   let tail = null;

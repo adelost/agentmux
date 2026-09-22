@@ -19,10 +19,12 @@ import {
 } from "../core/revive.mjs";
 import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "../core/kimi-jsonl-reader.mjs";
+import { readLastTurnsQwen } from "../core/qwen-jsonl-reader.mjs";
 
 const ENGINE_READERS = [
   { pattern: /codex/, source: "codex-jsonl", read: readLastTurnsCodex },
   { pattern: /kimi(?:-code)?/, source: "kimi-jsonl", read: readLastTurnsKimi },
+  { pattern: /qwen/, source: "qwen-dual-output", read: readLastTurnsQwen },
 ];
 
 /** WHAT: Reads one pane's pre-boot interruption from its engine journal. WHY: Keeps Kimi/Codex evidence beside the ledger's Claude events. */
@@ -54,7 +56,7 @@ export async function cmdRevive(ctx, flags, { configuredServiceTargets }) {
   const panes = [];
   for (const a of agents) {
     (a.panes || []).forEach((p, i) => {
-      if (/claude|codex|kimi(?:-code)?/.test(String(p?.cmd || ""))) {
+      if (/claude|codex|kimi(?:-code)?|qwen/.test(String(p?.cmd || ""))) {
         panes.push({ agent: a.name, pane: i, cmd: p.cmd, backend: a.backend });
       }
     });

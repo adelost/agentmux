@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { readMemoryContext } from "./memory-context.mjs";
 import { latestCodexSessionIdentity, readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { latestKimiSessionIdentity, readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
+import { latestQwenSessionIdentity, readLastTurnsQwen } from "./qwen-jsonl-reader.mjs";
 import { isWorkDirective } from "./system-noise.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
@@ -14,6 +15,7 @@ import { codexUserPrompt } from "./codex-user-events.mjs";
 const READERS = {
   codex: { identity: latestCodexSessionIdentity, read: readLastTurnsCodex },
   kimi: { identity: latestKimiSessionIdentity, read: readLastTurnsKimi },
+  qwen: { identity: latestQwenSessionIdentity, read: readLastTurnsQwen },
 };
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const IDLE_MS = 30 * 60_000;

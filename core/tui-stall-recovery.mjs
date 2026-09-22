@@ -9,6 +9,7 @@ import {
   latestPaneSessionIdentity,
 } from "./native-session-identity.mjs";
 import { latestKimiSessionIdentity } from "./kimi-jsonl-reader.mjs";
+import { latestQwenSessionIdentity } from "./qwen-jsonl-reader.mjs";
 import { paneModelSelection, setPaneModelSelection } from "./pane-model-state.mjs";
 import { waitForProgressingUi } from "./progressing-ui.mjs";
 import {
@@ -27,9 +28,12 @@ export const isClaudePaneCommand = (command) => /(?:^|\s)claude(?:\s|$)/u.test(S
 export const isCodexPaneCommand = (command) => /(?:^|\s)codex(?:\s|$)/u.test(String(command || ""));
 /** WHAT: Checks whether a pane starts Kimi Code. WHY: Keeps absolute installer paths inside Kimi recovery. */
 export const isKimiPaneCommand = (command) => /(?:^|[\/\s])kimi(?:-code)?(?:\s|$)/u.test(String(command || ""));
+/** WHAT: Checks whether a pane starts Qwen Code. WHY: Keeps its wrapper path inside Qwen lifecycle handling. */
+export const isQwenPaneCommand = (command) => /(?:^|[\/\s])qwen(?:\s|$)/u.test(String(command || ""));
 /** WHAT: Checks whether a pane runs a coding agent. WHY: Keeps service panes outside recovery boundaries. */
 export const isCodingPaneCommand = (command) =>
-  isClaudePaneCommand(command) || isCodexPaneCommand(command) || isKimiPaneCommand(command);
+  isClaudePaneCommand(command) || isCodexPaneCommand(command)
+  || isKimiPaneCommand(command) || isQwenPaneCommand(command);
 /** WHAT: Checks whether a process is an interactive shell. WHY: Keeps restart commands behind a ready PTY. */
 export const isShellProcess = (command) => /^(bash|zsh|sh|fish|dash)$/u.test(String(command || ""));
 
@@ -39,7 +43,7 @@ export const isShellProcess = (command) => /^(bash|zsh|sh|fish|dash)$/u.test(Str
  */
 export function createTuiStallRecovery({
   tmux, state, delay, configFor, paneDirectory, isPaneDead, respawnPane,
-  isAlreadyRunning, resolveSessionFlag, isBusy, promptTransportState, restartCodex, restartKimi,
+  isAlreadyRunning, resolveSessionFlag, isBusy, promptTransportState, restartCodex, restartKimi, restartQwen,
   now = Date.now,
 } = {}) {
   const runtimeProfileFor = createRuntimeProfileResolver({ state, configFor });
@@ -52,7 +56,7 @@ export function createTuiStallRecovery({
       command,
       dead,
       shell: isShellProcess(command),
-      running: /^(claude|codex|kimi|kimi-code|node)$/u.test(command || ""),
+      running: /^(claude|codex|kimi|kimi-code|qwen|node)$/u.test(command || ""),
     };
   }
 
@@ -175,6 +179,10 @@ export function createTuiStallRecovery({
       await restartKimi(agentName, pane);
       return { ok: true, dialect: "kimi" };
     }
+    if (isQwenPaneCommand(paneCmd)) {
+      await restartQwen(agentName, pane);
+      return { ok: true, dialect: "qwen" };
+    }
     if (!isClaudePaneCommand(paneCmd)) return { ok: false, reason: "not-a-coding-pane" };
     try {
       await restartClaudeAccount(agentName, pane);
@@ -195,11 +203,13 @@ export function createTuiStallRecovery({
           if (!await isBusy(name, pane)) continue;
           const dialect = isClaudePaneCommand(command)
             ? "claude"
-            : isCodexPaneCommand(command) ? "codex" : "kimi";
+            : isCodexPaneCommand(command) ? "codex"
+              : isKimiPaneCommand(command) ? "kimi" : "qwen";
           const cwd = paneDirectory(cfg.dir, pane);
           const identity = dialect === "kimi"
             ? latestKimiSessionIdentity(cwd)
-            : latestPaneSessionIdentity(dialect, cwd);
+            : dialect === "qwen" ? latestQwenSessionIdentity(cwd)
+              : latestPaneSessionIdentity(dialect, cwd);
           if (identity?.sessionId) targets.push({
             agentName: name,
             pane,

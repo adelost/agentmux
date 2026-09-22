@@ -1,6 +1,6 @@
 # agentmux
 
-agentmux is local developer tooling for coordinating Claude Code and Codex
+agentmux is local developer tooling for coordinating Claude Code, Codex, Kimi Code and Qwen Code
 agents across tmux panes. It adds a Discord-based ChatOps interface, a terminal
 CLI, session isolation, structured logs, media handling, and operational
 safeguards for long-running AI-assisted development workflows.
@@ -10,7 +10,7 @@ Discord / amux CLI
         -> agentmux bridge
         -> durable per-agent queue
         -> tmux panes OR AMUX Code native runtime
-        -> Claude Code / Codex
+        -> Claude Code / Codex / Kimi Code / Qwen Code
         -> structured logs, status, files, and replies
 ```
 
@@ -20,7 +20,7 @@ workspace.
 
 ## Why agentmux
 
-- Run multiple Claude Code and Codex sessions side by side.
+- Run multiple Claude Code, Codex, Kimi Code and Qwen Code sessions side by side.
 - Keep pane histories isolated so resume/continue does not cross wires.
 - Delegate work between agents through the `amux` CLI.
 - Inspect status, logs, timelines, and recent completed work from one place.
@@ -34,27 +34,27 @@ workspace.
 | Concept | Purpose |
 |---|---|
 | Agent | A named project workspace from `agentmux.yaml` |
-| Pane | One addressed Claude Code or Codex session; tmux or native runtime |
+| Pane | One addressed coding-agent session; tmux or native runtime |
 | Bridge | The Node.js process that connects Discord, tmux, and logs |
 | `amux` | CLI for sending prompts, reading logs, checking status, and coordinating panes |
 | `.agents/` | Generated per-pane working directories and instruction files |
 
 Pane 0 runs in the project root. Pane 1 and above run in `.agents/N/`, giving
-each coding agent its own session history while still letting Claude Code and
-Codex discover generated project instructions.
+each coding agent its own session history while still letting each CLI discover
+generated project instructions.
 
 ## Features
 
 ### Multi-agent orchestration
 
 - Route different Discord channels to different projects and panes.
-- Run several Claude Code and Codex sessions per project.
+- Run several Claude Code, Codex, Kimi Code and Qwen Code sessions per project.
 - Delegate tasks from one agent to another with `amux <agent> -p <pane> "..."`.
 - Fan out tests, audits, screenshots, or implementation work in parallel.
 
 ### Reliable session management
 
-- Structured jsonl history for Claude and Codex output extraction.
+- Structured journal history for Claude, Codex, Kimi and Qwen output extraction.
 - Durable prompt delivery with physical-submit and JSONL receipt verification.
 - Resume hints for panes that restart without prior context.
 - Model-aware context tracking.
