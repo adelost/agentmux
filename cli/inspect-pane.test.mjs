@@ -37,17 +37,19 @@ feature("dialectFor", () => {
     given: ["panes and agents of each shape", () => ({
       kimiAgent: { panes: [{ cmd: "kimi --resume" }] },
       codexAgent: { panes: [{ cmd: "codex --model x" }] },
+      qwenAgent: { panes: [{ cmd: "qwen --model qwen3.8-max" }] },
       claudeAgent: { panes: [{ cmd: "claude --continue" }] },
       shellAgent: { panes: [{ cmd: "bash" }] },
     })],
     when: ["resolving dialects", (ctx) => [
       dialectFor(ctx.kimiAgent, { index: 0, command: "kimi-code" }),
       dialectFor(ctx.codexAgent, { index: 0, command: "node" }),
+      dialectFor(ctx.qwenAgent, { index: 0, command: "node" }),
       dialectFor(ctx.claudeAgent, { index: 0, command: "zsh" }),
       dialectFor(ctx.shellAgent, { index: 0, command: "bash" }),
     ]],
     then: ["exact mapping", (dialects) => {
-      expect(dialects).toEqual(["kimi", "codex", "claude", null]);
+      expect(dialects).toEqual(["kimi", "codex", "qwen", "claude", null]);
     }],
   });
 });
