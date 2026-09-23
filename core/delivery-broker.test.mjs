@@ -957,7 +957,7 @@ feature("single-writer delivery broker", () => {
   component("a sender cancellation becomes NOT SENT after Claude proves the compact loss", {
     given: ["an ambiguous submitted job whose cancel was initially refused", () => {
       const rootDir = tempRoot();
-      const clock = 20_000;
+      let clock = 20_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
       const job = queue.enqueue({ agentName: "ai", pane: 2, text: "obsolete after compact" });
       const jsonl = join(rootDir, "claude.jsonl");
@@ -975,11 +975,13 @@ feature("single-writer delivery broker", () => {
         dialect: "claude" });
       const broker = createDeliveryBroker({ agent, queue, now: () => clock,
         notify: async (_job, kind) => notices.push(kind) });
-      return { rootDir, queue, job, agent, notices, broker };
+      return { rootDir, queue, job, agent, notices, broker, advance: (ms) => { clock += ms; } };
     }],
     when: ["the broker first proves the loss and then adjudicates cancellation", async (ctx) => {
       await ctx.broker.kickTarget("ai", 2);
       ctx.afterBoundary = ctx.queue.read("ai", 2, ctx.job.id);
+      await ctx.broker.kickTarget("ai", 2);
+      ctx.advance(31_000);
       await ctx.broker.kickTarget("ai", 2);
     }],
     then: ["the prompt is terminally NOT SENT and never retyped", (_, ctx) => {
@@ -1418,7 +1420,7 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("an internal producer resolves the bound target channel centrally", {
+  component("an internal producer's outcome is settled without reaching the human channel", {
     given: ["a drift-guard prompt without channel metadata and a bound target pane", () => {
       const rootDir = tempRoot();
       const clock = 4_000_000;
@@ -1466,18 +1468,15 @@ feature("single-writer delivery broker", () => {
       ctx.afterRestart = reopened.read("claw", 4, ctx.job.id);
       ctx.targetsAfterRestart = reopened.targets();
     }],
-    then: ["Discord is called before the sent marker and restart does not duplicate it", (_, ctx) => {
+    // Notice UX spec (Mattias 2026-09-23): the human only hears about his own
+    // messages. A drift-guard prompt is amux's own and has no sender to tell.
+    then: ["nothing is posted, the outcome is settled once and restart does not repeat it", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(0);
-      expect(ctx.sends).toEqual([{
-        channelId: "bound-channel",
-        kind: "unverified",
-        markerBeforeSend: null,
-      }]);
+      expect(ctx.sends).toEqual([]);
       expect(ctx.afterRestart).toMatchObject({
         status: "delivered_unverified",
-        metadata: { channelId: "bound-channel" },
         unverifiedNoticeSentAt: 4_000_000,
-        unverifiedNoticeLastReason: null,
+        unverifiedNoticeLastReason: "not a human message",
       });
       expect(ctx.targetsAfterRestart).toEqual([]);
       rmSync(ctx.rootDir, { recursive: true, force: true });
@@ -1729,7 +1728,7 @@ feature("single-writer delivery broker", () => {
   component("a sender can cancel a never-attempted follower without disturbing the FIFO head", {
     given: ["a fresh blocked head and an obsolete job that has never touched the composer", () => {
       const rootDir = tempRoot();
-      const clock = 10_000;
+      let clock = 10_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
       const head = queue.enqueue({
         agentName: "ai", pane: 5, text: "keep the head", createdAt: 1_000, orderKey: "001",
@@ -1748,13 +1747,17 @@ feature("single-writer delivery broker", () => {
       const broker = createDeliveryBroker({
         agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
       });
-      return { rootDir, queue, head, obsolete, notices, agent, broker };
+      return { rootDir, queue, head, obsolete, notices, agent, broker, advance: (ms) => { clock += ms; } };
     }],
-    when: ["the broker adjudicates cancellation under the pane writer lease", ({ broker }) =>
-      broker.kickTarget("ai", 5)],
+    when: ["the broker adjudicates cancellation under the pane writer lease", async ({ broker, advance }) => {
+      await broker.kickTarget("ai", 5);
+      advance(1_000);
+      await broker.kickTarget("ai", 5);
+    }],
     then: ["the follower is provably NOT SENT while the head and composer remain untouched", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(0);
-      expect(ctx.notices).toEqual(["not-sent"]);
+      // The notice waits for its 30 s quiet window; the head must not move meanwhile.
+      expect(ctx.notices).toEqual([]);
       expect(ctx.queue.read("ai", 5, ctx.head.id)).toMatchObject({
         status: "pending", attempts: 1, nextAttemptAt: 20_000,
       });
@@ -1811,7 +1814,7 @@ feature("single-writer delivery broker", () => {
   component("a cancellation arriving before the submit fence prevents Enter", {
     given: ["a sender request that appears after paste but before the durable pre-Enter callback", () => {
       const rootDir = tempRoot();
-      const clock = 10_000;
+      let clock = 10_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
       const job = queue.enqueue({ agentName: "lsrc", pane: 8, text: "stop before Enter", createdAt: 9_000 });
       const notices = [];
@@ -1833,10 +1836,14 @@ feature("single-writer delivery broker", () => {
       const broker = createDeliveryBroker({
         agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
       });
-      return { rootDir, queue, job, notices, agent, broker, physicalEnters: () => physicalEnters };
+      return { rootDir, queue, job, notices, agent, broker, physicalEnters: () => physicalEnters,
+        advance: (ms) => { clock += ms; } };
     }],
-    when: ["the durable fence callback observes the sender request", ({ broker }) =>
-      broker.kickTarget("lsrc", 8)],
+    when: ["the durable fence callback observes the sender request", async ({ broker, advance }) => {
+      await broker.kickTarget("lsrc", 8);
+      advance(31_000);
+      await broker.kickTarget("lsrc", 8);
+    }],
     then: ["the composer is preserved, Enter never runs, and NOT SENT is truthful", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(1);
       expect(ctx.physicalEnters()).toBe(0);
@@ -2398,12 +2405,15 @@ feature("single-writer delivery broker", () => {
       return context;
     }],
     when: ["two consecutive receipt budgets expire without any acknowledgement", async ({
-      broker, burnBudget, statusByText,
+      broker, burnBudget, statusByText, tick,
     }) => {
       await burnBudget();
       await burnBudget();
       await broker.kickTarget("ai", 2);
-      return { byText: statusByText() };
+      const byText = statusByText();
+      // The not-sent notice waits for its 30 s quiet window before it is posted.
+      for (let kick = 0; kick < 16; kick++) { tick(); await broker.kickTarget("ai", 2); }
+      return { byText };
     }],
     then: ["the head still probes while everything behind it is answered without being typed", ({ byText }, ctx) => {
       expect(byText).toEqual({
@@ -2657,9 +2667,9 @@ feature("single-writer delivery broker", () => {
         notify: async (candidate, kind, extra) => notices.push(deliveryStateNotice(candidate, kind, extra)) });
       return { rootDir, queue, job, notices, broker, advance: (ms) => { clock += ms; } };
     }],
-    when: ["one attempt runs and the grace window passes", async ({ broker, advance }) => {
+    when: ["one attempt runs and the one-minute grace window passes", async ({ broker, advance }) => {
       await broker.kickTarget("lsrc", 3);
-      advance(15_000);
+      advance(61_000);
       await broker.kickTarget("lsrc", 3);
     }],
     then: ["the durable reason and the human notice both name the two models", (_, ctx) => {

@@ -62,14 +62,18 @@ async function reconcileLateEchoWatch({ agentName, pane, queue, now, exactEcho, 
 }
 
 /** WHAT: Dispatches cancellation requests, terminal notices, and stale reporting before delivery. WHY: Keeps every pre-delivery terminal path in one ordered pass. */
-export async function runDeliveryPreflight({ agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, exactEcho = null, acknowledge = null, notifyBlocked = null, agent = null }) {
+export async function runDeliveryPreflight({ agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, flushTerminalNotices = null, exactEcho = null, acknowledge = null, notifyBlocked = null, agent = null }) {
   const cancellationRequests = queue.pendingCancellationRequests?.(agentName, pane) || [];
   for (const request of cancellationRequests) await terminalizeNotSent(request);
   await reconcileLateEchoWatch({ agentName, pane, queue, now, exactEcho, acknowledge });
-  const notices = (queue.pendingTerminalNotices?.(agentName, pane)
-    || queue.pendingUnverifiedNotices?.(agentName, pane) || [])
-    .filter((job) => Number(job.unverifiedNoticeNextAttemptAt || 0) <= now());
-  for (const notice of notices) await notifyTerminal(notice);
+  if (typeof flushTerminalNotices === "function") {
+    await flushTerminalNotices(agentName, pane);
+  } else {
+    const notices = (queue.pendingTerminalNotices?.(agentName, pane)
+      || queue.pendingUnverifiedNotices?.(agentName, pane) || [])
+      .filter((job) => Number(job.unverifiedNoticeNextAttemptAt || 0) <= now());
+    for (const notice of notices) await notifyTerminal(notice);
+  }
   await reportBlockedHandoffs({ agentName, pane, queue, now, exactEcho, acknowledge, log, agent });
   if (notifyBlocked) {
     for (const job of queue.list(agentName, pane)) {
