@@ -1109,7 +1109,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (!maintenanceGuard) await exitCopyMode(target);
     const dialect = await livePaneDialectName(agentName, pane);
     if (dialect === "codex") await assertCodexWorkModel({ state, name: agentName, pane, prompt,
-      configured: agentConfig(agentName).panes?.[pane], screen: () => captureScreen(agentName, pane) });
+      configured: agentConfig(agentName).panes?.[pane], screen: () => captureScreen(agentName, pane),
+      previous: () => getContextPercentByDialect(paneDir(agentConfig(agentName).dir, pane), "codex") });
     if (dialect === "qwen") {
       if (maintenanceGuard) await maintenanceGuard("submit");
       await submitWithDurableFence({

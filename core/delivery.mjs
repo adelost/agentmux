@@ -136,6 +136,14 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
     // A composer error is only a TUI hint: the previous attempt may already
     // have submitted while the repaint lied. Recheck the authoritative sink
     // before returning, and never let scraping create the delivery verdict.
+    // A refusal is a deterministic verdict made before any pane write (e.g.
+    // the Codex model guard). Retrying cannot change it, and hiding it behind
+    // "no receipt yet" made lsrc:3 look like a broken pane for eleven hours.
+    if (sendError?.code === "AMUX_DELIVERY_REFUSED") {
+      const echoed = await agent.waitForPromptEcho(agentName, pane, needle, 0, echoOptions);
+      if (echoed) return { delivered: true, attempts: attempt, via: "echo" };
+      return { delivered: false, attempts: attempt, via: null, reason: sendError.message };
+    }
     if (sendError?.code === "AMUX_DELIVERY_BLOCKED") {
       const echoed = await agent.waitForPromptEcho(agentName, pane, needle, 0, echoOptions);
       if (echoed) return { delivered: true, attempts: attempt, via: "echo" };

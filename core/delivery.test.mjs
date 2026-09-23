@@ -137,6 +137,32 @@ feature("sendPromptVerified", () => {
     }],
   });
 
+  component("a refusal before typing reports its own reason instead of a missing receipt", {
+    given: ["a pane whose model guard refuses the work prompt", () => {
+      const agent = fakeAgent({ echoResults: [false] });
+      agent.sendOnly = async () => {
+        agent.calls.push("refused-send");
+        const error = new Error("Codex work blocked: selected gpt-5.6-sol, running gpt-6-sol; verify /status before retrying");
+        error.code = "AMUX_DELIVERY_REFUSED";
+        throw error;
+      };
+      return agent;
+    }],
+    when: ["sending with the normal three-attempt budget", async (agent) => ({
+      result: await sendPromptVerified(agent, "lsrc", 3, "Komihåg att fixa skyvw", { attempts: 3 }),
+      agent,
+    })],
+    then: ["the guard's words become the reason and nothing is retried", ({ result, agent }) => {
+      expect(result).toEqual({
+        delivered: false,
+        attempts: 1,
+        via: null,
+        reason: "Codex work blocked: selected gpt-5.6-sol, running gpt-6-sol; verify /status before retrying",
+      });
+      expect(agent.calls.filter((call) => call === "refused-send")).toHaveLength(1);
+    }],
+  });
+
   component("a terminal retry error cannot hide an echo that already landed", {
     given: ["a send that reports a composer block after JSONL gained the prompt", () => {
       const agent = fakeAgent({ echoResults: [true] });

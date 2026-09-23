@@ -1,7 +1,7 @@
 import { buildCodexLaunchCommand } from "./agent-launch-command.mjs";
 import { launchCodexWithPolicy } from "./codex-launch-policy.mjs";
 import { parseCodexPaneReading } from "./codex-status.mjs";
-import { codexModelOverride, selectedCodexProfile } from "./codex-profiles.mjs";
+import { codexModelOverride, resolveCodexModelSelection, selectedCodexProfile } from "./codex-profiles.mjs";
 import { verifiedCodexCompact } from "./verified-compact.mjs";
 import { rememberContextCompact } from "./context-maintenance.mjs";
 import { esc } from "../lib.mjs";
@@ -55,17 +55,32 @@ export async function startCodexProcess({
   });
 }
 
-/** WHAT: Checks work against the selected Codex model. WHY: Prevents a failed compact or fallback from spending the next prompt on another model. */
-export async function assertCodexWorkModel({ state, name, pane, configured, screen, prompt = "" }) {
+/** WHAT: Marks a pre-typing refusal. WHY: Lets delivery report the guard's reason instead of a missing receipt. */
+function workRefused(message) {
+  const error = new Error(message);
+  error.code = "AMUX_DELIVERY_REFUSED";
+  return error;
+}
+
+/**
+ * WHAT: Checks work against the selected Codex model.
+ * WHY: Prevents a failed compact or fallback from spending the next prompt on another model.
+ * The selection is the one a restart would launch (pin, then session history,
+ * then config): a lost pin must not turn the fleet default into a veto on
+ * the model the pane was deliberately relaunched with.
+ */
+export async function assertCodexWorkModel({ state, name, pane, configured, screen, previous = null, prompt = "" }) {
   if (/^\s*\/model(?:\s|$)/u.test(prompt)) throw new Error(`Raw Codex /model bypasses compact: use amux model ${name} -p ${pane} MODEL or Discord /model`);
   if (/^\s*\//u.test(prompt)) return;
   const profile = selectedCodexProfile(state, name, pane);
   const record = state?.get?.("codex_session_by_pane_profile_v1", {})?.[`${name}:${pane}@${profile.id}`];
-  if (record?.modelTransitionBlocked) throw new Error(`Codex work blocked: ${record.modelTransitionBlocked.reason}`);
-  const expected = codexModelOverride(state, name, pane) || configured;
+  if (record?.modelTransitionBlocked) throw workRefused(`Codex work blocked: ${record.modelTransitionBlocked.reason}`);
+  const override = codexModelOverride(state, name, pane);
+  const history = override ? null : await previous?.();
+  const expected = resolveCodexModelSelection({ override, configured, previous: history });
   const actual = parseCodexPaneReading(await screen())?.selected;
   if (!expected?.model || actual?.model !== expected.model) {
-    throw new Error(`Codex work blocked: selected ${expected?.model || "unknown"}, running ${actual?.model || "unknown"}; verify /status before retrying`);
+    throw workRefused(`Codex work blocked: selected ${expected?.model || "unknown"}, running ${actual?.model || "unknown"}; verify /status before retrying`);
   }
 }
 

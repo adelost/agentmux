@@ -4,6 +4,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createDeliveryBroker } from "./delivery-broker.mjs";
+import { deliveryStateNotice } from "./delivery-notices.mjs";
 
 const tempRoot = () => join(tmpdir(), `amux-delivery-broker-${process.pid}-${Math.random().toString(36).slice(2)}`);
 
@@ -2636,6 +2637,74 @@ feature("single-writer delivery broker", () => {
       expect(ctx.agent.readyCalls).toBe(1);
       expect(ctx.agent.sends.map((send) => send.text)).toEqual(["wake and deliver"]);
       expect(ctx.queue.read("ai", 5, ctx.job.id)).toMatchObject({ status: "acknowledged" });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+  component("a model-guard refusal is the job's reason and its blocked notice", {
+    given: ["the lsrc:3 shape: the guard refuses every work prompt before typing", () => {
+      const rootDir = tempRoot();
+      let clock = 5_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "lsrc", pane: 3, text: "Komihåg att fixa skyvw", source: "discord" });
+      const agent = acceptingAgent();
+      agent.sendOnly = async () => {
+        const error = new Error("Codex work blocked: selected gpt-5.6-sol, running gpt-6-sol; verify /status before retrying");
+        error.code = "AMUX_DELIVERY_REFUSED";
+        throw error;
+      };
+      const notices = [];
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock,
+        notify: async (candidate, kind, extra) => notices.push(deliveryStateNotice(candidate, kind, extra)) });
+      return { rootDir, queue, job, notices, broker, advance: (ms) => { clock += ms; } };
+    }],
+    when: ["one attempt runs and the grace window passes", async ({ broker, advance }) => {
+      await broker.kickTarget("lsrc", 3);
+      advance(15_000);
+      await broker.kickTarget("lsrc", 3);
+    }],
+    then: ["the durable reason and the human notice both name the two models", (_, ctx) => {
+      expect(ctx.queue.read("lsrc", 3, ctx.job.id)).toMatchObject({
+        status: "pending",
+        lastReason: "Codex work blocked: selected gpt-5.6-sol, running gpt-6-sol; verify /status before retrying",
+      });
+      expect(ctx.notices).toHaveLength(1);
+      expect(ctx.notices[0]).toContain("gpt-6-sol");
+      expect(ctx.notices[0]).toContain("gpt-5.6-sol");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a head parked for hours is reported again with a widening interval", {
+    given: ["a parked head whose only blocked notice went out 61 minutes ago", () => {
+      const rootDir = tempRoot();
+      let clock = 50_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "lsrc", pane: 3, text: "Komihåg att fixa skyvw",
+        source: "discord", createdAt: clock - 61 * 60_000 });
+      queue.update(job, {
+        status: "pending", attempts: 3, nextAttemptAt: clock + 10 * 3_600_000,
+        lastReason: "Codex work blocked: selected gpt-5.6-sol, running gpt-6-sol; verify /status before retrying",
+        noticeSentAt: clock - 61 * 60_000,
+        metadata: { preSubmitPark: { count: 1, attempts: 64, firstAttemptAt: clock - 61 * 60_000, parkedAt: clock } },
+      });
+      const notices = [];
+      const broker = createDeliveryBroker({ agent: acceptingAgent(), queue, now: () => clock,
+        notify: async (candidate, kind, extra) => notices.push(deliveryStateNotice(candidate, kind, extra)) });
+      return { rootDir, notices, broker, advance: (ms) => { clock += ms; } };
+    }],
+    when: ["the broker polls", ({ broker }) => broker.kickTarget("lsrc", 3)],
+    then: ["reminders land at 1 h and 3 h, never on every poll", async (_, ctx) => {
+      const { broker, advance } = ctx;
+      expect(ctx.notices).toHaveLength(1);
+      expect(ctx.notices[0]).toContain("1 h");
+      expect(ctx.notices[0]).toContain("gpt-6-sol");
+      advance(60 * 60_000);
+      await broker.kickTarget("lsrc", 3);
+      expect(ctx.notices).toHaveLength(1);
+      advance(61 * 60_000);
+      await broker.kickTarget("lsrc", 3);
+      expect(ctx.notices).toHaveLength(2);
+      expect(ctx.notices[1]).toContain("3 h");
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });

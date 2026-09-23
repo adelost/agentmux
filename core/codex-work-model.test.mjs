@@ -45,6 +45,35 @@ feature("Codex work uses the verified explicit model choice", () => {
     when: ["admitting a work prompt", args => assertCodexWorkModel(args).then(() => true, () => false)],
     then: ["only the proven selection can spend the prompt", result => expect(result).toBe(allowed)],
   });
+  // lsrc:3, 2026-09-23: no saved pin, config default Sol 5.6, the session
+  // itself ran GPT-6 Sol and AMUX relaunched it on GPT-6 Sol from history.
+  // The guard judged against the default alone and refused every prompt for
+  // eleven hours while `amux ps` called gpt-6-sol the selection.
+  for (const [name, history, actual, allowed] of [
+    ["an unpinned pane may work on the model its session history selects", "gpt-6-sol", "gpt-6-sol", true],
+    ["an unpinned pane still cannot work on a model its history never selected", "gpt-5.6-sol", "gpt-6-sol", false],
+  ]) component(name, {
+    given: ["no saved pin, the fleet default, session history and the live footer", () => ({
+      state: { get: (_key, fallback) => fallback }, name: "lsrc", pane: 3,
+      configured: { cmd: "codex --yolo", model: "gpt-5.6-sol" },
+      previous: async () => ({ model: history, effort: "xhigh" }),
+      screen: async () => `› Ask Codex to do anything\n  ${actual} xhigh · ~/lsrc/.agents/3`,
+    })],
+    when: ["admitting a work prompt", args => assertCodexWorkModel(args).then(() => true, () => false)],
+    then: ["the guard uses the same selection a restart would launch", result => expect(result).toBe(allowed)],
+  });
+  component("a model refusal is a typed delivery refusal that names both models", {
+    given: ["a Sol pin and a GPT-6 footer", () => ({
+      state: { get: (key, fallback) => key === "codex_model_by_pane" ? { "lsrc:3": { model: "gpt-5.6-sol" } } : fallback },
+      name: "lsrc", pane: 3, configured: { model: "gpt-5.6-sol" },
+      screen: async () => "› Ask Codex to do anything\n  gpt-6-sol xhigh · ~/lsrc/.agents/3",
+    })],
+    when: ["admitting a work prompt", args => assertCodexWorkModel(args).then(() => null, error => error)],
+    then: ["delivery can report the real blocker instead of a missing receipt", error => {
+      expect(error.code).toBe("AMUX_DELIVERY_REFUSED");
+      expect(error.message).toBe("Codex work blocked: selected gpt-5.6-sol, running gpt-6-sol; verify /status before retrying");
+    }],
+  });
   component("restart retains a known session choice over a changed default", {
     when: ["resolving a restart without a new user selection", () => resolveCodexModelSelection({
       configured: { model: "gpt-5.6-sol" }, previous: { model: "gpt-6-astra", effort: "xhigh" },
