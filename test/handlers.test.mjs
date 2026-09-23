@@ -22,7 +22,7 @@ function mockMsg({ content = "hello", channelId = "ch1", id = "msg-1", isBot = f
   };
 }
 
-function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatusDriver, queueFleetRestartRequest, scheduleBridgeRestart, modelChangeOptions } = {}) {
+function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatusDriver, queueFleetRestartRequest, scheduleBridgeRestart, modelChangeOptions, claudeModelChanger } = {}) {
   const defaultMapping = { name: "_ai", dir: "/home/user/project", pane: 0 };
   const mapping = mappingOverride ?? defaultMapping;
   const channelMapData = channelMapEntries ?? new Map([["ch1", defaultMapping]]);
@@ -105,6 +105,7 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatus
     agentsYamlPath,
     pollInterval: 1,
     codexStatusDriver,
+    claudeModelChanger,
     modelChangeOptions: modelChangeOptions || {
       now: () => modelClock,
       wait: async (ms) => { modelClock += ms; },
@@ -213,6 +214,23 @@ function nativeStatus({ account = "one@example.com (Pro)", model = "gpt-5.6-sol"
 }
 
 feature("/model dialect routing", () => {
+  component("Kimi cannot be mistaken for a Claude model target", {
+    given: ["a Kimi pane and a Claude model request", () => {
+      const path = join(tmpdir(), `amux-handlers-kimi-${Date.now()}.yaml`);
+      writeFileSync(path, `_ai:\n  dir: /home/user/project\n  panes:\n    - name: kimi\n      cmd: kimi --model kimi-code/k3\n`);
+      const changer = vi.fn(async () => ({ ok: true, model: "claude-opus-5-5" }));
+      return { ...setup({ agentsYamlPath: path, claudeModelChanger: changer }), changer, path,
+        msg: mockMsg({ content: "/model claude-opus-5-5" }) };
+    }],
+    when: ["handling the model command", async ({ onMessage, msg }) => onMessage(msg)],
+    then: ["the wrong dialect is refused before a pane write", (_, ctx) => {
+      try {
+        expect(ctx.changer).not.toHaveBeenCalled();
+        expect(ctx.deliveryBroker.enqueueAndWait).not.toHaveBeenCalled();
+        expect(ctx.msg.reply.mock.calls.at(-1)[0]).toMatch(/unsupported|stöds inte/i);
+      } finally { unlinkSync(ctx.path); }
+    }],
+  });
   component("codex pane with a draft refuses the pane-local restart", {
     given: ["a Codex-backed channel whose pane has no identifiable composer", () => {
       const path = writeCodexYaml();
@@ -252,18 +270,18 @@ feature("/model dialect routing", () => {
     }],
   });
 
-  component("claude pane (no yaml) keeps the forwarding path", {
-    given: ["default setup and /model with a claude alias", () => {
-      const s = setup();
-      return { ...s, msg: mockMsg({ content: "/model opus" }) };
+  component("Claude model command uses the compact-first owner", {
+    given: ["default setup and an explicit Opus 5.5 choice", () => {
+      const changer = vi.fn(async () => ({ ok: true, model: "claude-opus-5-5" }));
+      const s = setup({ claudeModelChanger: changer });
+      return { ...s, changer, msg: mockMsg({ content: "/model claude-opus-5-5" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["the command is brokered and confirmed", (_, { msg, agent, deliveryBroker }) => {
-      expect(deliveryBroker.enqueueAndWait).toHaveBeenCalledWith(expect.objectContaining({
-        agentName: "_ai", pane: 0, text: "/model opus", kind: "slash",
-      }));
+    then: ["no raw model command bypasses the compact receipt", (_, { msg, agent, deliveryBroker, changer }) => {
+      expect(changer).toHaveBeenCalledOnce();
+      expect(deliveryBroker.enqueueAndWait).not.toHaveBeenCalled();
       expect(agent.sendOnly).not.toHaveBeenCalled();
-      expect(msg.reply.mock.calls[0][0]).toContain("sent `/model opus`");
+      expect(msg.reply.mock.calls.at(-1)[0]).toContain("claude-opus-5-5");
     }],
   });
 

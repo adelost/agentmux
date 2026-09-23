@@ -19,7 +19,7 @@ export function claudePaneSelection(paneConfig = {}) {
 }
 
 const MODEL_ALIASES = {
-  opus: "claude-opus-5",
+  opus: "claude-opus-5-5",
 };
 
 /** Families whose spoken form (`opus 4.8`) has to become a wire id (`claude-opus-4-8`). */

@@ -14,6 +14,7 @@ import { readQuotaSnapshot } from "./core/quota-usage.mjs";
 import { formatQuotaSnapshot } from "./core/quota-format.mjs";
 import { prepareCodexIdle } from "./core/codex-tui.mjs";
 import { formatCodexModelChange, runLockedCodexModelChange } from "./core/codex-model-command.mjs";
+import { runLockedClaudeModelChange } from "./core/claude-model-command.mjs";
 import {
   clearCodexModelOverride,
   codexLoginCommand,
@@ -29,7 +30,6 @@ import {
 import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
 import { MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, resumeBrief } from "./core/model-watch.mjs";
 import { queueFleetRestart } from "./core/fleet-restart.mjs";
-import { setPaneModelSelection } from "./core/pane-model-state.mjs";
 import { normalizeClaudeModelName } from "./core/claude-model.mjs";
 import { mergeInboundTarget } from "./core/inbound-target.mjs";
 /**
@@ -172,7 +172,7 @@ export function renderCatchupLine(countResult) {
  *
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentmuxYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, deliveryBroker = null, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus, modelChangeOptions = {}, queueFleetRestartRequest = queueFleetRestart, scheduleBridgeRestart = (delayMs) => setTimeout(() => process.exit(75), delayMs) }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, deliveryBroker = null, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus, claudeModelChanger = runLockedClaudeModelChange, modelChangeOptions = {}, queueFleetRestartRequest = queueFleetRestart, scheduleBridgeRestart = (delayMs) => setTimeout(() => process.exit(75), delayMs) }) {
   const noopRecorder = { save: () => {}, enabled: false };
   const rec = recorder || noopRecorder;
   const sendLocks = new Map();
@@ -532,10 +532,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         }));
     },
 
-    // Bare /model reads the pane's current model. Claude receives its native
-    // slash command; Codex is restarted+resumed with process-local overrides
-    // and then verified against native /status (see the global-config bug
-    // rationale below).
+    // /model reads current; changed models use engine-specific verified paths.
     "/model": async (msg, mapping, pane, args) => {
       const name = (args || "").trim();
       if (isNativePane(mapping, pane)) {
@@ -615,6 +612,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         }
         return;
       }
+      const command = paneCommand(mapping, pane);
+      if (command && !/\bclaude\b/iu.test(command)) { await msg.reply("Modelbyte stöds inte för den här paneldialekten."); return; }
       // Model ids/aliases only — never arbitrary text into the pane from a
       // typo'd Discord message. Spoken forms (`opus 4.8`) normalize to the
       // wire id first, so the guard rejects garbage and not human syntax.
@@ -625,25 +624,17 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       }
       const model = requested.model;
       try {
-        const result = deliveryBroker
-          ? await deliveryBroker.enqueueAndWait({
-              agentName: mapping.name,
-              pane,
-              text: `/model ${model}`,
-              kind: "slash",
-              source: "discord",
-              metadata: { channelId: msg.channelId, messageId: msg.id },
-            })
-          : await withPaneSendLock(`${mapping.name}:${pane}`, () =>
-              sendSlashVerified(agent, mapping.name, pane, `/model ${model}`));
-        if (result.delivered) {
-          setPaneModelSelection(state, mapping.name, pane, model);
-          const rescued = result.rescues ? ` (palette ate Enter, rescued x${result.rescues})` : "";
-          await msg.reply(`sent \`/model ${model}\`${rescued}; verify on the next turn's footer (or \`//model\`)`);
+        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () => claudeModelChanger({
+          agent, state, queue: deliveryBroker?.queue, name: mapping.name, pane,
+          paneDir: mapping.dir ? `${mapping.dir}/.agents/${pane}` : null, targetModel: model,
+        }));
+        if (!result.ok) {
+          await msg.reply(`⚠️ Claude-modellbyte ${result.stage === "verify" ? "har okänt utfall" : "stoppat före byte"}: ${result.reason || result.stage}. Inget automatiskt omförsök.`);
         } else {
-          await msg.reply(result.pending
-            ? `queued durably \`/model ${model}\``
-            : `⚠️ \`/model ${model}\` still sits unsubmitted in the composer; check \`/raw\``);
+          if (readParkState(mapping.name, pane)) unparkPane({ session: mapping.name, pane, detail: `verified Claude model: ${result.model}` });
+          await msg.reply(result.unchanged
+            ? `${mapping.name}:${pane} använder redan ${result.model}; ingen compact eller väckning.`
+            : `${mapping.name}:${pane}: compact verifierad${result.reusedCompact ? " sedan tidigare" : ""}; ${result.model} vald, effort oförändrad.`);
         }
       } catch (err) {
         await msg.reply(`/model failed: ${err.message}`).catch(() => {});

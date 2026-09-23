@@ -614,16 +614,15 @@ async function cmdSend(name, prompt, flags, ctx) {
   saveLast(ctx.lastFile, name);
   const pane = flags.p || 0;
 
-  // Auto-prepend [from <session>:<window>] when invoker is inside tmux,
-  // so receiver panes know which orchestrator briefed them. Invisible
-  // when called from raw terminal, Discord bot, or cron (no TMUX env).
-  // Sender is invariant — provenance must never be silently erased —
-  // except for short slash commands, where a header would turn the
-  // control action into prose; their provenance stays in the mirror.
+  // Preserve sender provenance, except on slash commands that must reach the engine verbatim.
   const exec = (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 });
   const sender = detectSenderFromEnv(process.env, exec);
   assertConfiguredSender(sender, (session, senderPane) => validateAgentSender(ctx.configPath, session, senderPane));
   const finalPrompt = outgoingPaneText(prompt, sender);
+  const paneCmd = getAgent(ctx.configPath, name).panes?.[pane]?.cmd || "";
+  if (/^\/model(?:\s|$)/u.test(finalPrompt) && /\bclaude\b/u.test(paneCmd)) {
+    throw new Error(`Raw Claude /model bypasses compact: use amux model ${name} -p ${pane} MODEL`);
+  }
   const idempotencyKey = flags["idempotency-key"];
   if (idempotencyKey != null
       && (typeof idempotencyKey !== "string" || Buffer.byteLength(idempotencyKey, "utf8") > 256
