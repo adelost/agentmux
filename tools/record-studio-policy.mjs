@@ -23,5 +23,5 @@ const events=cases.map(([facts,cell,action])=>{
 });
 const trace={kind:'product-studio-trace',version:1,modelDigest:project.modelDigest,events};
 await mkdir(new URL('../test-results/',import.meta.url),{recursive:true});
-await writeFile(new URL('../test-results/context-cost-studio-trace.json',import.meta.url),JSON.stringify(trace,null,2)+'\n');
+await writeFile(new URL('../test-results/amux-studio-trace.json',import.meta.url),JSON.stringify(trace,null,2)+'\n');
 console.log(`Recorded ${events.length} real context-cost decisions for Product Studio.`);
