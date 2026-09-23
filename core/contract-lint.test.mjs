@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execFileSync } from "child_process";
-import { collectSourceFiles, evaluateContract, extractSymbols, formatLintReport, lintRoot, lintRoots, overlapRatio, writeBaseline } from "./contract-lint.mjs";
+import { collectSourceFiles, evaluateContract, extractSymbols, formatLintReport, lintRoot, lintRoots, lintSource, overlapRatio, writeBaseline } from "./contract-lint.mjs";
 
 function git(root, ...args) {
   return execFileSync("git", ["-C", root, ...args], {
@@ -840,6 +840,42 @@ feature("contract-lint changed-file style ratchet", () => {
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
+    }],
+  });
+});
+
+
+feature("ProductSpec service contract discovery", () => {
+  unit("nested and aliased service declarations still own WHAT/WHY contracts", {
+    given: ["a factory with a local aliased ProductSpec service", () => `import { service as boundary } from "@v1d/product-spec";
+export function defineFeature() {
+  /**
+   * WHAT: Tracks one runtime boundary and publishes its status.
+   * WHY: Keeps device effects separate from the feature presentation.
+   */
+  const runtimeService = boundary({ id: "demo.runtime" });
+  return runtimeService;
+}
+`],
+    when: ["extracting contract-owned symbols", (source) => extractSymbols(source, ".ts")],
+    then: ["the local service is included with its contract", (symbols) => {
+      const service = symbols.find((symbol) => symbol.name === "runtimeService");
+      expect(service?.kind).toBe("service");
+      expect(service?.doc).toContain("WHAT: Tracks one runtime boundary");
+      expect(service?.doc).toContain("WHY: Keeps device effects separate");
+    }],
+  });
+
+  unit("a nested ProductSpec service cannot hide a missing contract", {
+    given: ["a local service with no doc contract", () => `import { service } from "@v1d/product-spec";
+export function defineFeature() {
+  const hiddenBoundary = service({ id: "demo.hidden" });
+  return hiddenBoundary;
+}
+`],
+    when: ["linting the source", (source) => lintSource("feature.ts", source, ".ts")],
+    then: ["the service gets the normal missing-contract error", (findings) => {
+      expect(findings.some((finding) => finding.code === "CONTRACT001" && finding.msg.includes("service hiddenBoundary"))).toBe(true);
     }],
   });
 });
