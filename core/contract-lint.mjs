@@ -370,6 +370,28 @@ function extractCFamily(source, ext) {
   return symbols;
 }
 
+// WHAT: Finds ProductSpec service declarations even when a feature factory keeps them local.
+// WHY: Prevents an architectural effect boundary from escaping WHAT/WHY because it is nested or aliased.
+function extractProductSpecServices(source) {
+  const aliases = new Set();
+  const imports = /import\s*{([\s\S]*?)}\s*from\s*["']@v1d\/product-spec(?:\/[^"']*)?["']/g;
+  for (const match of source.matchAll(imports)) {
+    for (const item of match[1].split(",")) {
+      const parts = item.trim().split(/\s+as\s+/);
+      if (parts[0]?.trim() === "service") aliases.add((parts[1] ?? parts[0]).trim());
+    }
+  }
+  if (!aliases.size) return [];
+  const lines = source.split("\n");
+  const symbols = [];
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const match = lines[idx].trim().match(/^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*\(/);
+    if (!match || !aliases.has(match[2])) continue;
+    symbols.push({ line: idx + 1, name: match[1], kind: "service", doc: leadingComment(lines, idx) });
+  }
+  return symbols;
+}
+
 // WHAT: Extracts top-level class/def symbols and their docstrings from Python.
 // WHY: Keeps Python on its native docstring-as-child shape instead of the C-family path.
 function extractPython(source) {
@@ -424,7 +446,14 @@ function pythonDocstring(lines, declIndex) {
  * WHY: Keeps the rule layer fed by a uniform symbol shape across languages.
  */
 export function extractSymbols(source, ext) {
-  return LANG_BY_EXT[ext] === "python" ? extractPython(source) : extractCFamily(source, ext);
+  if (LANG_BY_EXT[ext] === "python") return extractPython(source);
+  const publicSymbols = extractCFamily(source, ext);
+  if (![".js", ".mjs", ".ts", ".svelte"].includes(ext)) return publicSymbols;
+  const byIdentity = new Map(publicSymbols.map((symbol) => [`${symbol.line}:${symbol.name}`, symbol]));
+  for (const service of extractProductSpecServices(source)) {
+    byIdentity.set(`${service.line}:${service.name}`, service);
+  }
+  return [...byIdentity.values()].sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
 }
 
 /**
