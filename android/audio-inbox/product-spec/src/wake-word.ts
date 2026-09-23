@@ -52,6 +52,10 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
     ],
   } as const;
 
+  /**
+   * WHAT: Collects wake-word questions and publishes microphone loop status.
+   * WHY: Keeps hands-free capture outside UI lifecycle and conversation delivery.
+   */
   const wakeService = service({
     id: `${product}.wake`,
     inputs: [],

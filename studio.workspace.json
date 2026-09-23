@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "projects": [
+    {
+      "id": "amux",
+      "label": "AMUX policies",
+      "sources": [
+        "policies/context-cost.mjs"
+      ],
+      "documentation": {
+        "sourceRoots": [
+          "policies"
+        ],
+        "repository": "adelost/agentmux",
+        "bddReports": [
+          "test-results/bdd-run.json"
+        ]
+      }
+    },
+    {
+      "id": "amux-link",
+      "label": "AMUX Link",
+      "sources": [],
+      "artifact": "android/audio-inbox/product-spec/generated/link-product.json",
+      "graph": "android/audio-inbox/product-spec/generated/link-product.graph.mmd",
+      "documentation": {
+        "sourceRoots": [
+          "android/audio-inbox/product-spec/src"
+        ],
+        "repository": "adelost/agentmux"
+      }
+    }
+  ]
+}
