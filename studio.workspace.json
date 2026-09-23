@@ -4,9 +4,11 @@
     {
       "id": "amux",
       "label": "AMUX policies",
+      "kernelRoot": ".",
       "sources": [
         "policies/context-cost.mjs"
       ],
+      "traceFile": "test-results/context-cost-studio-trace.json",
       "documentation": {
         "sourceRoots": [
           "policies"
@@ -20,6 +22,7 @@
     {
       "id": "amux-link",
       "label": "AMUX Link",
+      "kernelRoot": "android/audio-inbox/product-spec",
       "sources": [],
       "artifact": "android/audio-inbox/product-spec/generated/link-product.json",
       "graph": "android/audio-inbox/product-spec/generated/link-product.graph.mmd",
@@ -27,7 +30,11 @@
         "sourceRoots": [
           "android/audio-inbox/product-spec/src"
         ],
-        "repository": "adelost/agentmux"
+        "repository": "adelost/agentmux",
+        "bddReports": [
+          "test-results/bdd-run.json",
+          "test-results/link-laws.json"
+        ]
       }
     }
   ]
