@@ -9,6 +9,7 @@
 import { appendEvent } from "./events.mjs";
 import { deliverToPane } from "./delivery.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
+import { captureDeliveryCursor } from "./delivery-cursor.mjs";
 import { recoverSupersededSubmit } from "./submit-boundary.mjs";
 import { createDeliveryNotSent, PRE_SUBMIT_STATES } from "./delivery-not-sent.mjs";
 import { createDeliveryNotices } from "./delivery-notices.mjs";
@@ -262,23 +263,7 @@ export function createDeliveryBroker({
       job = queue.update(job, { echoNotBeforeMs: now() });
     }
 
-    if (!job.echoCursor
-        && (job.kind === "prompt" || job.kind === "slash")
-        && job.metadata?.deliveryTransport !== "native") {
-      const captureCursor = job.kind === "slash"
-        ? agent.captureSlashReceiptCursor
-        : agent.capturePromptEchoCursor;
-      const cursorText = job.kind === "slash" ? rewriteModelSlash(job.verifyText) : job.verifyText;
-      let cursor = null;
-      if (typeof captureCursor === "function") {
-        try {
-          cursor = await captureCursor.call(agent, job.agentName, job.pane, cursorText);
-        } catch (error) {
-          log(`delivery broker cursor failed for ${job.agentName}:${job.pane}: ${error.message}`);
-        }
-      }
-      if (cursor) job = queue.update(job, { echoCursor: cursor });
-    }
+    job = await captureDeliveryCursor({ agent, job, queue, log });
 
     // Every resume/retry starts at the authoritative sink. A crash after
     // Enter but before the job file update is therefore acknowledged without
@@ -448,6 +433,7 @@ export function createDeliveryBroker({
       queueEvent, notifyBlocked: maybeNotifyBlocked });
     job = wake.job;
     if (!wake.proceed) return job;
+    job = await captureDeliveryCursor({ agent, job, queue, log, afterWake: true });
 
     // A receiptless retry re-proves pane liveness before the payload is
     // committed again; a silent pane keeps the FIFO parked, never retyped.

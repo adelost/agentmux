@@ -19,9 +19,9 @@ export async function recoverSubmittedTui({
   const recoveryKind = job.metadata?.submittedRecoveryKind || null;
   if (job.status !== "submitted" || job.kind !== "prompt"
       || job.metadata?.deliveryTransport === "native" || !job.echoCursor
-      // Missing Codex evidence is ambiguous even after process death or an
-      // empty composer. Never restart, re-Enter or retype across its fence.
-      || job.echoCursor.kind === "codex-prompt-events-v1"
+      // Missing Codex or Qwen evidence is ambiguous even after process death
+      // or an empty composer. Never restart or retype across either fence.
+      || ["codex-prompt-events-v1", "qwen-dual-output-v1"].includes(job.echoCursor.kind)
       // One retained-draft Enter is the cheap first stage. If that did not
       // produce a receipt, the exact pane may still be restarted once below.
       || (job.metadata?.submittedRecoveryAt && recoveryKind !== "exact-draft-enter")
