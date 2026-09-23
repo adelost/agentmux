@@ -43,6 +43,26 @@ function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5
 }
 
 feature("Claude model changes are compact-first and pane-local", () => {
+  component("Claude's live display name is the same Opus 5.5 model", {
+    given: ["the real footer spelling Opus 5.5 and an older saved choice", () => fixture({ liveModel: "Opus 5.5" })],
+    when: ["selecting the exact Opus 5.5 id", fx => fx.change("claude-opus-5-5")],
+    then: ["no paid compact or model switch is needed", (result, fx) => {
+      try {
+        expect(result.ok).toBe(true);
+        expect(result.unchanged).toBe(true);
+        expect(fx.calls).toEqual([]);
+        expect(paneModelSelection(fx.state, "claw", 0)?.model).toBe("claude-opus-5-5");
+      } finally { fx.cleanup(); }
+    }],
+  });
+  component("Claude's older display name still compacts before a new model", {
+    given: ["the real footer spelling Opus 5", () => fixture({ liveModel: "Opus 5" })],
+    when: ["requesting Opus 5.5", fx => fx.change("claude-opus-5-5")],
+    then: ["the verified compact precedes the switch", (result, fx) => {
+      try { expect(result.ok).toBe(true); expect(fx.calls).toEqual(["compact", "/model claude-opus-5-5", "release"]); }
+      finally { fx.cleanup(); }
+    }],
+  });
   component("a stopped pane is not woken solely to change models", {
     given: ["the pane process is asleep", () => fixture({ running: false })],
     when: ["requesting Opus 5.5", fx => fx.change("claude-opus-5-5")],
