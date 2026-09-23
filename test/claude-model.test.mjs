@@ -1,5 +1,16 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { normalizeClaudeModelName } from "../core/claude-model.mjs";
+import { normalizeClaudeModelName, resolveClaudeModel, rewriteModelSlash } from "../core/claude-model.mjs";
+
+feature("an explicit Opus alias cannot downgrade the current fleet", () => {
+  unit("Opus names the pinned 5.5 release", {
+    when: ["resolving an explicit alias", () => ({
+      model: resolveClaudeModel("opus"), slash: rewriteModelSlash("/model opus"),
+    })],
+    then: ["both command routes select Opus 5.5", result => {
+      expect(result).toEqual({ model: "claude-opus-5-5", slash: "/model claude-opus-5-5" });
+    }],
+  });
+});
 
 feature("normalizeClaudeModelName: spoken forms become wire ids", () => {
   unit("`opus 4.8` → `claude-opus-4-8`", {
