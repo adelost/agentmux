@@ -287,7 +287,7 @@ export function buildMigrationPlan(agents, existingChannels) {
     // If multiple channels claim the same pane, keep first-seen; rest are extras.
     const byPane = new Map();
     for (const c of claimed) {
-      if (!sourcePaneSlot(config, c.pane)) { extras.push(c); continue; }
+      if (!sourcePaneSlot(config, c.pane)) { extras.push({ ...c, agentName: name }); continue; }
       if (byPane.has(c.pane)) { extras.push(c); continue; }
       byPane.set(c.pane, c);
     }

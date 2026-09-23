@@ -134,6 +134,11 @@ export function createDiscordInboundStore({
         agentName: String(target.agentName),
         pane: Number(target.pane),
         dir: target.dir ? String(target.dir) : null,
+        ...(target.kind === "inactive" ? {
+          kind: "inactive",
+          channelName: String(target.channelName || ""),
+          redirectId: target.redirectId ? String(target.redirectId) : null,
+        } : {}),
       },
       createdTimestamp: Number(msg.createdTimestamp) || now(),
       observedAt: now(),
