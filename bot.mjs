@@ -102,7 +102,9 @@ export function startBot({
   // output never advances the scan cursor past an unseen human message.
   const resolveInboundTarget = (msg) => {
     const mapping = getMapping(msg?.channelId);
-    return resolveConfiguredInboundTarget(mapping, msg?.text);
+    if (mapping) return resolveConfiguredInboundTarget(mapping, msg?.text);
+    const inactive = state.get("sync", {})?.inactiveChannels?.[msg?.channelId];
+    return inactive ? { ...inactive, kind: "inactive" } : null;
   };
   const inbound = channels.length
     ? createInboundReconciler({
@@ -112,10 +114,14 @@ export function startBot({
 
   async function catchUpInbound(channel) {
     if (typeof channel.fetchMissed !== "function") return;
-    const configuredIds = new Set(channelMap.keys());
+    const inactive = state.get("sync", {})?.inactiveChannels || {};
+    const configuredIds = new Set([...channelMap.keys(), ...Object.keys(inactive)]);
     const channelIds = new Set([...configuredIds, ...(inboundStore?.channelIds?.() || [])]);
     for (const channelId of channelIds) {
       try {
+        if (inactive[channelId] && !inboundStore?.cursor?.(channelId) && inactive[channelId].afterId) {
+          inboundStore.advanceCursor(channelId, inactive[channelId].afterId);
+        }
         const result = configuredIds.has(channelId)
           ? await inbound.reconcile(channel, channelId)
           : await inbound.drain(channel, channelId);

@@ -2,6 +2,7 @@
 // the private intake journal and REST history repair own restart safety.
 
 import { legacyTranscriptPayload, transcriptPayload } from "./discord-transcript-effect.mjs";
+import { sendInactiveChannelNotice } from "./inactive-channel.mjs";
 
 const TYPING_INTERVAL_MS = 8_000;
 
@@ -96,6 +97,7 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
   const preparations = new Map();
 
   function prepare(record) {
+    if (record.target?.kind === "inactive") return Promise.resolve({ ok: true, value: record });
     const existing = preparations.get(record.identity);
     if (existing) return existing;
     let tracked;
@@ -129,6 +131,11 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
       current = await preparedRecord(prepared || prepare(current));
       current = store.read(current.channelId, current.messageId) || current;
       if (current.status === "completed") return { duplicate: true };
+      if (current.target?.kind === "inactive") {
+        await sendInactiveChannelNotice(current, store, channel);
+        store.complete(current, { inactive: true });
+        return { delivered: true, inactive: true };
+      }
       const outcome = await onMessage(durableMessage(current, store, channel, baseMessage));
       if (outcome?.delivered === false) {
         store.fail(current, outcome.reason || "handler did not durably accept the message");

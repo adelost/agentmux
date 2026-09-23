@@ -13,6 +13,7 @@ import { randomUUID } from "crypto";
 import { ChannelType } from "discord.js";
 import yaml from "js-yaml";
 import { parseConfig, buildMigrationPlan, generateAgentsYaml } from "../sync.mjs";
+import { inactiveChannelBindings } from "./inactive-channel.mjs";
 
 /**
  * Execute a full sync: read config, create Discord channels, generate agents.yaml.
@@ -31,7 +32,8 @@ export async function executeSync({ guild, configYaml, state, agentsYamlPath }) 
   const allChannels = await guild.channels.fetch();
   const textChannels = [...allChannels.values()]
     .filter((ch) => ch && ch.type === ChannelType.GuildText)
-    .map((ch) => ({ name: ch.name, id: ch.id, parentId: ch.parentId }));
+    .map((ch) => ({ name: ch.name, id: ch.id, parentId: ch.parentId,
+      lastMessageId: ch.lastMessageId || null }));
 
   // Per-agent categories (find or create, one per agent name)
   const categories = new Map(); // agentName → category channel
@@ -123,6 +125,7 @@ export async function executeSync({ guild, configYaml, state, agentsYamlPath }) 
   const syncState = {
     channels: Object.fromEntries(channelMap),
     agents: Object.fromEntries(agentNames.map((name) => [name, { id: agentIds.get(name) }])),
+    inactiveChannels: inactiveChannelBindings(plan.extras, config.agents, channelMap),
   };
   state.set("sync", syncState);
 
