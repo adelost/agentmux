@@ -2,6 +2,7 @@
 
 import { join } from "node:path";
 import { getAgent } from "../cli/config.mjs";
+import { claudePaneSelection } from "./claude-model.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { runtimeAgentsPath } from "./runtime-defaults.mjs";
 import {
@@ -28,6 +29,7 @@ export function configuredClaudeTarget(agentName, pane = 0, {
     pane: paneNumber,
     cwd: join(entry.dir, ".agents", String(paneNumber)),
     configPath,
+    selection: claudePaneSelection(paneConfig),
   });
 }
 

@@ -6,6 +6,7 @@ import { createTmuxAdapter } from "./tmux.mjs";
 import { findBlockingPrompt, hasEmptyClaudeComposer } from "./dismiss.mjs";
 import { persistedSessionIdentity } from "./native-session-identity.mjs";
 import { getContextPercent } from "./context.mjs";
+import { paneModelSelection } from "./pane-model-state.mjs";
 import {
   activeClaudeLimitForTarget,
   configuredClaudeTarget,
@@ -38,6 +39,8 @@ export function createClaudeQuotaLifecycle({
   homeDir = process.env.HOME,
   delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   record = appendEvent,
+  state = null,
+  contextFor = getContextPercent,
 } = {}) {
   if (!configPath) throw new Error("Claude quota lifecycle requires configPath");
   if (!tmuxSocket || typeof tmuxExec !== "function") {
@@ -141,12 +144,17 @@ export function createClaudeQuotaLifecycle({
       return { ok: false, reason: "limit-receipt-superseded" };
     }
 
-    const previousModel = getContextPercent(targetConfig.cwd, "claude")?.model || null;
+    const selected = paneModelSelection(state, agentName, pane);
+    const observed = contextFor(targetConfig.cwd, "claude");
+    const model = selected?.model || observed?.model || targetConfig.selection.model || undefined;
+    const effort = selected?.effort || (observed?.model === model ? observed?.effort : null)
+      || targetConfig.selection.effort || null;
     await tmux.respawnPane(target, { kill: true, cwd: targetConfig.cwd });
     if (!await waitForShell(target)) return { ok: false, reason: "replacement-shell-not-ready" };
     const launch = buildClaudeLaunchCommand({
       resumeSessionId: expectedReceipt.sessionId,
-      model: previousModel || undefined,
+      model,
+      effort,
     });
     await tmux.runShell(target, `cd '${targetConfig.cwd.replaceAll("'", "'\\''")}' && ${launch}`);
     if (!await waitForComposer(target)) return { ok: false, reason: "resumed-composer-not-ready" };
