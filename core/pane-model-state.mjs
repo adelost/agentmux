@@ -21,9 +21,9 @@ export function paneModelSelection(state, name, pane) {
 
 /**
  * WHAT: Turns a statusline display name ("Opus 5", "Fable 5.1") into its launch id.
- * WHY: Rejecting display names left the remembered model stale, so a reboot relaunched an exhausted Fable.
+ * WHY: Prevents display names from diverging from the launch identity used by recovery and model-change detection.
  */
-function launchModelId(model) {
+export function launchModelId(model) {
   const raw = String(model || "").trim();
   if (!/\s/u.test(raw)) return raw;
   const spoken = normalizeClaudeModelName(raw);

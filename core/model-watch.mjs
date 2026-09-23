@@ -14,11 +14,13 @@
 // setting, so stop-on-effort would add friction exactly when the fleet is
 // recovering. Every change still gets a channel line + ledger row.
 
+import { launchModelId } from "./pane-model-state.mjs";
+
 const EFFORT_TIERS = { max: 5, xhigh: 4, high: 3, medium: 2, low: 1, minimal: 0 };
 const CLAUDE_FAMILY = { fable: 5, mythos: 5, opus: 4, sonnet: 3, haiku: 2 };
 const CODEX_VARIANT = { sol: 3, terra: 2, luna: 1, mini: 0 };
 
-const normalizeModel = (model) => String(model || "").trim().toLowerCase();
+const normalizeModel = (model) => launchModelId(model).trim().toLowerCase();
 const normalizeEffort = (effort) => String(effort || "").trim().toLowerCase();
 
 /**

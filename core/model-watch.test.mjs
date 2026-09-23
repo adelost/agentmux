@@ -39,6 +39,30 @@ feature("modelRank — comparable within a family", () => {
 });
 
 feature("classifyModelChange — the warn/act decision", () => {
+  unit("Claude display names and stored ids describe the same model", {
+    given: ["statusline names for two Opus versions", () => [
+      ["claude-opus-5-5", "Opus 5.5"],
+      ["claude-opus-5", "Opus 5"],
+    ]],
+    when: ["classifying unchanged high-effort sightings", (pairs) => pairs.map(([stored, displayed]) =>
+      classifyModelChange({ model: stored, effort: "high" }, { model: displayed, effort: "high" }))],
+    then: ["neither sighting is a model change", (changes) => {
+      for (const change of changes) expect(change).toBeNull();
+    }],
+  });
+
+  unit("real Claude model changes remain visible across display and stored names", {
+    given: ["Opus 5.5 followed by Sonnet 5 and Fable 5.1", () => ["Sonnet 5", "claude-fable-5-1"]],
+    when: ["classifying both changes", (models) => models.map((model) =>
+      classifyModelChange({ model: "claude-opus-5-5", effort: "high" }, { model, effort: "high" }))],
+    then: ["Sonnet is a downgrade and Fable is a visible sidegrade", ([sonnet, fable]) => {
+      expect(sonnet?.direction).toBe("downgrade");
+      expect(shouldStopPane(sonnet)).toBe(true);
+      expect(fable?.direction).toBe("lateral");
+      expect(fable?.kind).toBe("model");
+    }],
+  });
+
   for (const model of ["gpt-5.6-sol", "gpt-6-astra"]) unit(`${model} to gpt-reserve is a quota fallback, not an unknown sidegrade`, {
     when: ["the provider changes a requested model to Reserve", () => classifyModelChange(
       { model, effort: "xhigh" }, { model: "gpt-reserve", effort: "xhigh" })],
