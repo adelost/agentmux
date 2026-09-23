@@ -3,6 +3,7 @@ import { appendFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createContextMaintenance } from "./context-maintenance.mjs";
+import { wakeDeliveryTarget } from "./delivery-wake.mjs";
 
 function fixture({ fail = false, jobs = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-cost-test-")), path = join(root, "session.jsonl");
@@ -28,6 +29,86 @@ function fixture({ fail = false, jobs = [] } = {}) {
 }
 
 feature("warm and cold compaction share a durable one-attempt fence", () => {
+  component("a cold first message enters an exact session with no work after compact", {
+    given: ["the compacted Claude journal has only local command output and bridge metadata", () => {
+      const ctx = fixture();
+      ctx.agent.getContext = async () => ({ tokens: null });
+      ctx.activityFor = () => null;
+      ctx.journalFor = () => null;
+      ctx.append({ type: "assistant", message: { model: "claude-opus-5-5", usage: { input_tokens: 150_000 } } });
+      ctx.append({ type: "system", subtype: "compact_boundary", sessionId: "one", timestamp: "2026-09-20T13:39:06.009Z" });
+      ctx.append({ type: "user", isCompactSummary: true, message: { content: "summary" } });
+      ctx.append({ type: "user", message: { content: "<local-command-stdout>Compacted</local-command-stdout>" } });
+      ctx.append({ type: "attachment", timestamp: "2026-09-23T20:02:48.865Z" });
+      ctx.append({ type: "pr-link", timestamp: "2026-09-23T20:02:48.865Z" });
+      return ctx;
+    }],
+    when: ["admitting the first delivery through the existing guard", ctx => createContextMaintenance(ctx).beforeWork({ agentName: "claw", pane: 2, id: "first" })],
+    then: ["the first message is admitted without a provider compact", (result, ctx) => {
+      try { expect(result.ok).toBe(true); expect(ctx.calls).toHaveLength(0); } finally { ctx.cleanup(); }
+    }],
+  });
+  for (const [name, entries] of [
+    ["a missing compact boundary", [{ type: "attachment" }]],
+    ["a malformed compact boundary", [{ type: "system", subtype: "compact_boundary", sessionId: "one", timestamp: "invalid" }]],
+    ["another session's compact boundary", [{ type: "system", subtype: "compact_boundary", sessionId: "other", timestamp: "2026-09-20T13:39:06.009Z" }]],
+    ["unknown work after compact", [
+      { type: "system", subtype: "compact_boundary", sessionId: "one", timestamp: "2026-09-20T13:39:06.009Z" },
+      { type: "user", message: { content: "new work" } },
+    ]],
+    ["an assistant turn after compact", [
+      { type: "system", subtype: "compact_boundary", sessionId: "one", timestamp: "2026-09-20T13:39:06.009Z" },
+      { type: "assistant", message: { model: "claude-opus-5-5", usage: { input_tokens: 200_000 } } },
+    ]],
+  ]) {
+    component(`${name} still blocks cold delivery when usage is unknown`, {
+      given: ["the exact journal has no trustworthy empty epoch", () => {
+        const ctx = fixture();
+        ctx.agent.getContext = async () => ({ tokens: null });
+        ctx.activityFor = () => null;
+        ctx.journalFor = () => null;
+        entries.forEach(ctx.append);
+        return ctx;
+      }],
+      when: ["admitting the first delivery", ctx => createContextMaintenance(ctx).beforeWork({ agentName: "claw", pane: 2, id: "first" })],
+      then: ["the guard holds and spends no provider compact", (result, ctx) => {
+        try { expect(result.reason).toContain("context-cost:unknown-evidence"); expect(ctx.calls).toHaveLength(0); }
+        finally { ctx.cleanup(); }
+      }],
+    });
+  }
+  component("transport admits the proven empty pane and retains unknown work as pending", {
+    given: ["two exact idle sessions with unknown usage and different post-compact histories", () => {
+      const empty = fixture(), used = fixture();
+      for (const ctx of [empty, used]) {
+        ctx.agent.getContext = async () => ({ tokens: null });
+        ctx.activityFor = () => null;
+        ctx.journalFor = () => null;
+        ctx.append({ type: "system", subtype: "compact_boundary", sessionId: "one", timestamp: "2026-09-20T13:39:06.009Z" });
+      }
+      used.append({ type: "assistant", message: { content: [{ type: "text", text: "prior work" }] } });
+      return { empty, used };
+    }],
+    when: ["routing one prompt to each session through delivery wake admission", async ({ empty, used }) => {
+      const route = ctx => wakeDeliveryTarget({
+        agent: ctx.agent,
+        job: { id: "first", kind: "prompt", agentName: "claw", pane: 2, status: "pending" },
+        costAdmission: job => createContextMaintenance(ctx).beforeWork(job),
+        queue: { update: (job, patch) => ({ ...job, ...patch }) },
+        now: () => 100_000_000, retryMs: () => 1_000,
+        queueEvent: () => {}, notifyBlocked: async job => job,
+      });
+      return { accepted: await route(empty), retained: await route(used) };
+    }],
+    then: ["only the empty pane proceeds, with no provider compact", (result, { empty, used }) => {
+      try {
+        expect(result.accepted.proceed).toBe(true);
+        expect(result.retained).toMatchObject({ proceed: false, job: { status: "pending", lastReason: "wake-refused:context-cost:unknown-evidence" } });
+        expect(empty.calls).toHaveLength(0);
+        expect(used.calls).toHaveLength(0);
+      } finally { empty.cleanup(); used.cleanup(); }
+    }],
+  });
   component("a cold 88k pane compacts before its first queued prompt", {
     given: ["an exact idle session with 88k tokens after 24 hours", () => {
       const ctx = fixture();
