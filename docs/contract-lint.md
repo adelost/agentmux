@@ -68,6 +68,12 @@ Do not combine states. `DTO:` plus `WHAT:/WHY:` is ambiguous; use `DTO:` only
 for pure shapes, otherwise write `WHAT:/WHY:`. Debt tags are also exclusive:
 do not add `REFACTOR:` next to `WHAT:/WHY:` or stack `REMOVE:` with `MERGE:`.
 
+## ProductSpec services
+
+Every `service(...)` imported from `@v1d/product-spec` owns an architectural effect boundary and therefore needs the same `WHAT:/WHY:` contract, even when the declaration is local inside a feature factory or the import is aliased. This is intentionally stricter than the normal top-level-public-symbol rule: moving a service into a helper must not erase its architecture contract.
+
+Do not repeat ports, effects, lifetime or state ownership in prose; ProductSpec already declares those facts. `WHAT:` names the stable responsibility and `WHY:` names the boundary or failure mode it protects. Product Studio may combine those two sentences with compiled structure, but the source comment remains the human-authored contract.
+
 ## WHAT
 
 `WHAT:` says what the symbol does or represents locally.
