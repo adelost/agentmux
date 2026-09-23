@@ -1,4 +1,4 @@
-import { resolveClaudeModel } from "./claude-model.mjs";
+import { normalizeClaudeModelName, resolveClaudeModel } from "./claude-model.mjs";
 import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "./context-maintenance.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
@@ -7,6 +7,10 @@ import { paneModelSelection, setPaneModelSelection } from "./pane-model-state.mj
 import { verifiedClaudeCompact } from "./verified-compact.mjs";
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const observedModelId = raw => {
+  const normalized = normalizeClaudeModelName(raw);
+  return normalized.ok ? resolveClaudeModel(normalized.model) : null;
+};
 
 /** WHAT: Routes one idle Claude model change after an exact compact. WHY: Prevents an old conversation from crossing models without a compact receipt. */
 export async function runLockedClaudeModelChange({
@@ -22,8 +26,9 @@ export async function runLockedClaudeModelChange({
   const process = await agent.paneProcessState?.(name, pane).catch(() => null);
   if (process?.running !== true) return { ok: false, stage: "stopped", reason: "pane-not-running" };
   const before = await current();
-  if (!before?.model) return { ok: false, stage: "status", reason: "current-model-unknown" };
-  if (resolveClaudeModel(before.model) === model) {
+  const previousModel = observedModelId(before?.model);
+  if (!previousModel) return { ok: false, stage: "status", reason: "current-model-unknown" };
+  if (previousModel === model) {
     setPaneModelSelection(state, name, pane, model,
       before.effort || paneModelSelection(state, name, pane)?.effort || null);
     return { ok: true, unchanged: true, model };
@@ -65,7 +70,7 @@ export async function runLockedClaudeModelChange({
     }
     for (let attempt = 0; attempt < 10; attempt++) {
       const actual = await current();
-      if (actual?.model && resolveClaudeModel(actual.model) === model) {
+      if (observedModelId(actual?.model) === model) {
         setPaneModelSelection(state, name, pane, model,
           actual.effort || paneModelSelection(state, name, pane)?.effort || null);
         return { ok: true, model, reusedCompact };
