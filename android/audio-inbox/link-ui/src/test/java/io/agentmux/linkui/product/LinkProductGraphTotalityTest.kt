@@ -15,12 +15,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import com.adelost.ringkit.ports.CirclePortRole
+import com.adelost.ringkit.ports.CirclePortQuality
 import com.adelost.ringkit.ports.CirclePortStatus
 import com.adelost.ringkit.ports.needsAttention
 import com.adelost.ringkit.ports.status
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
+import java.util.UUID
 
 class LinkProductGraphTotalityTest {
     @Test
@@ -77,6 +80,14 @@ class LinkProductGraphTotalityTest {
             graph.releaseCapture() // duplicate UP is not a second submission
             assertEquals(listOf(CaptureOperation.BEGIN, CaptureOperation.CANCEL,
                 CaptureOperation.BEGIN, CaptureOperation.RELEASE), captures)
+            val delivered = runBlocking { graph.inspections.first() }
+                .single { it.id == CaptureCommandInput.id.value }
+            assertEquals(CirclePortQuality.LIVE, delivered.quality)
+            System.getenv("V1D_STUDIO_TRACE_DIR")?.let { directory ->
+                File(directory, "kotlin-${UUID.randomUUID()}.jsonl").writeText(
+                    """{"kind":"port","portRef":"${delivered.id}"}""" + "\n",
+                )
+            }
         } finally {
             graph.close()
         }

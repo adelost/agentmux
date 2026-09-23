@@ -19,6 +19,7 @@
       "label": "AMUX Link",
       "artifact": "android/audio-inbox/product-spec/generated/link-product.json",
       "graph": "android/audio-inbox/product-spec/generated/link-product.graph.mmd",
+      "recordCommand": ["android/audio-inbox/gradlew", "-p", "android/audio-inbox", ":link-ui:testDebugUnitTest", "--tests", "io.agentmux.linkui.product.LinkProductGraphTotalityTest.servicesFlowThroughFinalPresentationsIntoComponents", "--console=plain"],
       "documentation": {
         "sourceRoots": [
           "android/audio-inbox/product-spec/src"
