@@ -651,7 +651,8 @@ See `agentmux.yaml.example` for a fuller project config example.
 - [CircleKit Product Studio](https://github.com/adelost/circlekit/blob/main/product-studio/README.md)
   is a local, unpublished tool. Install its locked dependencies and run
   `npm link` in that checkout, then run `v1d-studio` here. To record the AMUX
-  policy trace, run `v1d-studio record --product amux -- npm test -- core/context-cost.test.mjs -t 'the DSL refuses'`. The viewer does not
+  policy trace, run `v1d-studio record --product amux`. The selected focused test
+  is declared in `studio.workspace.json`; the viewer does not
   start the bridge.
   Link declaration laws use `v1d-studio laws --product amux-link`.
 - [Reliability](docs/reliability.md): Loop Guard, Drift Guard, Auto-Compact,

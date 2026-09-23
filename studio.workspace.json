@@ -7,6 +7,7 @@
       "sources": [
         "policies/context-cost.mjs"
       ],
+      "recordCommand": ["npm", "test", "--", "core/context-cost.test.mjs", "-t", "the DSL refuses"],
       "documentation": {
         "sourceRoots": [
           "policies"
