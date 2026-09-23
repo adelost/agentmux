@@ -21,6 +21,9 @@
       "documentation": {
         "sourceRoots": [
           "android/audio-inbox/product-spec/src"
+        ],
+        "idSources": [
+          "android/audio-inbox/link-ui/src/main/java/io/agentmux/linkui/product/generated/GeneratedLinkNativeLegoCatalog.kt"
         ]
       }
     }
