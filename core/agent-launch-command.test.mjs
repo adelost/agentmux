@@ -13,4 +13,15 @@ feature("account-scoped Claude launch", () => {
       expect(command).not.toContain("--continue");
     }],
   });
+  unit("pins effort with the model on an exact Claude resume", {
+    when: ["launching an existing session on Opus 5.5 high", () => buildClaudeLaunchCommand({
+      model: "claude-opus-5-5", effort: "high",
+      resumeSessionId: "11111111-1111-4111-8111-111111111111",
+    })],
+    then: ["the resumed process receives both choices", command => {
+      expect(command).toContain("--model 'claude-opus-5-5'");
+      expect(command).toContain("--effort 'high'");
+      expect(command).toContain("--resume '11111111-1111-4111-8111-111111111111'");
+    }],
+  });
 });

@@ -1,11 +1,13 @@
 import { choice, decide, defineDecisionTable, on } from "@v1d/product-spec";
 
 /** WHAT: Defines context-cost thresholds. WHY: Keeps idle and wake decisions on the same documented budget. */
-export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 100_000, idleMs: 60 * 60_000, coldMs: 24 * 60 * 60_000 });
+export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 100_000, coldMaxTokens: 80_000,
+  idleMs: 60 * 60_000, coldMs: 24 * 60 * 60_000 });
 
 /** WHAT: Reads operator cost-policy overrides. WHY: Keeps daytime and cold-wake thresholds consistent after restart. */
 export function readContextCostPolicy(env = process.env) {
-  const policy = { maxTokens: Number(env.AUTO_COMPACT_MAX_TOKENS || CONTEXT_COST_POLICY.maxTokens),
+  const maxTokens = Number(env.AUTO_COMPACT_MAX_TOKENS || CONTEXT_COST_POLICY.maxTokens);
+  const policy = { maxTokens, coldMaxTokens: Math.min(maxTokens, CONTEXT_COST_POLICY.coldMaxTokens),
     idleMs: Number(env.AUTO_COMPACT_MIN_IDLE_MS || CONTEXT_COST_POLICY.idleMs),
     coldMs: Number(env.AMUX_COLD_CONTEXT_IDLE_MS || CONTEXT_COST_POLICY.coldMs) };
   if (Object.values(policy).some(value => !Number.isSafeInteger(value) || value <= 0)) throw new Error("context-cost thresholds must be positive integers");
@@ -37,7 +39,8 @@ export const contextCostRules = defineDecisionTable(contextCostDeclaration);
 /** WHAT: Maps observed context facts to a traceable decision cell. WHY: Keeps numeric thresholds outside effects and unknown values outside permissive defaults. */
 export function contextCostDecision({ tokens, idleMs, cold = false, safe = false, attempt = "NEW" }, policy = CONTEXT_COST_POLICY) {
   const ageLimit = cold ? policy.coldMs : policy.idleMs;
-  const need = (Number.isFinite(tokens) && tokens <= policy.maxTokens) || (Number.isFinite(idleMs) && idleMs < ageLimit)
+  const tokenLimit = cold ? Math.min(policy.maxTokens, policy.coldMaxTokens ?? policy.maxTokens) : policy.maxTokens;
+  const need = (Number.isFinite(tokens) && tokens <= tokenLimit) || (Number.isFinite(idleMs) && idleMs < ageLimit)
     ? "NONE" : !Number.isFinite(tokens) || !Number.isFinite(idleMs) ? "UNKNOWN" : "COMPACT";
   return decide(contextCostRules, { need, readiness: safe ? "SAFE" : "UNSAFE", attempt });
 }

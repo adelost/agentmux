@@ -5,7 +5,7 @@ import { component, expect, feature } from "bdd-vitest";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { createTuiStallRecovery } from "./tui-stall-recovery.mjs";
 
-function fixture() {
+function fixture({ selected = { model: "claude-fable-5[1m]", effort: null }, command = "claude" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "agentmux-tui-recovery-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
@@ -17,7 +17,7 @@ function fixture() {
   const oldHome = process.env.HOME;
   process.env.HOME = home;
   const stateData = {
-    watcher_last_model: { "claw:6": { model: "claude-fable-5[1m]", effort: null } },
+    watcher_last_model: selected ? { "claw:6": selected } : {},
   };
   const commands = [];
   const keys = [];
@@ -44,7 +44,7 @@ function fixture() {
     },
     delay: async () => {},
     configFor: () => ({ dir: workspace, panes: Array.from({ length: 7 }, (_, pane) => ({
-      cmd: pane === 6 ? "claude" : "bash",
+      cmd: pane === 6 ? command : "bash",
     })) }),
     paneDirectory: (_root, pane) => join(workspace, ".agents", String(pane)),
     isPaneDead: async () => false,
@@ -126,6 +126,42 @@ feature("exact TUI crash recovery", () => {
       expect(targets).toEqual([{
         agentName: "claw", pane: 6, dialect: "claude", sessionId: ctx.sessionId,
       }]);
+      if (ctx.oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = ctx.oldHome;
+      rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
+
+  component("an unselected Claude pane starts with its configured model and effort", {
+    given: ["an exact session and an Opus 5.5 high pane declaration", () => fixture({
+      selected: null,
+      command: "claude --continue --model claude-opus-5-5 --effort high",
+    })],
+    when: ["resuming the pane", async ctx => {
+      await ctx.recovery.startClaude("claw", "claw:.6", ctx.workspace, 6);
+      return ctx.commands[0];
+    }],
+    then: ["the process receives both declared choices", (command, ctx) => {
+      expect(command).toContain("--model 'claude-opus-5-5'");
+      expect(command).toContain("--effort 'high'");
+      if (ctx.oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = ctx.oldHome;
+      rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
+
+  component("a saved Claude selection survives a different project default", {
+    given: ["an exact Fable xhigh session with an Opus high project default", () => fixture({
+      selected: { model: "claude-fable-5[1m]", effort: "xhigh" },
+      command: "claude --continue --model claude-opus-5-5 --effort high",
+    })],
+    when: ["resuming the pane", async ctx => {
+      await ctx.recovery.startClaude("claw", "claw:.6", ctx.workspace, 6);
+      return ctx.commands[0];
+    }],
+    then: ["the saved model and effort win", (command, ctx) => {
+      expect(command).toContain("--model 'claude-fable-5'");
+      expect(command).toContain("--effort 'xhigh'");
       if (ctx.oldHome === undefined) delete process.env.HOME;
       else process.env.HOME = ctx.oldHome;
       rmSync(ctx.root, { recursive: true, force: true });

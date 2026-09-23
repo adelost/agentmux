@@ -28,6 +28,17 @@ function fixture({ fail = false, jobs = [] } = {}) {
 }
 
 feature("warm and cold compaction share a durable one-attempt fence", () => {
+  component("a cold 88k pane compacts before its first queued prompt", {
+    given: ["an exact idle session with 88k tokens after 24 hours", () => {
+      const ctx = fixture();
+      ctx.agent.getContext = async () => ({ tokens: 88_000 });
+      return ctx;
+    }],
+    when: ["admitting the first cold delivery", ctx => ctx.maintenance.beforeWork({ agentName: "claw", pane: 2, id: "first" })],
+    then: ["one compact happens before the prompt is admitted", (result, ctx) => {
+      try { expect(result.ok).toBe(true); expect(ctx.calls).toEqual(["compact"]); } finally { ctx.cleanup(); }
+    }],
+  });
   component("old terminal history cannot wake a stopped pane for automatic compact", {
     given: ["a stopped process with apparently idle historical context", () => {
       const ctx = fixture();

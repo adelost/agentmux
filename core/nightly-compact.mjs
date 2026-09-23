@@ -4,11 +4,11 @@ import { CONTEXT_COST_POLICY } from "../policies/context-cost.mjs";
 
 /** WHAT: Checks the nightly budget. WHY: Keeps byte sizes and percentages outside token admission. */
 export function nightlyCompactPolicy(value) {
-  if (value === false) return { enabled: false, maxTokens: 80_000, idleMinutes: CONTEXT_COST_POLICY.idleMs / 60_000 };
+  if (value === false) return { enabled: false, maxTokens: CONTEXT_COST_POLICY.coldMaxTokens, idleMinutes: CONTEXT_COST_POLICY.idleMs / 60_000 };
   if (value !== undefined && (!value || typeof value !== "object" || Array.isArray(value))) {
     throw new Error("dream.compact must be false or an object");
   }
-  const policy = { enabled: true, maxTokens: 80_000, idleMinutes: CONTEXT_COST_POLICY.idleMs / 60_000, ...value };
+  const policy = { enabled: true, maxTokens: CONTEXT_COST_POLICY.coldMaxTokens, idleMinutes: CONTEXT_COST_POLICY.idleMs / 60_000, ...value };
   if (Object.keys(policy).some((key) => !["enabled", "maxTokens", "idleMinutes"].includes(key))
       || typeof policy.enabled !== "boolean"
       || !Number.isSafeInteger(policy.maxTokens) || policy.maxTokens < 1
