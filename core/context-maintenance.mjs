@@ -6,6 +6,7 @@ import { verifiedClaudeCompact, verifiedCodexCompact } from "./verified-compact.
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { prepareCodexIdle } from "./codex-tui.mjs";
 import { getContextPercent } from "./context.mjs";
+import { hasEmptyClaudeEpoch } from "./claude-empty-epoch.mjs";
 
 const STATE_KEY = "context_maintenance_by_pane_v1";
 const paneKey = (name, pane) => `${name}:${pane}`;
@@ -75,6 +76,16 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       && (await agent.promptTransportState(name, pane, "").catch(() => null))?.state === "empty-idle";
     const decision = contextCostDecision({ tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, safe, attempt }, policy);
     if (decision.values.action === "CONTINUE") return { ok: true, cell: decision.cell };
+    if (cold && target.engine === "claude" && decision.cell === "unknown-evidence" && attempt === "NEW"
+        && safe && !Number.isFinite(context?.tokens) && !Number.isFinite(activity)
+        && await hasEmptyClaudeEpoch(identity)) {
+      const current = identityFor(target.engine, target.dir);
+      const transport = await agent.promptTransportState(name, pane, "").catch(() => null);
+      if (current?.sessionId === identity.sessionId && current.path === identity.path
+          && !await agent.isBusy(name, pane) && transport?.state === "empty-idle") {
+        return { ok: true, cell: "empty-after-compact" };
+      }
+    }
     if (decision.values.action === "HOLD") return { ok: false, reason: `context-cost:${decision.cell}${prior?.reason ? `:${prior.reason}` : ""}` };
     const lease = leaseHeld ? null : queue.acquireSessionLease(name);
     if (!leaseHeld && !lease) return { ok: false, reason: "delivery-lease-busy" };
