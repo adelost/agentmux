@@ -52,6 +52,10 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
     ],
   } as const;
 
+  /**
+   * WHAT: Tracks hands-free wake activity and publishes its user-visible status.
+   * WHY: Keeps microphone-loop and transport effects independent from mounted UI graphs.
+   */
   const wakeService = service({
     id: `${product}.wake`,
     inputs: [],
