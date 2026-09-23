@@ -153,7 +153,7 @@ export function createDeliveryBroker({
     }
   }
 
-  const { maybeNotifyBlocked, notifyTerminal } = createDeliveryNotices({
+  const { maybeNotifyBlocked, notifyTerminal, flushTerminalNotices, notifyAndRemember } = createDeliveryNotices({
     queue, now, notify, log, blockedRetryMs, resolveNotificationChannel,
   });
   const { stalePreSubmit, terminalizeNotSent, yieldSupersededMaintenance } = createDeliveryNotSent({
@@ -165,7 +165,8 @@ export function createDeliveryBroker({
 
   const { terminalizeUnverified, reconcileRecoveredCancellationTerminals } =
     createDeliveryTerminalizer({
-      queue, agent, now, notify, notifyTerminal, log, queueEvent, exactEcho, acknowledge,
+      queue, agent, now, notify: (job, state, extra) => notifyAndRemember(job, state, extra),
+      notifyTerminal, log, queueEvent, exactEcho, acknowledge,
     });
 
   /**
@@ -404,8 +405,10 @@ export function createDeliveryBroker({
           .filter((other) => other.id !== job.id && !TERMINAL_DELIVERY_STATES.has(other.status))
           .length;
         job = queue.update(job, { noticeSentAt: now() });
-        await notify(job, "stalled", { queuedBehind }).catch((error) =>
-          log(`delivery broker stalled notice failed for ${job.id}: ${error.message}`));
+        job = await notifyAndRemember(job, "stalled", { queuedBehind }).catch((error) => {
+          log(`delivery broker stalled notice failed for ${job.id}: ${error.message}`);
+          return job;
+        });
       }
       let transportHint = null;
       if (submittedAge >= 5_000 && typeof agent.promptTransportState === "function") {
@@ -612,7 +615,7 @@ export function createDeliveryBroker({
         // All pre-delivery terminal paths run in one ordered pass under the
         // same writer lease as pane delivery.
         await runDeliveryPreflight({
-          agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, agent,
+          agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, flushTerminalNotices, agent,
           exactEcho, acknowledge, notifyBlocked: maybeNotifyBlocked,
         });
 

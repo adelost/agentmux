@@ -380,29 +380,35 @@ feature("broker closure and restart safety", () => {
     given: ["a durable /compact job and a rejecting pane", () => {
       const rootDir = tempRoot();
       mkdirSync(rootDir, { recursive: true });
-      const queue = createDeliveryQueue({ rootDir });
+      let clock = Date.now();
+      const now = () => clock;
+      const queue = createDeliveryQueue({ rootDir, now });
       const job = queue.enqueue({ agentName: "ai", pane: 5, text: "/compact" });
       const notices = [];
       const agent = rejectingAgent(rejectionTail, { before: codexScreen("/compact") });
       const broker = createDeliveryBroker({
         agent,
         queue,
+        now,
         notify: async (_job, kind) => { notices.push(kind); },
       });
-      return { rootDir, queue, job, notices, agent, broker };
+      return { rootDir, queue, job, notices, agent, broker, now, advance: (ms) => { clock += ms; } };
     }],
     when: ["the job drains, the loop restarts on the same spool, and it drains again", async (ctx) => {
       await ctx.broker.kickTarget("ai", 5);
       const afterReject = ctx.queue.read("ai", 5, ctx.job.id);
       // Loop restart: a fresh queue and broker over the same durable spool.
-      const queue2 = createDeliveryQueue({ rootDir: ctx.rootDir });
+      const queue2 = createDeliveryQueue({ rootDir: ctx.rootDir, now: ctx.now });
       const agent2 = rejectingAgent(rejectionTail);
       const broker2 = createDeliveryBroker({
         agent: agent2,
         queue: queue2,
+        now: ctx.now,
         notify: async () => {},
       });
       await broker2.kickTarget("ai", 5);
+      // The not-sent notice waits for its 30 s quiet window before it is posted.
+      ctx.advance(31_000);
       await ctx.broker.kickTarget("ai", 5);
       return { afterReject, agent2, restarted: queue2.read("ai", 5, ctx.job.id) };
     }],

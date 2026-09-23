@@ -52,8 +52,18 @@ export function createDiscordChannel({ token, onSent }) {
         // (watcher/handlers) already catch and log send errors.
         throw new Error(`channel ${channelId} not found (deleted or not visible to the bot)`);
       }
-      await ch.send(text);
+      const message = await ch.send(text);
       stamp(channelId);
+      return message;
+    },
+
+    /** WHAT: Rewrites one message the bot posted. WHY: A delivery notice is updated in place (waiting, then delivered) instead of stacking. */
+    async editMessage(channelId, messageId, text) {
+      const ch = await client.channels.fetch(channelId);
+      if (!ch?.messages) throw new Error(`channel ${channelId} cannot fetch messages`);
+      const message = await ch.messages.fetch(messageId);
+      if (!message) throw new Error(`message ${channelId}:${messageId} not found`);
+      return message.edit(text);
     },
 
     /** WHAT: Fetches every Discord message after one durable cursor. WHY: Gateway reconnects do not replay history and a one-page scan can skip busy outage windows. */
