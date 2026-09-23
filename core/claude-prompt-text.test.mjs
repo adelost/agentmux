@@ -13,6 +13,7 @@ feature("Claude pasted-content delivery receipts", () => {
     ["queued input", { type: "queue-operation", operation: "enqueue", content: pasted(prompt) }],
     ["queued-command attachment", { type: "attachment", attachment: { type: "queued_command", prompt: pasted(prompt) } }],
     ["sender inside the paste", userEvent(pasted(`[from ai:1]\n\n${prompt}`))],
+    ["image marker before the paste", { type: "user", message: { content: [{ type: "text", text: `[Image #53]${pasted(prompt)}` }, { type: "image" }] } }],
   ]) {
     unit(`${name} acknowledges the complete delivered prompt`, {
       given: ["Claude's observed pasted_content envelope around the sent text", () => event],
