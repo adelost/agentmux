@@ -587,6 +587,39 @@ agents:
     }],
   });
 
+  component("a tmux project's claudeModel is the model its Claude panes launch with", {
+    given: ["two tmux projects, one choosing Opus 5.5, and no AMUX_CLAUDE_MODEL", () => {
+      const saved = process.env.AMUX_CLAUDE_MODEL;
+      delete process.env.AMUX_CLAUDE_MODEL;
+      return { saved, source: `
+guild: "1"
+agents:
+  chosen:
+    dir: /tmp/chosen
+    claude: 2
+    claudeModel: claude-opus-5-5
+  unset:
+    dir: /tmp/unset
+    claude: 1
+` };
+    }],
+    when: ["regenerating agents.yaml", ({ saved, source }) => {
+      try {
+        return yaml.load(regenerateAgentsYaml(source, null));
+      } finally {
+        if (saved !== undefined) process.env.AMUX_CLAUDE_MODEL = saved;
+      }
+    }],
+    then: ["the chosen project launches Opus 5.5 and the other keeps the default", (generated) => {
+      const cmds = (name) => generated[name].panes.filter((p) => p.name.startsWith("claude")).map((p) => p.cmd);
+      expect(cmds("chosen")).toEqual([
+        "claude --continue --dangerously-skip-permissions --model claude-opus-5-5",
+        "claude --continue --dangerously-skip-permissions --model claude-opus-5-5",
+      ]);
+      expect(cmds("unset")).toEqual(["claude --continue --dangerously-skip-permissions --model claude-opus-5"]);
+    }],
+  });
+
   component("carries the ordered Dream candidate list into generated runtime config", {
     given: ["a source with fallback curators", () => `
 guild: "1"

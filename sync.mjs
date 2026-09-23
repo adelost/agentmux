@@ -18,7 +18,11 @@ import {
 } from "./core/source-pane-plan.mjs";
 export { generateChannelNames };
 
-const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model ${resolveClaudeModel()}`;
+// The project's claudeModel wins; AMUX_CLAUDE_MODEL and then DEFAULT_CLAUDE_MODEL only fill in when
+// the project names none. Built per project: a module-level command ignored claudeModel on tmux
+// panes, so a sync in a process without the env file rewrote every pane back to the default.
+const claudeAgentCmd = (claudeModel) =>
+  `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model ${resolveClaudeModel(claudeModel || undefined)}`;
 // Never `codex resume --last`: it resumes the globally most-recent rollout, not
 // this pane's own, so a pane launched from generated config can attach to
 // another live pane's session — two writers, interleaved model/context (the
@@ -395,7 +399,7 @@ export function generateAgentsYaml(
             ...(config.effort ? { effort: config.effort } : {}),
             ...(config.nativeAgentIds?.[paneIdx] ? { nativeAgentId: config.nativeAgentIds[paneIdx] } : {}),
           }
-        : { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: DEFAULT_AGENT_CMD };
+        : { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: claudeAgentCmd(config.claudeModel) };
       const label = labelFor(paneIdx);
       if (label) pane.label = label;
       panes.push(pane);
