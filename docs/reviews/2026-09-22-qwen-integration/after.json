@@ -1,0 +1,104 @@
+{
+  "node": "v22.16.0",
+  "sourceGitBlobs": {
+    "core/qwen-jsonl-reader.mjs": "e521ddcac5fe418ce9cafcfeca8c9e05272f7b71",
+    "core/qwen-agent-runtime.mjs": "2040754d88c9d8f012755079ca5bab8fa16d3cd8"
+  },
+  "scope": "Full reader and filesystem. Full runtime with substituted command builder/escape helper and tmux. Not the installed Qwen CLI, actual launch builder, bdd-vitest runner or full AMUX suite.",
+  "passed": 23,
+  "failed": 0,
+  "results": [
+    {
+      "id": "control-current-intake-and-answer",
+      "passed": true
+    },
+    {
+      "id": "control-identical-prompt-needs-new-append",
+      "passed": true
+    },
+    {
+      "id": "late-old-generation-cannot-finish-current-turn",
+      "passed": true
+    },
+    {
+      "id": "late-old-generation-cannot-ack-current-prompt",
+      "passed": true
+    },
+    {
+      "id": "foreign-session-cannot-ack-current-prompt",
+      "passed": true
+    },
+    {
+      "id": "subagent-cannot-ack-root-delivery",
+      "passed": true
+    },
+    {
+      "id": "subagent-cannot-finish-root-or-replace-model",
+      "passed": true
+    },
+    {
+      "id": "foreign-session-cannot-finish-root",
+      "passed": true
+    },
+    {
+      "id": "sidecar-over-16MiB-retains-latest-turn",
+      "passed": true
+    },
+    {
+      "id": "chat-over-16MiB-retains-latest-turn",
+      "passed": true
+    },
+    {
+      "id": "native-text-blocks-have-distinct-stable-ids",
+      "passed": true
+    },
+    {
+      "id": "metadata-cannot-redirect-prompt-to-unrelated-file",
+      "passed": true
+    },
+    {
+      "id": "captured-receipt-survives-a-later-restart",
+      "passed": true
+    },
+    {
+      "id": "replacement-cannot-ack-an-older-delivery",
+      "passed": true
+    },
+    {
+      "id": "legacy-byte-cursor-still-works-for-captured-file",
+      "passed": true
+    },
+    {
+      "id": "native-history-survives-process-generation-change",
+      "passed": true
+    },
+    {
+      "id": "native-thoughts-stay-private",
+      "passed": true
+    },
+    {
+      "id": "bounded-tail-reports-truncation-and-keeps-utf8",
+      "passed": true
+    },
+    {
+      "id": "large-file-does-not-hide-start-handshake-at-publication",
+      "passed": true
+    },
+    {
+      "id": "control-bootstrap-then-exact-resume",
+      "passed": true
+    },
+    {
+      "id": "configured-resume-is-not-fresh-bootstrap",
+      "passed": true
+    },
+    {
+      "id": "corrupt-receipt-cannot-silently-start-fresh",
+      "passed": true
+    },
+    {
+      "id": "working-directory-is-shell-quoted",
+      "passed": true
+    }
+  ]
+}

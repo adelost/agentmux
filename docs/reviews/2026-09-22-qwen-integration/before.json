@@ -1,0 +1,120 @@
+{
+  "node": "v22.16.0",
+  "sourceGitBlobs": {
+    "core/qwen-jsonl-reader.mjs": "3e8505a2b9d27b6722426eb8bf4dea4b99206177",
+    "core/qwen-agent-runtime.mjs": "fe555d9144e85ddeda101d79cdbee12e853be2d8"
+  },
+  "scope": "Full reader and filesystem. Full runtime with substituted command builder/escape helper and tmux. Not the installed Qwen CLI, actual launch builder, bdd-vitest runner or full AMUX suite.",
+  "passed": 7,
+  "failed": 16,
+  "results": [
+    {
+      "id": "control-current-intake-and-answer",
+      "passed": true
+    },
+    {
+      "id": "control-identical-prompt-needs-new-append",
+      "passed": true
+    },
+    {
+      "id": "late-old-generation-cannot-finish-current-turn",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\nfalse !== true\n"
+    },
+    {
+      "id": "late-old-generation-cannot-ack-current-prompt",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\ntrue !== false\n"
+    },
+    {
+      "id": "foreign-session-cannot-ack-current-prompt",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\ntrue !== false\n"
+    },
+    {
+      "id": "subagent-cannot-ack-root-delivery",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\ntrue !== false\n"
+    },
+    {
+      "id": "subagent-cannot-finish-root-or-replace-model",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\nfalse !== true\n"
+    },
+    {
+      "id": "foreign-session-cannot-finish-root",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\nfalse !== true\n"
+    },
+    {
+      "id": "sidecar-over-16MiB-retains-latest-turn",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'large-sidecar-ok'\n"
+    },
+    {
+      "id": "chat-over-16MiB-retains-latest-turn",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'large-chat-ok'\n"
+    },
+    {
+      "id": "native-text-blocks-have-distinct-stable-ids",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\n1 !== 2\n"
+    },
+    {
+      "id": "metadata-cannot-redirect-prompt-to-unrelated-file",
+      "passed": false,
+      "error": "Missing expected rejection."
+    },
+    {
+      "id": "captured-receipt-survives-a-later-restart",
+      "passed": true
+    },
+    {
+      "id": "replacement-cannot-ack-an-older-delivery",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\ntrue !== false\n"
+    },
+    {
+      "id": "legacy-byte-cursor-still-works-for-captured-file",
+      "passed": true
+    },
+    {
+      "id": "native-history-survives-process-generation-change",
+      "passed": true
+    },
+    {
+      "id": "native-thoughts-stay-private",
+      "passed": true
+    },
+    {
+      "id": "bounded-tail-reports-truncation-and-keeps-utf8",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- true\n"
+    },
+    {
+      "id": "large-file-does-not-hide-start-handshake-at-publication",
+      "passed": false,
+      "error": "Qwen Dual Output handshake does not match this pane generation"
+    },
+    {
+      "id": "control-bootstrap-then-exact-resume",
+      "passed": true
+    },
+    {
+      "id": "configured-resume-is-not-fresh-bootstrap",
+      "passed": false,
+      "error": "The input did not match the regular expression /--resume '11111111-1111-4111-8111-111111111111'/u. Input:\n\n\"cd /tmp/amux-qwen-runtime-review-I3wYz9/repo with spaces/.agents/4 && '/opt/nvm/versions/node/v22.16.0/bin/node' --session-id '11111111-1111-4111-8111-111111111111' --json-file '/tmp/amux-qwen-runtime-review-I3wYz9/state/50874d249a4f0117569735368464b0bf6b14cf629553cf93e53b52641ac96b00/events-1790052579589-945ddcce-2773-4c5a-a23d-f766d2bb3f2c.jsonl' --input-file '/tmp/amux-qwen-runtime-review-I3wYz9/state/50874d249a4f0117569735368464b0bf6b14cf629553cf93e53b52641ac96b00/input-1790052579589-945ddcce-2773-4c5a-a23d-f766d2bb3f2c.jsonl'\"\n"
+    },
+    {
+      "id": "corrupt-receipt-cannot-silently-start-fresh",
+      "passed": false,
+      "error": "Missing expected rejection."
+    },
+    {
+      "id": "working-directory-is-shell-quoted",
+      "passed": false,
+      "error": "The expression evaluated to a falsy value:\n\n  assert.ok(commands[0].startsWith(`cd '${paneDir}' && `))\n"
+    }
+  ]
+}
