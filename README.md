@@ -648,9 +648,12 @@ See `agentmux.yaml.example` for a fuller project config example.
 
 ## Documentation
 
-- Maintainers with a local, unpublished CircleKit Product Studio checkout can
-  `npm link` it there, run `v1d-studio` here, and record the policy test trace
-  with `node tools/record-studio-policy.mjs`. The viewer never starts the bridge.
+- [CircleKit Product Studio](https://github.com/adelost/circlekit/blob/main/product-studio/README.md)
+  is a local, unpublished tool. Install its locked dependencies and run
+  `npm link` in that checkout, then run `v1d-studio` here. To record the AMUX
+  policy trace, run `node tools/record-studio-policy.mjs`. The viewer does not
+  start the bridge.
+  Link declaration laws use `v1d-studio laws --product amux-link --kernel-root android/audio-inbox/product-spec --output test-results/amux-link-laws.json`.
 - [Reliability](docs/reliability.md): Loop Guard, Drift Guard, Auto-Compact,
   and recovery commands.
 - [CLI Reference](docs/cli.md): `amux` commands, log modes, timelines, and

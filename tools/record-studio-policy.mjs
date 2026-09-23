@@ -12,18 +12,16 @@ const cases=[
   [{tokens:120000,idleMs:7200000,safe:true,attempt:'NEW'},'compact-once','COMPACT'],
   [{tokens:120000,idleMs:7200000,safe:true,attempt:'FAILED'},'failed-attempt','HOLD'],
 ];
-const events=cases.map(([facts,cell,action],sequence)=>{
+const events=cases.map(([facts,cell,action])=>{
   const decision=contextCostDecision(facts);
   assert.equal(decision.cell,cell);
   assert.equal(decision.values.action,action);
-  return {sequence,atMs:sequence,kind:'decision',
+  return {kind:'decision',
     entityKey:`cell:decision-table%2Famux.context-cost:${decision.cell}`,
     summary:`Context policy chose ${action.toLowerCase()} for ${decision.cell}.`,
     logic:{facetId:'amux.context-cost',cellId:decision.cell,facts:decision.at,values:decision.values}};
 });
-const trace={kind:'product-studio-trace',version:1,productId:'amux',modelDigest:project.modelDigest,
-  sessionId:'context-cost-policy-test',clock:{domain:'virtual',unit:'ms'},provenance:'test-run',
-  truncation:{droppedBefore:0,gaps:[]},events};
+const trace={kind:'product-studio-trace',version:1,modelDigest:project.modelDigest,events};
 await mkdir(new URL('../test-results/',import.meta.url),{recursive:true});
-await writeFile(new URL('../test-results/context-cost-studio-trace.json',import.meta.url),JSON.stringify(trace,null,2)+'\n');
+await writeFile(new URL('../test-results/amux-studio-trace.json',import.meta.url),JSON.stringify(trace,null,2)+'\n');
 console.log(`Recorded ${events.length} real context-cost decisions for Product Studio.`);
