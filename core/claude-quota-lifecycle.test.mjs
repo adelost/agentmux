@@ -7,7 +7,8 @@ import { createClaudeQuotaLifecycle } from "./claude-quota-lifecycle.mjs";
 import { assertClaudeQuotaAvailable } from "./claude-quota-target.mjs";
 import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
 
-function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch = false } = {}) {
+function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch = false,
+  selected = null, configuredCmd = "claude", observed = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-quota-lifecycle-"));
   const homeDir = join(root, "home");
   const repoDir = join(root, "repo");
@@ -20,7 +21,7 @@ function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch =
     "claw:",
     `  dir: ${repoDir}`,
     "  panes:",
-    "    - { name: worker, cmd: claude }",
+    `    - { name: worker, cmd: "${configuredCmd}" }`,
     "",
   ].join("\n"));
   const projectDir = claudeProjectDir(cwd, homeDir);
@@ -91,6 +92,9 @@ function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch =
     homeDir,
     delay: async () => {},
     record: () => {},
+    state: { get: (key, fallback) => key === "watcher_last_model" && selected
+      ? { "claw:0": selected } : fallback },
+    contextFor: () => observed,
   });
   const receipt = lifecycle.activeReceipt("claw", 0);
   return {
@@ -118,6 +122,55 @@ function pendingResumeFixture({ exact = true } = {}) {
 }
 
 feature("Claude quota process boundary", () => {
+  component("quota restart preserves the exact pane model and effort", {
+    given: ["Opus 5.5 high saved over an older displayed model", () => fixture({
+      selected: { model: "claude-opus-5-5", effort: "high" },
+      configuredCmd: "claude --continue --model claude-opus-5-5 --effort high",
+      observed: { model: "claude-opus-5", effort: "xhigh" },
+    })],
+    when: ["resuming the receipt-bound session", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt)],
+    then: ["the resumed process keeps the saved choices", (result, ctx) => {
+      try {
+        expect(result.ok).toBe(true);
+        const launch = ctx.commands.find(command => command.includes("ANTHROPIC_DISABLE_SURVEY"));
+        expect(launch).toContain("--model 'claude-opus-5-5'");
+        expect(launch).toContain("--effort 'high'");
+        expect(launch).toContain(`--resume '${ctx.sessionId}'`);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("quota restart uses declared choices when no pane selection was recorded", {
+    given: ["Opus 5.5 high in the generated pane declaration", () => fixture({
+      configuredCmd: "claude --continue --model claude-opus-5-5 --effort high",
+    })],
+    when: ["resuming the receipt-bound session", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt)],
+    then: ["the declared model and effort reach the process", (result, ctx) => {
+      try {
+        expect(result.ok).toBe(true);
+        const launch = ctx.commands.find(command => command.includes("ANTHROPIC_DISABLE_SURVEY"));
+        expect(launch).toContain("--model 'claude-opus-5-5'");
+        expect(launch).toContain("--effort 'high'");
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("quota restart does not swap an observed older model to the new project default", {
+    given: ["an Opus 5 xhigh session and a newer Opus 5.5 high default", () => fixture({
+      configuredCmd: "claude --continue --model claude-opus-5-5 --effort high",
+      observed: { model: "claude-opus-5", effort: "xhigh" },
+    })],
+    when: ["resuming the receipt-bound session", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt)],
+    then: ["the model actually in use remains selected", (result, ctx) => {
+      try {
+        expect(result.ok).toBe(true);
+        const launch = ctx.commands.find(command => command.includes("ANTHROPIC_DISABLE_SURVEY"));
+        expect(launch).toContain("--model 'claude-opus-5'");
+        expect(launch).toContain("--effort 'xhigh'");
+        expect(launch).not.toContain("--model 'claude-opus-5-5'");
+      } finally { ctx.cleanup(); }
+    }],
+  });
   component("one pane resumes only the exact persisted session", {
     given: ["a terminal quota receipt and empty composer", fixture],
     when: ["the lifecycle restarts the pane", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt)],

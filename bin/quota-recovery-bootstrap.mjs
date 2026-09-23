@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "../lib.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
+import { createState } from "../core/state.mjs";
 import { readClaudeQuota } from "../core/quota-usage.mjs";
 import { createClaudeQuotaLifecycle } from "../core/claude-quota-lifecycle.mjs";
 import { createClaudeQuotaCoordinator } from "../core/claude-quota-coordinator.mjs";
@@ -35,7 +36,8 @@ if (!config.enabled) {
     env: { ...process.env, PATH: shellPath },
   });
   const queue = createDeliveryQueue();
-  const lifecycle = createClaudeQuotaLifecycle({ configPath, tmuxSocket, tmuxExec });
+  const lifecycle = createClaudeQuotaLifecycle({ configPath, tmuxSocket, tmuxExec,
+    state: createState(process.env.STATE_FILE || "/tmp/agentmux-state.json") });
   const coordinator = createClaudeQuotaCoordinator({
     queue,
     lifecycle,

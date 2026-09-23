@@ -1,6 +1,7 @@
 // Conservative recovery for coding-agent panes whose live TUI stops rendering.
 
 import { buildClaudeLaunchCommand } from "./agent-launch-command.mjs";
+import { claudePaneSelection } from "./claude-model.mjs";
 import { getContextPercent } from "./context.mjs";
 import { codexModelOverride, selectedCodexProfile } from "./codex-profiles.mjs";
 import { findBlockingPrompt, hasEmptyClaudeComposer } from "./dismiss.mjs";
@@ -79,14 +80,12 @@ export function createTuiStallRecovery({
     if (!selected?.model && observed?.model && state) {
       setPaneModelSelection(state, name, pane, observed.model, observed.effort ?? null);
     }
-    const declared = String(paneConfig.cmd || "");
-    const configuredModel = paneConfig.model || declared.match(/(?:^|\s)--model\s+([a-z0-9._-]+)/iu)?.[1];
-    const configuredEffort = paneConfig.effort || declared.match(/(?:^|\s)--effort\s+([a-z]+)/iu)?.[1];
+    const configured = claudePaneSelection(paneConfig);
     const command = buildClaudeLaunchCommand({
       resume: !resumeSessionId && sessionFlag === "--continue",
       resumeSessionId,
-      model: launch?.model || selected?.model || observed?.model || configuredModel || undefined,
-      effort: launch?.effort || selected?.effort || observed?.effort || configuredEffort || null,
+      model: launch?.model || selected?.model || observed?.model || configured.model || undefined,
+      effort: launch?.effort || selected?.effort || observed?.effort || configured.effort || null,
       profileHome: runtimeProfileLaunchHome(profile),
     });
     await tmux.runShell(target, `cd ${esc(dir)} && ${command}`);

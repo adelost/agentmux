@@ -10,6 +10,14 @@ export function resolveClaudeEffort(value) {
   return effort;
 }
 
+/** WHAT: Reads a pane's declared Claude choices. WHY: Keeps normal and quota restarts from choosing different fallbacks. */
+export function claudePaneSelection(paneConfig = {}) {
+  const command = String(paneConfig.cmd || "");
+  const model = paneConfig.model || command.match(/(?:^|\s)--model\s+([a-z0-9._-]+)/iu)?.[1] || null;
+  const effort = paneConfig.effort || command.match(/(?:^|\s)--effort\s+([a-z]+)/iu)?.[1] || null;
+  return { model: model ? resolveClaudeModel(model) : null, effort: resolveClaudeEffort(effort) };
+}
+
 const MODEL_ALIASES = {
   opus: "claude-opus-5",
 };
