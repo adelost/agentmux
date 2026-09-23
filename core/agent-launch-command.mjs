@@ -1,7 +1,7 @@
 // Shell-safe coding-agent launch construction shared by pane lifecycle paths.
 
 import { esc } from "../lib.mjs";
-import { resolveClaudeModel } from "./claude-model.mjs";
+import { resolveClaudeEffort, resolveClaudeModel } from "./claude-model.mjs";
 import {
   CLAUDE_AUTONOMOUS_FLAGS,
   CODEX_AUTONOMOUS_FLAGS,
@@ -30,16 +30,26 @@ export function buildClaudeLaunchCommand({
   resume = false,
   resumeSessionId = null,
   model = resolveClaudeModel(),
+  effort = null,
   profileHome = null,
 } = {}) {
   const exactModel = resolveClaudeModel(model);
+  const exactEffort = resolveClaudeEffort(effort);
   const exactResume = exactSessionId(resumeSessionId, "Claude");
   const sessionFlag = exactResume
     ? ` --resume ${shellQuote(exactResume)}`
     : resume ? " --continue" : "";
   const profile = profileHome ? `CLAUDE_CONFIG_DIR=${shellQuote(profileHome)} ` : "";
   return `${profile}ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_AUTONOMOUS_FLAGS} ` +
-    `--model ${shellQuote(exactModel)}${sessionFlag}`;
+    `--model ${shellQuote(exactModel)}${exactEffort ? ` --effort ${shellQuote(exactEffort)}` : ""}${sessionFlag}`;
+}
+
+/** WHAT: Builds a Claude pane descriptor. WHY: Keeps sync's declared model and effort on the actual startup command. */
+export function buildClaudePaneDescriptor(model, effort) {
+  const exactModel = resolveClaudeModel(model || undefined);
+  const exactEffort = resolveClaudeEffort(effort);
+  return `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model ${exactModel}` +
+    (exactEffort ? ` --effort ${exactEffort}` : "");
 }
 
 /**

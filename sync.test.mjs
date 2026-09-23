@@ -620,6 +620,43 @@ agents:
     }],
   });
 
+  component("Claude effort is explicit without changing Codex effort", {
+    given: ["a mixed project choosing Claude high and Codex medium", () => `
+guild: "1"
+agents:
+  chosen:
+    dir: /tmp/chosen
+    claude: 2
+    codex: 1
+    claudeModel: claude-opus-5-5
+    claudeEffort: high
+    effort: medium
+`],
+    when: ["regenerating pane declarations", source => yaml.load(regenerateAgentsYaml(source, null))],
+    then: ["both Claude launches pin high and Codex remains medium", generated => {
+      const panes = generated.chosen.panes;
+      expect(panes.slice(0, 2).map(p => p.cmd)).toEqual([
+        "claude --continue --dangerously-skip-permissions --model claude-opus-5-5 --effort high",
+        "claude --continue --dangerously-skip-permissions --model claude-opus-5-5 --effort high",
+      ]);
+      expect(panes[2].effort).toBe("medium");
+    }],
+  });
+
+  component("an unsupported Claude effort is refused at configuration", {
+    when: ["parsing an invalid Claude effort", () => () => parseConfig(`
+guild: "1"
+agents:
+  chosen:
+    dir: /tmp/chosen
+    claude: 1
+    claudeEffort: ultra
+`)],
+    then: ["a typo cannot silently fall back to another effort", parse => {
+      expect(parse).toThrow(/invalid claudeEffort/);
+    }],
+  });
+
   component("carries the ordered Dream candidate list into generated runtime config", {
     given: ["a source with fallback curators", () => `
 guild: "1"

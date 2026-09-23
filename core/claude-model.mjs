@@ -1,5 +1,14 @@
 /** WHAT: Defines the fleet default as an exact Claude model. WHY: Prevents upstream alias drift across pane recovery. */
 export const DEFAULT_CLAUDE_MODEL = "claude-opus-5";
+const CLAUDE_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+/** WHAT: Resolves a Claude effort. WHY: Keeps source config and resume commands on the same accepted vocabulary. */
+export function resolveClaudeEffort(value) {
+  if (value == null || value === "") return null;
+  const effort = String(value).trim().toLowerCase();
+  if (!CLAUDE_EFFORTS.has(effort)) throw new Error(`invalid claudeEffort: ${value}`);
+  return effort;
+}
 
 const MODEL_ALIASES = {
   opus: "claude-opus-5",

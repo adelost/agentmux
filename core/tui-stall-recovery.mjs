@@ -66,22 +66,27 @@ export function createTuiStallRecovery({
     if (await isAlreadyRunning(target)) return;
     const dir = paneDirectory(rootDir, pane);
     const profile = launch?.profile || runtimeProfileFor?.(name, pane, "claude") || null;
-    const configuredSessionId = configFor(name).panes?.[pane]?.resumeSessionId || null;
+    const paneConfig = configFor(name).panes?.[pane] || {};
+    const configuredSessionId = paneConfig.resumeSessionId || null;
     const discovered = configuredSessionId ? null : latestClaudeSessionIdentity(dir);
     const resumeSessionId = launch?.resumeSessionId
       || configuredSessionId
       || discovered?.sessionId
       || null;
     const sessionFlag = resumeSessionId ? "" : await resolveSessionFlag(dir, name, pane);
-    let rememberedModel = paneModelSelection(state, name, pane)?.model || null;
-    if (!rememberedModel) {
-      rememberedModel = getContextPercent(dir, "claude")?.model || null;
-      if (rememberedModel && state) setPaneModelSelection(state, name, pane, rememberedModel);
+    const selected = paneModelSelection(state, name, pane);
+    const observed = selected?.model ? null : getContextPercent(dir, "claude");
+    if (!selected?.model && observed?.model && state) {
+      setPaneModelSelection(state, name, pane, observed.model, observed.effort ?? null);
     }
+    const declared = String(paneConfig.cmd || "");
+    const configuredModel = paneConfig.model || declared.match(/(?:^|\s)--model\s+([a-z0-9._-]+)/iu)?.[1];
+    const configuredEffort = paneConfig.effort || declared.match(/(?:^|\s)--effort\s+([a-z]+)/iu)?.[1];
     const command = buildClaudeLaunchCommand({
       resume: !resumeSessionId && sessionFlag === "--continue",
       resumeSessionId,
-      model: rememberedModel || undefined,
+      model: launch?.model || selected?.model || observed?.model || configuredModel || undefined,
+      effort: launch?.effort || selected?.effort || observed?.effort || configuredEffort || null,
       profileHome: runtimeProfileLaunchHome(profile),
     });
     await tmux.runShell(target, `cd ${esc(dir)} && ${command}`);

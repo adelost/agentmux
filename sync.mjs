@@ -5,10 +5,10 @@ import { expandTilde } from "./core/runtime-defaults.mjs";
 export { expandTilde };
 import { randomUUID } from "crypto";
 import { resolveTmuxLayout } from "./core/layout.mjs";
-import { resolveClaudeModel } from "./core/claude-model.mjs";
+import { resolveClaudeEffort } from "./core/claude-model.mjs";
+import { buildClaudePaneDescriptor } from "./core/agent-launch-command.mjs";
 import { nightlyCompactPolicy } from "./core/nightly-compact.mjs";
-import { CLAUDE_AUTONOMOUS_FLAGS, CODEX_AUTONOMOUS_FLAGS, KIMI_AUTONOMOUS_FLAGS,
-  QWEN_AUTONOMOUS_FLAGS } from "./core/execution-safety.mjs";
+import { CODEX_AUTONOMOUS_FLAGS, KIMI_AUTONOMOUS_FLAGS, QWEN_AUTONOMOUS_FLAGS } from "./core/execution-safety.mjs";
 import {
   generateSourceChannelNames as generateChannelNames,
   sourceCodingPaneSlots,
@@ -18,11 +18,6 @@ import {
 } from "./core/source-pane-plan.mjs";
 export { generateChannelNames };
 
-// The project's claudeModel wins; AMUX_CLAUDE_MODEL and then DEFAULT_CLAUDE_MODEL only fill in when
-// the project names none. Built per project: a module-level command ignored claudeModel on tmux
-// panes, so a sync in a process without the env file rewrote every pane back to the default.
-const claudeAgentCmd = (claudeModel) =>
-  `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model ${resolveClaudeModel(claudeModel || undefined)}`;
 // Never `codex resume --last`: it resumes the globally most-recent rollout, not
 // this pane's own, so a pane launched from generated config can attach to
 // another live pane's session — two writers, interleaved model/context (the
@@ -160,6 +155,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
         ? String(config.runtime || "http://127.0.0.1:8811").replace(/\/+$/, "")
         : null,
       claudeModel: config.claudeModel || null,
+      claudeEffort: resolveClaudeEffort(config.claudeEffort),
       codexModel: config.codexModel || null,
       kimiModel,
       qwenModel,
@@ -396,10 +392,10 @@ export function generateAgentsYaml(
             cmd: "native:claude",
             engine: "claude",
             ...(config.claudeModel ? { model: config.claudeModel } : {}),
-            ...(config.effort ? { effort: config.effort } : {}),
+            ...(config.claudeEffort || config.effort ? { effort: config.claudeEffort || config.effort } : {}),
             ...(config.nativeAgentIds?.[paneIdx] ? { nativeAgentId: config.nativeAgentIds[paneIdx] } : {}),
           }
-        : { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: claudeAgentCmd(config.claudeModel) };
+        : { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: buildClaudePaneDescriptor(config.claudeModel, config.claudeEffort) };
       const label = labelFor(paneIdx);
       if (label) pane.label = label;
       panes.push(pane);
