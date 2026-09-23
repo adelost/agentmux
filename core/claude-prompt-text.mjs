@@ -40,12 +40,14 @@ export function normalizePrompt(text) {
   // misses turns where one side gained decoration, and delivery receipts or
   // response extraction fall through to tmux scraping.
   if (!text) return "";
-  let s = unwrapPastedContent(String(text).replace(/\r\n?/g, "\n"));
   // Pasted image paths: Claude attaches some and keeps others as text, and
   // puts "[Image #N]" first, so both sides drop markers and image paths.
-  s = s.replace(/\[Image #\d+\]/g, " ")
-    .replace(/(?<!\S)[~/]\S*\.(?:png|jpe?g|gif|webp)(?!\S)/gi, " ")
-    .trim();
+  // They go before unwrapping: a marker ahead of a paste envelope must not
+  // hide the envelope.
+  let s = String(text).replace(/\r\n?/g, "\n")
+    .replace(/\[Image #\d+\]/g, " ")
+    .replace(/(?<!\S)[~/]\S*\.(?:png|jpe?g|gif|webp)(?!\S)/gi, " ");
+  s = unwrapPastedContent(s).trim();
   // ax-meta: "[from project:0] actual prompt". Strip repeated envelopes too:
   // a caller may already include provenance and the CLI then adds its own.
   s = s.replace(/^(?:\[from\s+[^:]+:\d+\]\s*)+/i, "");
