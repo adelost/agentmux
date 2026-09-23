@@ -295,7 +295,7 @@ export function captureQwenPromptEchoCursor(paneDir, promptText, options = {}) {
     sessionId: metadata.sessionId, generation: metadata.generation };
 }
 
-/** WHAT: Checks one exact generation's root prompt receipt. WHY: Child or replacement processes must not acknowledge another delivery. */
+/** WHAT: Checks one exact generation's root prompt receipt. WHY: Prevents child or replacement processes from acknowledging another delivery. */
 export function isPromptInQwenJsonl(paneDir, promptText, { cursor = null, ...options } = {}) {
   const needle = promptText?.trim();
   if (!needle) return null;

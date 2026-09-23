@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 
 const MAX_WINDOW_BYTES = 16 * 1024 * 1024;
 
-/** WHAT: Reads complete records in a bounded head/tail window. WHY: Long-running panes must not disappear at a file-size threshold. */
+/** WHAT: Reads complete records in a bounded head/tail window. WHY: Keeps long-running pane history visible beyond a file-size threshold. */
 export function readQwenJournalWindow(file, { head = false, maxBytes = MAX_WINDOW_BYTES } = {}) {
   const budget = Number.isSafeInteger(maxBytes) && maxBytes > 0
     ? Math.min(maxBytes, MAX_WINDOW_BYTES) : MAX_WINDOW_BYTES;
