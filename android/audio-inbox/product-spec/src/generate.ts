@@ -8,8 +8,8 @@ import {
   logOutputManifest,
   productJsonEmitter,
   writeOutputManifest,
-  type ProductEmitterPlugin,
-} from "@v1d/product-spec";
+} from "@v1d/product-spec/node";
+import type { ProductEmitterPlugin } from "@v1d/product-spec";
 import { domainGraphEmitter, emitContractTypesKotlin } from "@v1d/product-emit/core";
 import { linkCapabilityTable } from "./capabilities.js";
 import {
