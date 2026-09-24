@@ -67,6 +67,7 @@ import {
 } from "./core/codex-profiles.mjs";
 import { allowsFreshCodexBootstrap, decideCodexStart, liveRolloutWriters } from "./core/codex-session-guard.mjs";
 import { waitForCodexUiReady as waitForCodexReady } from "./core/codex-readiness.mjs";
+import { driveCodexStatus } from "./core/codex-status.mjs";
 import { mapWithConcurrency } from "./core/concurrency.mjs";
 import { createTmuxServerHold } from "./core/tmux-server-hold.mjs";
 import { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./core/agent-launch-command.mjs";
@@ -600,6 +601,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       sessionId: resumeSessionId,
       compact: () => compactCodex(name, pane),
       ready: () => waitForCodexUiReady(target, name, pane), screen: () => captureScreen(name, pane),
+      status: () => driveCodexStatus({ agent: { capturePane, captureScreen, isBusy, sendTab, sendEscape,
+        clearInputLine, typeLiteral, sendEnter, paneHistorySize, zoomPaneForPicker, restorePaneZoom }, name, pane }),
       remember: persistSession, pin: (actual) => state && setCodexModelOverride(state, name, pane, actual.model, actual.effort),
     });
   }
@@ -635,9 +638,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     while (Date.now() < processDeadline) {
       const command = await t.currentCommand(target).catch(() => "");
       if (/^(codex|node)$/.test(command)) {
-        if (!(await waitForCodexUiReady(target, agentName, pane))) {
-          throw new Error(`Codex process started but its composer never became ready in ${agentName}:${pane}`);
-        }
         return { ok: true, profile: launch.profile.id, model: launch.model || null, effort: launch.effort || null };
       }
       await wait(200);
@@ -1495,16 +1495,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         throw new Error(`Claude process started but its composer never became ready in ${agentName}:${pane}`);
       }
     } else if (isCodexCmd(paneCmd)) {
-      // Codex panes use the same wait-for-ready + dismiss pattern as
-      // claude. Resume-hint is skipped because startCodex resumes the exact
-      // provenance-matched pane session (global `resume --last` is forbidden).
+      // startCodex verifies composer and selected model before returning.
+      // A second readiness pass can misclassify an already-started pane.
       await startCodex(agentName, target, config.dir, pane, launch);
-      if (!wasRunning) {
-        const ready = await waitForCodexUiReady(target, agentName, pane);
-        if (!ready) {
-          throw new Error(`Codex process started but its composer never became ready in ${agentName}:${pane}`);
-        }
-      }
     } else if (isKimiCmd(paneCmd)) {
       await startKimi(agentName, target, config.dir, pane);
       if (!wasRunning && !await waitForKimiUiReady(target, agentName, pane)) {

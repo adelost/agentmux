@@ -57,4 +57,23 @@ feature("Codex startup readiness", () => {
       expect(clock).toBeLessThan(90_000);
     }],
   });
+
+  unit("waits for a large resumed session past the former startup cutoff", {
+    given: ["a static replay that renders its composer after 130 seconds", () => ({ clock: 0 })],
+    when: ["waiting for the exact pane to become usable", async (ctx) => waitForCodexUiReady({
+      tmux: {
+        captureScreen: async () => ctx.clock >= 130_000
+          ? "› Ask Codex to do anything\n  gpt-6-luna medium · /workspace"
+          : "Resuming session…",
+        sendKeys: async () => {}, sendLiteral: async () => {}, sendEscape: async () => {},
+      },
+      target: "skyvw:.3", agentName: "skyvw", pane: 3,
+      delay: async (ms) => { ctx.clock += ms; }, now: () => ctx.clock,
+      logger: { warn: () => {} },
+    })],
+    then: ["wake does not falsely fail while Codex is still replaying", (ready, ctx) => {
+      expect(ready).toBe(true);
+      expect(ctx.clock).toBeGreaterThanOrEqual(130_000);
+    }],
+  });
 });

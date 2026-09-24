@@ -12,8 +12,8 @@ export async function waitForCodexUiReady({
   agentName,
   pane,
   delay,
-  hardTimeoutMs = 120_000,
-  stallTimeoutMs = 90_000,
+  hardTimeoutMs = 180_000,
+  stallTimeoutMs = 150_000,
   now = Date.now,
   logger = console,
 }) {

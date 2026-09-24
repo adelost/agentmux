@@ -7,12 +7,19 @@ import { rememberContextCompact } from "./context-maintenance.mjs";
 import { esc } from "../lib.mjs";
 
 /** WHAT: Reads the requested live model after startup. WHY: Prevents an early empty composer from masquerading as a fully rendered startup. */
-export async function waitForCodexModelSelection({ screen, wait, selected, attempts = 40 }) {
+export async function waitForCodexModelSelection({ screen, wait, selected, status, attempts = 40 }) {
   let actual = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
     actual = parseCodexPaneReading(await screen())?.selected || null;
     if (actual?.model === selected.model && (!selected.effort || actual.effort === selected.effort)) return actual;
     if (attempt + 1 < attempts) await wait(250);
+  }
+  if (status) {
+    const native = await status();
+    if (native?.ok && native.status?.model?.id) {
+      return { model: native.status.model.id, effort: native.status.model.effort, source: "codex-status" };
+    }
+    throw new Error(`Codex startup model unverified: ${native?.stage || "status"}: ${native?.error || "no model"}`);
   }
   return actual;
 }
@@ -20,7 +27,7 @@ export async function waitForCodexModelSelection({ screen, wait, selected, attem
 /** WHAT: Routes process launch through compact-first policy. WHY: Keeps every wake and recovery on the same session-preserving transition. */
 export async function startCodexProcess({
   t, wait, target, dir, profile, selected, sessionId, previous, remembered,
-  launchOptions, compact, ready, screen, remember, pin,
+  launchOptions, compact, ready, screen, status, remember, pin,
 }) {
   const reset = async () => {
     await t.respawnPane(target, { kill: true, cwd: dir });
@@ -44,7 +51,7 @@ export async function startCodexProcess({
     },
     compact,
     reset,
-    verify: () => waitForCodexModelSelection({ screen, wait, selected }),
+    verify: () => waitForCodexModelSelection({ screen, wait, selected, status }),
     remember: (actual) => {
       remember({ sessionId, status: sessionId ? "ready" : "awaiting-first-rollout",
         model: actual.model, effort: actual.effort, modelTransitionBlocked: null });

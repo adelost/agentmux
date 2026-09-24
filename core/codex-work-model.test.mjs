@@ -1,5 +1,5 @@
 import { feature, component, expect } from "bdd-vitest";
-import { assertCodexWorkModel, waitForCodexModelSelection } from "./codex-process-launch.mjs";
+import { assertCodexWorkModel, startCodexProcess, waitForCodexModelSelection } from "./codex-process-launch.mjs";
 import { resolveCodexModelSelection, isExpectedCodexModel } from "./codex-profiles.mjs";
 import { waitForCodexModelLease } from "./codex-model-command.mjs";
 
@@ -22,6 +22,59 @@ feature("Codex work uses the verified explicit model choice", () => {
     }],
     when: ["verifying the selected model", args => waitForCodexModelSelection(args)],
     then: ["the observed model is Sol without another model call", actual => expect(actual).toMatchObject({ model: "gpt-5.6-sol", effort: "xhigh" })],
+  });
+  component("a stopped pane resumes on Luna even when its footer never renders", {
+    given: ["an empty composer and a native status that reports Luna", () => ({
+      screen: async () => "› Ask Codex to do anything",
+      wait: async () => {},
+      selected: { model: "gpt-6-luna", effort: "medium" },
+      attempts: 2,
+      status: async () => ({ ok: true, status: { model: { id: "gpt-6-luna", effort: "medium" } } }),
+    })],
+    when: ["verifying the resumed model", args => waitForCodexModelSelection(args)],
+    then: ["the native status proves Luna rather than reporting running unknown", actual =>
+      expect(actual).toMatchObject({ model: "gpt-6-luna", effort: "medium" })],
+  });
+  component("native status cannot bless a fallback model", {
+    given: ["an empty composer but native status reports Sol", () => ({
+      screen: async () => "› Ask Codex to do anything",
+      wait: async () => {},
+      selected: { model: "gpt-6-luna", effort: "medium" },
+      attempts: 2,
+      status: async () => ({ ok: true, status: { model: { id: "gpt-5.6-sol", effort: "medium" } } }),
+    })],
+    when: ["verifying the resumed model", args => waitForCodexModelSelection(args)],
+    then: ["the mismatch stays visible for the launch guard", actual =>
+      expect(actual).toMatchObject({ model: "gpt-5.6-sol", effort: "medium" })],
+  });
+  component("a stale Sol footer cannot override current Luna status", {
+    given: ["the footer still paints Sol while /status has Luna", () => ({
+      screen: async () => "› Ask Codex to do anything\n  gpt-5.6-sol medium · /workspace",
+      wait: async () => {},
+      selected: { model: "gpt-6-luna", effort: "medium" },
+      attempts: 2,
+      status: async () => ({ ok: true, status: { model: { id: "gpt-6-luna", effort: "medium" } } }),
+    })],
+    when: ["verifying the resumed model", args => waitForCodexModelSelection(args)],
+    then: ["the native status wins", actual => expect(actual.model).toBe("gpt-6-luna")],
+  });
+  component("a Luna wake pins only a natively verified model", {
+    given: ["a stopped pane with no readable model footer", () => {
+      const calls = [];
+      return { calls, t: { runShell: async () => calls.push("launch") },
+        wait: async () => {}, target: "skyvw:.4", dir: "/workspace/.agents/4",
+        profile: { home: "/codex-home" }, selected: { model: "gpt-6-luna", effort: "medium" },
+        sessionId: null, previous: null, remembered: null,
+        ready: async () => true, screen: async () => "› Ask Codex to do anything",
+        status: async () => ({ ok: true, status: { model: { id: "gpt-6-luna", effort: "medium" } } }),
+        remember: actual => calls.push(`remember:${actual.model}`),
+        pin: actual => calls.push(`pin:${actual.model}`) };
+    }],
+    when: ["starting the pane", args => startCodexProcess(args)],
+    then: ["wake succeeds and keeps Luna selected", (actual, args) => {
+      expect(actual.model).toBe("gpt-6-luna");
+      expect(args.calls).toEqual(["launch", "remember:gpt-6-luna", "pin:gpt-6-luna"]);
+    }],
   });
   component("raw model administration cannot bypass compact-first controls", {
     when: ["a queued raw /model reaches the physical send boundary", () => assertCodexWorkModel({
