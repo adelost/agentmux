@@ -14,15 +14,39 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.cancel
 import com.adelost.ringkit.ports.CirclePortRole
 import com.adelost.ringkit.ports.CirclePortStatus
 import com.adelost.ringkit.ports.needsAttention
 import com.adelost.ringkit.ports.status
+import io.agentmux.linkui.product.generated.GeneratedLinkNativeLegoCatalog.PortIds
+import io.agentmux.linkui.product.generated.GeneratedLinkPortTrace
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkProductGraphTotalityTest {
+    @Test
+    fun aTypedSendReportsItsReturnThroughTheSameGeneratedPortHook() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val runtime = LinkProductPortRuntime(scope)
+        val pageInput = object : ProductInputPort<LinkRoute, Unit>(PortIds.NAVIGATION_PAGE_HOST_ACTIVEPAGE) {}
+        val rows = mutableListOf<String>()
+        val trace = GeneratedLinkPortTrace.attach { rows += it }
+        val sink = runtime.bindInput(pageInput, scope) { page -> assertEquals(LinkRoute.HOME, page) }
+        try {
+            runtime.send(pageInput, LinkRoute.HOME)
+            assertEquals(
+                listOf("""{"kind":"port","portRef":"navigation.page-host.activePage","phase":"returned"}"""),
+                rows,
+            )
+        } finally {
+            sink.close()
+            trace.close()
+            scope.cancel()
+        }
+    }
+
     @Test
     fun aRealGraphCommandRecordsOneReturnedPortWithoutRecordingStatePublication() {
         val rows = mutableListOf<String>()
