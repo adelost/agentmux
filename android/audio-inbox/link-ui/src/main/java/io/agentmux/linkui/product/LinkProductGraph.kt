@@ -2,6 +2,7 @@ package io.agentmux.linkui.product
 
 import io.agentmux.linkui.product.generated.GeneratedLinkCapturedTurn
 import io.agentmux.linkui.product.generated.GeneratedLinkWakeGlyphValue
+import io.agentmux.linkui.product.generated.GeneratedLinkPortTrace
 import io.agentmux.linkui.product.generated.GeneratedLinkComposeTurn
 import io.agentmux.linkui.product.generated.GeneratedLinkHistoryClear
 import io.agentmux.linkui.product.generated.GeneratedLinkHistoryStatus
@@ -71,6 +72,7 @@ open class LinkProductGraph(
     private val monotonicNanos: () -> Long = System::nanoTime,
 ) {
     private val runtime = LinkProductPortRuntime(processScope)
+    private var returnedPortObserver: AutoCloseable? = null
     private var captureBeganAtNanos: Long? = null
 
     val target: StateFlow<LinkTargetPresentation>
@@ -424,7 +426,15 @@ open class LinkProductGraph(
         wakeTryOpen.emit(event)
     }
 
+    /** A debug observer is attached to this graph's lifetime, not to a second port registry. */
+    fun attachReturnedPortObserver(callback: (String) -> Unit): AutoCloseable {
+        returnedPortObserver?.close()
+        return GeneratedLinkPortTrace.attach(callback).also { returnedPortObserver = it }
+    }
+
     open fun close() {
+        returnedPortObserver?.close()
+        returnedPortObserver = null
         processScope.cancel()
     }
 

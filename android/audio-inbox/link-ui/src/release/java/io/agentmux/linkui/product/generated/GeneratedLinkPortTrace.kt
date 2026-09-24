@@ -4,5 +4,6 @@
 package io.agentmux.linkui.product.generated
 
 internal object GeneratedLinkPortTrace {
+    fun attach(@Suppress("UNUSED_PARAMETER") callback: (String) -> Unit): AutoCloseable = AutoCloseable {}
     fun returned(@Suppress("UNUSED_PARAMETER") port: GeneratedProductPortId) = Unit
 }

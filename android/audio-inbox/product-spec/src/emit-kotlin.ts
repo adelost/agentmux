@@ -78,6 +78,7 @@ function emitPortTrace(product: ProductIr, sha: string, debug: boolean): string 
   const prefix = header("the typed Link port-return boundary", sha);
   if (!debug) return `${prefix}
 internal object GeneratedLinkPortTrace {
+    fun attach(@Suppress("UNUSED_PARAMETER") callback: (String) -> Unit): AutoCloseable = AutoCloseable {}
     fun returned(@Suppress("UNUSED_PARAMETER") port: GeneratedProductPortId) = Unit
 }
 `;
@@ -93,7 +94,13 @@ internal object GeneratedLinkPortTrace {
     private val output = System.getenv("V1D_STUDIO_TRACE_DIR")?.takeIf { it.isNotBlank() }?.let {
         java.io.File(it, "kotlin-" + java.util.UUID.randomUUID() + ".jsonl")
     }
-    @Volatile var observer: ((String) -> Unit)? = null
+    @Volatile private var observer: ((String) -> Unit)? = null
+
+    @Synchronized fun attach(callback: (String) -> Unit): AutoCloseable {
+        check(observer == null) { "Link port observation already attached" }
+        observer = callback
+        return AutoCloseable { synchronized(this) { if (observer === callback) observer = null } }
+    }
 
     @Synchronized fun returned(port: GeneratedProductPortId) {
         val row = when (port) {
