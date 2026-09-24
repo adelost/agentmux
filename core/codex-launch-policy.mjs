@@ -1,5 +1,6 @@
 import { hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { readCodexRolloutModel } from "./codex-rollout-model.mjs";
+import { codexUserPrompt } from "./codex-user-events.mjs";
 import { codexLaunchDecision } from "../policies/context-cost.mjs";
 
 /** WHAT: Maps exact-session model and compact evidence to resume inputs. WHY: Prevents old remembered settings from hiding a later provider fallback. */
@@ -40,7 +41,8 @@ export function validCodexCompactReceipt(receipt, sessionId) {
   let compacted = false;
   hasJsonlEventAfterCursor(files, receipt.cursor, (event) => {
     if (event?.type === "compacted" || (event?.type === "event_msg" && event.payload?.type === "context_compacted")) compacted = true;
-    else if (event?.type === "event_msg" && event.payload?.type === "user_message") compacted = false;
+    else if ((event?.type === "event_msg" && event.payload?.type === "user_message")
+      || codexUserPrompt(event) !== null) compacted = false;
     return false;
   });
   return compacted;

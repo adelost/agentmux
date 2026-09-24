@@ -2,8 +2,9 @@ import { component, expect, feature } from "bdd-vitest";
 import { appendFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createContextMaintenance } from "./context-maintenance.mjs";
+import { contextMaintenanceAttempt, createContextMaintenance } from "./context-maintenance.mjs";
 import { wakeDeliveryTarget } from "./delivery-wake.mjs";
+import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 
 function fixture({ fail = false, jobs = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-cost-test-")), path = join(root, "session.jsonl");
@@ -29,6 +30,25 @@ function fixture({ fail = false, jobs = [] } = {}) {
 }
 
 feature("warm and cold compaction share a durable one-attempt fence", () => {
+  component("a later Codex response_item user turn expires a saved maintenance receipt", {
+    given: ["a compact receipt followed by actual Codex user work", () => {
+      const ctx = fixture();
+      const path = ctx.identityFor().path;
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [path]);
+      ctx.state.set("context_maintenance_by_pane_v1", {
+        "claw:2": { sessionId: "one", cursor, status: "VERIFIED" },
+      });
+      ctx.append({ type: "compacted" });
+      ctx.append({ type: "response_item", payload: { type: "message", role: "user",
+        content: [{ type: "input_text", text: "new work" }],
+        internal_chat_message_metadata_passthrough: { content_item_kinds: ["user.text"] } } });
+      return ctx;
+    }],
+    when: ["reading the old receipt", ctx => contextMaintenanceAttempt(ctx.state, "claw", 2, { sessionId: "one" })],
+    then: ["the old receipt cannot authorize another model change", (receipt, ctx) => {
+      try { expect(receipt).toBeNull(); } finally { ctx.cleanup(); }
+    }],
+  });
   component("a cold first message enters an exact session with no work after compact", {
     given: ["the compacted Claude journal has only local command output and bridge metadata", () => {
       const ctx = fixture();
