@@ -1,5 +1,9 @@
 import { component, expect, feature } from "bdd-vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { launchCodexWithPolicy, codexResumeEvidence } from "./codex-launch-policy.mjs";
+import { readCodexRolloutModel } from "./codex-rollout-model.mjs";
 
 const fixture = (extra = {}) => {
   const events = [];
@@ -16,6 +20,54 @@ const fixture = (extra = {}) => {
 };
 
 feature("Codex wake cannot bypass compact-first model selection", () => {
+  component("the exact rollout yields its latest model even when bounded status scans cannot see it", {
+    when: ["reading a model between a long head and a long tool tail", async () => {
+      const root = mkdtempSync(join(tmpdir(), "codex-rollout-model-"));
+      const path = join(root, "rollout.jsonl");
+      try {
+        const padding = (count) => `${JSON.stringify({ type: "event_msg", payload: { type: "tool_output", text: "x".repeat(count) } })}\n`;
+        const model = JSON.stringify({ type: "turn_context", payload: { model: "gpt-6-sol",
+          collaboration_mode: { settings: { reasoning_effort: "xhigh" } } } });
+        writeFileSync(path, `${padding(300_000)}${model}\n${padding(9 * 1024 * 1024)}`);
+        return await readCodexRolloutModel(path, "session-a");
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+    then: ["only the exact recorded model and effort are returned", model =>
+      expect(model).toEqual({ sessionId: "session-a", model: "gpt-6-sol", effort: "xhigh" })],
+  });
+  component("an exact rollout model hidden beyond the status tail still requires compact before changing model", {
+    given: ["a stopped Sol session whose last rollout model is known but status has no model", () => codexResumeEvidence({
+      sessionId: "session-a", observed: { sessionId: "session-a", model: null },
+      rollout: { sessionId: "session-a", model: "gpt-6-sol", effort: "xhigh" },
+      remembered: { sessionId: "session-a", model: null }, allowFreshUnknown: true,
+    })],
+    when: ["choosing Luna for that session", evidence => {
+      const ctx = fixture({ sessionId: evidence.resumeSessionId, previous: evidence.previous,
+        selected: { model: "gpt-6-luna", effort: "medium" },
+        verify: async () => ({ model: "gpt-6-luna", effort: "medium" }) });
+      return launchCodexWithPolicy(ctx).then(() => ({ evidence, events: ctx.events }));
+    }],
+    then: ["the old Sol session resumes only to compact before Luna starts", ({ evidence, events }) => {
+      expect(evidence.resumeSessionId).toBe("session-a");
+      expect(events).toEqual(["launch:gpt-6-sol", "compact", "reset", "launch:gpt-6-luna", "remember:gpt-6-luna"]);
+    }],
+  });
+  component("a stopped session with no recorded model may start fresh without a model change", {
+    given: ["the exact rollout and session record have no model", () => codexResumeEvidence({
+      sessionId: "session-a", observed: { sessionId: "session-a", model: null },
+      rollout: null, remembered: { sessionId: "session-a", model: null }, allowFreshUnknown: true,
+    })],
+    when: ["starting Luna", evidence => {
+      const ctx = fixture({ sessionId: evidence.resumeSessionId, previous: evidence.previous,
+        selected: { model: "gpt-6-luna", effort: "medium" },
+        verify: async () => ({ model: "gpt-6-luna", effort: "medium" }) });
+      return launchCodexWithPolicy(ctx).then(() => ({ evidence, events: ctx.events }));
+    }],
+    then: ["a new session starts without touching the unmodeled old session", ({ evidence, events }) => {
+      expect(evidence.resumeSessionId).toBeNull();
+      expect(events).toEqual(["launch:gpt-6-luna", "remember:gpt-6-luna"]);
+    }],
+  });
   component("resume observes Reserve instead of trusting an old Sol startup record", {
     given: ["same-session provider fallback since startup", () => codexResumeEvidence({
       sessionId: "session-a", remembered: {sessionId: "session-a", model: "gpt-5.6-sol"},
