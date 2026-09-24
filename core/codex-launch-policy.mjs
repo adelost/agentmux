@@ -5,8 +5,8 @@ import { codexLaunchDecision } from "../policies/context-cost.mjs";
 /** WHAT: Maps exact-session model and compact evidence to resume inputs. WHY: Prevents old remembered settings from hiding a later provider fallback. */
 export function codexResumeEvidence({ sessionId, observed, rollout, remembered, launch, maintenance,
   allowFreshUnknown = false }) {
-  const previous = sessionId && observed?.sessionId === sessionId && observed?.model ? observed
-    : sessionId && rollout?.sessionId === sessionId && rollout?.model ? rollout
+  const previous = sessionId && rollout?.sessionId === sessionId && rollout?.model ? rollout
+    : sessionId && observed?.sessionId === sessionId && observed?.model ? observed
       : sessionId && remembered?.sessionId === sessionId && remembered?.model ? remembered : null;
   const resumeSessionId = sessionId && !previous && allowFreshUnknown ? null : sessionId;
   return {
@@ -21,7 +21,6 @@ export function codexResumeEvidence({ sessionId, observed, rollout, remembered, 
 export async function prepareCodexResume({ decision, discovered, observed, remembered, launch,
   maintenance, requestedSessionId }) {
   const rollout = decision.action === "resume"
-    && (observed?.sessionId !== decision.sessionId || !observed?.model)
     ? await readCodexRolloutModel(discovered.path, decision.sessionId) : null;
   const evidence = codexResumeEvidence({ sessionId: decision.sessionId, observed, rollout, remembered,
     launch, maintenance, allowFreshUnknown: decision.action === "resume" && !requestedSessionId });

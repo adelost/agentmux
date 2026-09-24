@@ -52,6 +52,16 @@ feature("Codex wake cannot bypass compact-first model selection", () => {
       expect(events).toEqual(["launch:gpt-6-sol", "compact", "reset", "launch:gpt-6-luna", "remember:gpt-6-luna"]);
     }],
   });
+  component("a stale model from the rollout head cannot override the later exact model", {
+    when: ["resolving a stopped session whose bounded status reader found only the head", () => codexResumeEvidence({
+      sessionId: "session-a",
+      observed: { sessionId: "session-a", model: "gpt-6-astra", modelSource: "head" },
+      rollout: { sessionId: "session-a", model: "gpt-6-sol", effort: "xhigh" },
+      remembered: { sessionId: "session-a", model: "gpt-6-astra" },
+    })],
+    then: ["the last rollout model governs the compact-first decision", evidence =>
+      expect(evidence.previous).toMatchObject({ model: "gpt-6-sol", effort: "xhigh" })],
+  });
   component("a stopped session with no recorded model may start fresh without a model change", {
     given: ["the exact rollout and session record have no model", () => codexResumeEvidence({
       sessionId: "session-a", observed: { sessionId: "session-a", model: null },
