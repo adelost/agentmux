@@ -1,9 +1,10 @@
 import { component, expect, feature } from "bdd-vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { launchCodexWithPolicy, codexResumeEvidence } from "./codex-launch-policy.mjs";
+import { launchCodexWithPolicy, codexResumeEvidence, validCodexCompactReceipt } from "./codex-launch-policy.mjs";
 import { readCodexRolloutModel } from "./codex-rollout-model.mjs";
+import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 
 const fixture = (extra = {}) => {
   const events = [];
@@ -20,6 +21,22 @@ const fixture = (extra = {}) => {
 };
 
 feature("Codex wake cannot bypass compact-first model selection", () => {
+  component("a later Codex user turn invalidates an old compact receipt", {
+    when: ["checking the real response_item user shape after a compact", () => {
+      const root = mkdtempSync(join(tmpdir(), "codex-compact-user-"));
+      const path = join(root, "rollout.jsonl");
+      try {
+        writeFileSync(path, "");
+        const cursor = captureJsonlAppendCursor("codex-model-change", [path]);
+        appendFileSync(path, `${JSON.stringify({ type: "compacted" })}\n`);
+        appendFileSync(path, `${JSON.stringify({ type: "response_item", payload: { type: "message", role: "user",
+          content: [{ type: "input_text", text: "new work" }],
+          internal_chat_message_metadata_passthrough: { content_item_kinds: ["user.text"] } } })}\n`);
+        return validCodexCompactReceipt({ ok: true, sessionId: "session-a", compactBoundary: true, cursor }, "session-a");
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+    then: ["a model change still needs a new compact", valid => expect(valid).toBe(false)],
+  });
   component("the exact rollout yields its latest model even when bounded status scans cannot see it", {
     when: ["reading a model between a long head and a long tool tail", async () => {
       const root = mkdtempSync(join(tmpdir(), "codex-rollout-model-"));

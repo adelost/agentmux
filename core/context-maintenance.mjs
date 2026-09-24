@@ -7,12 +7,14 @@ import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { prepareCodexIdle } from "./codex-tui.mjs";
 import { getContextPercent } from "./context.mjs";
 import { hasEmptyClaudeEpoch } from "./claude-empty-epoch.mjs";
+import { codexUserPrompt } from "./codex-user-events.mjs";
 
 const STATE_KEY = "context_maintenance_by_pane_v1";
 const paneKey = (name, pane) => `${name}:${pane}`;
 const compactEvent = e => e?.type === "compacted" || e?.payload?.type === "context_compacted"
   || (e?.type === "system" && e.subtype === "compact_boundary");
 const workEvent = e => e?.type === "event_msg" && e.payload?.type === "user_message"
+  || codexUserPrompt(e) !== null
   || (e?.type === "user" && !e.isMeta && !e.isCompactSummary
     && (typeof e.message?.content === "string" ? !/^\s*<(?:local-command|command-)/u.test(e.message.content)
       : e.message?.content?.some(part => part.type === "text")));
