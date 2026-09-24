@@ -20,6 +20,7 @@ import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkRoute
+import io.agentmux.linkui.product.LinkStudioBootstrap
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import io.agentmux.linkui.AndroidLinkListeningCue
 import io.agentmux.linkui.linkActionHostCosts
@@ -108,6 +109,7 @@ class MainActivity : ComponentActivity() {
                 listeningStarted = listeningCue::listeningStarted,
             )
         }
+        LinkStudioBootstrap.attach(this, productGraph)
         setContent {
             val preview by host.state.collectAsState()
             CircleHostSurface(
@@ -174,6 +176,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         // The updater has no executor of its own to shut down any more: its
         // work runs on lifecycleScope, which this activity cancels for us.
+        LinkStudioBootstrap.detach(this)
         productGraph.close()
         recorder.cancel()
         listeningCue.close()

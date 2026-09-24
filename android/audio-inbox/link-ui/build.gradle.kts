@@ -37,6 +37,7 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test:runner:1.6.2")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    debugImplementation("io.v1d.circlekit:studio-debug-android:$circleKitVersion")
 }
 
 // Studio gives each focused recording a new directory, so Gradle must rerun its named test.

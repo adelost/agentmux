@@ -32,6 +32,7 @@ import io.agentmux.linkui.LinkWatchScreen
 import io.agentmux.linkui.withHistoryPreview
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkRoute
+import io.agentmux.linkui.product.LinkStudioBootstrap
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -88,6 +89,7 @@ class WearMainActivity : ComponentActivity() {
             navigation = navigation,
             microphoneGranted = microphoneGranted,
         )
+        LinkStudioBootstrap.attach(this, productGraph)
         registerSessionReceiver()
         requestMicrophone()
         if (!qaPreviewActive) controller.start()
@@ -127,6 +129,7 @@ class WearMainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         unregisterReceiver(sessionChanges)
+        LinkStudioBootstrap.detach(this)
         productGraph.close()
         controller.close()
         super.onDestroy()

@@ -19,6 +19,11 @@
       "label": "AMUX Link",
       "artifact": "android/audio-inbox/product-spec/generated/link-product.json",
       "graph": "android/audio-inbox/product-spec/generated/link-product.graph.mmd",
+      "nativeLive": {
+        "package": "io.agentmux.audioinbox",
+        "action": "io.agentmux.audioinbox.STUDIO_OBSERVE",
+        "install": ["android/audio-inbox/gradlew", "-p", "android/audio-inbox", ":wear:installDebug"]
+      },
       "recordCommand": ["android/audio-inbox/gradlew", "-p", "android/audio-inbox", ":link-ui:testDebugUnitTest", "--tests", "io.agentmux.linkui.product.LinkProductGraphTotalityTest.aRealGraphCommandRecordsOneReturnedPortWithoutRecordingStatePublication", "--console=plain"],
       "documentation": {
         "sourceRoots": [
