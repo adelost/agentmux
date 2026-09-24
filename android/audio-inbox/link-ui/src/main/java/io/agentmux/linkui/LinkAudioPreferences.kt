@@ -10,7 +10,9 @@ data class LinkAudioPreference(
     val title: String,
     val hint: String,
     val enabled: Boolean,
-)
+) {
+    val stateLabel: String get() = if (enabled) "ON" else "OFF"
+}
 
 /** WHAT: Builds Link's audio preference rows. WHY: Keeps labels and values consistent across Settings renders. */
 fun linkAudioPreferences(

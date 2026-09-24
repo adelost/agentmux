@@ -83,6 +83,7 @@ class LinkControlsDeclareTheirKindTest {
         // controls whose rows a pure function builds, so the case can hold them to it.
         assertNotNull(GeneratedLinkControlTiming.SETTINGS_WAKE_PHRASE)
         assertNotNull(GeneratedLinkControlTiming.SETTINGS_PUBLIC_LINK)
+        assertNotNull(GeneratedLinkControlTiming.HOME_SPEAK_REPLIES)
         assertNotNull(GeneratedLinkControlTiming.HOME_VOICE_MESSAGE)
         assertNotNull(GeneratedLinkControlTiming.CONVERSATION_PLAY_TURN)
     }

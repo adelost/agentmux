@@ -85,6 +85,10 @@
           "mountRef": "target.picker"
         },
         {
+          "componentInstanceRef": "preferences.toggles",
+          "mountRef": "preferences.toggles"
+        },
+        {
           "componentInstanceRef": "wake.toggle",
           "mountRef": "wake.toggle"
         },
@@ -123,6 +127,10 @@
         {
           "componentInstanceRef": "target.picker",
           "mountRef": "target.picker"
+        },
+        {
+          "componentInstanceRef": "preferences.toggles",
+          "mountRef": "preferences.toggles"
         },
         {
           "componentInstanceRef": "wake.toggle",
@@ -594,9 +602,20 @@
               },
               {
                 "capacity": null,
+                "id": "preferences.toggles",
+                "instance": "preferences.toggles",
+                "order": 2,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "wake.toggle",
                 "instance": "wake.toggle",
-                "order": 2,
+                "order": 3,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -607,7 +626,7 @@
                 "capacity": null,
                 "id": "conversation.latest",
                 "instance": "conversation.latest",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -618,7 +637,7 @@
                 "capacity": null,
                 "id": "playback.controls",
                 "instance": "playback.controls",
-                "order": 4,
+                "order": 5,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -630,7 +649,7 @@
                 "capacity": null,
                 "id": "conversation.composer",
                 "instance": "conversation.composer",
-                "order": 5,
+                "order": 6,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -641,7 +660,7 @@
                 "capacity": null,
                 "id": "capture.talk",
                 "instance": "capture.talk",
-                "order": 6,
+                "order": 7,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -652,7 +671,7 @@
                 "capacity": null,
                 "id": "navigation.settings-entry",
                 "instance": "navigation.settings-entry",
-                "order": 7,
+                "order": 8,
                 "priority": 0,
                 "region": "chrome",
                 "requirement": {
@@ -688,9 +707,20 @@
               },
               {
                 "capacity": null,
+                "id": "preferences.toggles",
+                "instance": "preferences.toggles",
+                "order": 2,
+                "priority": 0,
+                "region": "rail",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "wake.toggle",
                 "instance": "wake.toggle",
-                "order": 2,
+                "order": 3,
                 "priority": 0,
                 "region": "rail",
                 "requirement": {
@@ -701,7 +731,7 @@
                 "capacity": null,
                 "id": "conversation.latest",
                 "instance": "conversation.latest",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -712,7 +742,7 @@
                 "capacity": null,
                 "id": "playback.controls",
                 "instance": "playback.controls",
-                "order": 4,
+                "order": 5,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -724,7 +754,7 @@
                 "capacity": null,
                 "id": "conversation.composer",
                 "instance": "conversation.composer",
-                "order": 5,
+                "order": 6,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -735,7 +765,7 @@
                 "capacity": null,
                 "id": "capture.talk",
                 "instance": "capture.talk",
-                "order": 6,
+                "order": 7,
                 "priority": 0,
                 "region": "rail",
                 "requirement": {
@@ -746,7 +776,7 @@
                 "capacity": null,
                 "id": "navigation.settings-entry",
                 "instance": "navigation.settings-entry",
-                "order": 7,
+                "order": 8,
                 "priority": 0,
                 "region": "chrome",
                 "requirement": {
@@ -3605,6 +3635,7 @@
         ],
         "componentInstanceRef": "preferences.toggles",
         "pageRefs": [
+          "home",
           "settings"
         ]
       },

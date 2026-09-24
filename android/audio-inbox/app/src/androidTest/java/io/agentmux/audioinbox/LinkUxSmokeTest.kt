@@ -2,6 +2,10 @@ package io.agentmux.audioinbox
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.view.KeyEvent
+import android.view.WindowInsets
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ActivityScenario
@@ -12,60 +16,160 @@ import org.junit.Test
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 
-/** Named actions exercise real hosts and typed sinks. Preview data stays explicit. */
+/** WHAT: Checks named actions through the real Phone host. WHY: Keeps synthetic preview evidence on typed product sinks. */
 class LinkUxSmokeTest {
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val round get() = InstrumentationRegistry.getArguments().getString("host") == "round"
     private val landscape get() = InstrumentationRegistry.getArguments().getString("orientation") == "landscape"
 
-    @Test fun recipientConversationAndSettings() {
+    @Test fun recipientHierarchyKeepsStableTargetsAndBack() {
+        val favoritePreferences = instrumentation.targetContext
+            .getSharedPreferences("link_recipient_favorites", 0)
+        val originalFavorites = favoritePreferences.getStringSet("ids", null)?.toSet()
+        favoritePreferences.edit().putStringSet("ids", setOf("demo:2")).commit()
         val launch = Intent(instrumentation.targetContext, MainActivity::class.java)
             .putExtra("qa_state", "active")
             .putExtra("qa_host", if (round) "WATCH_EXACT" else "RESPONSIVE")
             .putExtra("qa_watch_diameter", "216")
             .putExtra("qa_orientation", if (landscape) "DEG_90" else "DEG_0")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        ActivityScenario.launch<MainActivity>(launch).use { scenario ->
+        try {
+            ActivityScenario.launch<MainActivity>(launch).use {
             compose.waitUntil(10_000) {
                 compose.onAllNodes(hasContentDescription("TO demo:1", substring = true))
                     .fetchSemanticsNodes().isNotEmpty()
             }
+            compose.onNode(hasContentDescription("gpt-5.6-sol · xhigh", substring = true)).assertExists()
             shot("home")
             compose.onNode(hasContentDescription("TO demo:1", substring = true)).performClick()
             compose.waitForIdle()
-            shot("recipients")
+            compose.onAllNodes(hasContentDescription("Astra orchestrator", substring = true)).assertCountEquals(0)
+            shot("recipients-root")
+            compose.onNode(hasContentDescription("ops", substring = true)).performScrollTo().performClick()
+            compose.onNode(hasContentDescription("ops:0", substring = true)).assertExists()
+            shot("recipients-group")
+            compose.onNodeWithContentDescription("Back").performClick()
             compose.onNode(hasContentDescription("FAVORITES", substring = true)).performClick()
             shot("favorites")
-            compose.onNode(hasContentDescription("demo:2", substring = true)).performClick()
+            compose.onAllNodes(hasContentDescription("Previous worker", substring = true)).assertCountEquals(0)
             compose.onNodeWithContentDescription("Back").performClick()
             compose.onNode(hasContentDescription("demo:2", substring = true)).performClick()
             compose.onNode(hasContentDescription("TO demo:2", substring = true)).assertExists()
+            compose.onNode(hasContentDescription("claude-fable-5 · Last seen", substring = true)).assertExists()
             shot("empty-conversation")
-            if (!round) {
-                compose.onNode(hasSetTextAction()).performTextInput("A draft stays here while I read.")
-                shot("composer")
-                if (landscape) scenario.onActivity { activity ->
-                    activity.window.insetsController?.hide(android.view.WindowInsets.Type.ime())
+        }
+        } finally {
+            favoritePreferences.edit().apply {
+                if (originalFavorites == null) remove("ids") else putStringSet("ids", originalFavorites)
+            }.commit()
+        }
+    }
+
+    @Test fun homeAudioControlsShareTheSettingsPreference() {
+        if (round || landscape) return
+        val context = instrumentation.targetContext
+        val preferences = context.getSharedPreferences(AppContract.PREFS, 0)
+        val hadSpeakReplies = preferences.contains(AppContract.KEY_SPEAK_REPLIES)
+        val originalSpeakReplies = preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false)
+        preferences.edit().putBoolean(AppContract.KEY_SPEAK_REPLIES, false).commit()
+        val launch = Intent(context, MainActivity::class.java)
+            .putExtra("qa_state", "active")
+            .putExtra("qa_host", "RESPONSIVE")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        try {
+            ActivityScenario.launch<MainActivity>(launch).use { scenario ->
+                compose.waitUntil(10_000) {
+                    compose.onAllNodes(hasContentDescription("READ REPLIES · OFF", substring = true))
+                        .fetchSemanticsNodes().isNotEmpty()
                 }
-                compose.waitUntil(3000) { compose.onAllNodesWithContentDescription("Open Link settings")
-                    .fetchSemanticsNodes().isNotEmpty() }
+                compose.onNode(hasContentDescription("WAKE WORD", substring = true)).assertExists()
+                compose.onNode(hasContentDescription("READ REPLIES · OFF", substring = true)).performClick()
+                compose.onNode(hasContentDescription("READ REPLIES · ON", substring = true)).assertExists()
+                assertTrue(preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false))
+                shot("home-audio-on")
+
                 compose.onNodeWithContentDescription("Open Link settings").performClick()
-            } else {
-                compose.onNode(hasContentDescription("SETTINGS", substring = true)).performScrollTo().performClick()
+                compose.onNode(hasContentDescription("READ REPLIES · ON", substring = true))
+                    .assertExists().performClick()
+                compose.onNode(hasContentDescription("READ REPLIES · OFF", substring = true)).assertExists()
+                scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+                compose.onNode(hasContentDescription("READ REPLIES · OFF", substring = true)).assertExists()
+                assertEquals(false, preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, true))
+                shot("home-audio-off")
             }
-            compose.waitForIdle()
-            shot("settings-top")
-            if (!round) {
-                compose.onNodeWithContentDescription("ABOUT READ REPLIES").performClick()
-                shot("info", 250)
-                compose.onNodeWithContentDescription("Close information").performClick()
-                compose.onNode(hasScrollToIndexAction()).performScrollToNode(
-                    hasContentDescription("DISPLAY PREVIEW", substring = true))
-                shot("settings-bottom")
-                compose.onNode(hasContentDescription("DISPLAY PREVIEW", substring = true)).performClick()
-                shot("display-preview")
+        } finally {
+            preferences.edit().apply {
+                if (hadSpeakReplies) putBoolean(AppContract.KEY_SPEAK_REPLIES, originalSpeakReplies)
+                else remove(AppContract.KEY_SPEAK_REPLIES)
+            }.commit()
+        }
+    }
+
+    @Test fun longReplyStaysCompleteWithComposerAndStopReachable() {
+        if (round || landscape) return
+        val launch = Intent(instrumentation.targetContext, MainActivity::class.java)
+            .putExtra("qa_state", "active")
+            .putExtra("qa_case", "long-reply")
+            .putExtra("qa_playback", "active")
+            .putExtra("qa_host", "RESPONSIVE")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        ActivityScenario.launch<MainActivity>(launch).use { scenario ->
+            compose.waitUntil(5_000) {
+                imeVisible(scenario) || compose.onAllNodesWithContentDescription("HOLD TO TALK")
+                    .fetchSemanticsNodes().isNotEmpty()
             }
+            if (imeVisible(scenario)) {
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            }
+            compose.waitUntil(5_000) { !imeVisible(scenario) }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithContentDescription("HOLD TO TALK")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.waitUntil(10_000) {
+                compose.onAllNodes(hasText("FINAL SYNTHETIC PARAGRAPH", substring = true))
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNode(hasText("FINAL SYNTHETIC PARAGRAPH", substring = true)).assertExists()
+            assertRoundControl(
+                "hold to talk",
+                compose.onNodeWithContentDescription("HOLD TO TALK").assertIsDisplayed()
+                    .fetchSemanticsNode().boundsInRoot,
+            )
+            shot("long-reply-full", 2_000)
+            compose.onNode(hasSetTextAction()).performTextInput("SYNTHETIC QA draft")
+            compose.waitUntil(5_000) { imeVisible(scenario) }
+
+            val composer = compose.onNode(hasSetTextAction()).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val pause = compose.onNodeWithContentDescription("Pause playback").assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            val stop = compose.onNodeWithContentDescription("Stop playback").assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            val send = compose.onNodeWithContentDescription("Send message").assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            compose.onAllNodesWithContentDescription("HOLD TO TALK").assertCountEquals(0)
+            assertRoundControl("pause", pause)
+            assertRoundControl("stop", stop)
+            assertRoundControl("send", send)
+
+            val conversation = compose.onNode(hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
+            val viewportBottom = minOf(composer.top, pause.top, stop.top)
+            assertReadableReplyPixels(conversation.top, viewportBottom, "while the keyboard is open")
+            shot("long-reply-font", 2_000)
+
+            repeat(8) {
+                compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp() }
+                compose.waitForIdle()
+            }
+            val finalBounds = longReplyBounds()
+            assertTrue(
+                "the final synthetic paragraph never reached the readable viewport: $finalBounds / $viewportBottom",
+                finalBounds.bottom <= viewportBottom + 2f && finalBounds.bottom > 0f,
+            )
+            assertTrue("scrolling the reply dismissed the keyboard", imeVisible(scenario))
+            assertReadableReplyPixels(conversation.top, viewportBottom, "at the final paragraph")
+            shot("long-reply-end")
         }
     }
 
@@ -206,5 +310,52 @@ class LinkUxSmokeTest {
             "ux-${if (round) "round" else if (landscape) "wide" else "phone"}-$name.png")
         path.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         image.recycle()
+    }
+
+    private fun imeVisible(scenario: ActivityScenario<MainActivity>): Boolean {
+        var visible = false
+        scenario.onActivity { activity ->
+            visible = activity.window.decorView.rootWindowInsets
+                ?.isVisible(WindowInsets.Type.ime()) == true
+        }
+        return visible
+    }
+
+    private fun longReplyBounds(): Rect = compose
+        .onNode(hasText("FINAL SYNTHETIC PARAGRAPH", substring = true))
+        .fetchSemanticsNode().boundsInRoot
+
+    private fun assertRoundControl(name: String, bounds: Rect) {
+        val ratio = bounds.width / bounds.height
+        assertTrue("$name was deformed to $bounds", bounds.width >= 44f && ratio in 0.90f..1.10f)
+    }
+
+    private fun assertReadableReplyPixels(viewportTop: Float, viewportBottom: Float, state: String) {
+        val bounds = longReplyBounds()
+        val image = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        try {
+            val left = bounds.left.toInt().coerceIn(0, image.width)
+            val right = bounds.right.toInt().coerceIn(left, image.width)
+            val top = maxOf(bounds.top, viewportTop).toInt().coerceIn(0, image.height)
+            val bottom = minOf(bounds.bottom, viewportBottom).toInt().coerceIn(top, image.height)
+            assertTrue("no readable reply viewport $state: $bounds / $viewportBottom", bottom - top >= 32)
+            var readable = 0
+            var readableRows = 0
+            for (y in top until bottom) {
+                var rowPixels = 0
+                for (x in left until right) {
+                    val pixel = image.getPixel(x, y)
+                    if (Color.red(pixel) > 110 && Color.green(pixel) > 110 && Color.blue(pixel) > 110) {
+                        readable += 1
+                        rowPixels += 1
+                    }
+                }
+                if (rowPixels >= 20) readableRows += 1
+            }
+            assertTrue("reply text had only $readable readable pixels $state", readable >= 200)
+            assertTrue("reply text covered only $readableRows image rows $state", readableRows >= 8)
+        } finally {
+            image.recycle()
+        }
     }
 }

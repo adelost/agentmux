@@ -23,6 +23,8 @@ import io.agentmux.linkcore.LinkAction
 import io.agentmux.linkcore.LinkReducer
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTarget
+import io.agentmux.linkcore.LinkTargetModel
+import io.agentmux.linkcore.LinkTargetModelStatus
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
@@ -184,8 +186,28 @@ internal fun activePreviewState(): LinkState = LinkState(
     connection = ConnectionState.CONNECTED,
     connectionDetail = "LINK READY",
     targets = listOf(
-        LinkTarget("demo:1", "Demo one"),
-        LinkTarget("demo:2", "Demo two"),
+        LinkTarget(
+            "demo:1",
+            "Astra orchestrator · internal synthetic description",
+            model = LinkTargetModel(
+                status = LinkTargetModelStatus.CURRENT,
+                observedModel = "gpt-5.6-sol",
+                observedEffort = "xhigh",
+                configuredModel = "gpt-5.6-sol",
+                configuredEffort = "xhigh",
+            ),
+        ),
+        LinkTarget(
+            "demo:2",
+            "Previous worker · internal synthetic description",
+            model = LinkTargetModel(
+                status = LinkTargetModelStatus.STALE,
+                observedModel = "claude-fable-5",
+            ),
+        ),
+        LinkTarget("ops:0", "Self-directed fleet · internal synthetic description"),
+        LinkTarget("ops:1", "PAUSED on PR · internal synthetic description"),
+        LinkTarget("windows", "Windows rescue · internal synthetic description"),
     ),
     selectedTargetId = "demo:1",
     turns = listOf(

@@ -7,6 +7,8 @@ import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTarget
+import io.agentmux.linkcore.LinkTargetModel
+import io.agentmux.linkcore.LinkTargetModelStatus
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
@@ -18,8 +20,48 @@ internal fun phoneActivePreviewState(playbackActive: Boolean, scenario: String? 
     connectionDetail = "PRIVATE RELAY READY",
     connectionObservedAtMs = System.currentTimeMillis(),
     targets = listOf(
-        LinkTarget(id = "demo:1", label = "Implementation worker · available for your next task"),
-        LinkTarget(id = "demo:2", label = "Second window · a deliberately long description that stays readable"),
+        LinkTarget(
+            id = "demo:1",
+            label = "Astra orchestrator · internal synthetic description",
+            model = LinkTargetModel(
+                status = LinkTargetModelStatus.CURRENT,
+                observedModel = "gpt-5.6-sol",
+                observedEffort = "xhigh",
+                configuredModel = "gpt-5.6-sol",
+                configuredEffort = "xhigh",
+            ),
+        ),
+        LinkTarget(
+            id = "demo:2",
+            label = "Previous worker · internal synthetic description",
+            model = LinkTargetModel(
+                status = LinkTargetModelStatus.STALE,
+                observedModel = "claude-fable-5",
+                configuredModel = "gpt-5.6-sol",
+                configuredEffort = "xhigh",
+            ),
+        ),
+        LinkTarget(
+            id = "ops:0",
+            label = "Self-directed fleet · internal synthetic description",
+            model = LinkTargetModel(
+                status = LinkTargetModelStatus.UNKNOWN,
+                configuredModel = "gpt-6-astra",
+                configuredEffort = "max",
+            ),
+        ),
+        LinkTarget(
+            id = "ops:1",
+            label = "PAUSED on PR · internal synthetic description",
+            available = false,
+            acceptsMessages = true,
+            model = LinkTargetModel(
+                status = LinkTargetModelStatus.CURRENT,
+                observedModel = "gpt-reserve",
+                observedEffort = "xhigh",
+            ),
+        ),
+        LinkTarget(id = "windows", label = "Windows rescue · internal synthetic description"),
     ),
     selectedTargetId = "demo:1",
     turns = listOf(
@@ -50,6 +92,18 @@ internal fun phoneActivePreviewState(playbackActive: Boolean, scenario: String? 
             deliveryPhase = DeliveryPhase.FAILED, deliveryError = "No connection. Message not sent.") })
         "loading" -> state.copy(activePlaybackTurnId = "qa-turn",
             turns = state.turns.map { it.copy(playbackPhase = PlaybackPhase.QUEUED) })
+        "long-reply" -> state.copy(turns = state.turns.map { turn ->
+            turn.copy(
+                userText = "SYNTHETIC QA · Show the complete long answer.",
+                replyText = buildString {
+                    append("SYNTHETIC QA · This answer stays fully visible and selectable. ")
+                    repeat(18) { index ->
+                        append("Paragraph ${index + 1} checks readable wrapping at larger system text without clipping. ")
+                    }
+                    append("FINAL SYNTHETIC PARAGRAPH.")
+                },
+            )
+        })
         else -> error("Unknown Link preview scenario: $scenario")
     }
 }

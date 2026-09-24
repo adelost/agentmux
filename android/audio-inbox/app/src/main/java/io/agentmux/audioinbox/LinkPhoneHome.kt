@@ -1,32 +1,35 @@
 package io.agentmux.audioinbox
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.ringkit.ui.PhoneScreenHeader
+import com.adelost.ringkit.ui.IconRing
 import io.agentmux.linkcore.LinkPreferenceKey
 import io.agentmux.linkui.product.LinkPreferenceToggleEvent
 import io.agentmux.linkui.product.LinkWakePresentation
@@ -45,6 +48,7 @@ import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.linkConnectionLabel
 import io.agentmux.linkui.LinkCaptureControl
 import io.agentmux.linkui.LinkConversationTurn
+import io.agentmux.linkui.linkAudioPreferences
 import io.agentmux.linkui.linkConversationTurns
 import io.agentmux.linkui.LinkRecipientPicker
 import io.agentmux.linkui.activeTurnId
@@ -78,6 +82,12 @@ internal fun LinkPhoneHome(
     val savedReplyAudio by graph.savedReplyAudio.collectAsStateWithLifecycle()
     val wake by graph.wakeToggleModel.collectAsStateWithLifecycle()
     val preferences by graph.preferences.collectAsStateWithLifecycle()
+    val readReplies = linkAudioPreferences(
+        preferences.speakReplies,
+        preferences.handsFree,
+        preferences.wakeWord,
+        preferences.listeningCueSound,
+    ).first { it.key == LinkPreferenceKey.SPEAK_REPLIES }
     var choosingRecipient by remember { mutableStateOf(false) }
     if (choosingRecipient) {
         LinkRecipientPicker(
@@ -93,11 +103,28 @@ internal fun LinkPhoneHome(
     val turns = linkConversationTurns(latest.turns, target.selectedTargetId)
     val selected = target.targets.firstOrNull { it.id == target.selectedTargetId }
     val listState = rememberLazyListState()
-    LaunchedEffect(selected?.id, turns.size, turns.lastOrNull()?.replyText) {
-        if (turns.isNotEmpty()) listState.animateScrollToItem(turns.lastIndex)
+    val keyboardEditing = platformImeVisible()
+    var followsLatest by remember(selected?.id) { mutableStateOf(true) }
+    LaunchedEffect(listState, selected?.id, turns.size) {
+        snapshotFlow {
+            Triple(
+                listState.isScrollInProgress,
+                listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index,
+                turns.size,
+            )
+        }.collect { (userScrolling, lastVisibleIndex, conversationItems) ->
+            followsLatest = updatedFollowLatest(
+                current = followsLatest,
+                userScrolling = userScrolling,
+                lastVisibleIndex = lastVisibleIndex,
+                conversationItems = conversationItems,
+            )
+        }
     }
-    BoxWithConstraints(Modifier.widthIn(max = 640.dp).fillMaxSize().imePadding()) {
-        val compactEditing = maxHeight < 260.dp && WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    LaunchedEffect(selected?.id, turns.size, turns.lastOrNull()?.replyText, keyboardEditing) {
+        if (turns.isNotEmpty() && followsLatest) listState.animateScrollToItem(turns.lastIndex)
+    }
+    Box(Modifier.widthIn(max = 640.dp).fillMaxSize().imePadding()) {
         Column(
             verticalArrangement = Arrangement.spacedBy(4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -105,7 +132,7 @@ internal fun LinkPhoneHome(
         ) {
             val tree = GeneratedLinkHomeComponents.resolve(LocalCircleSurfaceLayout.current.surfaceClass)
             val route = GeneratedLinkRoutes.descriptor(LinkRoute.HOME)
-            if (!compactEditing) PhoneScreenHeader(
+            if (!keyboardEditing) PhoneScreenHeader(
                 title = route.title,
                 onBack = null,
                 backLabel = "Back",
@@ -120,27 +147,39 @@ internal fun LinkPhoneHome(
                 when (component) {
                     GeneratedLinkHomeComponent.NAVIGATION_PAGE_HOST,
                     GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> Unit
-                    GeneratedLinkHomeComponent.TARGET_PICKER ->
+                    GeneratedLinkHomeComponent.TARGET_PICKER -> if (!keyboardEditing) {
                         PhoneRow(linkRecipientRow(target) { choosingRecipient = true })
-                    // Mattias 2026-09-19 asked to turn the wake word on and off "enklare ... på kanske
-                    // huvudsidan". One word for where it is, one tap for on or off, writing the same
-                    // preference Settings writes. Not the talk ring: a press there would fight it for the
-                    // microphone (decision 2026-09-14).
-                    GeneratedLinkHomeComponent.WAKE_TOGGLE -> PhoneRow(
-                        title = wake.phrase.spoken.uppercase(),
+                    }
+                    GeneratedLinkHomeComponent.PREFERENCES_TOGGLES -> IconRing(
+                        label = readReplies.title,
+                        sub = readReplies.stateLabel,
+                        icon = RingIcons.Speaker,
+                        active = readReplies.enabled,
+                        semanticColor = if (readReplies.enabled) null else {
+                            circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.INACTIVE)
+                        },
+                        actionTiming = GeneratedLinkControlTiming.HOME_SPEAK_REPLIES,
+                        onTap = {
+                            graph.onPreferencesToggle(
+                                LinkPreferenceToggleEvent(
+                                    LinkPreferenceKey.SPEAK_REPLIES,
+                                    !readReplies.enabled,
+                                ),
+                            )
+                        },
+                    )
+                    GeneratedLinkHomeComponent.WAKE_TOGGLE -> IconRing(
+                        label = "WAKE WORD",
                         sub = wakeRowDetail(wake, captureSpec.wake.hearing?.sendsInMs),
-                        // The declared phase glyph, the same four the status bar wears. Nothing is chosen
-                        // here, BLOCKED included: it wears ATTENTION because the declaration says a phase
-                        // that needs a person to do something looks unlike the ones that only report
-                        // (lsrc:0 M2 and its follow-up, 2026-09-19).
                         icon = ImageVector.vectorResource(wakeGlyphDrawable(wake.phase)),
-                        // A wake word that is off is not doing anything, and the row says so quietly.
+                        active = preferences.wakeWord,
                         semanticColor = if (wake.phase == WakePhase.OFF) {
                             circleAccentColor(CircleAccent.NEUTRAL, CircleAccentStrength.INACTIVE)
                         } else {
                             null
                         },
-                        press = LinkPress(GeneratedLinkControlTiming.HOME_WAKE_TOGGLE) {
+                        actionTiming = GeneratedLinkControlTiming.HOME_WAKE_TOGGLE,
+                        onTap = {
                             graph.onWakeToggle(
                                 LinkPreferenceToggleEvent(
                                     LinkPreferenceKey.WAKE_WORD,
@@ -194,7 +233,7 @@ internal fun LinkPhoneHome(
                         ),
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                     )
-                    GeneratedLinkHomeComponent.CAPTURE_TALK -> if (!compactEditing) LinkCaptureControl(
+                    GeneratedLinkHomeComponent.CAPTURE_TALK -> if (!keyboardEditing) LinkCaptureControl(
                         spec = captureSpec,
                         recordedBytes = recordedBytes,
                         recordedLevel = recordedLevel,
@@ -211,22 +250,43 @@ internal fun LinkPhoneHome(
     }
 }
 
-/**
- * The declared phase word first, then the one thing that word does not say. The row is titled by the
- * phrase, so the second line never repeats it.
- *
- * lsrc:0 M1, 2026-09-19: a row titled OFF under CHOOSE RECIPIENT does not say what is off, and the phrase
- * is exactly what a wearer has to say out loud. The blocked reason is the loop's own sentence, never a
- * guess made here, so the one place that knows why it is blocked is the only place that words it.
- */
-internal fun wakeRowDetail(wake: LinkWakePresentation, sendsInMs: Int?): String {
-    val word = wakePhaseWord(wake.phase)
-    val rest = when (wake.phase) {
-        WakePhase.OFF -> "tap to listen"
-        WakePhase.LISTENING -> "tap to stop"
-        // The countdown the talk ring draws as a digit, in words, for the row that has no ring.
-        WakePhase.CAPTURING -> sendsInMs?.let { "${(it + 999) / 1_000} s" }.orEmpty()
-        else -> wake.detail.orEmpty()
+/** The root-window fact stays observable even after Compose consumes IME padding. */
+@Composable
+private fun platformImeVisible(): Boolean {
+    val view = LocalView.current
+    var visible by remember(view) { mutableStateOf(false) }
+    DisposableEffect(view) {
+        val update = {
+            visible = ViewCompat.getRootWindowInsets(view)
+                ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+        }
+        val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener(update)
+        val observer = view.viewTreeObserver
+        update()
+        observer.addOnGlobalLayoutListener(listener)
+        onDispose { if (observer.isAlive) observer.removeOnGlobalLayoutListener(listener) }
     }
-    return if (rest.isBlank()) word else "$word · $rest"
+    return visible
+}
+
+/** A new reply follows only while the reader is already following the end. */
+internal fun updatedFollowLatest(
+    current: Boolean,
+    userScrolling: Boolean,
+    lastVisibleIndex: Int?,
+    conversationItems: Int,
+): Boolean = if (!userScrolling) {
+    current
+} else {
+    conversationItems == 0 || (lastVisibleIndex ?: -1) >= conversationItems - 1
+}
+
+/** ON/OFF leads, the idle row names the phrase once, and live failure keeps the loop's own reason. */
+internal fun wakeRowDetail(wake: LinkWakePresentation, sendsInMs: Int?): String = when (wake.phase) {
+    WakePhase.OFF -> "OFF · ${wake.phrase.spoken.uppercase()}"
+    WakePhase.LISTENING -> "ON · ${wake.phrase.spoken.uppercase()}"
+    WakePhase.CAPTURING -> sendsInMs?.let { "ON · ${(it + 999) / 1_000} s" } ?: "ON · HEARING"
+    WakePhase.BLOCKED -> listOf(wakePhaseWord(wake.phase), wake.detail.orEmpty())
+        .filter(String::isNotBlank).joinToString(" · ")
+    else -> "ON · ${wakePhaseWord(wake.phase)}"
 }
