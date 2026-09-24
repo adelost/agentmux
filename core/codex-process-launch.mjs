@@ -1,16 +1,25 @@
 import { buildCodexLaunchCommand } from "./agent-launch-command.mjs";
 import { launchCodexWithPolicy } from "./codex-launch-policy.mjs";
 import { parseCodexPaneReading } from "./codex-status.mjs";
+import { findBlockingPrompt } from "./dismiss.mjs";
 import { codexModelOverride, resolveCodexModelSelection, selectedCodexProfile } from "./codex-profiles.mjs";
 import { verifiedCodexCompact } from "./verified-compact.mjs";
 import { rememberContextCompact } from "./context-maintenance.mjs";
 import { esc } from "../lib.mjs";
 
 /** WHAT: Reads the requested live model after startup. WHY: Prevents an early empty composer from masquerading as a fully rendered startup. */
-export async function waitForCodexModelSelection({ screen, wait, selected, status, attempts = 40 }) {
+export async function waitForCodexModelSelection({ screen, wait, selected, status, dismiss, attempts = 40 }) {
   let actual = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    actual = parseCodexPaneReading(await screen())?.selected || null;
+    const frame = await screen();
+    const blocker = findBlockingPrompt(frame);
+    if (blocker) {
+      if (!dismiss) throw new Error(`Codex startup blocked by ${blocker.name}`);
+      await dismiss(blocker);
+      await wait(blocker.waitMs);
+      continue;
+    }
+    actual = parseCodexPaneReading(frame)?.selected || null;
     if (actual?.model === selected.model && (!selected.effort || actual.effort === selected.effort)) return actual;
     if (attempt + 1 < attempts) await wait(250);
   }
@@ -27,7 +36,7 @@ export async function waitForCodexModelSelection({ screen, wait, selected, statu
 /** WHAT: Routes process launch through compact-first policy. WHY: Keeps every wake and recovery on the same session-preserving transition. */
 export async function startCodexProcess({
   t, wait, target, dir, profile, selected, sessionId, previous, remembered,
-  launchOptions, compact, ready, screen, status, remember, pin,
+  launchOptions, compact, ready, screen, status, dismiss, remember, pin,
 }) {
   const reset = async () => {
     await t.respawnPane(target, { kill: true, cwd: dir });
@@ -51,7 +60,7 @@ export async function startCodexProcess({
     },
     compact,
     reset,
-    verify: () => waitForCodexModelSelection({ screen, wait, selected, status }),
+    verify: () => waitForCodexModelSelection({ screen, wait, selected, status, dismiss }),
     remember: (actual) => {
       remember({ sessionId, status: sessionId ? "ready" : "awaiting-first-rollout",
         model: actual.model, effort: actual.effort, modelTransitionBlocked: null });

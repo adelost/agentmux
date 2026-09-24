@@ -601,6 +601,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       sessionId: resumeSessionId,
       compact: () => compactCodex(name, pane),
       ready: () => waitForCodexUiReady(target, name, pane), screen: () => captureScreen(name, pane),
+      dismiss: blocker => t.sendKeys(target, blocker.keys),
       status: () => driveCodexStatus({ agent: { capturePane, captureScreen, isBusy, sendTab, sendEscape,
         clearInputLine, typeLiteral, sendEnter, paneHistorySize, zoomPaneForPicker, restorePaneZoom }, name, pane }),
       remember: persistSession, pin: (actual) => state && setCodexModelOverride(state, name, pane, actual.model, actual.effort),
@@ -1495,8 +1496,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         throw new Error(`Claude process started but its composer never became ready in ${agentName}:${pane}`);
       }
     } else if (isCodexCmd(paneCmd)) {
-      // startCodex verifies composer and selected model before returning.
-      // A second readiness pass can misclassify an already-started pane.
+      // startCodex verifies composer and model; a second pass can misclassify a ready pane.
       await startCodex(agentName, target, config.dir, pane, launch);
     } else if (isKimiCmd(paneCmd)) {
       await startKimi(agentName, target, config.dir, pane);

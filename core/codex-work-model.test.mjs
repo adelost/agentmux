@@ -58,6 +58,25 @@ feature("Codex work uses the verified explicit model choice", () => {
     when: ["verifying the resumed model", args => waitForCodexModelSelection(args)],
     then: ["the native status wins", actual => expect(actual.model).toBe("gpt-6-luna")],
   });
+  component("model verification crosses startup menus before checking Luna", {
+    given: ["an update menu and a paused-goal menu after initial readiness", () => {
+      const ctx = { stage: 0, keys: [], selected: { model: "gpt-6-luna", effort: "medium" },
+        wait: async () => {}, attempts: 5 };
+      const screens = [
+        "Update available! 0.155.1 -> 0.156.1\n› 1. Update now\n  2. Skip\nPress enter to continue",
+        "Resume paused goal?\nGoal: Old work\n› 1. Resume goal\n  2. Leave paused\nPress enter to confirm or esc to go back",
+        "› Ask Codex to do anything\n  gpt-6-luna medium · /workspace",
+      ];
+      ctx.screen = async () => screens[ctx.stage];
+      ctx.dismiss = async prompt => { ctx.keys.push(prompt.keys); ctx.stage++; };
+      return ctx;
+    }],
+    when: ["verifying the requested model", ctx => waitForCodexModelSelection(ctx)],
+    then: ["the old goal stays paused and Luna is verified", (actual, ctx) => {
+      expect(actual.model).toBe("gpt-6-luna");
+      expect(ctx.keys).toEqual(["Down Enter", "Down Enter"]);
+    }],
+  });
   component("a Luna wake pins only a natively verified model", {
     given: ["a stopped pane with no readable model footer", () => {
       const calls = [];
