@@ -79,7 +79,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const decision = contextCostDecision({ tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, safe, attempt }, policy);
     if (decision.values.action === "CONTINUE") return { ok: true, cell: decision.cell };
     if (cold && target.engine === "claude" && decision.cell === "unknown-evidence" && attempt === "NEW"
-        && safe && !Number.isFinite(context?.tokens) && !Number.isFinite(activity)
+        && safe && !Number.isFinite(context?.tokens)
         && await hasEmptyClaudeEpoch(identity)) {
       const current = identityFor(target.engine, target.dir);
       const transport = await agent.promptTransportState(name, pane, "").catch(() => null);

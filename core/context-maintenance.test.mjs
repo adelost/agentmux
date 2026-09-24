@@ -68,6 +68,24 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
       try { expect(result.ok).toBe(true); expect(ctx.calls).toHaveLength(0); } finally { ctx.cleanup(); }
     }],
   });
+  component("a cold message enters an empty epoch whose bookkeeping and compact time are known", {
+    given: ["lsrc:1 on 2026-09-24: frame-link after compact and an activity time from the compact output", () => {
+      const ctx = fixture();
+      ctx.agent.getContext = async () => ({ tokens: null });
+      ctx.activityFor = () => 100_000_000 - 5 * 86_400_000;   // the compact output, five days before now()
+      ctx.journalFor = () => null;
+      ctx.append({ type: "system", subtype: "compact_boundary", sessionId: "one", timestamp: "2026-09-19T02:06:47.912Z" });
+      ctx.append({ type: "user", isCompactSummary: true, message: { content: "summary" } });
+      ctx.append({ type: "user", message: { content: "<local-command-stdout>Compacted</local-command-stdout>" } });
+      ctx.append({ type: "frame-link", timestamp: "2026-09-19T02:06:48.200Z" });
+      ctx.append({ type: "some-future-bookkeeping" });
+      return ctx;
+    }],
+    when: ["admitting the first delivery", ctx => createContextMaintenance(ctx).beforeWork({ agentName: "claw", pane: 2, id: "first" })],
+    then: ["the message is admitted without a provider compact", (result, ctx) => {
+      try { expect(result.ok).toBe(true); expect(ctx.calls).toHaveLength(0); } finally { ctx.cleanup(); }
+    }],
+  });
   for (const [name, entries] of [
     ["a missing compact boundary", [{ type: "attachment" }]],
     ["a malformed compact boundary", [{ type: "system", subtype: "compact_boundary", sessionId: "one", timestamp: "invalid" }]],

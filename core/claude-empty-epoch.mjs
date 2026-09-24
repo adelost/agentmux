@@ -1,11 +1,9 @@
 import { createReadStream, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 
-const HOUSEKEEPING = new Set([
-  "attachment", "last-prompt", "ai-title", "mode", "permission-mode",
-  "atis-latch", "pr-link", "history-suppression", "bridge-session",
-  "file-history-snapshot",
-]);
+// Only a user or assistant turn is conversation; every other entry is Claude Code bookkeeping
+// (attachment, pr-link, frame-link ...), and its list grows with each release.
+const CONVERSATION = new Set(["user", "assistant"]);
 const localCommand = content => typeof content === "string" && /^\s*<(?:local-command|command-)/u.test(content);
 const sameFile = (left, right) => left.dev === right.dev && left.ino === right.ino
   && left.size === right.size && left.mtimeMs === right.mtimeMs;
@@ -32,7 +30,7 @@ export async function hasEmptyClaudeEpoch(identity) {
       }
       if (!boundary) continue;
       const content = entry?.message?.content;
-      const harmless = HOUSEKEEPING.has(entry?.type)
+      const harmless = !CONVERSATION.has(entry?.type)
         || (entry?.type === "user" && (entry.isCompactSummary === true || localCommand(content)));
       if (!harmless || entry.isSidechain || (entry.sessionId && entry.sessionId !== identity.sessionId)
           || entry?.message?.usage) empty = false;
