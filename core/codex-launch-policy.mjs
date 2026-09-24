@@ -1,15 +1,35 @@
 import { hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
+import { readCodexRolloutModel } from "./codex-rollout-model.mjs";
 import { codexLaunchDecision } from "../policies/context-cost.mjs";
 
 /** WHAT: Maps exact-session model and compact evidence to resume inputs. WHY: Prevents old remembered settings from hiding a later provider fallback. */
-export function codexResumeEvidence({ sessionId, observed, remembered, launch, maintenance }) {
+export function codexResumeEvidence({ sessionId, observed, rollout, remembered, launch, maintenance,
+  allowFreshUnknown = false }) {
+  const previous = sessionId && rollout?.sessionId === sessionId && rollout?.model ? rollout
+    : sessionId && observed?.sessionId === sessionId && observed?.model ? observed
+      : sessionId && remembered?.sessionId === sessionId && remembered?.model ? remembered : null;
+  const resumeSessionId = sessionId && !previous && allowFreshUnknown ? null : sessionId;
   return {
-    previous: observed?.sessionId === sessionId && observed?.model ? observed
-      : remembered?.sessionId === sessionId ? remembered : null,
+    previous, resumeSessionId,
     launchOptions: { ...launch, compactReceipt: launch?.compactReceipt
-      || (maintenance?.status === "VERIFIED" && maintenance.sessionId === sessionId
+      || (resumeSessionId && maintenance?.status === "VERIFIED" && maintenance.sessionId === resumeSessionId
         ? { ...maintenance, ok: true, compactBoundary: true } : null) },
   };
+}
+
+/** WHAT: Reads the exact rollout before a pane-owned start. WHY: Prevents a missing status tail from hiding a known model or bypassing compact. */
+export async function prepareCodexResume({ decision, discovered, observed, remembered, launch,
+  maintenance, requestedSessionId }) {
+  const rollout = decision.action === "resume"
+    ? await readCodexRolloutModel(discovered.path, decision.sessionId) : null;
+  const evidence = codexResumeEvidence({ sessionId: decision.sessionId, observed, rollout, remembered,
+    launch, maintenance, allowFreshUnknown: decision.action === "resume" && !requestedSessionId });
+  const startRecord = evidence.resumeSessionId
+    ? { ...remembered, sessionId: decision.sessionId, status: "ready", rolloutPath: discovered.path }
+    : { sessionId: null, status: "awaiting-first-rollout", startedAt: Date.now(),
+      supersededSessionId: decision.action === "resume" ? decision.sessionId : null,
+      modelTransitionBlocked: remembered?.sessionId == null ? remembered?.modelTransitionBlocked ?? null : null };
+  return { ...evidence, startRecord };
 }
 
 /** WHAT: Checks a compact receipt for the exact resumed session. WHY: Prevents another pane's compact from authorizing a model change. */
