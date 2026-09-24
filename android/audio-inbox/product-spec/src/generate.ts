@@ -42,6 +42,7 @@ const manifest = buildOutputManifest(
   product,
   [
     productJsonEmitter(jsonPath),
+    linkStudioIdentityEmitter(productSpecPackage.version),
     linkNativeEmitter(kotlinRoot),
     linkContractTypesEmitter(),
     linkControlTimingEmitter(),
@@ -57,6 +58,33 @@ if (check) {
   await writeOutputManifest(linkRoot, manifest);
 }
 console.log(logOutputManifest(manifest));
+
+/** Correlate the native debug hello to the exact emitted product bytes, not a copied model hash. */
+function linkStudioIdentityEmitter(productSpecVersion: string): ProductEmitterPlugin {
+  return {
+    id: "link-studio-identity",
+    emit(product) {
+      const productBytes = productJsonEmitter(jsonPath).emit(product)[0]!.content;
+      const artifactSha256 = createHash("sha256").update(productBytes).digest("hex");
+      const events = product.portRegistry.bindings.length > 0 ? ["port"] : [];
+      return [{
+        id: "link-studio-identity",
+        path: `${kotlinDebugRoot}/GeneratedLinkStudioIdentity.kt`,
+        mediaType: "text/x-kotlin",
+        content: [
+          "// Generated from the installed ProductSpec and exact Link product artifact. Debug only.",
+          "package io.agentmux.linkui.product.generated", "",
+          "internal object GeneratedLinkStudioIdentity {",
+          `    const val productId = ${JSON.stringify(product.id)}`,
+          `    const val productSpecVersion = ${JSON.stringify(productSpecVersion)}`,
+          `    const val artifactSha256 = ${JSON.stringify(artifactSha256)}`,
+          `    val events = listOf(${events.map((event) => JSON.stringify(event)).join(", ")})`,
+          "}", "",
+        ].join("\n"),
+      }];
+    },
+  };
+}
 
 /**
  * The contracts native code holds as plain values, as generated data classes: a renamed or retyped declared field

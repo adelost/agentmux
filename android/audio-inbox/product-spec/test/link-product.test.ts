@@ -1,4 +1,5 @@
 import { adapterFields } from "@v1d/product-spec/foundation";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -22,6 +23,14 @@ const product = compileAgentmuxLinkProduct("0.0.0-test");
 const manifest = decodeNativeBindingManifest(
   JSON.parse(await readFile(resolve(packageRoot, "native-registry/link.json"), "utf8")),
 );
+
+test("debug Studio identity names the exact emitted Link artifact", async () => {
+  const bytes = await readFile(resolve(packageRoot, "generated/link-product.json"));
+  const identity = await readFile(resolve(packageRoot,
+    "../link-ui/src/debug/java/io/agentmux/linkui/product/generated/GeneratedLinkStudioIdentity.kt"), "utf8");
+  assert.match(identity, new RegExp(createHash("sha256").update(bytes).digest("hex")));
+  assert.match(identity, /productId = "agentmux-link"/u);
+});
 
 test("generated port returns come from graph bindings and release has no trace transport", () => {
   const artifacts = linkNativeEmitter("link-ui/src/main/java/io/agentmux/linkui/product/generated").emit(product);
