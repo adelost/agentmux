@@ -15,12 +15,25 @@ import { compileAgentmuxLinkProduct } from "../src/product.js";
 import { preferencesStatusContract } from "../src/contracts.js";
 import { linkPreferenceKeys } from "../src/finite-values.js";
 import { linkControls } from "../src/interactions.js";
+import { linkNativeEmitter } from "../src/emit-kotlin.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const product = compileAgentmuxLinkProduct("0.0.0-test");
 const manifest = decodeNativeBindingManifest(
   JSON.parse(await readFile(resolve(packageRoot, "native-registry/link.json"), "utf8")),
 );
+
+test("generated port returns come from graph bindings and release has no trace transport", () => {
+  const artifacts = linkNativeEmitter("link-ui/src/main/java/io/agentmux/linkui/product/generated").emit(product);
+  const debug = artifacts.find(({ id }) => id === "studio-port-debug");
+  const release = artifacts.find(({ id }) => id === "studio-port-release");
+  assert.ok(debug);
+  assert.ok(release);
+  assert.match(String(debug.content), /conversation\.service\.turn/u);
+  assert.match(String(debug.content), /capture\.talk\.command/u);
+  assert.match(String(debug.content), /V1D_STUDIO_TRACE_DIR/u);
+  assert.doesNotMatch(String(release.content), /V1D_STUDIO_TRACE_DIR|observer|runtime\/v1/u);
+});
 
 test("the listening cue sound is one declared preference and one immediate control", () => {
   assert.deepEqual(preferencesStatusContract.fields.map(({ name }) => name),

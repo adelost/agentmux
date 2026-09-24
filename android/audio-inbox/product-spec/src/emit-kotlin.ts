@@ -11,8 +11,8 @@ import type {
   SurfaceFamily,
 } from "@v1d/product-spec";
 import { linkPagePresentations, linkSettingsActionPresentation } from "./routes.js";
-
-const packageName = "io.agentmux.linkui.product.generated";
+import { emitPortBindings, emitPortData, emitPortTrace } from "./emit-ports-kotlin.js";
+import { header, kotlinEnumToken } from "./emit-kotlin-utils.js";
 
 /**
  * Link's native emitter: projects the compiled ProductSpec port graph and the
@@ -22,6 +22,11 @@ const packageName = "io.agentmux.linkui.product.generated";
  * by @v1d/product-spec before anything is emitted.
  */
 export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
+  const variantRoot = (variant: "debug" | "release") => {
+    const path = kotlinRoot.replace("/src/main/java/", `/src/${variant}/java/`);
+    if (path === kotlinRoot) throw new Error(`Link Kotlin root has no main source set: ${kotlinRoot}`);
+    return path;
+  };
   return {
     id: "link-native",
     emit(product) {
@@ -42,6 +47,10 @@ export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
           emitPortData(product, catalogSha)),
         artifact("catalog-bindings", `${kotlinRoot}/GeneratedLinkNativeLegoCatalogPortBindings.kt`,
           emitPortBindings(product, catalogSha)),
+        artifact("studio-port-debug", `${variantRoot("debug")}/GeneratedLinkPortTrace.kt`,
+          emitPortTrace(product, catalogSha, true)),
+        artifact("studio-port-release", `${variantRoot("release")}/GeneratedLinkPortTrace.kt`,
+          emitPortTrace(product, catalogSha, false)),
         artifact("state-presentations", `${kotlinRoot}/GeneratedLinkStatePresentations.kt`,
           emitStatePresentations(product.stateAuthorities, fingerprint(product.stateAuthorities))),
         artifact("routes", `${kotlinRoot}/GeneratedLinkRoutes.kt`,
@@ -266,20 +275,6 @@ function stateAuthorityName(authority: CompiledStateAuthority): string {
   return `Generated${kotlinIdentifier(authority.id)}Authority`;
 }
 
-function emitPortData(product: ProductIr, sha: string): string {
-  const ports = [...product.portRegistry.nodePorts, ...product.portRegistry.componentPorts];
-  const entries = ports.map((port) =>
-    `        GeneratedProductPort(GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(port.ref)}, ${ownerKind(port.ownerKind)}, "${port.ownerId}", "${port.typeRef}", "${port.portId}", ${direction(port.direction)}, "${port.contractRef}", ${boundary(port.boundary)}, ${port.required}, ${purpose(port.purpose)})`
-  ).join(",\n");
-  return `${header("the portable native-Lego port registry", sha)}
-internal object GeneratedLinkNativeLegoPortData {
-    val ports: List<GeneratedProductPort> = listOf(
-${entries}
-    )
-}
-`;
-}
-
 /**
  * Screen identity as an EXHAUSTIVE `when` over LinkRoute, not a map.
  *
@@ -339,19 +334,6 @@ data class GeneratedLinkChromeAction(
 
 object GeneratedLinkChromeActions {
 ${chromeAction}
-}
-`;
-}
-
-function emitPortBindings(product: ProductIr, sha: string): string {
-  const entries = product.portRegistry.bindings.map((binding) =>
-    `        GeneratedProductPortBinding(${bindingKind(binding.kind)}, GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(binding.from)}, GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(binding.to)}, ${purpose(binding.purpose)})`
-  ).join(",\n");
-  return `${header("the portable native-Lego port bindings", sha)}
-internal object GeneratedLinkNativeLegoPortBindings {
-    val bindings: List<GeneratedProductPortBinding> = listOf(
-${entries}
-    )
 }
 `;
 }
@@ -473,50 +455,10 @@ ${trees}
 `;
 }
 
-function header(source: string, sha: string): string {
-  return `// GENERATED FILE. DO NOT EDIT.
-// GENERATED FROM ${source}
-// Product declarations SHA-256: ${sha}
-package ${packageName}
-`;
-}
-
 function kotlinIdentifier(id: string): string {
   return id.split(/[^A-Za-z0-9]+/u).filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join("");
-}
-
-function kotlinEnumToken(id: string): string {
-  return id.replace(/[^A-Za-z0-9]+/gu, "_").toUpperCase();
-}
-
-function ownerKind(kind: "node" | "component"): string {
-  return `GeneratedProductPortOwnerKind.${kind === "node" ? "NODE" : "COMPONENT"}`;
-}
-function direction(value: "input" | "output"): string {
-  return `GeneratedProductPortDirection.${value === "input" ? "INPUT" : "OUTPUT"}`;
-}
-function boundary(value: string): string {
-  const token = kotlinEnumToken(value);
-  if (!["PRESENTATION", "UI_EVENT", "SERVICE_INTERNAL"].includes(token)) {
-    throw new Error(`unknown port boundary '${value}'`);
-  }
-  return `GeneratedProductPortBoundary.${token}`;
-}
-function purpose(value: string): string {
-  const token = kotlinEnumToken(value);
-  if (!["DATA", "DEMAND", "CONTEXT"].includes(token)) {
-    throw new Error(`unknown port purpose '${value}'`);
-  }
-  return `GeneratedProductPortPurpose.${token}`;
-}
-function bindingKind(kind: string): string {
-  const token = kotlinEnumToken(kind);
-  if (!["NODE_INPUT", "COMPONENT_INPUT", "COMPONENT_EVENT"].includes(token)) {
-    throw new Error(`unknown binding kind '${kind}'`);
-  }
-  return `GeneratedProductPortBindingKind.${token}`;
 }
 
 function artifact(id: string, path: string, content: string): OutputArtifact {

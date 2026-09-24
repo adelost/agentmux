@@ -8,8 +8,8 @@ import {
   logOutputManifest,
   productJsonEmitter,
   writeOutputManifest,
-  type ProductEmitterPlugin,
-} from "@v1d/product-spec";
+} from "@v1d/product-spec/node";
+import type { ProductEmitterPlugin } from "@v1d/product-spec";
 import { domainGraphEmitter, emitContractTypesKotlin } from "@v1d/product-emit/core";
 import { linkCapabilityTable } from "./capabilities.js";
 import {
@@ -31,6 +31,8 @@ const jsonPath = "product-spec/generated/link-product.json";
 const domainsPath = "product-spec/generated/link-product.domains.mmd";
 const graphPath = "product-spec/generated/link-product.graph.mmd";
 const kotlinRoot = "link-ui/src/main/java/io/agentmux/linkui/product/generated";
+const kotlinDebugRoot = "link-ui/src/debug/java/io/agentmux/linkui/product/generated";
+const kotlinReleaseRoot = "link-ui/src/release/java/io/agentmux/linkui/product/generated";
 const check = process.argv.includes("--check");
 
 const productSpecPackage = JSON.parse(await readFile(productSpecPackagePath, "utf8")) as { version?: unknown };
@@ -45,7 +47,7 @@ const manifest = buildOutputManifest(
     linkControlTimingEmitter(),
     domainGraphEmitter({ domains: domainsPath, full: graphPath, productJsonPath: jsonPath }, linkCapabilityTable),
   ],
-  [jsonPath, domainsPath, graphPath, kotlinRoot],
+  [jsonPath, domainsPath, graphPath, kotlinRoot, kotlinDebugRoot, kotlinReleaseRoot],
 );
 
 if (check) {

@@ -38,3 +38,8 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
+// Studio gives each focused recording a new directory, so Gradle must rerun its named test.
+tasks.withType<Test>().configureEach {
+    inputs.property("studioTraceDir", providers.environmentVariable("V1D_STUDIO_TRACE_DIR").orElse(""))
+}

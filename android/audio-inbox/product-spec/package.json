@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@v1d/circlekit-assets": "https://circlekit.pages.dev/npm/v1d/circlekit-assets/0.3.97/v1d-circlekit-assets-0.3.97.tgz",
-    "@v1d/product-emit": "https://circlekit.pages.dev/npm/v1d/product-emit/0.1.42/v1d-product-emit-0.1.42.tgz",
-    "@v1d/product-spec": "https://circlekit.pages.dev/npm/v1d/product-spec/0.3.64/v1d-product-spec-0.3.64.tgz"
+    "@v1d/product-emit": "https://circlekit.pages.dev/npm/v1d/product-emit/0.1.49/v1d-product-emit-0.1.49.tgz",
+    "@v1d/product-spec": "https://circlekit.pages.dev/npm/v1d/product-spec/0.3.78/v1d-product-spec-0.3.78.tgz"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
