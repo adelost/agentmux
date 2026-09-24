@@ -6,6 +6,7 @@ import io.agentmux.linkui.product.generated.GeneratedProductPortBindingKind
 import io.agentmux.linkui.product.generated.GeneratedProductPortDirection
 import io.agentmux.linkui.product.generated.GeneratedProductPortId
 import io.agentmux.linkui.product.generated.GeneratedProductPortOwnerKind
+import io.agentmux.linkui.product.generated.GeneratedLinkPortTrace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -228,6 +229,7 @@ internal class LinkProductPortRuntime(
         val result = requireNotNull(inputSinks[port.id]) {
             "Missing native input binding for required port ${port.id.value}"
         }.sink(event)
+        GeneratedLinkPortTrace.returned(port.id)
         publishConnected(binding, event, ProductPortQuality.LIVE)
         return result as R
     }
@@ -241,6 +243,7 @@ internal class LinkProductPortRuntime(
         val result = requireNotNull(inputSinks[binding.to]) {
             "Missing native input binding for required port ${binding.to.value}"
         }.sink(event)
+        GeneratedLinkPortTrace.returned(port.id)
         publishConnected(binding, event, ProductPortQuality.LIVE)
         return result as R
     }

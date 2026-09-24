@@ -22,6 +22,11 @@ const packageName = "io.agentmux.linkui.product.generated";
  * by @v1d/product-spec before anything is emitted.
  */
 export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
+  const variantRoot = (variant: "debug" | "release") => {
+    const path = kotlinRoot.replace("/src/main/java/", `/src/${variant}/java/`);
+    if (path === kotlinRoot) throw new Error(`Link Kotlin root has no main source set: ${kotlinRoot}`);
+    return path;
+  };
   return {
     id: "link-native",
     emit(product) {
@@ -42,6 +47,10 @@ export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
           emitPortData(product, catalogSha)),
         artifact("catalog-bindings", `${kotlinRoot}/GeneratedLinkNativeLegoCatalogPortBindings.kt`,
           emitPortBindings(product, catalogSha)),
+        artifact("studio-port-debug", `${variantRoot("debug")}/GeneratedLinkPortTrace.kt`,
+          emitPortTrace(product, catalogSha, true)),
+        artifact("studio-port-release", `${variantRoot("release")}/GeneratedLinkPortTrace.kt`,
+          emitPortTrace(product, catalogSha, false)),
         artifact("state-presentations", `${kotlinRoot}/GeneratedLinkStatePresentations.kt`,
           emitStatePresentations(product.stateAuthorities, fingerprint(product.stateAuthorities))),
         artifact("routes", `${kotlinRoot}/GeneratedLinkRoutes.kt`,
@@ -63,6 +72,43 @@ export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
       ];
     },
   };
+}
+
+function emitPortTrace(product: ProductIr, sha: string, debug: boolean): string {
+  const prefix = header("the typed Link port-return boundary", sha);
+  if (!debug) return `${prefix}
+internal object GeneratedLinkPortTrace {
+    fun returned(@Suppress("UNUSED_PARAMETER") port: GeneratedProductPortId) = Unit
+}
+`;
+  const returnedRefs = [...new Set(product.portRegistry.bindings.map((binding) =>
+    binding.kind === "component-event" ? binding.from : binding.to))].sort();
+  const rows = returnedRefs.map((ref) => {
+    const event = JSON.stringify({ kind: "port", portRef: ref, phase: "returned" });
+    return `        GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(ref)} -> ${JSON.stringify(event)}`;
+  }).join("\n");
+  return `${prefix}
+/** Test recording and an optional debug observer share the same generated port identities. */
+internal object GeneratedLinkPortTrace {
+    private val output = System.getenv("V1D_STUDIO_TRACE_DIR")?.takeIf { it.isNotBlank() }?.let {
+        java.io.File(it, "kotlin-" + java.util.UUID.randomUUID() + ".jsonl")
+    }
+    @Volatile var observer: ((String) -> Unit)? = null
+
+    @Synchronized fun returned(port: GeneratedProductPortId) {
+        val row = when (port) {
+${rows}
+            else -> return
+        }
+        try { output?.appendText(row + "\\n") } catch (failure: Exception) {
+            System.err.println("Link Studio test trace unavailable: " + failure.javaClass.simpleName)
+        }
+        try { observer?.invoke(row) } catch (failure: Exception) {
+            System.err.println("Link Studio observation unavailable: " + failure.javaClass.simpleName)
+        }
+    }
+}
+`;
 }
 
 function emitCatalogTypes(sha: string): string {

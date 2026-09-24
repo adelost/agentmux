@@ -18,11 +18,33 @@ import com.adelost.ringkit.ports.CirclePortRole
 import com.adelost.ringkit.ports.CirclePortStatus
 import com.adelost.ringkit.ports.needsAttention
 import com.adelost.ringkit.ports.status
+import io.agentmux.linkui.product.generated.GeneratedLinkPortTrace
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkProductGraphTotalityTest {
+    @Test
+    fun aRealGraphCommandRecordsOneReturnedPortWithoutRecordingStatePublication() {
+        val rows = mutableListOf<String>()
+        GeneratedLinkPortTrace.observer = { rows += it }
+        val graph = graph(
+            state = MutableStateFlow(LinkState()),
+            sinks = LinkProductSinks({}, {}, {}, {}, {}, {}, {}, {}),
+        )
+        try {
+            assertEquals(emptyList<String>(), rows)
+            graph.onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.BEGIN))
+            assertEquals(
+                listOf("""{"kind":"port","portRef":"capture.talk.command","phase":"returned"}"""),
+                rows,
+            )
+        } finally {
+            graph.close()
+            GeneratedLinkPortTrace.observer = null
+        }
+    }
+
     @Test
     fun servicesFlowThroughFinalPresentationsIntoComponents() {
         val state = MutableStateFlow(LinkState())
