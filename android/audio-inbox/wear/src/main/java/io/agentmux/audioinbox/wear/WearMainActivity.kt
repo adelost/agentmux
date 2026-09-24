@@ -32,6 +32,7 @@ import io.agentmux.linkui.LinkWatchScreen
 import io.agentmux.linkui.withHistoryPreview
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkRoute
+import io.agentmux.linkui.product.LinkRouteOpenEvent
 import io.agentmux.linkui.product.LinkStudioBootstrap
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -120,6 +121,15 @@ class WearMainActivity : ComponentActivity() {
         microphoneGranted.value = hasMicrophonePermission()
         if (::controller.isInitialized && !qaPreviewActive) refreshHandoff()
         if (::updater.isInitialized) updater.resumeInstallerStatus()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (BuildConfig.DEBUG && qaPreviewActive &&
+            intent.getStringExtra("qa_action") == "open_settings"
+        ) {
+            productGraph.onSettingsActionOpen(LinkRouteOpenEvent(LinkRoute.SETTINGS))
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
