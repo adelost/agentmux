@@ -34,7 +34,39 @@ const workspaceTrustMenu = `
  Enter to confirm · Esc to cancel
 `;
 
+const codexUpdateMenu = `
+  Update available! 0.155.1 -> 0.156.1
+› 1. Update now (runs npm install)
+  2. Skip
+  3. Skip until next version
+  Press enter to continue
+`;
+
+const pausedGoalMenu = `
+  Resume paused goal?
+  Goal: Sample task, currently paused
+› 1. Resume goal   Mark it active and continue when idle
+  2. Leave paused  Keep it paused; use /goal resume later
+  Press enter to confirm or esc to go back
+`;
+
 feature("blocking prompt recognition", () => {
+  component("Codex startup skips an update without installing it", {
+    when: ["the update menu is active", () => findBlockingPrompt(codexUpdateMenu)],
+    then: ["Skip, not Update now, is selected", prompt =>
+      expect(prompt).toMatchObject({ name: "codex-update", keys: "Down Enter" })],
+  });
+  component("Codex startup preserves an existing paused goal", {
+    when: ["the goal resume menu is active", () => findBlockingPrompt(pausedGoalMenu)],
+    then: ["Leave paused is selected", prompt =>
+      expect(prompt).toMatchObject({ name: "codex-paused-goal", keys: "Down Enter" })],
+  });
+  component("an old goal menu in scrollback cannot activate navigation", {
+    when: ["the menu is followed by a real composer", () => findBlockingPrompt(
+      `${pausedGoalMenu}\n› Ask Codex to do anything\n`,
+    )],
+    then: ["no menu action is inferred", prompt => expect(prompt).toBeNull()],
+  });
   component("additional safety review keeps waiting without changing model", {
     when: ["the exact active provider menu is visible", () => findBlockingPrompt(activeSafetyReview)],
     then: ["the non-bypass continuation choice is selected", (prompt) => {

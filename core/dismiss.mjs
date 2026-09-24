@@ -41,7 +41,58 @@ function activeWorkspaceTrustCursor(text) {
   return cursor === exit && trust === exit + 1 ? "exit-above-trust" : null;
 }
 
+/** WHAT: Identifies the selected option in a live two-choice Codex startup menu. WHY: Never confirms a stale menu in scrollback. */
+function activeCodexChoice(text, { header, first, second, footer }) {
+  const lines = tailLines(text, 10);
+  if (!footer.test(lines.at(-1)?.trim() || "")) return null;
+  if (!lines.some(line => header.test(line))
+      || !lines.some(line => first.test(line))
+      || !lines.some(line => second.test(line))) return null;
+  const selected = lines.find(line => /^\s*[›❯]\s*[12]\.\s/u.test(line)) || "";
+  if (first.test(selected)) return "first";
+  if (second.test(selected)) return "second";
+  return null;
+}
+
+const UPDATE_MENU = {
+  header: /Update available!/u,
+  first: /^\s*[›❯]?\s*1\.\s*Update now\b/u,
+  second: /^\s*[›❯]?\s*2\.\s*Skip\s*$/u,
+  footer: /^Press enter to continue$/iu,
+};
+const PAUSED_GOAL_MENU = {
+  header: /Resume paused goal\?/u,
+  first: /^\s*[›❯]?\s*1\.\s*Resume goal\b/u,
+  second: /^\s*[›❯]?\s*2\.\s*Leave paused\b/u,
+  footer: /^Press enter to confirm or esc to go back$/iu,
+};
+
+/** WHAT: Maps active TUI menus to safe choices. WHY: Keeps startup from updating Codex or resuming unrelated work. */
 export const BLOCKING_PROMPTS = [
+  {
+    name: "codex-update",
+    match: text => activeCodexChoice(text, UPDATE_MENU) === "first",
+    keys: "Down Enter",
+    waitMs: 1000,
+  },
+  {
+    name: "codex-update",
+    match: text => activeCodexChoice(text, UPDATE_MENU) === "second",
+    keys: "Enter",
+    waitMs: 1000,
+  },
+  {
+    name: "codex-paused-goal",
+    match: text => activeCodexChoice(text, PAUSED_GOAL_MENU) === "first",
+    keys: "Down Enter",
+    waitMs: 1000,
+  },
+  {
+    name: "codex-paused-goal",
+    match: text => activeCodexChoice(text, PAUSED_GOAL_MENU) === "second",
+    keys: "Enter",
+    waitMs: 1000,
+  },
   {
     name: "trust-directory",
     // A configured coding pane always runs inside agentmux's own .agents/N

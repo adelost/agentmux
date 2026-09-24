@@ -76,4 +76,26 @@ feature("Codex startup readiness", () => {
       expect(ctx.clock).toBeGreaterThanOrEqual(130_000);
     }],
   });
+
+  unit("dismisses update and paused-goal menus without activating the old goal", {
+    given: ["the two startup menus before an empty Luna composer", () => ({
+      stage: 0, keys: [], screens: [
+        "Update available! 0.155.1 -> 0.156.1\n› 1. Update now\n  2. Skip\nPress enter to continue",
+        "Resume paused goal?\nGoal: Old work\n› 1. Resume goal\n  2. Leave paused\nPress enter to confirm or esc to go back",
+        "› Ask Codex to do anything\n  gpt-6-luna medium · /workspace",
+      ],
+    })],
+    when: ["waiting for the composer", async ctx => waitForCodexUiReady({
+      tmux: {
+        captureScreen: async () => ctx.screens[ctx.stage],
+        sendKeys: async (_target, keys) => { ctx.keys.push(keys); ctx.stage++; },
+        sendLiteral: async () => {}, sendEscape: async () => { throw new Error("unexpected Escape"); },
+      },
+      target: "skyvw:.4", agentName: "skyvw", pane: 4, delay: async () => {},
+    })],
+    then: ["startup reaches Luna with both safe choices", (ready, ctx) => {
+      expect(ready).toBe(true);
+      expect(ctx.keys).toEqual(["Down Enter", "Down Enter"]);
+    }],
+  });
 });
