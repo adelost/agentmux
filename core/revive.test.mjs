@@ -155,6 +155,48 @@ feature("planRevive — the 2026-07-10 crash as known-answer fixture", () => {
   });
 });
 
+// The 2026-09-25 18:45 reboot, from the ledger: skydive:0 was mid-turn
+// (prompt 18:13), skybar:4 had sat on a turn its quota limit cut off on
+// 2026-09-16 06:03 and was woken anyway. The 18:48 reboot then cut off that
+// wake's own brief turn (18:47:28), which the old plan would revive again.
+const BOOT_0925 = Date.parse("2026-09-25T16:45:59Z");
+const REBOOT_0925 = Date.parse("2026-09-25T16:48:22Z");
+
+feature("planRevive — only turns the reboot cut off", () => {
+  unit("a turn abandoned days before boot is not revived", {
+    given: ["skydive:0 mid-turn, skybar:4 unfinished since 09-16", () => planRevive({
+      events: [{ ts: "2026-09-25T16:13:00Z", event: "prompt", session: "skydive", pane: 0 }],
+      bootMs: BOOT_0925,
+      panes: [{ agent: "skydive", pane: 0 }, { agent: "skybar", pane: 4 }],
+      statuses: new Map([["skydive:0", "idle"], ["skybar:4", "idle"]]),
+      journalInterruptions: [{
+        agent: "skybar", pane: 4, interruptedAtMs: Date.parse("2026-09-16T04:03:00Z"), source: "codex-jsonl",
+      }],
+    })],
+    when: ["planning", (p) => p],
+    then: ["only skydive:0 is briefed", (p) => {
+      expect(p.briefs.map((b) => `${b.agent}:${b.pane}`)).toEqual(["skydive:0"]);
+    }],
+  });
+
+  unit("a revive brief cut off by the next reboot is not revived again", {
+    given: ["skybar:4's own 18:47 brief turn left unfinished at 18:48", () => planRevive({
+      events: [{
+        ts: "2026-09-25T16:47:28.871Z", event: "revive_brief", session: "skybar", pane: 4,
+        interruptedAtMs: Date.parse("2026-09-16T04:03:00Z"),
+      }],
+      bootMs: REBOOT_0925,
+      panes: [{ agent: "skybar", pane: 4 }],
+      statuses: new Map([["skybar:4", "idle"]]),
+      journalInterruptions: [{
+        agent: "skybar", pane: 4, interruptedAtMs: Date.parse("2026-09-25T16:47:28.379Z"), source: "codex-jsonl",
+      }],
+    })],
+    when: ["planning", (p) => p],
+    then: ["no brief", (p) => expect(p.briefs).toEqual([])],
+  });
+});
+
 feature("boot time + brief text", () => {
   unit("btime parses from /proc/stat shape", {
     given: ["a stat excerpt", () => "cpu 1 2 3\nbtime 1783702756\nprocesses 999"],

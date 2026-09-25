@@ -40,7 +40,18 @@ export function parseBootMs(procStat) {
   return m ? Number(m[1]) * 1000 : null;
 }
 
-/** WHAT: Maps ledger, statuses, and journals to the panes needing a resume-brief. WHY: Keeps recovery evidence-based, never age- or screen-based. */
+// Mattias 2026-09-25, after skybar:4/6 were woken on a turn left unfinished on
+// 2026-09-16: "ni får absolut inte väcka sessioner som varit döda jättelänge!!!
+// Det kostar massor med tokens" / "i alla fall inte när jag inte skrivit i dem".
+// An unfinished turn older than this before boot was abandoned (quota limit,
+// dead session), not cut off by the reboot, so it is never revived.
+export const REVIVE_WINDOW_MS = 2 * 60 * 60_000;
+// A revive brief the next boot cuts off is the tool's own prompt, not the
+// human's: reviving it again would wake the pane on every boot forever. Its
+// receipt is logged after delivery, so the turn may start just before it.
+const BRIEF_ECHO_MS = 2 * 60_000;
+
+/** WHAT: Maps ledger, statuses, and journals to the panes needing a resume-brief. WHY: Keeps recovery evidence-based and limited to turns the reboot actually cut off. */
 export function planRevive({
   events = [],
   bootMs,
@@ -56,6 +67,7 @@ export function planRevive({
   const activeAfterBoot = new Set();
   const manualStops = new Map();
   const activity = new Map();
+  const briefTimes = new Map();
   for (const e of events) {
     const ms = Date.parse(e.ts);
     if (!Number.isFinite(ms)) continue;
@@ -81,6 +93,7 @@ export function planRevive({
     if (e?.event === "prompt" || e?.event === "stop") {
       activity.set(key, Math.max(activity.get(key) || 0, ms));
     }
+    if (e?.event === "revive_brief") briefTimes.set(key, [...(briefTimes.get(key) || []), ms]);
     if (e?.event === "revive_brief" && ms >= bootMs) {
       const interruptedAtMs = Number(e.interruptedAtMs);
       if (Number.isFinite(interruptedAtMs)) {
@@ -128,7 +141,10 @@ export function planRevive({
     if (status === "working" || status === "resume") continue;
     briefs.push(interruption);
   }
-  return { briefs };
+  const cutOffByBoot = (brief) => brief.interruptedAtMs >= bootMs - REVIVE_WINDOW_MS;
+  const isOwnBrief = (brief) => (briefTimes.get(`${brief.agent}:${brief.pane}`) || [])
+    .some((ms) => Math.abs(brief.interruptedAtMs - ms) <= BRIEF_ECHO_MS);
+  return { briefs: briefs.filter((brief) => cutOffByBoot(brief) && !isOwnBrief(brief)) };
 }
 
 /** WHAT: Filters which panes to revive. WHY: Keeps selective recovery the default, never the storm. */
