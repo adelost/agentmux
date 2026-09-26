@@ -50,12 +50,12 @@ feature("nightly context budget", () => {
         fx.ctx.state = createState(statePath);
         const other = createState(statePath), acquire = fx.deps.queue.acquireSessionLease;
         let checks = 0;
-        fx.change({ tokens: 120_000 });
+        fx.change({ tokens: 250_000 });
         fx.deps.queue.acquireSessionLease = (...args) => ++checks === 1 ? null : acquire(...args);
         fx.deps.sleep = async ms => {
           if (ms === 2_000) other.set("context_maintenance_by_pane_v1", { "claw:4": {
             sessionId: "same-session", cursor: { positions: { [journal]: 0 } }, status,
-            beforeTokens: 120_000, reason: status === "FAILED" ? "provider-usage-limited" : null,
+            beforeTokens: 250_000, reason: status === "FAILED" ? "provider-usage-limited" : null,
           } });
         };
         try { return { result: await runNightlyCompact(fx.ctx, {}, fx.deps), calls: fx.calls() }; }
@@ -86,13 +86,13 @@ feature("nightly context budget", () => {
       }],
     });
   }
-  unit("selects 227k at 28 percent and 100k at 10 percent without changing the daytime rule", {
-    when: ["checking absolute context tokens", () => [facts(), { ...facts(), tokens: 100_000, percent: 10 }].map((item) => nightlyCompactDecision(item, policy))],
+  unit("selects 227k at 28 percent and 211k at 10 percent without changing the daytime rule", {
+    when: ["checking absolute context tokens", () => [facts(), { ...facts(), tokens: 211_000, percent: 10 }].map((item) => nightlyCompactDecision(item, policy))],
     then: ["both are eligible", (result) => expect(result).toEqual([null, null])],
   });
   unit("keeps active, uncertain, unsupported and already attempted sessions untouched", {
     when: ["checking all unsafe axes", () => [
-      { tokens: 80_000 }, { tokens: null }, { idleMs: 49 * 60_000 }, { idleMs: null },
+      { tokens: 210_000 }, { tokens: null }, { idleMs: 49 * 60_000 }, { idleMs: null },
       { status: "working" }, { status: "unknown" }, { status: "permission" },
       { composerEmpty: false }, { queued: 1 }, { queued: null }, { running: false },
       { sessionId: null }, { backend: "native" }, { engine: "kimi" },
@@ -114,13 +114,13 @@ feature("nightly context budget", () => {
   });
   unit("keeps the configuration through regeneration and rejects invalid units", {
     when: ["parsing the user-owned source", () => {
-      const source = "dream:\n  agent: claw\n  pane: 0\n  compact: {maxTokens: 80000, idleMinutes: 30}\nagents:\n  claw: {dir: /repo, panes: 1}\n";
+      const source = "dream:\n  agent: claw\n  pane: 0\n  compact: {maxTokens: 210000, idleMinutes: 30}\nagents:\n  claw: {dir: /repo, panes: 1}\n";
       const parsed = parseConfig(source);
       return { parsed, yaml: generateAgentsYaml(parsed.agents, new Map(), new Map(), null, null, parsed.dream) };
     }],
     then: ["the policy remains data, not a dropped generator field", ({ parsed, yaml }) => {
       expect(parsed.dream.compact).toEqual({ ...policy, idleMinutes: 30 });
-      expect(yaml).toContain("maxTokens: 80000");
+      expect(yaml).toContain("maxTokens: 210000");
       expect(() => nightlyCompactPolicy({ maxBytes: 80000 })).toThrow();
       expect(nightlyCompactPolicy(false).enabled).toBe(false);
     }],

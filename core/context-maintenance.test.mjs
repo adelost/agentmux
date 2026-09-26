@@ -161,10 +161,10 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
       try { expect(result.ok).toBe(true); expect(ctx.calls).toEqual(["compact"]); } finally { ctx.cleanup(); }
     }],
   });
-  component("a cold 88k pane compacts before its first queued prompt", {
-    given: ["an exact idle session with 88k tokens after 24 hours", () => {
+  component("a cold 250k pane compacts before its first queued prompt", {
+    given: ["an exact idle session with 250k tokens after 24 hours", () => {
       const ctx = fixture();
-      ctx.agent.getContext = async () => ({ tokens: 88_000 });
+      ctx.agent.getContext = async () => ({ tokens: 250_000 });
       return ctx;
     }],
     when: ["admitting the first cold delivery", ctx => ctx.maintenance.beforeWork({ agentName: "claw", pane: 2, id: "first" })],
@@ -216,7 +216,7 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
     given: ["an idle large context with a mocked provider", () => fixture()],
     when: ["compacting and checking again through a new controller", async ctx => {
       await ctx.maintenance.run("claw", 2);
-      ctx.agent.getContext = async () => ({ tokens: 120_000 });
+      ctx.agent.getContext = async () => ({ tokens: 250_000 });
       await createContextMaintenance(ctx).run("claw", 2, { cold: true, leaseHeld: true });
     }],
     then: ["only one provider call occurred", (_, ctx) => { try { expect(ctx.calls).toEqual(["compact"]); } finally { ctx.cleanup(); } }],

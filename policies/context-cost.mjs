@@ -6,16 +6,20 @@ import { choice, decide, defineDecisionTable, on } from "@v1d/product-spec";
 // a warm cache, while the next prompt after 60 re-bills the whole context. The
 // 80k floor sits just above a freshly compacted session (system prompt, tools
 // and summary), so one message after a compact does not trigger another.
+//
+// A cold cache (idle past the hour) makes the compact itself re-read the whole
+// context C: about 1.25C plus a ~30k summary, then 2 x 65k to write the small
+// context, against 2C for simply sending the prompt. That only pays below
+// C = 210k on the first message, so a cold context is compacted from 210k.
+// Mattias: "måste du vara helt säker på att det skulle minska kostnaden".
 /** WHAT: Defines context-cost thresholds. WHY: Keeps idle and wake decisions on the same documented budget. */
-// A pane idle past the cache's hour has a cold cache: its next prompt re-bills
-// the whole context, so it is compacted before work, not only after 24 hours.
-export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 80_000, coldMaxTokens: 80_000,
+export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 80_000, coldMaxTokens: 210_000,
   idleMs: 50 * 60_000, coldMs: 60 * 60_000 });
 
 /** WHAT: Reads operator cost-policy overrides. WHY: Keeps daytime and cold-wake thresholds consistent after restart. */
 export function readContextCostPolicy(env = process.env) {
   const maxTokens = Number(env.AUTO_COMPACT_MAX_TOKENS || CONTEXT_COST_POLICY.maxTokens);
-  const policy = { maxTokens, coldMaxTokens: Math.min(maxTokens, CONTEXT_COST_POLICY.coldMaxTokens),
+  const policy = { maxTokens, coldMaxTokens: CONTEXT_COST_POLICY.coldMaxTokens,
     idleMs: Number(env.AUTO_COMPACT_MIN_IDLE_MS || CONTEXT_COST_POLICY.idleMs),
     coldMs: Number(env.AMUX_COLD_CONTEXT_IDLE_MS || CONTEXT_COST_POLICY.coldMs) };
   if (Object.values(policy).some(value => !Number.isSafeInteger(value) || value <= 0)) throw new Error("context-cost thresholds must be positive integers");
@@ -47,7 +51,7 @@ export const contextCostRules = defineDecisionTable(contextCostDeclaration);
 /** WHAT: Maps observed context facts to a traceable decision cell. WHY: Keeps numeric thresholds outside effects and unknown values outside permissive defaults. */
 export function contextCostDecision({ tokens, idleMs, cold = false, safe = false, attempt = "NEW" }, policy = CONTEXT_COST_POLICY) {
   const ageLimit = cold ? policy.coldMs : policy.idleMs;
-  const tokenLimit = cold ? Math.min(policy.maxTokens, policy.coldMaxTokens ?? policy.maxTokens) : policy.maxTokens;
+  const tokenLimit = cold ? policy.coldMaxTokens ?? policy.maxTokens : policy.maxTokens;
   const need = (Number.isFinite(tokens) && tokens <= tokenLimit) || (Number.isFinite(idleMs) && idleMs < ageLimit)
     ? "NONE" : !Number.isFinite(tokens) || !Number.isFinite(idleMs) ? "UNKNOWN" : "COMPACT";
   return decide(contextCostRules, { need, readiness: safe ? "SAFE" : "UNSAFE", attempt });
