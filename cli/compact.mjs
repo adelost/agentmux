@@ -13,7 +13,7 @@ const COMPACT_MIN_TOKENS = CONTEXT_COST_POLICY.maxTokens;
 /** WHAT: Routes manual and nightly compaction. WHY: Keeps explicit targeting separate from absolute-token admission. */
 export async function cmdCompact(ctx, flags = {}, positional = []) {
   if (flags.help || flags.h) {
-    console.log("Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --nightly [AGENT -p N] [--dry]\nBulk default: over 100000 tokens. Percent thresholds are not supported.");
+    console.log(`Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --nightly [AGENT -p N] [--dry]\nBulk default: over ${COMPACT_MIN_TOKENS} tokens. Percent thresholds are not supported.`);
     return { help: true };
   }
   if (flags.nightly) {

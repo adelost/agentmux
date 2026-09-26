@@ -92,7 +92,7 @@ feature("nightly context budget", () => {
   });
   unit("keeps active, uncertain, unsupported and already attempted sessions untouched", {
     when: ["checking all unsafe axes", () => [
-      { tokens: 80_000 }, { tokens: null }, { idleMs: 59 * 60_000 }, { idleMs: null },
+      { tokens: 80_000 }, { tokens: null }, { idleMs: 49 * 60_000 }, { idleMs: null },
       { status: "working" }, { status: "unknown" }, { status: "permission" },
       { composerEmpty: false }, { queued: 1 }, { queued: null }, { running: false },
       { sessionId: null }, { backend: "native" }, { engine: "kimi" },

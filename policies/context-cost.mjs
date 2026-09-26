@@ -1,8 +1,14 @@
 import { choice, decide, defineDecisionTable, on } from "@v1d/product-spec";
 
+// Mattias 2026-09-26: "sänka gränsen så att alla paneler har varit idle i 50
+// minuter så kör man kompakt nästan oavsett och sen så finns det ett kvitto".
+// Claude's prompt cache lives one hour: compacting after 50 quiet minutes reads
+// a warm cache, while the next prompt after 60 re-bills the whole context. The
+// 80k floor sits just above a freshly compacted session (system prompt, tools
+// and summary), so one message after a compact does not trigger another.
 /** WHAT: Defines context-cost thresholds. WHY: Keeps idle and wake decisions on the same documented budget. */
-export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 100_000, coldMaxTokens: 80_000,
-  idleMs: 60 * 60_000, coldMs: 24 * 60 * 60_000 });
+export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 80_000, coldMaxTokens: 80_000,
+  idleMs: 50 * 60_000, coldMs: 24 * 60 * 60_000 });
 
 /** WHAT: Reads operator cost-policy overrides. WHY: Keeps daytime and cold-wake thresholds consistent after restart. */
 export function readContextCostPolicy(env = process.env) {

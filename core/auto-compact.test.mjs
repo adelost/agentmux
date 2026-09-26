@@ -33,7 +33,7 @@ feature("decideAutoCompactAction — disabled config", () => {
     then: ["no warning starts", result => expect(result.action).toBe("none")],
   });
   unit("percentage alone never authorizes compact, even at 100 percent", {
-    when: ["reading a small or unknown absolute context", () => [90_000, null].map(contextTokens =>
+    when: ["reading a small or unknown absolute context", () => [70_000, null].map(contextTokens =>
       decideAutoCompactAction({ ...base, contextPercent: 100, contextTokens }))],
     then: ["neither observation starts the compact countdown", results => {
       expect(results.map(r => r.action)).toEqual(["none", "none"]);
@@ -62,13 +62,13 @@ feature("decideAutoCompactAction — first crossing (warn)", () => {
   });
 
   unit("exactly at token budget → none", {
-    given: ["100000 tokens idle", () => ({ ...base, contextTokens: 100_000 })],
+    given: ["80000 tokens idle", () => ({ ...base, contextTokens: 80_000 })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["within the requested token budget", (r) => expect(r.action).toBe("none")],
   });
 
   unit("below token budget → none", {
-    given: ["99000 tokens idle", () => ({ ...base, contextTokens: 99_000 })],
+    given: ["79000 tokens idle", () => ({ ...base, contextTokens: 79_000 })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=none", (r) => expect(r.action).toBe("none")],
   });
@@ -143,7 +143,7 @@ feature("decideAutoCompactAction — activity cancels warning", () => {
   unit("context dropped below threshold during grace → cancel", {
     given: ["warning + context=59%", () => {
       const warnings = new Map([[key, { warned_at: base.now - 20_000 }]]);
-      return { ...base, warnings, contextTokens: 99_000 };
+      return { ...base, warnings, contextTokens: 79_000 };
     }],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=cancel", (r) => expect(r.action).toBe("cancel")],
@@ -254,7 +254,7 @@ feature("decideAutoCompactAction — verify-before-refire (no-op /compact)", () 
     given: ["compactFloor=100, context now 30%", () => ({
       ...base,
       contextPercent: 30,
-      contextTokens: 90_000,
+      contextTokens: 70_000,
       compactFloors: new Map([[key, 200_000]]),
     })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
@@ -431,10 +431,10 @@ feature("parseAutoCompactConfig — minIdleMs", () => {
     then: ["parsed to 2 min", (r) => expect(r.minIdleMs).toBe(120_000)],
   });
 
-  unit("minIdleMs defaults to one hour", {
+  unit("minIdleMs defaults to 50 minutes, inside the one-hour prompt cache", {
     given: ["no env", () => ({ env: {} })],
     when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
-    then: ["default 3_600_000 ms", (r) => expect(r.minIdleMs).toBe(3_600_000)],
+    then: ["default 3_000_000 ms", (r) => expect(r.minIdleMs).toBe(3_000_000)],
   });
 });
 
@@ -462,7 +462,7 @@ feature("parseAutoCompactConfig", () => {
     then: ["matches DEFAULT_CONFIG", (r) => {
       expect(r.enabled).toBe(true);
       expect(r.codexEnabled).toBe(true);
-      expect(r.maxTokens).toBe(100_000);
+      expect(r.maxTokens).toBe(80_000);
       expect(r.threshold).toBeUndefined();
       expect(r.graceMs).toBe(DEFAULT_CONFIG.graceMs);
       expect(r.pollMs).toBe(DEFAULT_CONFIG.pollMs);
