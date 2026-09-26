@@ -134,5 +134,15 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       return { ok: false, reason: `context-cost:${error.message}` };
     } finally { lease?.release(); }
   }
-  return { canAttempt, run, beforeWork: ({ agentName, pane, id }) => run(agentName, pane, { cold: true, leaseHeld: true, jobId: id }) };
+  // Mattias 2026-09-26: "ni orkestrerar ju. Jag kan ju inte få en fråga, då
+  // kommer ju panelen låsa sig". Compact before work is best effort: when it
+  // cannot run (unknown evidence, a failed attempt), the work is delivered
+  // anyway. 518 deliveries were held on context-cost:unknown-evidence before.
+  async function beforeWork({ agentName, pane, id }) {
+    const result = await run(agentName, pane, { cold: true, leaseHeld: true, jobId: id });
+    if (result.ok) return result;
+    log(`${agentName}:${pane} delivered without compact: ${result.reason}`);
+    return { ok: true, cell: "delivered-uncompacted", reason: result.reason };
+  }
+  return { canAttempt, run, beforeWork };
 }

@@ -115,7 +115,9 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
       }],
     });
   }
-  component("transport admits the proven empty pane and retains unknown work as pending", {
+  // Mattias 2026-09-26: a held delivery locks the orchestrated pane ("då kommer ju
+  // panelen låsa sig"), so unknown evidence delivers without a compact instead.
+  component("transport admits both the proven empty pane and the unknown pane, spending no compact", {
     given: ["two exact idle sessions with unknown usage and different post-compact histories", () => {
       const empty = fixture(), used = fixture();
       for (const ctx of [empty, used]) {
@@ -136,15 +138,27 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
         now: () => 100_000_000, retryMs: () => 1_000,
         queueEvent: () => {}, notifyBlocked: async job => job,
       });
-      return { accepted: await route(empty), retained: await route(used) };
+      return { accepted: await route(empty), unknown: await route(used) };
     }],
-    then: ["only the empty pane proceeds, with no provider compact", (result, { empty, used }) => {
+    then: ["both proceed, with no provider compact", (result, { empty, used }) => {
       try {
         expect(result.accepted.proceed).toBe(true);
-        expect(result.retained).toMatchObject({ proceed: false, job: { status: "pending", lastReason: "wake-refused:context-cost:unknown-evidence" } });
+        expect(result.unknown.proceed).toBe(true);
         expect(empty.calls).toHaveLength(0);
         expect(used.calls).toHaveLength(0);
       } finally { empty.cleanup(); used.cleanup(); }
+    }],
+  });
+  component("a pane idle past the one-hour cache compacts before its next prompt", {
+    given: ["an exact idle session with 473k tokens, last reply 61 minutes ago", () => {
+      const ctx = fixture();
+      ctx.agent.getContext = async () => ({ tokens: 473_000 });
+      ctx.activityFor = () => 100_000_000 - 61 * 60_000;
+      return ctx;
+    }],
+    when: ["admitting the delivery", ctx => createContextMaintenance(ctx).beforeWork({ agentName: "claw", pane: 2, id: "first" })],
+    then: ["one compact happens before the prompt is admitted", (result, ctx) => {
+      try { expect(result.ok).toBe(true); expect(ctx.calls).toEqual(["compact"]); } finally { ctx.cleanup(); }
     }],
   });
   component("a cold 88k pane compacts before its first queued prompt", {
