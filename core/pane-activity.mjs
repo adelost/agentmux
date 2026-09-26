@@ -3,7 +3,7 @@
 // while idle, so only a real turn may refresh an established session.
 
 import { statSync } from "node:fs";
-import { readLastTurns } from "./jsonl-reader.mjs";
+import { readLastTurns, readTailWindow, parseJsonlText } from "./jsonl-reader.mjs";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
 import { readLastTurnsQwen } from "./qwen-jsonl-reader.mjs";
@@ -21,6 +21,22 @@ const DEFAULT_READERS = Object.freeze({
   kimi: readLastTurnsKimi,
   qwen: readLastTurnsQwen,
 });
+
+// A long Claude turn (screenshots, big tool results) can push its own prompt
+// more than 1 MiB back, so the tail holds no whole turn. Its user and
+// assistant records still carry their own timestamps; housekeeping records
+// (ai-title, mode, pr-link...) are other types, so they cannot fake activity.
+// Without this, skydive:1 (411k tokens) and lsrc:0 (141k) sat idle for hours
+// on 2026-09-26 and nightly compact skipped them as "activity-unknown".
+const CONVERSATION_RECORD_TYPES = new Set(["user", "assistant"]);
+
+function latestClaudeRecordMs(readTail, path, tailBytes) {
+  if (!path) return NaN;
+  const records = parseJsonlText(readTail(path, tailBytes).text);
+  const times = records.filter((record) => CONVERSATION_RECORD_TYPES.has(record?.type))
+    .map((record) => Date.parse(record.timestamp)).filter(Number.isFinite);
+  return times.length ? Math.max(...times) : NaN;
+}
 
 function journalStamp(stat, path) {
   const value = stat(path);
@@ -41,6 +57,7 @@ function recoverColdCodexTurn(reader, paneDir, path, stat) {
 export function latestConversationActivityMs(paneDir, dialect, {
   readers = DEFAULT_READERS,
   stat = statSync,
+  readTail = readTailWindow,
   recoverCodexHistory = false,
 } = {}) {
   const reader = readers[dialect];
@@ -65,7 +82,8 @@ export function latestConversationActivityMs(paneDir, dialect, {
   }
 
   const times = [newest?.timestamp, newest?.endTimestamp].map(Date.parse).filter(Number.isFinite);
-  const turnMs = times.length ? Math.max(...times) : NaN;
+  const turnMs = times.length ? Math.max(...times)
+    : dialect === "claude" ? latestClaudeRecordMs(readTail, result.jsonlFile, tailBytes) : NaN;
   let fileMtimeMs = NaN;
   let fileFullyRead = false;
   if (result.jsonlFile) {

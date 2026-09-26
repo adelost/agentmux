@@ -38,6 +38,35 @@ feature("pane conversation activity", () => {
   });
 });
 
+feature("claude activity inside one long turn", () => {
+  // skydive:1 on 2026-09-26: a 240 MB journal whose last 1 MiB is one turn's
+  // tool results, housekeeping records written later without timestamps.
+  const tail = [
+    { type: "user", timestamp: "2026-09-25T23:06:10.000Z", message: { content: [{ type: "tool_result" }] } },
+    { type: "assistant", timestamp: "2026-09-25T23:07:28.000Z" },
+    { type: "ai-title" }, { type: "mode" }, { type: "pr-link", timestamp: "2026-09-26T04:00:00.000Z" },
+  ].map((record) => JSON.stringify(record)).join("\n");
+  const options = {
+    readers: { claude: () => ({ turns: [], jsonlFile: "/session.jsonl" }) },
+    stat: () => ({ size: 240 * 1024 * 1024, mtimeMs: Date.parse("2026-09-26T04:00:00.000Z") }),
+    readTail: () => ({ text: tail, reachedStart: false }),
+  };
+
+  unit("the last reply starts the idle clock when the turn's prompt is out of reach", {
+    when: ["reading activity", () => latestConversationActivityMs("/pane", "claude", options)],
+    then: ["the assistant record's time, not the housekeeping pr-link", (value) => {
+      expect(value).toBe(Date.parse("2026-09-25T23:07:28.000Z"));
+    }],
+  });
+
+  unit("a tail with only housekeeping stays unknown", {
+    when: ["reading activity", () => latestConversationActivityMs("/pane", "claude", {
+      ...options, readTail: () => ({ text: '{"type":"pr-link","timestamp":"2026-09-26T04:00:00.000Z"}', reachedStart: false }),
+    })],
+    then: ["no activity is fabricated", (value) => expect(value).toBeNull()],
+  });
+});
+
 feature("cold nightly activity recovery", () => {
   function fixture() {
     const jsonlFile = "/session.jsonl";
