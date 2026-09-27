@@ -257,6 +257,22 @@ feature("Claude fleet account rotation", () => {
     }],
   });
 
+  unit("a profile change after preflight cannot restart the old selection", {
+    given: ["another selection is recorded while the target is prepared", () => {
+      const fx = fixture();
+      fx.deps.prepare = () => fx.state.set("account_profile_by_pane_v1", { "lsrc:0": "2" });
+      fx.ctx.agent.restartClaudeAccount = vi.fn();
+      return fx;
+    }],
+    when: ["requesting rotation from the old observation", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["the changed profile is not restarted or overwritten", (result, fx) => {
+      expect(result.status).toBe("BLOCKED");
+      expect(result.rows[0].reason).toBe("rotation-profile-changed");
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:0": "2" });
+    }],
+  });
+
   unit("incomplete journal tails never authorize a restart", {
     given: ["a torn final JSONL row", () => {
       const fx = fixture(); appendFileSync(fx.path, '{"type":'); fx.ctx.agent.restartClaudeAccount = vi.fn(); return fx;

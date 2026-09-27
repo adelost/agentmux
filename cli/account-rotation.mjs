@@ -127,6 +127,11 @@ function blockedProjectRows(panes, reason, culprit = null) {
 function paneChangeReason(before, after, deps) {
   if (!after.allow) return after.reason;
   if (after.mode !== before.mode) return "rotation-pane-changed";
+  if (after.currentProfile?.id !== before.currentProfile?.id) return "rotation-profile-changed";
+  if (after.pending?.sessionId !== before.pending?.sessionId
+      || after.pending?.targetProfileId !== before.pending?.targetProfileId) {
+    return "rotation-transition-changed";
+  }
   if (before.mode === "dormant") return null;
   try { deps.assertContinuity(before.continuity, after.identity); }
   catch (error) { return error.message; }
