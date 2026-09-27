@@ -53,6 +53,29 @@ feature("verified Claude compact", () => {
     }],
   });
 
+  // lsrc:2, 2026-09-27: Claude journaled "You've hit your weekly limit" one
+  // second after /compact, and the caller still waited five minutes.
+  unit("stops at Claude's own refusal and keeps its words", {
+    when: ["Claude journals a failed compact right after the submit", async () => {
+      let clock = 1_000;
+      const result = await verifiedClaudeCompact({
+        agent: { capturePromptEchoCursor: async () => ({ positions: { journal: 10 } }) },
+        agentName: "lsrc", pane: 2, paneDir: "/pane",
+        latestIdentity: () => ({ sessionId: "same-session" }), now: () => clock,
+        sendSlash: async () => ({ delivered: true, via: "command-receipt" }),
+        hasBoundary: () => false,
+        compactRefusal: () => "Error during compaction: You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm)",
+        sleep: async (ms) => { clock += ms; },
+      });
+      return { result, waited: clock - 1_000 };
+    }],
+    then: ["the attempt ends at once as a usage limit with the provider's text", ({ result, waited }) => {
+      expect(result).toEqual({ ok: false, reason: "provider-usage-limited",
+        detail: "Error during compaction: You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm)" });
+      expect(waited).toBe(0);
+    }],
+  });
+
   unit("waits for a delayed exact command receipt instead of rescuing Enter during compact", {
     when: ["Claude persists its compact receipt after the old 600ms cutoff", async () => {
       const calls = [];

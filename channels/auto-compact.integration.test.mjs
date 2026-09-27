@@ -267,6 +267,43 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     }],
   });
 
+  // lsrc:2, 2026-09-27: "Auto-compact in 60s" at 20:28, then silence. The weekly
+  // limit had refused the compact at 20:29 and nobody was told.
+  component("a refused compact is reported once in the pane's channel", {
+    given: ["a pane over the limit whose compact the provider refuses", () => {
+      const { path, dir } = writeYaml();
+      writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000099\n  panes:\n    - name: claude\n      cmd: claude\n  discord:\n    "ch-test": 0\n`);
+      const sends = [];
+      let attempted = false;
+      const contextMaintenance = {
+        canAttempt: () => !attempted,
+        run: async () => {
+          attempted = true;
+          return { ok: false, attempted: true, reason: "context-cost:provider-usage-limited",
+            detail: "Error during compaction: You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm)" };
+        },
+      };
+      const agent = {
+        paneProcessState: async () => ({ running: true }),
+        capturePane: async () => CONTENT.full100,
+        dismissBlockingPrompt: async () => null,
+        sendEnter: async () => {},
+      };
+      const config = { ...DEFAULT_CONFIG, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
+      const ac = createAutoCompact({
+        agent, agentsYamlPath: path, discord: { send: async (_channel, text) => { sends.push(text); } },
+        tmux: async () => ({ stdout: "0 50" }), config, contextMaintenance, log: () => {},
+      });
+      return { ac, sends };
+    }],
+    when: ["four poll ticks", async ({ ac, sends }) => { await ticks(ac, 4); return sends; }],
+    then: ["one warning, one notice with Claude's reason, and nothing more", (sends) => {
+      expect(sends).toHaveLength(2);
+      expect(sends[0]).toContain("Auto-compact in");
+      expect(sends[1]).toBe("⚠ Auto-compact of **test:0** did not run: Error during compaction: You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm). No new attempt until the pane has done new work.");
+    }],
+  });
+
   component("Codex panes use the absolute-token compact request without a false completion notice", {
     given: ["an agent with a claude pane (0) and a codex pane (1), both reading 100%", () => {
       const dir = mkdtempSync(join(tmpdir(), "amux-ac-codex-"));

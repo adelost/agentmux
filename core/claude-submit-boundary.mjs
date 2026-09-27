@@ -2,9 +2,31 @@
 // lands after a durable submit fence and the exact prompt is absent, the old
 // TUI could not ingest that prompt in the superseded epoch.
 
-import { hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
+import { hasJsonlEventAfterCursor, jsonlEventsAfterCursor } from "./jsonl-append-cursor.mjs";
 
 const CLAUDE_PROMPT_CURSOR_KIND = "claude-prompt-events-v1";
+
+const isRefusedCompact = (event, submittedAt) => event?.type === "system"
+  && event.subtype === "local_command" && event.commandRun?.command === "compact"
+  && event.commandOutcome?.kind === "failed"
+  && Date.parse(String(event.timestamp || "")) >= Number(submittedAt);
+
+const commandErrorText = (content) => String(content || "")
+  .replace(/<\/?local-command-std(?:err|out)>/gu, "").trim();
+
+// Claude journals a refused /compact at once ("You've hit your weekly limit");
+// lsrc:2 still waited five minutes for a boundary on 2026-09-27.
+/**
+ * WHAT: Returns Claude's own error text when it refused a /compact after one submit fence.
+ * WHY: Prevents a five-minute wait for a boundary that a refused compact never writes.
+ */
+export function claudeCompactRefusalAfterSubmit(cursor, submittedAt) {
+  if (cursor?.kind !== CLAUDE_PROMPT_CURSOR_KIND
+      || !Number.isFinite(Number(submittedAt))) return null;
+  const refused = jsonlEventsAfterCursor(Object.keys(cursor.positions || {}), cursor)
+    .find((event) => isRefusedCompact(event, submittedAt));
+  return refused ? commandErrorText(refused.content) || "compact refused" : null;
+}
 
 /**
  * WHAT: Returns whether Claude committed a compact epoch after one durable submit fence.

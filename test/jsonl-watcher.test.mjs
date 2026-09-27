@@ -309,7 +309,58 @@ feature("watcher: narrative with multiple images", () => {
   });
 });
 
+const clock = (iso) => new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+const compactSummary = (uuid, timestamp) => ({
+  type: "user", uuid, timestamp, isCompactSummary: true,
+  message: { role: "user", content: "This session is being continued from a compact summary." },
+});
+
 feature("watcher: claude compaction visibility", () => {
+  // skydive:0, 2026-09-27 22:05: the larger startup read after a bridge restart
+  // showed three compacts from 26-27 Sep that the small live read never held,
+  // and they were posted as "3 times while the bridge was offline".
+  unit("a restart's larger read does not re-announce compacts older than the last one seen", {
+    given: ["three compact summaries; the channel has seen only the newest", () => setupWatcher({
+      jsonlLines: [
+        compactSummary("old-a", "2026-09-26T08:41:25.937Z"),
+        compactSummary("old-b", "2026-09-27T06:01:20.614Z"),
+        compactSummary("seen", "2026-09-27T17:50:05.444Z"),
+      ],
+      stateInitial: { watcher_compaction_ids: { "ch-test": ["seen"] } },
+    })],
+    when: ["the restarted watcher reads the pane", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["nothing is posted", (ctx) => {
+      expect(ctx.discord.sends).toHaveLength(0);
+      ctx.cleanup();
+    }],
+  });
+
+  unit("compacts newer than the last one seen are announced once, with their times", {
+    given: ["one seen compact followed by two new ones", () => setupWatcher({
+      jsonlLines: [
+        compactSummary("seen", "2026-09-27T13:08:31.242Z"),
+        compactSummary("new-a", "2026-09-27T15:08:31.242Z"),
+        compactSummary("new-b", "2026-09-27T17:50:05.444Z"),
+      ],
+      stateInitial: { watcher_compaction_ids: { "ch-test": ["seen"] } },
+    })],
+    when: ["watcher.checkPane observes the session twice", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["one notice names both times", (ctx) => {
+      expect(ctx.discord.sends).toHaveLength(1);
+      expect(ctx.discord.sends[0].payload).toBe(
+        `Context compacted 2 times for **testagent:0** (${clock("2026-09-27T15:08:31.242Z")}, ${clock("2026-09-27T17:50:05.444Z")}). Work continues from the latest summary.`,
+      );
+      ctx.cleanup();
+    }],
+  });
+
   unit("announces a new compact summary exactly once", {
     given: ["a Claude compact-summary row on an initialized channel", () => setupWatcher({
       jsonlLines: [{
@@ -328,10 +379,10 @@ feature("watcher: claude compaction visibility", () => {
       await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
       return ctx;
     }],
-    then: ["one completion notice is posted", (ctx) => {
+    then: ["one completion notice with its time is posted", (ctx) => {
       expect(ctx.discord.sends).toHaveLength(1);
       expect(ctx.discord.sends[0].payload).toBe(
-        "Context compacted for **testagent:0**. Work continues from the summary.",
+        `Context compacted for **testagent:0** (${clock("2026-04-30T20:20:00.000Z")}). Work continues from the summary.`,
       );
       ctx.cleanup();
     }],
@@ -745,10 +796,10 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
       await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
       return ctx;
     }],
-    then: ["Discord receives one concise completion notice and no duplicate", (ctx) => {
+    then: ["Discord receives one concise completion notice with its time and no duplicate", (ctx) => {
       expect(ctx.discord.sends).toHaveLength(1);
       expect(ctx.discord.sends[0].payload).toBe(
-        "Context compacted for **testagent:0**. Work continues from the summary.",
+        `Context compacted for **testagent:0** (${clock("2026-05-10T00:00:05.000Z")}). Work continues from the summary.`,
       );
       ctx.cleanup();
     }],
