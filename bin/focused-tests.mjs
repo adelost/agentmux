@@ -48,6 +48,7 @@ const TEST_ALIASES = {
   "channels/auto-compact.mjs": ["channels/auto-compact.integration.test.mjs"],
   "channels/jsonl-watcher.mjs": ["test/jsonl-watcher.test.mjs"],
   "core/compaction-notice.mjs": ["test/jsonl-watcher.test.mjs"],
+  "cli/nightly-compact.mjs": ["test/nightly-compact.test.mjs", "cli/stop-compact.test.mjs"],
   "bin/dream-cron.sh": ["test/morning-cron-logs.test.mjs"],
   "bin/start.sh": ["test/post-boot-revive.integration.test.mjs"],
   "bin/post-boot-revive.sh": ["test/post-boot-revive.integration.test.mjs"],

@@ -128,6 +128,7 @@ import { persistAskCompletionEvidence, readAskLedger } from "../core/ask-ledger.
 import { backfillAskLedgerFromDeliveryQueue } from "../core/ask-ledger-backfill.mjs";
 import { formatAskEntry } from "./ask-format.mjs";
 import { formatAskOverview } from "./ask-overview.mjs";
+import { cmdStop } from "./stop-compact.mjs";
 import {
   formatWorktreeDeps,
   provisionWorktreeDependencies,
@@ -168,20 +169,6 @@ async function cmdAttach(name, ctx) {
     return;
   }
   attachSession(ctx.socket, name);
-}
-
-async function cmdStop(name, ctx) {
-  const configured = getAgent(ctx.configPath, name);
-  if (configured.backend === "native") {
-    console.log(`'${name}' is native and has no tmux session to stop; its sessions remain resumable in AMUX Code.`);
-    return;
-  }
-  if (!(await hasSession(ctx, name))) {
-    console.log(`No tmux session for '${name}'.`);
-    return;
-  }
-  await killSession(ctx, name);
-  console.log(`Stopped '${name}'.`);
 }
 
 async function cmdReconcile(name, ctx) {
@@ -3120,7 +3107,7 @@ export async function dispatch(argv, ctx) {
     }
 
     case "stop": {
-      const { flags, positional } = parseFlags(rest, { all: "boolean" });
+      const { flags, positional } = parseFlags(rest, { all: "boolean", "no-compact": "boolean" });
       // --all → stop bridge + every agent session.
       if (flags.all) return cmdStopAll(ctx);
       // No arg, or 'serve'/'bridge' → stop the bridge in either ownership mode.
@@ -3128,7 +3115,7 @@ export async function dispatch(argv, ctx) {
         return bridgeLifecycle.stop(ctx);
       }
       const name = resolveAgent(positional[0], ctx.configPath);
-      return cmdStop(name, ctx);
+      return cmdStop(name, ctx, { compact: !flags["no-compact"] });
     }
 
     case "reconcile": {
