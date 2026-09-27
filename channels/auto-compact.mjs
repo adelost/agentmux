@@ -8,6 +8,7 @@ import {
   decideAutoCompactAction,
   formatWarningMessage,
   formatCompactedMessage,
+  formatCompactFailedMessage,
 } from "../core/auto-compact.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { appendEvent, readEvents } from "../core/events.mjs";
@@ -217,6 +218,7 @@ export function createAutoCompact({
       if (contextMaintenance) {
         const result = await contextMaintenance.run(agentName, paneIdx);
         log(`${paneKey}: ${result.compacted ? "compact verified" : result.reason || result.cell || "within policy"}`);
+        if (result.attempted && !result.ok) await postCompactFailed(agentName, paneIdx, paneKey, result.detail || result.reason);
         return;
       }
       const result = deliveryBroker
@@ -315,6 +317,13 @@ export function createAutoCompact({
     }
     notifyUser(`🚫 ${paneKey} slut på kvot — står stilla tills du knuffar`)
       .catch?.((err) => log(`limited push failed: ${err.message}`));
+  }
+
+  async function postCompactFailed(agentName, paneIdx, paneKey, reason) {
+    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
+    if (!channelId || !discord) return;
+    await discord.send(channelId, formatCompactFailedMessage(paneKey, reason))
+      .catch((err) => log(`compact-failed notice send failed for ${paneKey}: ${err.message}`));
   }
 
   async function postWarning(agentName, paneIdx, paneKey, contextTokens) {

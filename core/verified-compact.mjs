@@ -1,6 +1,6 @@
 // Exact Claude compact receipt shared by sleep and account rotation.
 
-import { hasClaudeCompactBoundaryAfterSubmit } from "./claude-submit-boundary.mjs";
+import { claudeCompactRefusalAfterSubmit, hasClaudeCompactBoundaryAfterSubmit } from "./claude-submit-boundary.mjs";
 import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
 import { compactAccessBlocker } from "./nightly-compact.mjs";
@@ -27,6 +27,7 @@ export async function verifiedClaudeCompact({
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   sendSlash = sendSlashVerified,
   hasBoundary = hasClaudeCompactBoundaryAfterSubmit,
+  compactRefusal = claudeCompactRefusalAfterSubmit,
   pollAttempts = 300,
   pollMs = 1_000,
   settleMs = 200,
@@ -60,12 +61,19 @@ export async function verifiedClaudeCompact({
   if (!sent.delivered || sent.via !== "command-receipt") {
     return { ok: false, reason: "compact-command-unverified" };
   }
+  let refusal = null;
   const boundary = await waitFor(
     Math.max(1, Math.min(pollAttempts, Math.floor((deadline - now()) / pollMs) + 1)),
     pollMs,
     sleep,
-    () => hasBoundary(cursor, submittedAt),
+    () => {
+      refusal = compactRefusal(cursor, submittedAt);
+      return Boolean(refusal) || hasBoundary(cursor, submittedAt);
+    },
   );
+  if (refusal) {
+    return { ok: false, reason: /limit/iu.test(refusal) ? "provider-usage-limited" : "compact-refused", detail: refusal };
+  }
   if (!boundary) return { ok: false, reason: "compact-boundary-missing" };
   const after = latestIdentity(paneDir);
   if (!after?.sessionId) return { ok: false, reason: "post-compact-session-missing" };

@@ -252,6 +252,15 @@ export function formatWarningMessage(paneKey, contextTokens, graceMs) {
   return `⚠ Auto-compact in ${secs}s: **${paneKey}** has ${contextTokens} context tokens and is idle. Type anything (here or in tmux) to cancel.`;
 }
 
+// lsrc:2, 2026-09-27: "Auto-compact in 60s", then silence after the refusal.
+/**
+ * WHAT: Formats the one notice for a compact that was attempted and did not run.
+ * WHY: Keeps a refused compact from looking done after its warning.
+ */
+export function formatCompactFailedMessage(paneKey, reason) {
+  return `⚠ Auto-compact of **${paneKey}** did not run: ${reason}. No new attempt until the pane has done new work.`;
+}
+
 export function formatCompactedMessage(paneKey, contextPercent) {
   return `🗜 Auto-compacting **${paneKey}** (was ${contextPercent}%). Summary preserves recent context.`;
 }

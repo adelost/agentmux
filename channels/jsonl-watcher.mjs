@@ -58,6 +58,7 @@ import { parkPane, unparkPane } from "../core/pane-park.mjs";
 import { appendEvent } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
+import { compactionNoticeText, compactionsToAnnounce } from "../core/compaction-notice.mjs";
 import {
   paneModelSelection,
   setPaneModelSelection,
@@ -452,18 +453,14 @@ export function createJsonlWatcher({
     }
 
     const seen = new Set(stateByChannel[channelId] || []);
-    const unseen = events.filter((event) => event.id && !seen.has(event.id));
+    const unseen = compactionsToAnnounce(events, seen);
     if (!unseen.length) return;
 
-    const count = unseen.length;
-    const text = count === 1
-      ? `Context compacted for **${name}:${idx}**. Work continues from the summary.`
-      : `Context compacted ${count} times for **${name}:${idx}** while the bridge was offline. Work continues from the latest summary.`;
     try {
-      await discord.send(channelId, text);
-      stateByChannel[channelId] = [...seen, ...visibleIds].slice(-100);
+      await discord.send(channelId, compactionNoticeText(`${name}:${idx}`, unseen));
+      stateByChannel[channelId] = [...new Set([...seen, ...visibleIds])].slice(-100);
       state.set(STATE_KEY_COMPACTION_IDS, stateByChannel);
-      log(`${name}:${idx} → ${channelId} (compaction notice x${count})`);
+      log(`${name}:${idx} → ${channelId} (compaction notice x${unseen.length})`);
     } catch (err) {
       log(`compaction notice failed for ${name}:${idx}: ${err.message}`);
     }

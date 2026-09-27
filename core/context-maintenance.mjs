@@ -13,10 +13,16 @@ const STATE_KEY = "context_maintenance_by_pane_v1";
 const paneKey = (name, pane) => `${name}:${pane}`;
 const compactEvent = e => e?.type === "compacted" || e?.payload?.type === "context_compacted"
   || (e?.type === "system" && e.subtype === "compact_boundary");
+// Claude journals a typed slash command ("/compact", "/model x") as its own
+// user row. A command is not work: counting it let a quota-refused /compact
+// re-arm its own fence, so a bridge restart warned and tried again (lsrc:2,
+// 2026-09-27). A path such as "/tmp/x is broken" is still a prompt.
+const isSlashCommand = text => /^\s*\/[a-z][\w:-]*(?:\s|$)/iu.test(text);
+const isClaudeWorkText = text => !/^\s*<(?:local-command|command-)/u.test(text) && !isSlashCommand(text);
 const workEvent = e => e?.type === "event_msg" && e.payload?.type === "user_message"
   || codexUserPrompt(e) !== null
   || (e?.type === "user" && !e.isMeta && !e.isCompactSummary
-    && (typeof e.message?.content === "string" ? !/^\s*<(?:local-command|command-)/u.test(e.message.content)
+    && (typeof e.message?.content === "string" ? isClaudeWorkText(e.message.content)
       : e.message?.content?.some(part => part.type === "text")));
 
 function write(state, key, record) {
@@ -127,7 +133,8 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
         latestIdentity: dir => identityFor(target.engine, dir), maxRescues: 0 });
       write(state, paneKey(name, pane), { ...record, status: result.ok ? "VERIFIED" : "FAILED", reason: result.reason || null });
       log(`${name}:${pane} ${decision.cell}: ${result.ok ? "compact verified" : result.reason}`);
-      return result.ok ? { ok: true, compacted: true, receipt: result } : { ok: false, reason: `context-cost:${result.reason}` };
+      return result.ok ? { ok: true, compacted: true, receipt: result }
+        : { ok: false, attempted: true, reason: `context-cost:${result.reason}`, detail: result.detail || null };
     } catch (error) {
       if (intent && !submitted) write(state, paneKey(name, pane), { ...intent, status: "NOT_SENT", reason: error.message });
       log(`${name}:${pane} context compact failed: ${error.message}`);
