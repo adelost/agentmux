@@ -10,6 +10,9 @@ export function classifyClaudeRotationPane({
   liveDeliveryJobs,
   sessionId,
 } = {}) {
+  if (Number(liveDeliveryJobs) !== 0) {
+    return { allow: false, mode: "blocked", reason: "live-or-unknown-delivery" };
+  }
   if (!processState || processState.dead || !processState.command) {
     return { allow: true, mode: "dormant", reason: "pane-offline" };
   }
@@ -25,9 +28,6 @@ export function classifyClaudeRotationPane({
   if (transportState !== "empty-idle") {
     return { allow: false, mode: "blocked", reason: "composer-not-provably-empty" };
   }
-  if (Number(liveDeliveryJobs) !== 0) {
-    return { allow: false, mode: "blocked", reason: "live-or-unknown-delivery" };
-  }
   if (!sessionId) {
     return { allow: false, mode: "blocked", reason: "exact-session-missing" };
   }
@@ -36,9 +36,14 @@ export function classifyClaudeRotationPane({
 
 /** WHAT: Reports the fleet result from per-pane outcomes. WHY: Keeps partial recovery from being upgraded to success. */
 export function accountRotationOutcome(rows = []) {
-  const failed = rows.filter((row) => row.status === "failed");
+  const failed = rows.filter((row) => row.status === "failed" || row.status === "blocked");
   const rolledBack = rows.filter((row) => row.status === "rolled-back");
-  if (failed.length) return { status: "BLOCKED", failed, rolledBack };
-  if (rolledBack.length) return { status: "PARTIAL", failed, rolledBack };
+  const available = rows.some((row) => row.status === "switched"
+    || row.status === "selected-for-next-wake"
+    || row.status === "already-selected"
+    || row.status.startsWith("would-"));
+  if (failed.length || rolledBack.length) {
+    return { status: available ? "PARTIAL" : "BLOCKED", failed, rolledBack };
+  }
   return { status: "RECOVERED", failed, rolledBack };
 }
