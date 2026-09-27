@@ -22,7 +22,8 @@ Usage:
     --wait-ms <0-12000>           Bound automation receipt wait (enqueue is already durable)
   agent add <name> <dir>          Add new agent
   agent rm <name|:nr>             Remove agent
-  agent stop <name|:nr>           Stop tmux session (keep config)
+  agent stop <name|:nr>           Stop tmux session (keep config); first compacts large idle panes while warm
+    --no-compact                  Stop without that compact
   agent reconcile <name|:nr>      Respawn dead service/shell panes to match config
                                   (preserves live coding-agent panes; use instead of stop+start
                                    when only services died)

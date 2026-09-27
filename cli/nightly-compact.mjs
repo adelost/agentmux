@@ -20,7 +20,8 @@ import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-co
 import { compactAccessBlocker, nightlyCompactDecision, nightlyCompactOutcome, nightlyCompactPolicy, sharedNightlyCompactOutcome } from "../core/nightly-compact.mjs";
 
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
-const dayKey = (now) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date(now));
+/** WHAT: Returns the Stockholm date that names a compact receipt directory. WHY: Keeps nightly and stop-time receipts on the same day boundary. */
+export const compactDayKey = (now) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date(now));
 
 function readReport(path, dateKey) {
   try {
@@ -81,7 +82,8 @@ export async function observeNightlyPane(ctx, target, { queue, now = Date.now } 
   };
 }
 
-async function discover(ctx, agents) {
+/** WHAT: Returns the configured coding panes a compact pass may inspect. WHY: Keeps nightly and stop-time compaction on one target list. */
+export async function discoverCompactTargets(ctx, agents) {
   const targets = [];
   for (const agent of agents) {
     if (agent.backend !== "tmux") {
@@ -108,10 +110,11 @@ async function mirror(ctx, target, command) {
 /** WHAT: Routes one idle context pass per night. WHY: Keeps the 80k budget independent of Dream activity and the 60-percent daytime trigger. */
 export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
   const now = dependencies.now || Date.now;
-  const dateKey = dayKey(now());
-  const policy = nightlyCompactPolicy((dependencies.runtimeConfig || loadConfig(ctx.configPath))?.dream?.compact);
+  const dateKey = compactDayKey(now());
+  const policy = dependencies.policy || nightlyCompactPolicy((dependencies.runtimeConfig || loadConfig(ctx.configPath))?.dream?.compact);
+  const label = dependencies.label || "Nightly compact";
   if (!policy.enabled) return { disabled: true, rows: [] };
-  let targets = dependencies.targets || await discover(ctx, dependencies.agents || listAgents(ctx.configPath));
+  let targets = dependencies.targets || await discoverCompactTargets(ctx, dependencies.agents || listAgents(ctx.configPath));
   if (dependencies.onlyTarget) targets = targets.filter((target) => target.agent.name === dependencies.onlyTarget.agent && target.pane.index === dependencies.onlyTarget.pane);
   if (dependencies.onlyTarget && !targets.length) throw new Error("No running configured coding pane matches the nightly target");
   const path = dependencies.path || join(homedir(), ".agentmux", "nightly-compact", dateKey);
@@ -119,7 +122,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
   const sleep = dependencies.sleep || pause;
   const queue = dependencies.queue || createDeliveryQueue({ initialize: !flags.dry });
   const rows = [];
-  console.log(`Nightly compact: >${policy.maxTokens} tokens, idle >=${policy.idleMinutes}min, at most one attempt/session/night${flags.dry ? " (dry)" : ""}.`);
+  console.log(`${label}: >${policy.maxTokens} tokens, idle >=${policy.idleMinutes}min, at most one attempt/session/night${flags.dry ? " (dry)" : ""}.`);
   for (const target of targets) {
     const key = `${target.agent.name}:${target.pane.index}`;
     const receiptPath = join(path, `${encodeURIComponent(key)}.json`);
@@ -228,6 +231,6 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
   const unresolved = rows.filter((row) => ["failed", "unverified"].includes(row.status) || row.status.startsWith("compacted-")
     || (row.beforeTokens > policy.maxTokens && /^(claude-subscription-access-disabled|provider-usage-limited|activity-unknown|already-attempted:(failed|attempting|compacted-))/u.test(row.reason || ""))).length;
   if (!flags.dry && targets.length) writeReport(reportPath, { dateKey, policy, rows, unresolved, observedAt: new Date(now()).toISOString() });
-  console.log(`Nightly compact: ${flags.dry ? `${rows.filter((row) => row.status === "eligible").length} eligible` : `${rows.filter((row) => row.status === "within-budget").length} verified within budget`}; ${unresolved} unresolved; ${rows.filter((row) => row.status === "skipped").length} skipped. ${flags.dry ? "No receipt written" : `Report ${reportPath}`}`);
+  console.log(`${label}: ${flags.dry ? `${rows.filter((row) => row.status === "eligible").length} eligible` : `${rows.filter((row) => row.status === "within-budget").length} verified within budget`}; ${unresolved} unresolved; ${rows.filter((row) => row.status === "skipped").length} skipped. ${flags.dry ? "No receipt written" : `Report ${reportPath}`}`);
   return { policy, rows, unresolved, path: reportPath, dryRun: !!flags.dry };
 }
