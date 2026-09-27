@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { feature, unit, expect } from "bdd-vitest";
@@ -70,6 +70,46 @@ feature("runtime account profiles", () => {
       expect(readlinkSync(join(ctx.secondary.home, "projects")))
         .toBe(join(ctx.primary.home, "projects"));
       expect(() => readlinkSync(ctx.secondary.credentialsPath)).toThrow();
+      rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("secondary Claude profile starts past onboarding with the operator's config", {
+    given: ["a set-up primary and a freshly logged-in secondary", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-account-profile-"));
+      const primary = {
+        provider: "claude", id: "1", home: join(root, "one"),
+        identityPath: join(root, ".claude.json"),
+      };
+      const secondary = {
+        provider: "claude", id: "2", home: join(root, "two"),
+        identityPath: join(root, "two", ".claude.json"),
+      };
+      mkdirSync(join(primary.home, "hooks"), { recursive: true });
+      mkdirSync(secondary.home, { recursive: true });
+      writeFileSync(join(primary.home, "settings.json"), '{"promptCacheTtl":"1h"}');
+      writeFileSync(join(primary.home, "CLAUDE.md"), "rules");
+      writeFileSync(primary.identityPath, JSON.stringify({
+        hasCompletedOnboarding: true, lastOnboardingVersion: "2.1.283",
+        mcpServers: { windows: {} }, oauthAccount: { emailAddress: "one" },
+      }));
+      writeFileSync(secondary.identityPath, JSON.stringify({
+        oauthAccount: { emailAddress: "two" },
+      }));
+      return { root, primary, secondary };
+    }],
+    when: ["preparing profile 2 twice", (ctx) => {
+      prepareRuntimeProfile(ctx.secondary, [ctx.primary, ctx.secondary]);
+      prepareRuntimeProfile(ctx.secondary, [ctx.primary, ctx.secondary]);
+      return { ...ctx, identity: JSON.parse(readFileSync(ctx.secondary.identityPath, "utf8")) };
+    }],
+    then: ["config is shared, onboarding is done and the account is its own", (ctx) => {
+      for (const name of ["settings.json", "CLAUDE.md", "hooks"]) {
+        expect(readlinkSync(join(ctx.secondary.home, name))).toBe(join(ctx.primary.home, name));
+      }
+      expect(ctx.identity.hasCompletedOnboarding).toBe(true);
+      expect(ctx.identity.mcpServers).toEqual({ windows: {} });
+      expect(ctx.identity.oauthAccount).toEqual({ emailAddress: "two" });
       rmSync(ctx.root, { recursive: true, force: true });
     }],
   });

@@ -181,6 +181,45 @@ function ensureSharedEntry(source, target, kind) {
   symlinkSync(resolve(source), target, kind === "dir" ? "dir" : "file");
 }
 
+// Operator config every Claude account must load. Without it a secondary
+// profile launched in the first-run theme picker with no hooks, CLAUDE.md or
+// MCP servers, and api:0 never reached its composer (2026-09-27).
+const CLAUDE_SHARED_CONFIG = [
+  "settings.json", "CLAUDE.md", "agents", "commands", "skills", "hooks",
+  "plugins", "output-styles", "keybindings.json",
+];
+const CLAUDE_IDENTITY_SETUP_KEYS = [
+  "hasCompletedOnboarding", "lastOnboardingVersion", "hasAcknowledgedCostThreshold",
+  "autoUpdates", "mcpServers",
+];
+
+function readJsonObject(path) {
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function shareClaudeConfig(primary, profile) {
+  for (const name of CLAUDE_SHARED_CONFIG) {
+    const source = join(primary.home, name);
+    const target = join(profile.home, name);
+    // A profile's own file is the operator's choice; only missing entries link.
+    if (!existsSync(source) || lstatSync(target, { throwIfNoEntry: false })) continue;
+    symlinkSync(resolve(source), target);
+  }
+  const primaryIdentity = primary.identityPath && readJsonObject(primary.identityPath);
+  if (!primaryIdentity || !profile.identityPath) return;
+  const identity = readJsonObject(profile.identityPath) || {};
+  const missing = CLAUDE_IDENTITY_SETUP_KEYS
+    .filter((key) => key in primaryIdentity && !(key in identity));
+  if (!missing.length) return;
+  for (const key of missing) identity[key] = primaryIdentity[key];
+  writeFileSync(profile.identityPath, `${JSON.stringify(identity, null, 2)}\n`, { mode: 0o600 });
+}
+
 /** WHAT: Builds shared-history links without copying auth. WHY: Keeps exact resume history shared while OAuth remains isolated. */
 export function prepareRuntimeProfile(profile, catalog = runtimeProfileCatalog(profile?.provider)) {
   if (!profile) throw new Error("account profile is required");
@@ -194,6 +233,7 @@ export function prepareRuntimeProfile(profile, catalog = runtimeProfileCatalog(p
   mkdirSync(primary.home, { recursive: true, mode: 0o700 });
   if (profile.provider === "claude") {
     ensureSharedEntry(join(primary.home, "projects"), join(profile.home, "projects"), "dir");
+    shareClaudeConfig(primary, profile);
   } else if (profile.provider === "kimi") {
     ensureSharedEntry(join(primary.home, "sessions"), join(profile.home, "sessions"), "dir");
     ensureSharedEntry(
