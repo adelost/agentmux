@@ -73,6 +73,99 @@ function fixture({ busy = false, restart = async () => ({ ok: true }) } = {}) {
 }
 
 feature("Claude fleet account rotation", () => {
+  unit("a locked project does not prevent another empty sleeping project from rotating", {
+    given: ["Skydive owns its delivery lease while lsrc is an empty shell", () => {
+      const fx = fixture();
+      fx.deps.agents = [
+        { name: "skydive", dir: "/work/skydive", panes: [{ cmd: "claude --continue", accountProfile: 1 }] },
+        { name: "lsrc", dir: "/work/lsrc", panes: [{ cmd: "claude --continue", accountProfile: 1 }] },
+      ];
+      fx.ctx.deliveryQueue.acquireSessionLease = (name) => name === "skydive"
+        ? null : { release: () => fx.releases.push(name) };
+      fx.ctx.agent.paneProcessState = async () => ({ command: "bash", running: false, shell: true, dead: false });
+      fx.ctx.agent.restartClaudeAccount = vi.fn();
+      return fx;
+    }],
+    when: ["rotating to the accessible account", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["only lsrc changes and the blocked lease remains untouched", (result, fx) => {
+      expect(result.status).toBe("PARTIAL");
+      expect(result.rows.map((row) => [row.key, row.status, row.reason])).toEqual(expect.arrayContaining([
+        ["skydive:0", "blocked", "delivery-lease-busy:skydive"],
+        ["lsrc:0", "selected-for-next-wake", null],
+      ]));
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:0": "2" });
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+      expect(fx.releases).toEqual(["lsrc"]);
+    }],
+  });
+
+  unit("a submitted job blocks its project without blocking a separate idle project", {
+    given: ["one Skydive delivery is submitted and lsrc is an empty shell", () => {
+      const fx = fixture();
+      fx.deps.agents = [
+        { name: "skydive", dir: "/work/skydive", panes: [
+          { cmd: "claude --continue", accountProfile: 1 },
+          { cmd: "claude --continue", accountProfile: 1 },
+        ] },
+        { name: "lsrc", dir: "/work/lsrc", panes: [{ cmd: "claude --continue", accountProfile: 1 }] },
+      ];
+      fx.ctx.deliveryQueue.list = (name, pane) => name === "skydive" && pane === 0
+        ? [{ status: "submitted" }] : [];
+      fx.ctx.deliveryQueue.acquireSessionLease = (name) => ({ release: () => fx.releases.push(name) });
+      fx.ctx.agent.paneProcessState = async () => ({ command: "bash", running: false, shell: true, dead: false });
+      fx.ctx.agent.restartClaudeAccount = vi.fn();
+      return fx;
+    }],
+    when: ["rotating to the accessible account", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["the submitted project stays on its source profile", (result, fx) => {
+      expect(result.status).toBe("PARTIAL");
+      expect(result.rows.find((row) => row.key === "skydive:0")).toMatchObject({
+        status: "blocked", reason: "live-or-unknown-delivery",
+      });
+      expect(result.rows.find((row) => row.key === "skydive:1")).toMatchObject({
+        status: "blocked", reason: "project-preflight-failed:skydive:0",
+      });
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:0": "2" });
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+    }],
+  });
+
+  unit("a partial dry-run reports both projects without changing either", {
+    given: ["a locked project and an empty sleeping project", () => {
+      const fx = fixture();
+      fx.deps.agents = [
+        { name: "skydive", dir: "/work/skydive", panes: [{ cmd: "claude --continue", accountProfile: 1 }] },
+        { name: "lsrc", dir: "/work/lsrc", panes: [{ cmd: "claude --continue", accountProfile: 1 }] },
+      ];
+      fx.ctx.deliveryQueue.acquireSessionLease = (name) => name === "skydive"
+        ? null : { release: () => fx.releases.push(name) };
+      fx.ctx.agent.paneProcessState = async () => ({ command: "bash", running: false, shell: true, dead: false });
+      return fx;
+    }],
+    when: ["preflighting the target", fx => rotateClaudeFleet(fx.ctx, "2", { dry: true }, fx.deps)],
+    then: ["partial status is explicit and no selection is written", (result, fx) => {
+      expect(result.status).toBe("PARTIAL");
+      expect(result.rows.find((row) => row.key === "lsrc:0").status).toBe("would-dormant");
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({});
+      expect(fx.deps.prepare).not.toHaveBeenCalled();
+    }],
+  });
+
+  unit("an already selected running pane is not restarted again", {
+    given: ["the target profile is durably selected", () => {
+      const fx = fixture();
+      fx.state.set("account_profile_by_pane_v1", { "lsrc:0": "2" });
+      fx.ctx.agent.restartClaudeAccount = vi.fn();
+      return fx;
+    }],
+    when: ["retrying the same rotation", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["the live session is left intact", (result, fx) => {
+      expect(result.status).toBe("RECOVERED");
+      expect(result.rows[0].status).toBe("already-selected");
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+    }],
+  });
+
   unit("restarts only the running pane without a source model turn while selecting sleepers", {
     given: ["one idle running pane and one sleeping pane", () => fixture()],
     when: ["rotating to profile 2", (ctx) =>
@@ -160,6 +253,23 @@ feature("Claude fleet account rotation", () => {
     then: ["the changed session is not killed", (result, fx) => {
       expect(result.status).toBe("BLOCKED"); expect(result.rows[0].reason).toBe("rotation-session-changed");
       expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({});
+    }],
+  });
+
+  unit("a profile change after preflight cannot restart the old selection", {
+    given: ["another selection is recorded while the target is prepared", () => {
+      const fx = fixture();
+      fx.deps.prepare = () => fx.state.set("account_profile_by_pane_v1", { "lsrc:0": "2" });
+      fx.ctx.agent.restartClaudeAccount = vi.fn();
+      return fx;
+    }],
+    when: ["requesting rotation from the old observation", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["the changed profile is not restarted or overwritten", (result, fx) => {
+      expect(result.status).toBe("BLOCKED");
+      expect(result.rows[0].reason).toBe("rotation-profile-changed");
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:0": "2" });
     }],
   });
 

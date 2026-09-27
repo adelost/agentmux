@@ -106,17 +106,36 @@ async function observePane(ctx, entry, catalog, target, deps) {
   };
 }
 
-function acquireFleetLeases(queue, panes) {
-  const leases = [];
-  for (const agentName of [...new Set(panes.map((pane) => pane.agentName))].sort()) {
-    const lease = queue.acquireSessionLease?.(agentName);
-    if (!lease) {
-      for (const held of leases.reverse()) held.release();
-      return { ok: false, reason: `delivery-lease-busy:${agentName}`, leases: [] };
-    }
-    leases.push(lease);
+function projectsFor(panes) {
+  const projects = new Map();
+  for (const pane of panes) {
+    if (!projects.has(pane.agentName)) projects.set(pane.agentName, []);
+    projects.get(pane.agentName).push(pane);
   }
-  return { ok: true, leases };
+  return [...projects].sort(([left], [right]) => left.localeCompare(right));
+}
+
+function blockedProjectRows(panes, reason, culprit = null) {
+  return panes.map((pane) => ({
+    ...pane,
+    key: pane.key || paneKey(pane.agentName, pane.pane),
+    status: "blocked",
+    reason: culprit && pane.key !== culprit.key ? `project-preflight-failed:${culprit.key}` : reason,
+  }));
+}
+
+function paneChangeReason(before, after, deps) {
+  if (!after.allow) return after.reason;
+  if (after.mode !== before.mode) return "rotation-pane-changed";
+  if (after.currentProfile?.id !== before.currentProfile?.id) return "rotation-profile-changed";
+  if (after.pending?.sessionId !== before.pending?.sessionId
+      || after.pending?.targetProfileId !== before.pending?.targetProfileId) {
+    return "rotation-transition-changed";
+  }
+  if (before.mode === "dormant") return null;
+  try { deps.assertContinuity(before.continuity, after.identity); }
+  catch (error) { return error.message; }
+  return null;
 }
 
 function report(output, status, target, rows, reason = null) {
@@ -158,99 +177,110 @@ export async function rotateClaudeFleet(ctx, requested, {
     return { status: "BLOCKED", reason, rows: [] };
   }
 
-  const panes = configuredClaudePanes(deps.agents);
-  const leaseSet = acquireFleetLeases(ctx.deliveryQueue, panes);
-  if (!leaseSet.ok) {
-    report(deps.output, "BLOCKED", target, [], leaseSet.reason);
-    deps.setExitCode(1);
-    return { status: "BLOCKED", reason: leaseSet.reason, rows: [] };
-  }
-
-  try {
-    const observed = [];
-    for (const pane of panes) {
-      observed.push(await observePane(ctx, pane, deps.catalog, target, deps));
+  const rows = [];
+  let prepared = false;
+  for (const [agentName, panes] of projectsFor(configuredClaudePanes(deps.agents))) {
+    const lease = ctx.deliveryQueue.acquireSessionLease?.(agentName);
+    if (!lease) {
+      rows.push(...blockedProjectRows(panes, `delivery-lease-busy:${agentName}`));
+      continue;
     }
-    const blocked = observed.filter((pane) => !pane.allow);
-    if (blocked.length) {
-      const rows = blocked.map((pane) => ({ ...pane, status: "blocked" }));
-      report(deps.output, "BLOCKED", target, rows, "preflight-failed");
-      deps.setExitCode(1);
-      return { status: "BLOCKED", reason: "preflight-failed", rows };
-    }
-    if (dry) {
-      const rows = observed.map((pane) => ({ ...pane, status: `would-${pane.mode}` }));
-      report(deps.output, "DRY-RUN", target, rows);
-      return { status: "DRY-RUN", rows };
-    }
-
-    deps.prepare(target, deps.catalog);
-    const rows = [];
-    for (const pane of observed) {
-      // The fleet may take time to restart. Check EACH pane again immediately
-      // before selecting or stopping it, under the same delivery lease.
-      const rechecked = await observePane(ctx, pane, deps.catalog, target, deps);
-      let reason = !rechecked.allow ? rechecked.reason : rechecked.mode !== pane.mode ? "rotation-pane-changed" : null;
-      if (!reason && pane.mode !== "dormant") {
-        try { deps.assertContinuity(pane.continuity, rechecked.identity); }
-        catch (error) { reason = error.message; }
-      }
-      if (reason) {
-        rows.push({ ...pane, status: "failed", reason });
+    try {
+      const observed = [];
+      for (const pane of panes) observed.push(await observePane(ctx, pane, deps.catalog, target, deps));
+      const blocked = observed.find((pane) => !pane.allow);
+      if (blocked) {
+        rows.push(...blockedProjectRows(observed, blocked.reason, blocked));
         continue;
       }
-      if (pane.mode === "dormant") {
-        setRuntimeProfile(ctx.state, pane.agentName, pane.pane, "claude", target.id);
-        rows.push({ ...pane, status: "selected-for-next-wake", reason: null });
+      if (dry) {
+        rows.push(...observed.map((pane) => ({
+          ...pane, status: pane.currentProfile?.id === target.id && !pane.pending
+            ? "would-already-selected" : `would-${pane.mode}`,
+        })));
         continue;
       }
-      const sessionId = pane.pending?.sessionId || pane.identity.sessionId;
-      const transition = pane.pending || beginRuntimeProfileTransition(ctx.state, {
-        agentName: pane.agentName,
-        pane: pane.pane,
-        provider: "claude",
-        previousProfileId: pane.currentProfile.id,
-        targetProfileId: target.id,
-        sessionId,
-      });
-      try {
-        await ctx.agent.restartClaudeAccount(pane.agentName, pane.pane, {
-          profile: target,
-          resumeSessionId: sessionId,
-          continuity: pane.continuity,
-        });
-        completeRuntimeProfileTransition(ctx.state, transition, target.id);
-        rows.push({ ...pane, status: "switched", reason: null });
-      } catch (error) {
-        const previous = deps.catalog.find((profile) =>
-          profile.id === transition.previousProfileId) || pane.currentProfile;
-        if (!previous || previous.id === target.id) {
-          rows.push({ ...pane, status: "failed", reason: error.message });
+      if (!prepared) {
+        deps.prepare(target, deps.catalog);
+        prepared = true;
+      }
+      const recheckedProject = [];
+      for (const pane of panes) recheckedProject.push(await observePane(ctx, pane, deps.catalog, target, deps));
+      const changed = recheckedProject.map((pane, index) => ({
+        pane,
+        reason: paneChangeReason(observed[index], pane, deps),
+      })).find((entry) => entry.reason);
+      if (changed) {
+        rows.push(...blockedProjectRows(observed, changed.reason, changed.pane));
+        continue;
+      }
+      for (const pane of observed) {
+        // A later pane can change while earlier panes restart under this lease.
+        const rechecked = await observePane(ctx, pane, deps.catalog, target, deps);
+        const reason = paneChangeReason(pane, rechecked, deps);
+        if (reason) {
+          rows.push({ ...pane, status: "failed", reason });
           continue;
         }
-        setRuntimeProfile(ctx.state, pane.agentName, pane.pane, "claude", previous.id);
+        if (pane.currentProfile?.id === target.id && !pane.pending) {
+          rows.push({ ...pane, status: "already-selected", reason: null });
+          continue;
+        }
+        if (pane.mode === "dormant") {
+          setRuntimeProfile(ctx.state, pane.agentName, pane.pane, "claude", target.id);
+          rows.push({ ...pane, status: "selected-for-next-wake", reason: null });
+          continue;
+        }
+        const sessionId = pane.pending?.sessionId || pane.identity.sessionId;
+        const transition = pane.pending || beginRuntimeProfileTransition(ctx.state, {
+          agentName: pane.agentName,
+          pane: pane.pane,
+          provider: "claude",
+          previousProfileId: pane.currentProfile.id,
+          targetProfileId: target.id,
+          sessionId,
+        });
         try {
-          deps.prepare(previous, deps.catalog);
           await ctx.agent.restartClaudeAccount(pane.agentName, pane.pane, {
-            profile: previous,
+            profile: target,
             resumeSessionId: sessionId,
+            continuity: pane.continuity,
           });
-          completeRuntimeProfileTransition(ctx.state, transition, previous.id);
-          rows.push({ ...pane, status: "rolled-back", reason: error.message });
-        } catch (rollbackError) {
-          rows.push({
-            ...pane,
-            status: "failed",
-            reason: `${error.message}; rollback-failed:${rollbackError.message}`,
-          });
+          completeRuntimeProfileTransition(ctx.state, transition, target.id);
+          rows.push({ ...pane, status: "switched", reason: null });
+        } catch (error) {
+          const previous = deps.catalog.find((profile) =>
+            profile.id === transition.previousProfileId) || pane.currentProfile;
+          if (!previous || previous.id === target.id) {
+            rows.push({ ...pane, status: "failed", reason: error.message });
+            continue;
+          }
+          setRuntimeProfile(ctx.state, pane.agentName, pane.pane, "claude", previous.id);
+          try {
+            deps.prepare(previous, deps.catalog);
+            await ctx.agent.restartClaudeAccount(pane.agentName, pane.pane, {
+              profile: previous,
+              resumeSessionId: sessionId,
+            });
+            completeRuntimeProfileTransition(ctx.state, transition, previous.id);
+            rows.push({ ...pane, status: "rolled-back", reason: error.message });
+          } catch (rollbackError) {
+            rows.push({
+              ...pane,
+              status: "failed",
+              reason: `${error.message}; rollback-failed:${rollbackError.message}`,
+            });
+          }
         }
       }
+    } finally {
+      lease.release();
     }
-    const outcome = accountRotationOutcome(rows);
-    report(deps.output, outcome.status, target, rows);
-    if (outcome.status !== "RECOVERED") deps.setExitCode(1);
-    return { ...outcome, rows };
-  } finally {
-    for (const lease of leaseSet.leases.reverse()) lease.release();
   }
+  const outcome = accountRotationOutcome(rows);
+  const status = dry && outcome.status === "RECOVERED" ? "DRY-RUN" : outcome.status;
+  const reason = outcome.status === "BLOCKED" ? "preflight-failed" : null;
+  report(deps.output, status, target, rows, reason);
+  if (status !== "RECOVERED" && status !== "DRY-RUN") deps.setExitCode(1);
+  return { ...outcome, status, ...(reason ? { reason } : {}), rows };
 }
