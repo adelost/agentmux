@@ -3,7 +3,7 @@ import {
   CLAUDE, CODEX, KIMI, QWEN, ALL_DIALECTS, detectDialect, isCodingDialect,
   matchesAnyBullet, matchesAnyToolResult, matchesAnyToolCall,
   matchesAnyPromptPrefix, matchesAnyPromptWithText, stripBullet,
-  COMPOSER_LINE_RE, foreignComposerText,
+  COMPOSER_LINE_RE, composerLines, foreignComposerText,
 } from "./dialects.mjs";
 
 // --- Data integrity ------------------------------------------------------
@@ -300,5 +300,22 @@ feature("coding-dialect gate", () => {
     given: ["no resolved dialect", () => null],
     when: ["gating it", (dialect) => isCodingDialect(dialect)],
     then: ["rejected so /compact never lands in a shell", (ok) => expect(ok).toBe(false)],
+  });
+});
+
+feature("composer lines", () => {
+  const rule = "─".repeat(40);
+  unit("finds Claude's composer above the background-agent list", {
+    given: ["lsrc:1's screen on 2026-09-28", () => [
+      "old answer", rule, "❯ /compact", rule, "  ⬆ Opus 5.5 │ 89%", "  ⏵⏵ bypass permissions on", "", "  ● main", "  ◯ general-purpose  1h 31m",
+    ].join("\n")],
+    when: ["reading the composer", (screen) => composerLines(screen)],
+    then: ["only the line between the two rules", (lines) => expect(lines).toEqual(["❯ /compact"])],
+  });
+
+  unit("keeps the last five lines on a screen without the two rules", {
+    given: ["a legacy screen", () => ["a", "b", "c", "> typed", "d", "e"].join("\n")],
+    when: ["reading the composer", (screen) => composerLines(screen)],
+    then: ["the old window", (lines) => expect(lines).toEqual(["b", "c", "> typed", "d", "e"])],
   });
 });

@@ -283,6 +283,24 @@ export const COMPOSER_LINE_RE = new RegExp(
   `^[>${ALL_DIALECTS.map((d) => d.promptChar).join("")}]`,
 );
 
+const COMPOSER_RULE_RE = /^─{8,}$/u;
+
+/**
+ * WHAT: Returns the composer lines between Claude's two horizontal rules, or the last five screen lines without them.
+ * WHY: Claude lists background agents under its footer, so its composer can be the seventh line from the bottom.
+ *   Reading only the last five lines missed amux's own /compact, maintenance refused Enter and the next attempt
+ *   typed it again (lsrc:1, 2026-09-28: "/compact/compact[…] Hej, var är ni någonstans?").
+ */
+export function composerLines(raw) {
+  const lines = String(raw || "").split("\n").map((line) => line.trim());
+  const rules = lines.flatMap((line, index) => (COMPOSER_RULE_RE.test(line) ? [index] : []));
+  for (let above = rules.length - 2; above >= 0; above -= 1) {
+    const between = lines.slice(rules[above] + 1, rules[above + 1]);
+    if (COMPOSER_LINE_RE.test(between[0] ?? "")) return between;
+  }
+  return lines.slice(-5);
+}
+
 /**
  * Text a previous (failed) delivery left in the composer that would corrupt
  * the message we're about to type. Returns the stale text, or null when

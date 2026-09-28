@@ -12,7 +12,7 @@ import { createTmuxAdapter } from "./core/tmux.mjs";
 import { ensureHeadlessWindow, settleTmuxWindowSize } from "./core/tmux-window-size.mjs";
 import { stripPaneChrome } from "./core/pane-chrome.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
-import { detectDialect, COMPOSER_LINE_RE, foreignComposerText } from "./core/dialects.mjs";
+import { detectDialect, COMPOSER_LINE_RE, composerLines, foreignComposerText } from "./core/dialects.mjs";
 import { createPaneDialectResolver } from "./core/pane-dialect.mjs";
 import {
   captureClaudePromptEchoCursor,
@@ -80,7 +80,7 @@ import {
   isCodingPaneCommand as isAgentCmd,
   isShellProcess as isShellProc,
 } from "./core/tui-stall-recovery.mjs";
-import { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
+import { eraseKeys, shouldPastePrompt, submitCheckOrErase, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
 import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
 import { assertCodexWorkModel, createCodexCompact, startCodexProcess } from "./core/codex-process-launch.mjs";
@@ -1192,7 +1192,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
     // Persist ambiguity before Enter; a crash must never authorize a second paste.
-    if (maintenanceGuard) await maintenanceGuard("submit");
+    const eraseTyped = shouldPastePrompt({ knownDrafted, alreadyComposed }) ? () => t.sendKeys(target, eraseKeys(prompt)) : null;
+    if (maintenanceGuard) await submitCheckOrErase(maintenanceGuard, eraseTyped);
     await submitWithDurableFence({
       onSubmitting,
       sendEnter: () => dialect === "kimi" ? submitKimiPromptNow(target, { busy: busyAtSend }) : t.sendEnter(target),
@@ -1258,11 +1259,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // a hardcoded [❯>] here missed codex's "›", so retries re-typed a
       // brief that was already sitting in the composer (ai:4 2026-07-08).
       // Requiring the marker keeps a prompt-head quoted in SCROLLBACK from
-      // suppressing a legitimate first type-in.
-      const headVisible = raw.split("\n").slice(-5).some((l) => {
-        const line = l.trim();
-        return COMPOSER_LINE_RE.test(line) && line.includes(head);
-      });
+      // suppressing a legitimate first type-in; composerLines finds the box.
+      const headVisible = composerLines(raw).some((line) => COMPOSER_LINE_RE.test(line) && line.includes(head));
       if (headVisible) return true;
       // Kimi collapses an atomic paste to a `[paste #…]` composer marker
       // whose full text is no longer visible. Only an OWNED draft may be
