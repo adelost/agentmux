@@ -20,6 +20,9 @@ import { sendSlashVerified } from "../core/delivery.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { latestConversationActivityMs } from "../core/pane-activity.mjs";
 import { compactReceiptIsAuthoritative } from "../core/dialects.mjs";
+import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
+import { formatLimitedAlert } from "../core/quota-format.mjs";
+import { parseQuotaRecoveryConfig } from "./quota-recovery.mjs";
 
 // Panes that have warnings pending (paneKey → { warned_at: ms }).
 // Panes currently mid-compact (paneKey string).
@@ -116,6 +119,13 @@ export function createAutoCompact({
   log = (msg) => console.log(`auto-compact | ${msg}`),
 }) {
   const warnings = new Map();
+  // The stop notice names the reset from the journal: the screen banner wraps
+  // in narrow panes. Quota recovery resumes only Claude panes.
+  const quotaRecoveryEnabled = parseQuotaRecoveryConfig().enabled;
+  const claudeStopResetAt = (paneDir) => {
+    try { return activeClaudeLimitReceipt(paneDir)?.resetAt ?? null; }
+    catch (err) { log(`limit receipt unreadable for ${paneDir}: ${err.message}`); return null; }
+  };
   const compacting = new Set();
   // paneKey → context% at last /compact fire. Drives verify-before-refire in
   // decideAutoCompactAction: if context doesn't drop below this, the compact
@@ -207,8 +217,9 @@ export function createAutoCompact({
     // Asked of the SAME captured tail the status came from, so the latch and
     // the classifier can never disagree about whether the banner is on screen.
     const limitBannerVisible = Boolean(content) && LIMIT_BANNER.test(content);
+    const claudeStop = limitBannerVisible && dialect === "claude";
     return { status, contextPercent, contextTokens: dialect === "kimi" ? null : ctxInfo?.tokens ?? null, contextSession: ctxInfo?.sessionId ?? null, paneInMode, paneHeight, lastActivityMs,
-             limitBannerVisible };
+             limitBannerVisible, limitResetAt: claudeStop ? claudeStopResetAt(paneDir) : null, autoResume: claudeStop && quotaRecoveryEnabled };
   }
 
   async function fireCompact(agentName, paneIdx, paneKey, contextPercent, dialect) {
@@ -291,7 +302,7 @@ export function createAutoCompact({
   seedLimitedFromLedger(prevStatus);
 
   async function alertOnLimited(agentName, paneIdx, paneKey, status,
-                                { limitBannerVisible = false } = {}) {
+                                { limitBannerVisible = false, limitResetAt = null, autoResume = false } = {}) {
     const prev = prevStatus.get(paneKey);
     prevStatus.set(paneKey, nextLimitedMemory(prev, status, { limitBannerVisible }));
     // A bridge that starts while a pane is already limited must still alert;
@@ -309,13 +320,14 @@ export function createAutoCompact({
       });
     } catch (err) { log(`limited ledger row failed: ${err.message}`); }
 
+    const notice = formatLimitedAlert({ paneKey, resetAt: limitResetAt, autoResume,
+      logCommand: `amux log ${agentName} -p ${paneIdx} --tmux` });
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
     if (channelId && discord) {
-      await discord.send(channelId,
-        `🚫 **${paneKey} har slagit i kvot/limit — arbetet står stilla.** Återställningstiden syns i panelen (\`amux log ${agentName} -p ${paneIdx} --tmux\`). Knuffa igång den när kvoten är tillbaka.`)
+      await discord.send(channelId, notice.discord)
         .catch((err) => log(`limited warning send failed for ${paneKey}: ${err.message}`));
     }
-    notifyUser(`🚫 ${paneKey} slut på kvot — står stilla tills du knuffar`)
+    notifyUser(notice.push)
       .catch?.((err) => log(`limited push failed: ${err.message}`));
   }
 
@@ -373,7 +385,7 @@ export function createAutoCompact({
         }
 
         const { status, contextPercent, contextTokens, contextSession, paneInMode, paneHeight, lastActivityMs,
-                limitBannerVisible } = await inspect(a, i);
+                limitBannerVisible, limitResetAt, autoResume } = await inspect(a, i);
 
         if (contextSession && contextSessions.has(paneKey) && contextSessions.get(paneKey) !== contextSession) {
           warnings.delete(paneKey);
@@ -384,7 +396,7 @@ export function createAutoCompact({
 
         // Quota-silence watch runs for EVERY pane (the classic producer is
         // codex, which the compact logic below deliberately skips).
-        await alertOnLimited(a.name, i, paneKey, status, { limitBannerVisible });
+        await alertOnLimited(a.name, i, paneKey, status, { limitBannerVisible, limitResetAt, autoResume });
 
         if (!config.codexEnabled && paneDialect(a, i) === "codex") {
           if (warnings.has(paneKey) || compactFloors.has(paneKey) || lastWarnPostAt.has(paneKey)) {

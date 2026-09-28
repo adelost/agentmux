@@ -123,6 +123,17 @@ feature("pane status detection", () => {
     }],
   });
 
+  for (const banner of [
+    "You've hit your monthly spend limit · raise it at claude.ai/settings/usage?from=cc_cli_limit_message · your session limit resets 3:10am (Europe/Stockholm)",
+    "You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm)",
+  ]) {
+    unit(`flags Claude's current stop wording as limited: ${banner.slice(16, 36)}`, {
+      given: ["the stop banner above the composer (lsrc:1, 2026-09-28)", () => [banner, "", "❯ "].join("\n")],
+      when: ["detecting pane status", (content) => detectPaneStatus(content)],
+      then: ["status is limited", (status) => expect(status).toBe("limited")],
+    });
+  }
+
   unit("a pane that resumed real turns after limit reset is working", {
     given: ["limit banner residue but a live spinner footer", () => [
       "You've hit your session limit · resets 6:50pm (Europe/Stockholm)",

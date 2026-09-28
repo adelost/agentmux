@@ -1,6 +1,7 @@
 // Nightly token budget; the quiet-time default is shared with daytime maintenance.
 
 import { CONTEXT_COST_POLICY } from "../policies/context-cost.mjs";
+import { CLAUDE_STOP_BANNER } from "./claude-quota-recovery.mjs";
 
 /** WHAT: Checks the nightly budget. WHY: Keeps byte sizes and percentages outside token admission. */
 export function nightlyCompactPolicy(value) {
@@ -70,6 +71,6 @@ export function compactAccessBlocker(screen) {
   const lastTurn = lines.findLastIndex((line) => /^\s*[❯›]\s*\S/u.test(line));
   const text = lines.slice(Math.max(0, lastTurn)).join("\n");
   if (/organization has disabled Claude subscription access/iu.test(text)) return "claude-subscription-access-disabled";
-  if (/you(?:'|’)?ve hit your (?:session|usage) limit|usage limit reached|out of extra usage/iu.test(text)) return "provider-usage-limited";
+  if (CLAUDE_STOP_BANNER.test(text) || /usage limit reached|out of extra usage/iu.test(text)) return "provider-usage-limited";
   return null;
 }

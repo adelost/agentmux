@@ -28,6 +28,21 @@ export const formatReset = (resetsAt) => {
   return `reset ${at.getDate()} ${SHORT_MONTHS[at.getMonth()]} ${hh}:${mm}`;
 };
 
+/**
+ * WHAT: Builds the Discord and push notice for a pane stopped by its plan limit.
+ * WHY: Keeps a quota stop from looking like work (lsrc:1 stood still from 02:48 to 06:50 on 2026-09-28 without a word).
+ */
+export const formatLimitedAlert = ({ paneKey, resetAt = null, autoResume = false, logCommand }) => {
+  const reset = formatReset(resetAt);
+  const next = autoResume
+    ? "amux fortsätter själv i samma session när fönstret är tillbaka."
+    : "Knuffa igång den när kvoten är tillbaka.";
+  return {
+    discord: `🚫 **${paneKey} står stilla, kvoten är slut${reset ? ` (${reset})` : ""}.** ${next} Panelen: \`${logCommand}\``,
+    push: `🚫 ${paneKey} står stilla på kvot${reset ? `, ${reset}` : ""}. ${autoResume ? "amux fortsätter själv." : "Knuffa igång den."}`,
+  };
+};
+
 const percentCell = (label, usedPercent) =>
   `${label} ${usedPercent}%${severityMark(usedPercent)}`;
 
