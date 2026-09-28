@@ -5,7 +5,7 @@
 // or usage remains terminally ambiguous and is never replayed automatically.
 
 import {
-  CLAUDE_LIMIT_TEXT,
+  claudeLimitFromText,
   claudeQuotaRecoveryReadiness,
   parseClaudeLimitResetAt,
   quotaRecoveryContinuation,
@@ -41,18 +41,18 @@ function zeroUsage(event) {
  */
 export function nativeClaudeQuotaCandidate(event) {
   const text = singleAssistantText(event);
-  const match = text && CLAUDE_LIMIT_TEXT.exec(text);
+  const limit = text && claudeLimitFromText(text);
   if (event?.type !== "assistant"
       || event.error !== "rate_limit"
       || event.message?.model !== "<synthetic>"
-      || !match
+      || !limit
       || !event.session_id
       || !event.uuid) return null;
   const observedAt = Date.parse(event.timestamp);
   if (!Number.isFinite(observedAt)) return null;
   return {
     text,
-    limitKind: match[1].toLowerCase(),
+    limitKind: limit.kind,
     sessionId: event.session_id,
     limitEventId: event.uuid,
     observedAt,

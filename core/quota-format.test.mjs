@@ -2,7 +2,7 @@
 // shows the same truth, failures are named loudly, and thresholds mark rows.
 
 import { feature, unit, expect } from "bdd-vitest";
-import { formatQuotaSnapshot, formatReset } from "./quota-format.mjs";
+import { formatLimitedAlert, formatQuotaSnapshot, formatReset } from "./quota-format.mjs";
 
 // Mirrors the readQuotaSnapshot() shape captured live 2026-07-15.
 const SNAPSHOT = {
@@ -112,6 +112,26 @@ feature("quota text render for bridge and CLI", () => {
       expect(text).toContain("Vecka 100% 🔴");
       expect(text).toContain("5 h 20%");
       expect(text).not.toContain("gränser");
+    }],
+  });
+});
+
+feature("stop notice for a pane that hit its plan limit", () => {
+  const logCommand = "amux log lsrc -p 1 --tmux";
+  unit("names the reset and the automatic resume", {
+    when: ["lsrc:1 stops until 03:10 with recovery on", () => formatLimitedAlert({
+      paneKey: "lsrc:1", resetAt: new Date(2026, 8, 28, 3, 10).getTime(), autoResume: true, logCommand })],
+    then: ["the channel and the phone both get the reset time", ({ discord, push }) => {
+      expect(discord).toBe("🚫 **lsrc:1 står stilla, kvoten är slut (reset 28 sep 03:10).** amux fortsätter själv i samma session när fönstret är tillbaka. Panelen: `amux log lsrc -p 1 --tmux`");
+      expect(push).toBe("🚫 lsrc:1 står stilla på kvot, reset 28 sep 03:10. amux fortsätter själv.");
+    }],
+  });
+
+  unit("asks for a nudge when nothing resumes the pane", {
+    when: ["a stop without a known reset and recovery off", () => formatLimitedAlert({ paneKey: "ai:4", logCommand })],
+    then: ["no invented time and an honest next step", ({ discord, push }) => {
+      expect(discord).toBe("🚫 **ai:4 står stilla, kvoten är slut.** Knuffa igång den när kvoten är tillbaka. Panelen: `amux log lsrc -p 1 --tmux`");
+      expect(push).toBe("🚫 ai:4 står stilla på kvot. Knuffa igång den.");
     }],
   });
 });

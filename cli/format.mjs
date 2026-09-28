@@ -3,6 +3,7 @@
 import { stripAnsi } from "../lib.mjs";
 import { ALL_DIALECTS } from "../core/dialects.mjs";
 import { statusIcon } from "../core/pane-status.mjs";
+import { CLAUDE_STOP_BANNER } from "../core/claude-quota-recovery.mjs";
 
 // Re-exported so existing `import { statusIcon } from "./format.mjs"`
 // callers keep working; the truth lives in core/pane-status.mjs.
@@ -13,7 +14,7 @@ export { statusIcon };
  * Exported so the auto-compact latch can ask the same question this classifier
  * asks, instead of keeping a second copy that would drift away from it.
  */
-export const LIMIT_BANNER = /You've hit your (session|usage) limit/;
+export const LIMIT_BANNER = CLAUDE_STOP_BANNER;
 
 /** Detect pane status from captured content. */
 export function detectPaneStatus(paneContent) {

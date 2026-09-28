@@ -128,3 +128,45 @@ feature("Claude quota recovery readiness", () => {
     )],
   });
 });
+
+feature("Claude's current stop wording starts recovery", () => {
+  // The three shapes Claude Code wrote in the last two weeks (2026-09-28).
+  // None was recognized, so no stopped pane was ever resumed or announced.
+  const receiptFor = (text, timestamp) => activeClaudeLimitReceiptFromEvents(
+    [limitEvent({ text, timestamp })], { sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+  );
+
+  unit("a spend-limit stop names the session window and its reset", {
+    when: ["reading lsrc:1's stop at 02:48", () => receiptFor(
+      "You've hit your monthly spend limit · raise it at claude.ai/settings/usage?from=cc_cli_limit_message · your session limit resets 3:10am (Europe/Stockholm)",
+      "2026-09-28T00:48:06.000Z",
+    )],
+    then: ["a session receipt that resets at 03:10 Stockholm", (receipt) =>
+      expect(receipt).toMatchObject({ limitKind: "session", resetAt: Date.parse("2026-09-28T01:10:00.000Z") })],
+  });
+
+  unit("a weekly stop with an hour-only reset", {
+    when: ["reading a 08:41 stop that resets 9am", () => receiptFor(
+      "You've hit your weekly limit · resets 9am (Europe/Stockholm)", "2026-09-23T06:41:35.579Z",
+    )],
+    then: ["a weekly receipt that resets the same morning", (receipt) =>
+      expect(receipt).toMatchObject({ limitKind: "weekly", resetAt: Date.parse("2026-09-23T07:00:00.000Z") })],
+  });
+
+  unit("a weekly stop with a dated reset", {
+    when: ["reading a Sunday stop that resets Sep 30", () => receiptFor(
+      "You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm)", "2026-09-27T19:48:57.046Z",
+    )],
+    then: ["the reset lands on that date", (receipt) =>
+      expect(receipt).toMatchObject({ limitKind: "weekly", resetAt: Date.parse("2026-09-30T07:00:00.000Z") })],
+  });
+
+  unit("a session window that is back does not resume while the week is spent", {
+    when: ["the session is fresh but the weekly limit is full", () => claudeQuotaRecoveryReadiness(
+      { limitKind: "session", resetAt: null },
+      { ok: true, limits: [{ kind: "session", usedPercent: 2 }, { kind: "weekly_all", usedPercent: 100, isActive: true }] },
+    )],
+    then: ["no resume, so no paid usage", (result) =>
+      expect(result).toEqual({ ready: false, reason: "weekly-limit-still-exhausted" })],
+  });
+});

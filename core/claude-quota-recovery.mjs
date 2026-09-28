@@ -3,8 +3,33 @@
 import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
 import { parseJsonlWindow } from "./jsonl-reader.mjs";
 
-/** DTO: Exact terminal quota response accepted as restart evidence. */
-export const CLAUDE_LIMIT_TEXT = /^You've hit your (session|usage) limit(?:\s*·\s*resets\s+(.+?))?\s*$/iu;
+// Claude's stop texts. The spend-limit form is what a plan stop says while
+// paid usage is off or capped; with only "session|usage" recognized, no stop
+// was resumed or announced for two weeks (lsrc:1, 2026-09-28, 02:48 to 06:50):
+//   You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm)
+//   You've hit your monthly spend limit · raise it at … · your session limit resets 3:10am (Europe/Stockholm)
+const PLAN_STOP_TEXT = /^You(?:'|’)ve hit your (session|usage|weekly) limit(?:\s*·\s*resets\s+(.+?))?\s*$/iu;
+const SPEND_STOP_TEXT = /^You(?:'|’)ve hit your monthly spend limit\b/iu;
+const SPEND_STOP_WINDOW = /·\s*your (session|weekly) limit resets\s+(.+?)\s*$/iu;
+
+/** DTO: Any Claude plan-stop banner on a screen, for pane status and compact refusals. */
+export const CLAUDE_STOP_BANNER = /You(?:'|’)ve hit your (?:session|usage|weekly|monthly spend) limit/iu;
+
+/**
+ * WHAT: Reads the stopped window and its displayed reset from one exact Claude stop text.
+ * WHY: Keeps every current wording of a plan stop able to start recovery.
+ */
+export function claudeLimitFromText(text) {
+  const trimmed = String(text || "").trim();
+  const plan = PLAN_STOP_TEXT.exec(trimmed);
+  if (plan) return { kind: plan[1].toLowerCase(), reset: plan[2] || null };
+  if (!SPEND_STOP_TEXT.test(trimmed)) return null;
+  const window = SPEND_STOP_WINDOW.exec(trimmed);
+  return window ? { kind: window[1].toLowerCase(), reset: window[2] } : { kind: "usage", reset: null };
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const RESET_TEXT = /^(?:([a-z]{3})[a-z]*\s+(\d{1,2}),\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)(?:\s*\(([^)]+)\))?$/iu;
 
 const ACTIONABLE_EVENT_TYPES = new Set(["assistant", "user"]);
 const DEFAULT_LIMIT_TAIL_BYTES = 8 * 1024 * 1024;
@@ -62,26 +87,26 @@ function zonedEpoch({ year, month, day, hour, minute }, timeZone) {
  * WHY: Keeps clock fallback from guessing across time zones or day rollover.
  */
 export function parseClaudeLimitResetAt(text, observedAtMs) {
-  const match = CLAUDE_LIMIT_TEXT.exec(String(text || "").trim());
-  if (!match?.[2]) return null;
-  const reset = /^(\d{1,2}):(\d{2})(am|pm)(?:\s*\(([^)]+)\))?$/iu.exec(match[2].trim());
+  const shown = claudeLimitFromText(text)?.reset;
+  const reset = shown && RESET_TEXT.exec(shown.trim());
   if (!reset) return null;
 
-  const timeZone = reset[4]
+  const timeZone = reset[6]
     || Intl.DateTimeFormat().resolvedOptions().timeZone
     || "UTC";
-  let hour = Number(reset[1]) % 12;
-  if (reset[3].toLowerCase() === "pm") hour += 12;
-  const minute = Number(reset[2]);
-  if (!Number.isFinite(observedAtMs) || minute > 59) return null;
+  let hour = Number(reset[3]) % 12;
+  if (reset[5].toLowerCase() === "pm") hour += 12;
+  const minute = Number(reset[4] || 0);
+  const month = reset[1] ? MONTHS.indexOf(reset[1].toLowerCase()) + 1 : null;
+  if (!Number.isFinite(observedAtMs) || minute > 59 || month === 0) return null;
 
   let dateParts;
   try {
     const observed = zonedParts(observedAtMs, timeZone);
     dateParts = {
       year: Number(observed.year),
-      month: Number(observed.month),
-      day: Number(observed.day),
+      month: month ?? Number(observed.month),
+      day: month ? Number(reset[2]) : Number(observed.day),
       hour,
       minute,
     };
@@ -92,6 +117,10 @@ export function parseClaudeLimitResetAt(text, observedAtMs) {
   let candidate;
   try { candidate = zonedEpoch(dateParts, timeZone); }
   catch { return null; }
+  if (month) {
+    // A dated reset before the stop is next year's date (a December stop resetting in January).
+    return candidate < observedAtMs - 30_000 ? zonedEpoch({ ...dateParts, year: dateParts.year + 1 }, timeZone) : candidate;
+  }
   if (candidate < observedAtMs - 30_000) {
     const nextDate = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day + 1));
     candidate = zonedEpoch({
@@ -117,13 +146,13 @@ export function activeClaudeLimitReceiptFromEvents(events, {
   let found = null;
   for (let index = events.length - 1; index >= 0; index--) {
     const text = assistantText(events[index]);
-    const match = text && CLAUDE_LIMIT_TEXT.exec(text);
-    if (!match) continue;
+    const limit = text && claudeLimitFromText(text);
+    if (!limit) continue;
     const event = events[index];
     if (!event.uuid || !event.timestamp) return null;
     const observedAt = Date.parse(event.timestamp);
     if (!Number.isFinite(observedAt)) return null;
-    found = { index, event, text, match, observedAt };
+    found = { index, event, text, limit, observedAt };
     break;
   }
   if (!found) return null;
@@ -134,7 +163,7 @@ export function activeClaudeLimitReceiptFromEvents(events, {
     sessionId,
     sessionPath,
     limitEventId: found.event.uuid,
-    limitKind: found.match[1].toLowerCase(),
+    limitKind: found.limit.kind,
     text: found.text,
     observedAt: found.observedAt,
     resetAt: parseClaudeLimitResetAt(found.text, found.observedAt),
@@ -154,7 +183,7 @@ export function activeClaudeLimitReceipt(paneDir, {
   const events = parseJsonlWindow(identity.path, {
     initialBytes: Math.min(256 * 1024, tailBytes),
     maxBytes: tailBytes,
-    enough: (rows) => rows.some((event) => CLAUDE_LIMIT_TEXT.test(assistantText(event) || "")),
+    enough: (rows) => rows.some((event) => claudeLimitFromText(assistantText(event)) !== null),
   });
   return activeClaudeLimitReceiptFromEvents(events, {
     sessionId: identity.sessionId,
@@ -172,19 +201,17 @@ export function claudeQuotaRecoveryReadiness(receipt, quota, {
 } = {}) {
   if (!receipt) return { ready: false, reason: "no-active-limit-receipt" };
   if (quota?.ok && Array.isArray(quota.limits)) {
-    if (receipt.limitKind === "session") {
-      const session = quota.limits.find((limit) => limit?.kind === "session");
-      if (session && Number.isFinite(session.usedPercent)) {
-        return Number(session.usedPercent) < 100
-          ? { ready: true, via: "quota-api", usedPercent: Number(session.usedPercent) }
-          : { ready: false, reason: "session-limit-still-exhausted" };
-      }
-    } else {
-      const active = quota.limits.filter((limit) => limit?.isActive === true
-        || limit?.kind === "session" || limit?.kind === "weekly_all");
-      if (active.length && active.every((limit) => Number(limit.usedPercent) < 100)) {
-        return { ready: true, via: "quota-api" };
-      }
+    // Every plan window must have room, whichever one stopped the pane: a fresh
+    // session in a spent week would run on paid usage (15 Sep: €20 in 1 min 43 s).
+    const windows = quota.limits.filter((limit) => (limit?.isActive === true
+      || limit?.kind === "session" || limit?.kind === "weekly_all") && Number.isFinite(limit.usedPercent));
+    const spent = windows.find((limit) => Number(limit.usedPercent) >= 100);
+    if (spent) return { ready: false, reason: `${spent.kind === "session" ? "session" : "weekly"}-limit-still-exhausted` };
+    const session = windows.find((limit) => limit.kind === "session");
+    if (windows.length) {
+      return receipt.limitKind === "session" && session
+        ? { ready: true, via: "quota-api", usedPercent: Number(session.usedPercent) }
+        : { ready: true, via: "quota-api" };
     }
   }
   if (Number.isFinite(receipt.resetAt) && now >= receipt.resetAt + resetGraceMs) {

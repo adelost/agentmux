@@ -132,6 +132,13 @@ feature("nightly context budget", () => {
     }],
     then: ["only the current refusal blocks", (result) => expect(result).toEqual(["claude-subscription-access-disabled", null])],
   });
+  unit("reads Claude's current stop wording as a usage limit", {
+    when: ["a refused /compact under a weekly and a spend-limit stop", () => [
+      "You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm)",
+      "You've hit your monthly spend limit · raise it at claude.ai/settings/usage · your session limit resets 3:10am (Europe/Stockholm)",
+    ].map((stop) => compactAccessBlocker(`❯ /compact\n${stop}\n❯ `))],
+    then: ["both are provider limits", (result) => expect(result).toEqual(["provider-usage-limited", "provider-usage-limited"])],
+  });
   component("dry-run previews without typing, acquiring a lease or writing receipts", {
     when: ["previewing the actual runner", async () => {
       const fx = fixture();
