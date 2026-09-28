@@ -302,6 +302,20 @@ export function composerLines(raw) {
 }
 
 /**
+ * WHAT: Returns the text in the composer box, "" when it is empty, or null when no composer is visible.
+ * WHY: Typing appends to whatever the box already holds, so delivery must see that text before it types.
+ */
+export function composerDraft(raw) {
+  const lines = composerLines(raw);
+  const start = lines.findIndex((line) => COMPOSER_LINE_RE.test(line));
+  if (start < 0) return null;
+  const below = lines.slice(start + 1);
+  const end = below.findIndex((line) => COMPOSER_RULE_RE.test(line));
+  const continuation = end < 0 ? [] : below.slice(0, end);
+  return [lines[start].replace(COMPOSER_LINE_RE, ""), ...continuation].join("\n").trim();
+}
+
+/**
  * Text a previous (failed) delivery left in the composer that would corrupt
  * the message we're about to type. Returns the stale text, or null when
  * typing is safe. Pure — callers own the capture + clearing keystrokes.

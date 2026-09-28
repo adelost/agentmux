@@ -18,8 +18,11 @@ const withAgentList = (composer) => [
   "  ◯ general-purpose  Appending port-collision lesson… 1h 31m 36s · ↓ 601.7k tokens",
 ].join("\n");
 
-/** A Claude pane whose composer follows typed text, backspaces and Enter. */
-function claudePane({ screen = shortFooter, composer = "", copyMode = false } = {}) {
+/**
+ * A Claude pane whose composer follows typed text, backspaces and Enter. A
+ * `suggestion` is grey text shown in an empty composer until the first keystroke.
+ */
+function claudePane({ screen = shortFooter, composer = "", copyMode = false, suggestion = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-maintenance-"));
   const configPath = join(root, "agents.yaml");
   writeFileSync(configPath, `probe:\n  dir: ${root}\n  panes:\n    - {cmd: claude}\n`);
@@ -30,9 +33,9 @@ function claudePane({ screen = shortFooter, composer = "", copyMode = false } = 
       pane.calls.push(command);
       if (command.includes("pane_current_command")) return { stdout: "claude\n" };
       if (command.includes("pane_in_mode")) return { stdout: copyMode ? "1\n" : "0\n" };
-      if (command.includes("capture-pane")) return { stdout: screen(pane.composer) };
+      if (command.includes("capture-pane")) return { stdout: screen(pane.composer || suggestion || "") };
       const typed = command.match(/ -l -- '(.*)'$/u);
-      if (typed) pane.composer += typed[1];
+      if (typed) { pane.composer += typed[1]; suggestion = null; }
       const erased = (command.match(/\bBSpace\b/gu) || []).length;
       if (erased) pane.composer = pane.composer.slice(0, Math.max(0, pane.composer.length - erased));
       if (/send-keys.* Enter$/u.test(command)) { pane.submitted = pane.composer; pane.composer = ""; }
@@ -110,6 +113,49 @@ feature("Claude's composer is found above its background-agent list", () => {
       expect(error).toBeNull();
       expect(typed).toBe(0);
       expect(submitted).toBe("/compact");
+    }],
+  });
+});
+
+async function deliver(setup, prompt) {
+  const { agent, pane, clean } = claudePane(setup);
+  let error = null;
+  try { await agent.sendOnly("probe", prompt, 0, { existingOnly: true }); }
+  catch (caught) { error = caught.message; }
+  finally { clean(); }
+  return { ...pane, error };
+}
+
+feature("a delivery never types after text amux did not write", () => {
+  const question = "[transcribed voice] Hej, var är ni någonstans?";
+
+  // lsrc:1, 2026-09-28: "/compact/compact" sat in the composer and Mattias's
+  // question went out as "/compact/compact[…] Hej, var är ni någonstans?".
+  component("a draft in the composer holds the message and stays untouched", {
+    when: ["delivering while the composer holds a short draft", () =>
+      deliver({ screen: withAgentList, composer: "/compact/compact" }, question)],
+    then: ["nothing is sent and the draft is exactly as it was", ({ error, submitted, composer }) => {
+      expect(error).toMatch(/composer holds a draft/u);
+      expect(submitted).toBeNull();
+      expect(composer).toBe("/compact/compact");
+    }],
+  });
+
+  component("a grey suggestion in an empty composer does not hold the message", {
+    when: ["delivering while Claude suggests a next prompt", () =>
+      deliver({ screen: withAgentList, suggestion: "run the tests" }, question)],
+    then: ["exactly the message is sent", ({ error, submitted }) => {
+      expect(error).toBeNull();
+      expect(submitted).toBe(question);
+    }],
+  });
+
+  component("an empty composer is typed into without a probe", {
+    when: ["delivering into an empty composer", () => deliver({ screen: withAgentList }, question)],
+    then: ["exactly the message is sent with no erase", ({ error, submitted, calls }) => {
+      expect(error).toBeNull();
+      expect(submitted).toBe(question);
+      expect(calls.some((call) => /\bBSpace\b/u.test(call))).toBe(false);
     }],
   });
 });

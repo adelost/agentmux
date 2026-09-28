@@ -12,7 +12,7 @@ import { createTmuxAdapter } from "./core/tmux.mjs";
 import { ensureHeadlessWindow, settleTmuxWindowSize } from "./core/tmux-window-size.mjs";
 import { stripPaneChrome } from "./core/pane-chrome.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
-import { detectDialect, COMPOSER_LINE_RE, composerLines, foreignComposerText } from "./core/dialects.mjs";
+import { detectDialect, COMPOSER_LINE_RE, composerDraft, composerLines, foreignComposerText } from "./core/dialects.mjs";
 import { createPaneDialectResolver } from "./core/pane-dialect.mjs";
 import {
   captureClaudePromptEchoCursor,
@@ -1144,6 +1144,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // Normal delivery may recover a draft; unattended maintenance must not clear one.
       if (maintenanceGuard) await maintenanceGuard("paste");
       else await clearForeignComposerText(agentName, pane, target, prompt, dialect);
+      if (dialect === "claude") await refuseToTypeAfterClaudeDraft(agentName, pane, target);
       if (dialect === "codex") {
         const ready = maintenanceGuard ? { busy: false } : await waitForCodexPromptReady(agentName, pane);
         busyAtSend = Boolean(ready?.busy);
@@ -1321,6 +1322,24 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       captureScreen: () => captureScreen(agentName, pane),
       sleep: wait,
     });
+
+  /**
+   * WHAT: Refuses to type while Claude's composer holds text amux did not write, and leaves that text as it was.
+   * WHY: Typing appends to the draft, so "/compact/compact" turned Mattias's question into
+   *   "/compact/compact[…] Hej, var är ni någonstans?" (lsrc:1, 2026-09-28). A suggestion in the box
+   *   disappears on the first keystroke and a draft does not, so one probe space tells them apart and is erased.
+   */
+  async function refuseToTypeAfterClaudeDraft(agentName, pane, target) {
+    if (!composerDraft(await capturePane(agentName, pane, 15))) return;
+    await t.sendLiteral(target, " ");
+    await wait(300);
+    const draft = composerDraft(await capturePane(agentName, pane, 15));
+    await t.sendKeys(target, eraseKeys(" "));
+    if (draft === "") return;
+    throw codexDeliveryBlocked(
+      `Claude prompt delivery blocked: the composer holds a draft amux did not type ("${String(draft).slice(0, 40)}")`,
+    );
+  }
 
   /**
    * A previous failed delivery can leave ITS text sitting in the composer.
