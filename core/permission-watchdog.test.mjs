@@ -183,6 +183,85 @@ describe("classifyPermissionPrompt", () => {
   });
 });
 
+// lsrc:1 on 2026-09-29 (Claude Code 2.1.284): a background agent's command, verbatim from its transcript, stopped the
+// pane 6 minutes behind this prompt until Mattias answered it himself: "jag tycker inte den ska pausa". Newer Claude
+// Code quotes the rm and a hint after the target, and $2 comes from `set -- $pair` in a loop over literal words.
+const LSRC1_COMMAND = String.raw`S=/tmp/claude-1000/-home-adelost-lsrc--agents-1/cc72f53f-04fd-4096-936c-82d153278adc/scratchpad/a23; D=$S/ws1; for p in 8865 8866; do pid=$(ss -ltnpH "sport = :$p" | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1); [ -n "$pid" ] && kill $pid; done; sleep 1; for pair in "8865 p-ws1-cut v2-a23-timeline" "8866 p-ws1-cut-base v2-a23-timeline-base"; do set -- $pair; rm -rf $S/$2; $S/make_copy.sh $S/$2 > /dev/null; cd ~/lsrc/cutkit-wt/$3 && (python3 tools/studio.py $S/$2 --marks marks-points.yaml --port $1 --no-open > $S/$2.log 2>&1 &); done; for p in 8865 8866; do for i in $(seq 1 60); do curl -s -o /dev/null -w "%{http_code}" "localhost:$p/api/recipe?name=edl-film-1752.yaml" 2>/dev/null | grep -q 200 && break; sleep 1; done; done; for pair in "8865 p-ws1-cut v2-a23-timeline mine" "8866 p-ws1-cut-base v2-a23-timeline-base base"; do set -- $pair; rm -rf $D/cut2-$4; mkdir -p $D/cut2-$4; cd ~/lsrc/cutkit-wt/$3 && FX=$S/$2 PORT=$1 OUT=$D/cut2-$4 SIZE=1600x950 timeout 590 node tools/dev/drive.mjs $D/moves-variant2.mjs > $D/moves2-$4.txt 2>&1; echo "== $4 moves 2-5: $(grep -c 'STEP FAILED' $D/moves2-$4.txt) failed, starts: $(head -c 20 $D/moves2-$4.txt | tr '\n' ' ')"; grep -A2 "STEP FAILED" $D/moves2-$4.txt | cut -c1-600 | head -3; ls $D/cut2-$4 | tr '\n' ' '; echo; done`;
+const LSRC1_REASON = 'Dangerous rm operation on possibly-empty variable path: $S/$2 in `rm -rf $S/$2` (bind $2 and rewrite its $S as "${S:?}" or use a literal path)';
+const LSRC1_SCRATCH = "/tmp/claude-1000/-home-adelost-lsrc--agents-1/cc72f53f-04fd-4096-936c-82d153278adc/scratchpad/a23";
+
+/** The dialog as Claude Code draws it: the command and the reason in a box, wrapped between words at `width`. */
+function dialog(command, description, reason, width = 150) {
+  const wrap = (text) => text.split("\n").flatMap((para) => {
+    const lines = [];
+    let line = "";
+    for (const word of para.split(" ")) {
+      if (line && line.length + 1 + word.length > width) { lines.push(line); line = word; } else line = line ? `${line} ${word}` : word;
+    }
+    return [...lines, line];
+  });
+  return [
+    ...wrap(command).map((l) => `   │ ${l}`),
+    `   ${description}`,
+    ...wrap(reason).map((l) => ` │ ${l}`),
+    " Do you want to proceed?",
+    " ❯ 1. Yes",
+    "   2. No",
+    " Esc to cancel · Tab to amend",
+  ].join("\n");
+}
+
+describe("the 29 Sep loop rm (lsrc:1)", () => {
+  const screen = dialog(LSRC1_COMMAND, "Run moves 2 to 5 on fresh copies of mine and base", LSRC1_REASON);
+
+  it("reads the whole reason and the command off the screen", () => {
+    const p = detectPermissionPrompt(screen);
+    expect(p.reason).toBe(LSRC1_REASON);
+    expect(p.command.replace(/\s+/gu, " ")).toBe(LSRC1_COMMAND.replace(/\s+/gu, " "));
+  });
+
+  it("answers yes: the target is $S/$2 alone, and $2 is one of the loop's literal words under the scratch folder", () => {
+    const decision = classifyPermissionPrompt(detectPermissionPrompt(screen), untracked);
+    expect(decision).toMatchObject({ action: "answer", keys: "1" });
+    expect(decision.why).toContain(`${LSRC1_SCRATCH}/p-ws1-cut,`);
+    expect(decision.why).toContain(`${LSRC1_SCRATCH}/p-ws1-cut-base`);
+  });
+
+  it("reads the target alone from the newer reason for a variable assigned a literal path", () => {
+    const reason = "Dangerous rm operation on possibly-empty variable path: $D/*.png in `rm -f $D/*.png` (rewrite it as \"${D:?}\" or use a literal path: when $D is empty this removes /*.png)";
+    expect(classifyPermissionPrompt({ reason, command: "D=/home/adelost/lsrc/.artifacts/home-reach/conservative; rm -f $D/*.png" }, untracked).action).toBe("answer");
+  });
+});
+
+describe("rm targets bound by a loop", () => {
+  const loopRm = (target, command) => classifyPermissionPrompt(varRm(target, command), untracked);
+
+  it("answers yes for a loop variable over literal words, and for $N after set -- $loopvar", () => {
+    expect(loopRm("$S/$d", "S=/tmp/claude-1000/x/scratchpad; for d in out 'cache' \"logs\"; do rm -rf $S/$d; done").action).toBe("answer");
+    expect(loopRm("$S/$1", "set -euo pipefail; S=/tmp/claude-1000/x/scratchpad; for pair in \"a 1\" \"b 2\"; do set -- $pair; rm -rf $S/$1; done").action).toBe("answer");
+  });
+
+  it("notifies when the loop runs over a command substitution, a variable, a glob or a brace", () => {
+    expect(loopRm("$S/$d", "S=/tmp/claude-1000/x/y; for d in $(ls); do rm -rf $S/$d; done").action).toBe("notify");
+    expect(loopRm("$S/$d", "S=/tmp/claude-1000/x/y; for d in $LIST; do rm -rf $S/$d; done").action).toBe("notify");
+    expect(loopRm("$S/$d", "S=/tmp/claude-1000/x/y; for d in *; do rm -rf $S/$d; done").action).toBe("notify");
+    expect(loopRm("$S/$d", "S=/tmp/claude-1000/x/y; for d in {a,b}; do rm -rf $S/$d; done").action).toBe("notify");
+  });
+
+  it("notifies when a loop word climbs out with .., even one broken across two lines", () => {
+    expect(loopRm("$S/$d", "S=/tmp/claude-1000/x/y; for d in a ../../../../home/adelost; do rm -rf $S/$d; done").action).toBe("notify");
+    expect(loopRm("$S/$2", "S=/tmp/claude-1000/x/y; for p in \"1 .\n./../../home\"; do set -- $p; rm -rf $S/$2; done").action).toBe("notify");
+  });
+
+  it("notifies when the loop variable is also assigned, a word holds a space, or the positionals move", () => {
+    expect(loopRm("$S/$d", "S=/tmp/claude-1000/x/y; for d in a; do d=$HOME; rm -rf $S/$d; done").action).toBe("notify");
+    expect(loopRm("$S/$d", "S=/tmp/claude-1000/x/y; for d in \"a b\"; do rm -rf $S/$d; done").action).toBe("notify");
+    expect(loopRm("$S/$2", "S=/tmp/claude-1000/x/y; for p in \"1 a\"; do set -- $p; shift; rm -rf $S/$2; done").action).toBe("notify");
+    expect(loopRm("$S/$1", "S=/tmp/claude-1000/x/y; set -- $(cat list); rm -rf $S/$1").action).toBe("notify");
+    expect(loopRm("$S/$1", "S=/tmp/claude-1000/x/y; rm -rf $S/$1").action).toBe("notify");
+  });
+});
+
 describe("parsePermissionWatchdogConfig", () => {
   it("reads env with safe defaults", () => {
     // humanAgeMs: skyvw:0's order for Mattias 2026-09-15, "Mattias gets the DM only if the prompt is still open N minutes later (default 10)".

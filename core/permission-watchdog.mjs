@@ -138,8 +138,11 @@ export function openPromptsSnapshot(at, open) {
   }, null, 2)}\n`;
 }
 
-const RM_REASON = /^Dangerous rm operation on (possibly-empty variable path(?: inside command substitution)?|statically-unresolvable target):\s*(.+)$/u;
+const RM_REASON = /^Dangerous rm operation on (possibly-empty variable path(?: inside command substitution)?|statically-unresolvable target):\s*(.+)$/su;
+// Claude Code 2.1.28x names one target and then quotes the rm and a hint: "$S/$2 in `rm -rf $S/$2` (bind $2 ...)".
+const QUOTED_RM = /^(.+?) in `[^`]*` \(.*\)$/su;
 const MIN_DEPTH = 3;
+const MAX_VARIANTS = 64;
 const notify = (why) => ({ action: "notify", why });
 
 /**
@@ -155,28 +158,116 @@ export function classifyPermissionPrompt({ reason = "", command = "" } = {}, { h
   const m = RM_REASON.exec(reason.trim());
   if (!m) return notify("not a Claude Code dangerous-rm check");
   if (/inside command substitution/u.test(m[1])) return notify("rm target comes from command substitution");
+  const quoted = QUOTED_RM.exec(m[2].trim());
+  const targets = quoted ? [quoted[1]] : m[2].trim().split(/\s+/u);
   const paths = [];
-  for (const target of m[2].trim().split(/\s+/u)) {
+  for (const target of targets) {
     const resolved = resolveRmTarget(target, command, home);
     if (resolved.why) return notify(resolved.why);
-    const unsafe = unsafeRmPath(resolved.path, home, holdsKeptFiles);
-    if (unsafe) return notify(unsafe);
-    paths.push(resolved.path);
+    for (const path of resolved.paths) {
+      const unsafe = unsafeRmPath(path, home, holdsKeptFiles);
+      if (unsafe) return notify(unsafe);
+      paths.push(path);
+    }
   }
   return { action: "answer", keys: "1", why: `rm-målen är djupa mappar utan filer som git behåller (${paths.join(", ")})` };
 }
 
-/** Resolves an rm target to its literal folder prefix: variables from literal
- * assignments in the same command, ~ as home, cut at the first glob. */
+// A variable in an rm target: ${NAME}, $NAME, ${N} or a one-digit positional $N.
+const VAR_REF = /\$(?:\{([A-Za-z_][A-Za-z0-9_]*|[0-9]+)\}|([A-Za-z_][A-Za-z0-9_]*|[0-9]))/gu;
+
+/** Resolves an rm target to the literal folder prefixes it can have: variables
+ * from literal assignments in the same command, a loop variable (or $N after
+ * `set -- $loopvar`) from the loop's literal words, ~ as home, cut at the first
+ * glob. Returns { paths } or { why }. */
 function resolveRmTarget(target, command, home) {
-  let t = target.replace(/["']/gu, "");
+  const t = target.replace(/["']/gu, "");
   if (/\$\(|`/u.test(t)) return { why: "rm target comes from command substitution" };
-  for (const [, name] of t.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/gu)) {
-    const assign = new RegExp(`(?:^|[;\\n]|&&|\\|\\|)\\s*${name}=("?)(\\/[^\\s"';&|]+)\\1(?=\\s|;|$)`, "u").exec(command);
-    if (!assign) return { why: `${name} is not assigned to a literal absolute path in the same command` };
-    if (/\$/u.test(assign[2])) return { why: `${name} is assigned from another variable` };
-    t = t.replace(new RegExp(`\\$\\{?${name}\\}?(?![A-Za-z0-9_])`, "gu"), assign[2]);
+  const names = [...new Set([...t.matchAll(VAR_REF)].map((m) => m[1] ?? m[2]))];
+  let combos = [new Map()];
+  for (const name of names) {
+    const values = variableValues(name, command);
+    if (values.why) return values;
+    combos = combos.flatMap((combo) => values.words.map((word) => new Map(combo).set(name, word)));
+    if (combos.length > MAX_VARIANTS) return { why: `rm target has more than ${MAX_VARIANTS} possible values: ${target}` };
   }
+  const paths = [];
+  for (const combo of combos) {
+    const resolved = literalFolder(t.replace(VAR_REF, (_, braced, bare) => combo.get(braced ?? bare)), command, home, target);
+    if (resolved.why) return resolved;
+    paths.push(resolved.path);
+  }
+  return { paths: [...new Set(paths)] };
+}
+
+/** The values a variable can have where the rm runs, or why they cannot be known. */
+function variableValues(name, command) {
+  if (/^[0-9]+$/u.test(name)) return positionalValues(Number(name), command);
+  const assign = new RegExp(`(?:^|[;\\n]|&&|\\|\\|)\\s*${name}=("?)(\\/[^\\s"';&|]+)\\1(?=\\s|;|$)`, "u").exec(command);
+  if (assign) {
+    if (/\$/u.test(assign[2])) return { why: `${name} is assigned from another variable` };
+    return { words: [assign[2]] };
+  }
+  const loop = loopWords(name, command);
+  if (loop.why) return loop;
+  if (!loop.words) return { why: `${name} is not assigned to a literal absolute path in the same command` };
+  if (loop.words.some((w) => /\s/u.test(w))) return { why: `a word the loop gives ${name} holds a space` };
+  return loop;
+}
+
+/** $N after `set -- $V` where V loops over literal words: the Nth word of each. */
+function positionalValues(n, command) {
+  if (n === 0) return { why: "$0 is the shell's own name" };
+  if (/(?:^|[\s;&|(])shift\b/u.test(command)) return { why: "the command shifts its positional parameters" };
+  const words = [];
+  let bound = false;
+  for (const set of command.matchAll(/(?:^|[\s;&|(])set\s+([^;\n&|]*)/gu)) {
+    const args = set[1].trim().split(/\s+/u).filter(Boolean);
+    let i = 0;
+    // options alone (set -euo pipefail) leave the positionals as they are
+    while (i < args.length && /^[-+][A-Za-z]+$/u.test(args[i])) i += /o$/u.test(args[i]) ? 2 : 1;
+    if (i >= args.length) continue;
+    const from = args[i] === "--" && args.length === i + 2 ? /^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/u.exec(args[i + 1]) : null;
+    if (!from) return { why: `set ${set[1].trim()} does not bind the positionals from a loop's literal words` };
+    const loop = loopWords(from[1], command);
+    if (loop.why) return loop;
+    if (!loop.words) return { why: `$${from[1]} is not a loop over literal words` };
+    bound = true;
+    for (const item of loop.words) words.push(item.split(/\s+/u).filter(Boolean)[n - 1] ?? "");
+  }
+  if (!bound) return { why: `$${n} is not set in the command` };
+  return { words };
+}
+
+/** The words every `for NAME in ...` in the command gives NAME, when each is
+ * literal. Returns {} when NAME is no loop variable, { words } or { why }. */
+function loopWords(name, command) {
+  const starts = [...command.matchAll(new RegExp(`(?:^|[\\s;&|(])for\\s+${name}\\s+in\\s`, "gu"))];
+  if (!starts.length) return {};
+  if (new RegExp(`(?:^|[\\s;&|(])(?:${name}=|read\\s+(?:-\\S+\\s+)*${name}\\b)`, "u").test(command)) {
+    return { why: `${name} is also assigned in the command` };
+  }
+  const words = [];
+  for (const start of starts) {
+    let i = start.index + start[0].length;
+    for (;;) {
+      const token = /^\s*(?:(;|do(?=\s|$))|"([^"$`\\]*)"|'([^']*)'|([^\s;&|<>(){}"'$`\\*?[]+)|(\S))/u.exec(command.slice(i));
+      if (!token || token[1] !== undefined) break;
+      if (token[5] !== undefined) return { why: `the loop over ${name} has a word that is not literal` };
+      const next = command[i + token[0].length];
+      if (next !== undefined && !/[\s;]/u.test(next)) return { why: `the loop over ${name} has a word that is not literal` };
+      words.push(token[2] ?? token[3] ?? token[4]);
+      i += token[0].length;
+    }
+    // a screen line can break inside a word; with the breaks taken out, no .. may appear
+    if (/\.\./u.test(command.slice(start.index, i).replace(/\s+/gu, ""))) return { why: `the loop over ${name} climbs out with ..` };
+  }
+  return { words };
+}
+
+/** A resolved target as the literal folder it removes from. */
+function literalFolder(resolved, command, home, target) {
+  let t = resolved;
   if (/\$/u.test(t)) return { why: `rm target is still a variable: ${target}` };
   if (t === "~" || t.startsWith("~/")) t = home + t.slice(1);
   const literal = t.split(/[*?[]/u)[0].replace(/\/+$/u, "");

@@ -8,6 +8,7 @@ import {
 } from "../core/permission-watchdog.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
+import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -72,6 +73,8 @@ export function createPermissionWatchdog({
   holdsKeptFiles = gitKeepsFilesUnder,
   recordDecision = (line) => writeFile(permissionDecisionLogPath(), line, { append: true }),
   publishOpenPrompts = (text) => writeFile(openPromptsPath(), text, { append: false }),
+  beat = (metrics) => writeGuardHeartbeat({ key: "permission-watchdog", metrics }),
+  captureTimeoutMs = 5_000,
   sessionIdentity = (agentConfig, paneIdx) => {
     const paneDir = agent.paneDirectory(agentConfig.dir, paneIdx);
     return latestClaudeSessionIdentity(paneDir)?.sessionId || null;
@@ -82,6 +85,22 @@ export function createPermissionWatchdog({
   const seen = new Map();
   let intervalId = null;
   let publishedPrompts = null;
+  let ticking = false;
+  let lastBeatAt = -Infinity;
+
+  // A pane whose capture never returns must not hold every other pane's prompt:
+  // on 2026-09-29 no round had finished since the bridge restarted the day before.
+  async function capture(agentConfig, paneIdx) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`capture timed out after ${captureTimeoutMs} ms`)), captureTimeoutMs);
+    });
+    try {
+      return await Promise.race([agent.capturePane(agentConfig.name, paneIdx, 120), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   async function post(agentName, paneIdx, text) {
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
@@ -122,8 +141,9 @@ export function createPermissionWatchdog({
     const paneKey = `${agentConfig.name}:${paneIdx}`;
     let content = "";
     try {
-      content = await agent.capturePane(agentConfig.name, paneIdx, 120);
-    } catch {
+      content = await capture(agentConfig, paneIdx);
+    } catch (err) {
+      if (/timed out/u.test(err.message)) log(`${paneKey}: ${err.message}`);
       seen.delete(paneKey);
       return null;
     }
@@ -211,21 +231,32 @@ export function createPermissionWatchdog({
   }
 
   async function tick() {
-    if (!config.enabled) return [];
-    let agents;
-    try { agents = listAgents(agentsYamlPath); } catch { return []; }
-    const at = now();
-    const results = [];
-    for (const a of agents) {
-      if (a.backend === "native") continue;
-      const panes = Array.isArray(a.panes) ? a.panes : [];
-      for (let i = 0; i < panes.length; i++) {
-        const r = await inspectPane(a, i, at);
-        if (r) results.push(r);
+    if (!config.enabled || ticking) return [];
+    ticking = true;
+    try {
+      let agents;
+      try { agents = listAgents(agentsYamlPath); } catch (err) { log(`agents unreadable: ${err.message}`); return []; }
+      const at = now();
+      const results = [];
+      let panesRead = 0;
+      for (const a of agents) {
+        if (a.backend === "native") continue;
+        const panes = Array.isArray(a.panes) ? a.panes : [];
+        for (let i = 0; i < panes.length; i++) {
+          const r = await inspectPane(a, i, at);
+          if (r) results.push(r);
+          panesRead += 1;
+        }
       }
+      publishOpen(at);
+      // a finished round is the proof of life amux doctor reads (guard key permission-watchdog)
+      if (at - lastBeatAt >= 30_000) {
+        try { beat({ panes: panesRead, prompts: seen.size }); lastBeatAt = at; } catch (err) { log(`heartbeat write failed: ${err.message}`); }
+      }
+      return results;
+    } finally {
+      ticking = false;
     }
-    publishOpen(at);
-    return results;
   }
 
   function publishOpen(at) {

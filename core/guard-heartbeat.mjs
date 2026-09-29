@@ -10,6 +10,10 @@ import { dirname, join } from "path";
 
 const guard = (key, intervalSec, label = key) => Object.freeze({ key, intervalSec, label });
 
+/**
+ * WHAT: Defines every guard whose heartbeat amux doctor expects, with its interval.
+ * WHY: Keeps a guard that stops beating from disappearing without a trace.
+ */
 export const GUARD_CRON_REGISTRY = Object.freeze([
   guard("fleet-progress", 20 * 60),
   guard("task-keeper", 29 * 60),
@@ -17,6 +21,8 @@ export const GUARD_CRON_REGISTRY = Object.freeze([
   guard("comment-bridge", 60),
   guard("backlog-pull", 15 * 60),
   guard("board-curator", 60 * 60),
+  // the bridge's permission watchdog, polling every 10 s; stale after two missed minutes
+  guard("permission-watchdog", 60),
 ]);
 
 const REGISTRY_BY_KEY = new Map(GUARD_CRON_REGISTRY.map((entry) => [entry.key, entry]));

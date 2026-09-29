@@ -136,7 +136,7 @@ guard_heartbeat_disarm
     expect(readGuardHeartbeat("fleet-progress", heartbeatDir)).toBeNull();
   });
 
-  it("keeps all six production entrypoints wired to their canonical keys", () => {
+  it("keeps all seven production entrypoints wired to their canonical keys", () => {
     const sources = {
       "fleet-progress": readFileSync(join(REPO, "bin", "fleet-progress-cron.sh"), "utf8"),
       "task-keeper": readFileSync(join(REPO, "bin", "task-keeper-cron.sh"), "utf8"),
@@ -144,6 +144,7 @@ guard_heartbeat_disarm
       "comment-bridge": readFileSync(join(REPO, "bin", "suggestions-comment-bridge.mjs"), "utf8"),
       "backlog-pull": readFileSync(join(REPO, "bin", "backlog-pull-cron.sh"), "utf8"),
       "board-curator": readFileSync(join(REPO, "bin", "board-curator-cron.sh"), "utf8"),
+      "permission-watchdog": readFileSync(join(REPO, "channels", "permission-watchdog.mjs"), "utf8"),
     };
     expect(Object.keys(sources)).toEqual(GUARD_CRON_REGISTRY.map((entry) => entry.key));
     for (const [key, source] of Object.entries(sources)) {

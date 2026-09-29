@@ -24,11 +24,12 @@ const PROMPT = `
 const UNSAFE = PROMPT.replace('Q=/mnt/q/Chathelper-traningsdata-2026-09-10/GEMMA-4-TEST/TRANINGSDATA; ', "");
 const IDLE = "● Bash\n  done\n\n❯ ";
 
-function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" } }) {
+function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null }) {
   const decisions = [];
   const snapshots = [];
+  const beats = [];
   const agent = {
-    capturePane: vi.fn(async (_n, pane) => screens[pane] ?? IDLE),
+    capturePane: vi.fn(capture ?? (async (_n, pane) => screens[pane] ?? IDLE)),
     typeLiteral: vi.fn(async () => {}),
     sendEnter: vi.fn(async () => {}),
     sendOnly: vi.fn(async () => ({ submitted: true })),
@@ -44,9 +45,11 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
     sessionIdentity: (_agentConfig, pane) => sessionIds[pane] ?? null,
     recordDecision: (line) => decisions.push(JSON.parse(line)),
     publishOpenPrompts: (text) => snapshots.push(JSON.parse(text)),
+    beat: (metrics) => beats.push(metrics),
+    captureTimeoutMs: 50,
     log: () => {}, now: () => t,
   });
-  return { wd, agent, discord, notifyUser, decisions, snapshots, advance: (ms) => { t += ms; } };
+  return { wd, agent, discord, notifyUser, decisions, snapshots, beats, advance: (ms) => { t += ms; } };
 }
 
 describe("permission watchdog", () => {
@@ -186,6 +189,39 @@ describe("the watchdog's own record", () => {
     screens[1] = IDLE;
     await h.wd.tick();
     expect(h.snapshots.at(-1).prompts).toEqual([]);
+  });
+});
+
+// 2026-09-29: the bridge's watchdog had published nothing since the bridge restarted on 28 Sep and logged no
+// decision since 16 Sep, while lsrc:1 and skydive:0 sat on prompts it should have seen; nothing showed it had stopped.
+describe("the watchdog stays alive and says so", () => {
+  it("beats after a finished round, at most every 30 s, so amux doctor sees it alive", async () => {
+    const h = harness({ screens: {} });
+    await h.wd.tick();
+    expect(h.beats).toEqual([{ panes: 2, prompts: 0 }]);
+    h.advance(10_000); await h.wd.tick();
+    expect(h.beats).toHaveLength(1);
+    h.advance(20_000); await h.wd.tick();
+    expect(h.beats).toHaveLength(2);
+  });
+
+  it("reads the other panes and still beats when one pane never answers its capture", async () => {
+    const screens = { 1: UNSAFE };
+    const h = harness({ screens, capture: (_n, pane) => (pane === 0 ? new Promise(() => {}) : Promise.resolve(screens[pane])) });
+    await h.wd.tick(); h.advance(130_000); await h.wd.tick();
+    expect(h.decisions.map((d) => [d.pane, d.action])).toEqual([["lsrc:1", "escalated-orchestrator"]]);
+    expect(h.beats.at(-1)).toEqual({ panes: 2, prompts: 1 });
+  });
+
+  it("starts no round while the last one is still reading", async () => {
+    let release;
+    const h = harness({ screens: {}, capture: (_n, pane) => (pane === 0 ? new Promise((done) => { release = () => done(IDLE); }) : Promise.resolve(IDLE)) });
+    const first = h.wd.tick();
+    expect(await h.wd.tick()).toEqual([]);
+    expect(h.agent.capturePane).toHaveBeenCalledTimes(1);
+    release();
+    await first;
+    expect(h.agent.capturePane).toHaveBeenCalledTimes(2);
   });
 });
 
