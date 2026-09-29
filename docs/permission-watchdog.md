@@ -44,6 +44,8 @@ Var 10:e sekund läser den varje tmux-panels skärm. Frågan måste ligga i skä
 
 Svaret skickas som `1` och Enter under deliveryBroker-lås, och en rad postas i panelens Discord-kanal.
 
+Om en smal panel bryter frågan, alternativet eller kommandot över skärmrader känner vakten igen den aktiva dialogen men använder inte skärmtexten som bevis för auto-svar. Den går till ägaren efter två minuter. Bakgrundsagentens exakta Bash-kommando hämtas inte ur transkriptet när flera tool calls kan vänta samtidigt. Nya Claude-sessioner har dessutom en PreToolUse-krok som nekar sådana `rm`-mål före dialogen och ber agenten skriva en säker sökväg; redan startade sessioner kan sakna kroken.
+
 **Ägarrouting efter två minuter** för allt annat: kommandosubstitution, variabler som inte kan lösas, skyddade platser och alla frågor som inte gäller rm. Om projektet deklarerar en annan `orchestrator`-panel skickas frågan dit en gång. Om ingen sådan panel finns eller leveransen nekas går frågan direkt till människan. Om ägaren inte löser frågan går ett DM via `notifyUser` efter totalt tio minuter. Ingen tangent skickas för dessa frågor.
 
 Varje auto-svar kontrollerar under samma delivery-broker-lås att pane-sessionen och den hashade fullständiga prompten fortfarande är exakt de observerade. Ett sessionsbyte, en ändrad fråga eller en osäker session stoppar svaret. Ett påbörjat svar upprepas aldrig.
