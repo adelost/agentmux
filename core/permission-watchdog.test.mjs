@@ -280,6 +280,59 @@ describe("paths broken across screen lines", () => {
   });
 });
 
+// lsrc:0's 2026-09-29 16:06:31 Bash tool_use (toolu_01ExamdR55aAk5BdffxKvBKm)
+// was denied at 16:08:45 without running. Its 22-column Claude pane split the
+// question; the 42-column case below checks that a split target is never approved.
+const NARROW22_SCREEN = `
+ Bash command
+ │ S=/tmp/claude-1000/
+ │ lsrc-0/scratchpad/wd/
+ │ rmtest; for pair in
+ │ "1 one" "2 two"; do
+ │ set -- $pair; rm -rf
+ │ $S/$2; done
+ │ Dangerous rm
+ │ operation on possibly-
+ │ empty variable path:
+ │ $S/$2 in \`rm -rf
+ │ $S/$2\`
+ Do you want to
+ proceed?
+ ❯ 1.
+ Yes
+   2. No
+ Esc to cancel
+ · Tab to amend`;
+
+const NARROW42_SCREEN = `
+ Bash command
+ │ S=/tmp/claude-1000/a/b; cd
+ │ /tmp/claude-1000/a/b; rm -rf $S/alpha
+ │ beta
+ Run shell command
+ │ Dangerous rm operation on
+ │ possibly-empty variable path:
+ │ $S/alpha
+ │ beta
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+ Esc to cancel · Tab to amend`;
+
+describe("narrow Claude permission dialogs", () => {
+  it("recognises a 22-column live dialog and routes it instead of approving text broken by the screen", () => {
+    const prompt = detectPermissionPrompt(NARROW22_SCREEN);
+    expect(prompt).not.toBeNull();
+    expect(classifyPermissionPrompt(prompt, untracked).action).toBe("notify");
+  });
+
+  it("refuses auto-answer when a 42-column display splits one target into two apparently safe paths", () => {
+    const prompt = detectPermissionPrompt(NARROW42_SCREEN);
+    expect(prompt).not.toBeNull();
+    expect(classifyPermissionPrompt(prompt, untracked).action).toBe("notify");
+  });
+});
+
 describe("parsePermissionWatchdogConfig", () => {
   it("reads env with safe defaults", () => {
     // humanAgeMs: skyvw:0's order for Mattias 2026-09-15, "Mattias gets the DM only if the prompt is still open N minutes later (default 10)".

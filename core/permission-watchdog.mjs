@@ -39,6 +39,46 @@ export function parsePermissionWatchdogConfig(env = process.env) {
 }
 
 const strip = (s) => String(s || "").replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+const compactPaneRows = (rows) => rows.map((x) => x.l.replace(/^\s*│\s?/u, "")).join("").replace(/\s+/gu, "");
+
+/** Finds one active Yes/No modal even when Claude wraps its controls in a narrow pane. */
+function permissionControls(lines) {
+  const nonEmpty = lines.map((l, i) => ({ l, i })).filter((x) => x.l.trim());
+  const tail = nonEmpty.slice(-14);
+  let question = null;
+  for (let i = tail.length - 1; i >= 0 && !question; i--) {
+    if (!/^\s*(?:│\s*)?Do\b/u.test(tail[i].l)) continue;
+    for (let j = i; j < Math.min(i + 4, tail.length); j++) {
+      if (compactPaneRows(tail.slice(i, j + 1)).includes("Doyouwanttoproceed?")) {
+        question = { start: tail[i].i, end: tail[j].i };
+        break;
+      }
+    }
+  }
+  if (!question) return null;
+  const afterQuestion = tail.filter((x) => x.i > question.end);
+  const controls = compactPaneRows(afterQuestion);
+  const yes = controls.indexOf("1.Yes");
+  const no = controls.indexOf("2.No", yes + 1);
+  const cancel = controls.indexOf("Esctocancel", no + 1);
+  if (yes < 0 || no < 0 || cancel < 0) return null;
+  let cancelEnd = -1;
+  for (let i = 0; i < afterQuestion.length; i++) {
+    if (compactPaneRows(afterQuestion.slice(0, i + 1)).includes("Esctocancel")) {
+      cancelEnd = afterQuestion[i].i;
+      break;
+    }
+  }
+  if (lines.slice(cancelEnd + 1).some((l) => /^\s*[❯›>]\s*$/u.test(l) || /^\s*[❯›>]\s+\S/u.test(l))) return null;
+  const visibleOptions = afterQuestion.map((x) => x.l.trim()).filter((l) => /^(?:❯\s*)?\d+\.\s+\S/u.test(l));
+  const optionWrapped = !visibleOptions.some((o) => /^(?:❯\s*)?1\.\s+Yes\b/u.test(o))
+    || !visibleOptions.some((o) => /^(?:❯\s*)?2\.\s+No\b/u.test(o));
+  return {
+    askIdx: question.start,
+    options: optionWrapped ? ["❯ 1. Yes", "2. No"] : visibleOptions,
+    wrapped: question.start !== question.end || optionWrapped || !afterQuestion.some((x) => /Esc to cancel/u.test(x.l)),
+  };
+}
 
 /**
  * WHAT: Extracts the active Claude Code permission prompt at a pane's bottom.
@@ -46,25 +86,16 @@ const strip = (s) => String(s || "").replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
  */
 export function detectPermissionPrompt(paneText) {
   // Requires the question, numbered options and "Esc to cancel" in the last
-  // lines with no composer below. Returns null or { signature, reason, command, options }.
+  // lines with no composer below. Wrapped display text is never proof for auto-answer.
   const lines = strip(paneText).split(/\r?\n/).map((l) => l.trimEnd());
-  const nonEmpty = lines.map((l, i) => ({ l, i })).filter((x) => x.l.trim());
-  const tail = nonEmpty.slice(-14);
-  const tailText = tail.map((x) => x.l).join("\n");
-  if (!/Do you want to proceed\?/u.test(tailText)) return null;
-  const options = tail.map((x) => x.l.trim()).filter((l) => /^(?:❯\s*)?\d+\.\s+\S/u.test(l));
-  if (!options.some((o) => /^(?:❯\s*)?1\.\s+Yes\b/u.test(o))) return null;
-  if (!/Esc to cancel/u.test(tailText)) return null;
-  // Anything after the option lines that looks like a composer prompt means the
-  // dialog is gone and this is scrollback.
-  const lastOptionIdx = Math.max(...tail.filter((x) => /^\s*(?:❯\s*)?\d+\.\s+\S/u.test(x.l)).map((x) => x.i));
-  if (lines.slice(lastOptionIdx + 1).some((l) => /^\s*[❯›>]\s*$/u.test(l) || /^\s*[❯›>]\s+\S/u.test(l))) return null;
-
-  const askIdx = lines.findLastIndex((l, i) => i <= lastOptionIdx && /Do you want to proceed\?/u.test(l));
+  const controls = permissionControls(lines);
+  if (!controls) return null;
+  const { askIdx, options } = controls;
   const unbox = (l) => l.replace(/^\s*│\s?/u, "").trim();
   // Newer Claude Code draws the reason inside the box and wraps its target onto
   // the next box line; older builds print it as a plain line under the box.
-  const boxedReasonIdx = lines.findLastIndex((l, i) => i < askIdx && /^\s*│\s*Dangerous rm operation/u.test(l));
+  const boxedReasonIdx = lines.findLastIndex((l, i) => i < askIdx && /^\s*│\s*Dangerous\b/u.test(l)
+    && compactPaneRows(lines.slice(i, i + 3).map((text) => ({ l: text }))).startsWith("Dangerousrmoperation"));
   const bodyEnd = boxedReasonIdx >= 0 ? boxedReasonIdx : askIdx;
   // Command box: lines starting with "│" above the question; the box may carry
   // a trailing description line ("Relaunch the v8 training ...").
@@ -83,10 +114,13 @@ export function detectPermissionPrompt(paneText) {
   const reason = boxedReasonIdx >= 0
     ? lines.slice(boxedReasonIdx, askIdx).filter((l) => /^\s*│/u.test(l)).map(unbox).filter(Boolean).join(" ")
     : lines.slice(0, askIdx).map((l) => l.trim()).filter((l) => l && !/^│/u.test(l) && !/^Bash command$/u.test(l) && !/^[─┌┐└┘]+$/u.test(l)).at(-1) || "";
+  const boxedLines = lines.slice(Math.max(0, bodyEnd - commandLines.length), askIdx).filter((l) => /^\s*│/u.test(l));
+  const narrowBox = boxedLines.length > 1 && Math.max(...boxedLines.map((l) => l.length)) <= 48;
+  const screenWrapped = controls.wrapped || narrowBox;
   const signature = createHash("sha256")
-    .update(JSON.stringify({ reason, command, options }))
+    .update(JSON.stringify({ reason, command, options, screenWrapped }))
     .digest("hex");
-  return { signature, reason, command, options };
+  return { signature, reason, command, options, screenWrapped };
 }
 
 /**
@@ -149,12 +183,13 @@ const notify = (why) => ({ action: "notify", why });
  * WHAT: Checks whether a permission prompt may be answered yes without a human.
  * WHY: Keeps safe rm prompts from blocking panes and every other prompt with Mattias.
  */
-export function classifyPermissionPrompt({ reason = "", command = "" } = {}, { home, holdsKeptFiles }) {
+export function classifyPermissionPrompt({ reason = "", command = "", screenWrapped = false } = {}, { home, holdsKeptFiles }) {
   // Claude Code asks about rm targets it cannot resolve statically even in bypass
   // mode (Mattias 2026-09-14: amux approves rm automatically). A target is safe once
   // it resolves to a deep literal path that is not home, a top folder in home or on
   // a drive, and holds nothing git keeps. Returns { action: "answer", keys, why } or
   // { action: "notify", why }.
+  if (screenWrapped) return notify("the permission prompt is wrapped on screen, so its rm target cannot be proven");
   const m = RM_REASON.exec(reason.trim());
   if (!m) return notify("not a Claude Code dangerous-rm check");
   if (/inside command substitution/u.test(m[1])) return notify("rm target comes from command substitution");

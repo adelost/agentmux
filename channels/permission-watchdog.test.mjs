@@ -91,6 +91,18 @@ describe("permission watchdog", () => {
     expect(h.notifyUser.mock.calls[0][0]).toContain("amux lsrc -p 1 -- 1");
   });
 
+  it("escalates a wrapped live question without typing Yes into the pane", async () => {
+    const narrow = PROMPT.replace("Do you want to proceed?", "Do you want to\n proceed?");
+    const h = harness({ screens: { 1: narrow } });
+    await h.wd.tick(); h.advance(11_000);
+    expect(await h.wd.tick()).toEqual([]);
+    expect(h.agent.typeLiteral).not.toHaveBeenCalled();
+    h.advance(110_000);
+    expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:1", action: "escalated-orchestrator" }]);
+    expect(h.decisions[0].why).toContain("lsrc:0 owns the decision");
+    expect(h.agent.typeLiteral).not.toHaveBeenCalled();
+  });
+
   it("routes instead of answering when auto-answer is switched off", async () => {
     const h = harness({ screens: { 0: PROMPT }, autoAnswer: false });
     await h.wd.tick(); h.advance(121_000);
