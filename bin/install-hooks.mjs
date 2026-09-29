@@ -32,6 +32,8 @@ const SUGGESTIONS_GUARD_CMD = `exec node "${INSTALLED_GUARD}"`;
 // Hotspot reflection runs from the package like the event hook. The shell pre-filter keeps every other
 // Bash call free of a node start: only payloads that mention commit reach the guard.
 export const HOTSPOT_GUARD_CMD = `p=$(cat); case "$p" in *commit*) printf '%s' "$p" | exec node "${join(__dir, "hotspot-commit-guard.mjs")}";; esac`;
+// rm targets Claude Code stops for a person are refused before the call; only payloads naming rm start node.
+const RM_GUARD_CMD = `p=$(cat); case "$p" in *rm*) printf '%s' "$p" | exec node "${join(__dir, "rm-target-guard.mjs")}";; esac`;
 const SETTINGS = join(homedir(), ".claude", "settings.json");
 
 const isAmuxHook = (h) => h?.type === "command" && /amux-hook\.mjs/.test(h?.command || "");
@@ -39,6 +41,8 @@ const isSuggestionsGuard = (h) => h?.type === "command"
   && /suggestions-write-guard\.mjs/.test(h?.command || "");
 const isHotspotGuard = (h) => h?.type === "command"
   && /hotspot-commit-guard\.mjs/.test(h?.command || "");
+const isRmGuard = (h) => h?.type === "command"
+  && /rm-target-guard\.mjs/.test(h?.command || "");
 
 function without(entries, predicate) {
   return (entries || [])
@@ -135,13 +139,16 @@ function main() {
     if (kept.length) hooks[event] = kept;
     else delete hooks[event];
   }
-  const preToolUse = without(without(hooks.PreToolUse, isSuggestionsGuard), isHotspotGuard);
+  const preToolUse = without(without(without(hooks.PreToolUse, isSuggestionsGuard), isHotspotGuard), isRmGuard);
   if (!remove) {
     preToolUse.push({ matcher: "Bash", hooks: [{
       type: "command", command: SUGGESTIONS_GUARD_CMD, timeout: 5,
     }] });
     preToolUse.push({ matcher: "Bash", hooks: [{
       type: "command", command: HOTSPOT_GUARD_CMD, timeout: 60,
+    }] });
+    preToolUse.push({ matcher: "Bash", hooks: [{
+      type: "command", command: RM_GUARD_CMD, timeout: 10,
     }] });
   }
   if (preToolUse.length) hooks.PreToolUse = preToolUse;
@@ -165,6 +172,7 @@ function main() {
   console.log(`events: ${HOOK_EVENTS.join(", ")} -> ${HOOK_CMD}`);
   console.log(`Suggestions mutations: PreToolUse/Bash -> ${SUGGESTIONS_GUARD_CMD}`);
   console.log(`Hotspot reflection on git commit: PreToolUse/Bash -> ${HOTSPOT_GUARD_CMD}`);
+  console.log(`rm targets Claude Code stops for a person: PreToolUse/Bash -> ${RM_GUARD_CMD}`);
 }
 
 // Only run when executed, never on import. This file now exports a helper, and

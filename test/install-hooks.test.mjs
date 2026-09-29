@@ -57,6 +57,8 @@ feature("agentmux hook installer", () => {
         (hook) => hook.command.includes("suggestions-write-guard.mjs"),
       )).matcher).toBe("Bash");
       expect(commands.filter((command) => command.includes("hotspot-commit-guard.mjs"))).toHaveLength(1);
+      // 2026-09-29: rm targets Claude Code stops for a person are refused before the call, once per install
+      expect(commands.filter((command) => command.includes("rm-target-guard.mjs"))).toHaveLength(1);
       const installed = join(home, ".agentmux", "bin", "amux-suggest.mjs");
       const linked = join(home, ".local", "bin", "amux-suggest");
       expect(existsSync(installed)).toBe(true);

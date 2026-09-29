@@ -159,7 +159,9 @@ export function classifyPermissionPrompt({ reason = "", command = "" } = {}, { h
   if (!m) return notify("not a Claude Code dangerous-rm check");
   if (/inside command substitution/u.test(m[1])) return notify("rm target comes from command substitution");
   const quoted = QUOTED_RM.exec(m[2].trim());
-  const targets = quoted ? [quoted[1]] : m[2].trim().split(/\s+/u);
+  // one named target holds no space unless a narrow pane broke it across lines
+  if (quoted && /\s/u.test(quoted[1].trim())) return notify(`the rm target is broken across screen lines: ${quoted[1].trim()}`);
+  const targets = quoted ? [quoted[1].trim()] : m[2].trim().split(/\s+/u);
   const paths = [];
   for (const target of targets) {
     const resolved = resolveRmTarget(target, command, home);
@@ -203,9 +205,13 @@ function resolveRmTarget(target, command, home) {
 /** The values a variable can have where the rm runs, or why they cannot be known. */
 function variableValues(name, command) {
   if (/^[0-9]+$/u.test(name)) return positionalValues(Number(name), command);
-  const assign = new RegExp(`(?:^|[;\\n]|&&|\\|\\|)\\s*${name}=("?)(\\/[^\\s"';&|]+)\\1(?=\\s|;|$)`, "u").exec(command);
+  const assignment = new RegExp(`(?:^|[;\\n]|&&|\\|\\|)\\s*${name}=("?)(\\/[^\\s"';&|]+)\\1(?=\\s|;|$)`, "u");
+  const assign = assignment.exec(command);
   if (assign) {
     if (/\$/u.test(assign[2])) return { why: `${name} is assigned from another variable` };
+    // read off a screen, a path longer than the pane goes on at the next line, and the shorter one is not the path
+    // that runs; a path that ends its line may be one of those
+    if (command[assign.index + assign[0].length] === "\n") return { why: `${name}'s path ends a screen line and may go on at the next` };
     return { words: [assign[2]] };
   }
   const loop = loopWords(name, command);

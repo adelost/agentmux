@@ -262,6 +262,24 @@ describe("rm targets bound by a loop", () => {
   });
 });
 
+// 2026-09-29: a pane narrower than a path breaks it across screen lines, so the command read off the screen can hold
+// a shorter path than the one that runs: "/home/adelost" read as "/home/adel" passes the home rule.
+describe("paths broken across screen lines", () => {
+  it("notifies when an assignment's path is broken across lines", () => {
+    expect(classifyPermissionPrompt(varRm("$S/$d", "S=/home/adel\nost; for d in a; do rm -rf $S/$d; done"), untracked).action).toBe("notify");
+    expect(classifyPermissionPrompt(varRm('"$Q"/*.md', "Q=/tmp/claude-1000/x/\n../../../home/adelost; rm -f \"$Q\"/*.md"), untracked).action).toBe("notify");
+  });
+
+  it("notifies when the target read from the reason is broken in two", () => {
+    const reason = "Dangerous rm operation on possibly-empty variable path: $S/ $2 in `rm -rf $S/$2` (bind $2 and rewrite its $S as \"${S:?}\" or use a literal path)";
+    expect(classifyPermissionPrompt({ reason, command: 'S=/tmp/claude-1000/x/y; for p in "1 a"; do set -- $p; rm -rf $S/$2; done' }, untracked).action).toBe("notify");
+  });
+
+  it("still answers an assignment that ends its own line", () => {
+    expect(classifyPermissionPrompt(varRm("$D/*.png", "D=/home/adelost/lsrc/.artifacts/x/y; rm -f $D/*.png\necho done"), untracked).action).toBe("answer");
+  });
+});
+
 describe("parsePermissionWatchdogConfig", () => {
   it("reads env with safe defaults", () => {
     // humanAgeMs: skyvw:0's order for Mattias 2026-09-15, "Mattias gets the DM only if the prompt is still open N minutes later (default 10)".
