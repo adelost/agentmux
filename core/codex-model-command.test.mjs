@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, rmSync, statSync, writeFileSync } from "no
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createState } from "./state.mjs";
-import { formatCodexModelChange, runLockedCodexModelChange } from "./codex-model-command.mjs";
+import { formatCodexModelChange, formatCodexModelFailure, runLockedCodexModelChange } from "./codex-model-command.mjs";
 
 const roots=[];
 afterEach(()=>roots.splice(0).forEach(path=>rmSync(path,{recursive:true,force:true})));
@@ -69,8 +69,19 @@ describe("explicit model commands do not buy duplicate compaction",()=>{
   }
   it("reports no-op, reused proof and new compact as different outcomes", () => {
     const result = { model: "gpt-6-astra", effort: "xhigh" };
-    expect(formatCodexModelChange("claw", 3, { ...result, unchanged: true })).toContain("no compact or restart");
-    expect(formatCodexModelChange("claw", 3, { ...result, reusedCompact: true })).toContain("reused the existing compact receipt");
-    expect(formatCodexModelChange("claw", 3, result)).toContain("compact verified");
+    // Mattias 2026-10-02 found the receipt wording incomprehensible; the three
+    // outcomes stay distinct in plain words.
+    expect(formatCodexModelChange("claw", 3, { ...result, unchanged: true })).toBe("claw:3 already runs gpt-6-astra xhigh. Nothing changed.");
+    expect(formatCodexModelChange("claw", 3, { ...result, reusedCompact: true })).toBe("claw:3 now runs gpt-6-astra xhigh. No compact was needed; other panes are unchanged.");
+    expect(formatCodexModelChange("claw", 3, result)).toBe("claw:3 now runs gpt-6-astra xhigh. The context was compacted first; other panes are unchanged.");
+  });
+  it("says in plain words that a failed compact holds new messages", () => {
+    // lsrc:4 on 2026-10-02 got "modelbyte avbrutet före osäkert cachebyte:
+    // compact: compact-ended-without-boundary" and could not tell what happened.
+    expect(formatCodexModelFailure("lsrc", 4, { ok: false, stage: "compact", reason: "compact-ended-without-boundary" })).toBe(
+      "lsrc:4 was not switched. The compact that has to run first did not finish (compact-ended-without-boundary). "
+      + "Messages to lsrc:4 wait until a switch succeeds; send /model again to retry.");
+    expect(formatCodexModelFailure("lsrc", 4, { ok: false, stage: "busy", error: "pane is mid-turn; wait for it to finish or interrupt it first" }))
+      .toBe("lsrc:4 was not switched. pane is mid-turn; wait for it to finish or interrupt it first.");
   });
 });

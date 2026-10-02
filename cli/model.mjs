@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { getAgent } from "./config.mjs";
 import { normalizeClaudeModelName } from "../core/claude-model.mjs";
 import { runLockedClaudeModelChange } from "../core/claude-model-command.mjs";
-import { codexModelRequest, formatCodexModelChange, runLockedCodexModelChange } from "../core/codex-model-command.mjs";
+import { codexModelRequest, formatCodexModelChange, formatCodexModelFailure, runLockedCodexModelChange } from "../core/codex-model-command.mjs";
 import { driveCodexStatus } from "../core/codex-status.mjs";
 import { readParkState, unparkPane } from "../core/pane-park.mjs";
 
@@ -38,7 +38,7 @@ export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaude
   if (!ok) throw new Error(`${reason}. ${name}:${pane} keeps its current model.`);
   const result = await codexModelChanger({ agent: ctx.agent, state: ctx.state, name, pane,
     targetModel, targetEffort: effort, deliveryBroker: { queue: ctx.deliveryQueue }, statusDriver: driveCodexStatus });
-  if (!result.ok) throw new Error(`model change blocked: ${result.error || result.reason || result.stage}`);
+  if (!result.ok) throw new Error(formatCodexModelFailure(name, pane, result));
   unparkPane({ session: name, pane, detail: `explicit verified model selection: ${result.model}` });
   console.log(formatCodexModelChange(name, pane, result));
 }

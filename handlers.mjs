@@ -604,7 +604,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           }
           await msg.reply(`✅ ${formatCodexModelChange(mapping.name, pane, result)}`);
         } else {
-          await msg.reply(formatCodexModelFailure(result));
+          await msg.reply(`⚠️ ${formatCodexModelFailure(mapping.name, pane, result)}`);
         }
         return;
       }

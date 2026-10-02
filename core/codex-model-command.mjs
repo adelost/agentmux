@@ -13,30 +13,38 @@ import { parseCodexPaneReading } from "./codex-status.mjs";
 import { contextMaintenanceAttempt } from "./context-maintenance.mjs";
 import { validCodexCompactReceipt } from "./codex-launch-policy.mjs";
 
+// Plain words first, the technical code last (Mattias 2026-10-02: "UX:en här
+// är ju sjukt dålig. Jag fattar verkligen inte vad som händer.").
 /** WHAT: Reports the verified model action. WHY: Prevents a no-op or reused receipt from claiming another paid compact. */
 export function formatCodexModelChange(name, pane, result) {
   const selected = `${result.model}${result.effort ? ` ${result.effort}` : ""}`;
-  const action = result.unchanged ? `already using ${selected}; no compact or restart`
-    : result.reusedCompact ? `selected ${selected}; reused the existing compact receipt`
-      : `compact verified; selected ${selected}`;
-  return `${name}:${pane}: ${action}; global default unchanged`;
+  if (result.unchanged) return `${name}:${pane} already runs ${selected}. Nothing changed.`;
+  const compact = result.reusedCompact ? "No compact was needed" : "The context was compacted first";
+  return `${name}:${pane} now runs ${selected}. ${compact}; other panes are unchanged.`;
 }
 
-/** WHAT: Reports why a model change stopped and what the pane runs now. WHY: Keeps a failed switch from looking like a changed model. */
-export function formatCodexModelFailure(result) {
-  const error = result.error || `${result.stage}: ${result.reason}`;
-  const recovery = result.stage === "switch"
-    ? (result.rollbackError ? ` Återställningen misslyckades också: ${result.rollbackError}` : " Föregående modell återställdes.")
-    : " Modellen ändrades inte.";
-  return `⚠️ modelbyte avbrutet före osäkert cachebyte: ${error}.${recovery}`;
+/** WHAT: Reports why a model change stopped and what waits on it. WHY: Keeps a failed switch from looking like a changed model. */
+export function formatCodexModelFailure(name, pane, result) {
+  const code = result.reason || result.error || result.stage;
+  // A failed compact or switch blocks new work until a switch succeeds.
+  const held = ["compact", "delivery", "switch"].includes(result.stage)
+    ? ` Messages to ${name}:${pane} wait until a switch succeeds; send /model again to retry.` : "";
+  if (result.stage === "switch" && result.rollbackError) {
+    return `${name}:${pane} may be stopped. The new model did not start (${result.error}), and restoring the previous model failed (${result.rollbackError}).${held}`;
+  }
+  const why = result.stage === "lease" ? "Another delivery kept this session busy for 6 minutes."
+    : result.stage === "switch" ? `The new model did not start (${result.error}), so the previous model is back.`
+      : ["compact", "delivery"].includes(result.stage) ? `The compact that has to run first did not finish (${code}).`
+        : `${result.error || code}.`;
+  return `${name}:${pane} was not switched. ${why}${held}`;
 }
 
 /** WHAT: Resolves one pane's model request and its first reply. WHY: Keeps a name the account cannot run from reaching compact or restart. */
 export function codexModelRequest({ state, name, pane, requested, models = codexModelCatalog }) {
   const resolved = resolveCatalogCodexModel(requested, models(selectedCodexProfile(state, name, pane)));
   if (!resolved.ok) return { ...resolved, reply: `⚠️ ${resolved.reason}. ${name}:${pane} keeps its current model.` };
-  const match = resolved.requested ? ` (the only match for ${resolved.requested})` : "";
-  return { ...resolved, reply: `Preparing ${name}:${pane} for ${resolved.model}${match}: waiting for the session lock, then checking the selected model and compact receipt. Compact runs only if needed.` };
+  const match = resolved.requested ? ` (the only ${resolved.requested} model)` : "";
+  return { ...resolved, reply: `🔄 Switching ${name}:${pane} to ${resolved.model}${match}. This takes seconds, or minutes if a compact has to run first.` };
 }
 
 /** WHAT: Returns a shared session lease after bounded waiting. WHY: Prevents unrelated pane maintenance from rejecting an explicit model choice immediately. */

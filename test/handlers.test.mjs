@@ -252,7 +252,7 @@ feature("/model dialect routing", () => {
     then: ["failed closed before restarting", (_, { msg, agent }) => {
       const reply = msg.reply.mock.calls.at(-1)[0];
       expect(agent.restartCodex).not.toHaveBeenCalled();
-      expect(reply).toMatch(/modelbyte avbrutet/i);
+      expect(reply).toMatch(/^⚠️ _ai:0 was not switched\./);
       expect(agent.sendOnly).not.toHaveBeenCalled();
     }],
   });
@@ -280,7 +280,7 @@ feature("/model dialect routing", () => {
     when: ["onMessage is called", async ({ onMessage, msg }) => onMessage(msg)],
     then: ["the reply names gpt-6.1-sol before the switch starts", (_, { msg, path }) => {
       try {
-        expect(msg.reply.mock.calls[0][0]).toMatch(/^Preparing _ai:0 for gpt-6\.1-sol \(the only match for gpt-6\.1\)/);
+        expect(msg.reply.mock.calls[0][0]).toMatch(/^🔄 Switching _ai:0 to gpt-6\.1-sol \(the only gpt-6\.1 model\)\./);
       } finally { unlinkSync(path); }
     }],
   });
@@ -347,7 +347,7 @@ feature("/model dialect routing", () => {
       expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "/compact", 0, expect.any(Object));
       expect(agent.restartCodex).toHaveBeenCalledTimes(1);
       expect(agent.restartCodex.mock.calls[0][2]).toMatchObject({ model: "gpt-5.6-sol", effort: "max" });
-      expect(msg.reply.mock.calls.at(-1)[0]).toContain("global default unchanged");
+      expect(msg.reply.mock.calls.at(-1)[0]).toContain("other panes are unchanged");
     }],
   });
 
@@ -408,7 +408,7 @@ feature("/model dialect routing", () => {
     }],
     then: ["no second restart destroys the draft", (_, { msg, agent }) => {
       expect(agent.restartCodex).toHaveBeenCalledTimes(1);
-      expect(msg.reply.mock.calls.at(-1)[0]).toMatch(/Återställningen misslyckades också/);
+      expect(msg.reply.mock.calls.at(-1)[0]).toMatch(/restoring the previous model failed/);
       expect(msg.reply.mock.calls.at(-1)[0]).toMatch(/preserve pane input/);
     }],
   });
