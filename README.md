@@ -515,6 +515,16 @@ The secondary Claude profile shares only the `projects` session-history
 directory with profile 1. Credentials, settings, and quota remain isolated.
 No logout or token copy is part of the workflow.
 
+### Automatic quota recovery
+
+The sidecar reads OAuth usage for each pane's selected Claude profile, once per profile per poll. Exact-session
+resume uses that same profile, model and effort. It does not rotate accounts or purchase a model call to check quota.
+After a manual resume, a matching journal and live `--resume` process can release old quota scheduling parks under
+the existing delivery lease. Submitted jobs retain their status and submit fences; only delivery reconciliation can
+acknowledge them. A stale or different session, draft, or unproven live process stays held. A continuation parked
+after a successful restart is made schedulable again when capacity returns, without a second restart or continuation.
+Explicit cancellation remains a broker decision, not a manual queue-file rewrite.
+
 Terminal commands:
 
 ```bash
