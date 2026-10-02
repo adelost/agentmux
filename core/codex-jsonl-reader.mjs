@@ -15,6 +15,7 @@ import { codexSessionDirs } from "./codex-profiles.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { codexUserPrompt, normalizeCodexUserEvents } from "./codex-user-events.mjs";
 import { readCodexDreamEvents } from "./codex-dream-history.mjs";
+import { codexRefusals } from "./codex-refusal-notice.mjs";
 
 // Content-addressed line identity for the watcher's posted-set dedupe. Codex
 // rollout events carry no stable id (no uuid, no payload.id), so we key on a
@@ -804,11 +805,10 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
   const events = opts.dreamHistory ? normalizeCodexUserEvents(readCodexDreamEvents(file)) : (tailBytes && !since && !grep)
     ? parseJsonlTail(file, tailBytes)
     : parseJsonl(file);
-  if (events.length === 0) return { turns: [], compactions: [], jsonlFile: file };
+  if (events.length === 0) return { turns: [], compactions: [], refusals: [], jsonlFile: file };
 
   // A bounded tail can begin after user_message; reconstruct its visible suffix.
   let turns = groupCodexIntoTurns(events, { headless: headless || Boolean(tailBytes) });
-  const compactions = codexCompactions(events);
 
   if (since) {
     turns = turns.filter((t) => {
@@ -827,5 +827,5 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
 
   if (turns.length > limit) turns = turns.slice(-limit);
 
-  return { turns, compactions, jsonlFile: file };
+  return { turns, compactions: codexCompactions(events), refusals: codexRefusals(events), jsonlFile: file };
 }

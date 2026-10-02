@@ -58,7 +58,9 @@ import { parkPane, unparkPane } from "../core/pane-park.mjs";
 import { appendEvent } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
-import { compactionNoticeText, compactionsToAnnounce } from "../core/compaction-notice.mjs";
+import { compactionNoticeText } from "../core/compaction-notice.mjs";
+import { announceNewPaneEvents } from "../core/pane-notices.mjs";
+import { codexThreadOfRollout, codexTurnError, refusalNoticeText } from "../core/codex-refusal-notice.mjs";
 import {
   paneModelSelection,
   setPaneModelSelection,
@@ -107,6 +109,7 @@ const STATE_KEY_LAST_POSTED = "watcher_last_posted_ts";
 const STATE_KEY_POSTED_IDS = "watcher_posted_item_ids";
 const STATE_KEY_RETRY_UNTIL = "watcher_retry_until_ts";
 const STATE_KEY_COMPACTION_IDS = "watcher_compaction_ids";
+const STATE_KEY_REFUSAL_IDS = "watcher_refusal_ids";
 const STATE_KEY_CUSTOM_TOOLS_SEEDED = "watcher_custom_tools_seeded";
 
 /**
@@ -438,34 +441,6 @@ export function createJsonlWatcher({
     setRetryUntilMs(channelId, nextState.retryUntilMs);
   }
 
-  async function postCompactionNotice(name, idx, channelId, events = []) {
-    if (!events.length) return;
-    const stateByChannel = state.get(STATE_KEY_COMPACTION_IDS, {}) || {};
-    const visibleIds = events.map((event) => event.id).filter(Boolean);
-
-    // Migration seed: an upgrade must not announce every historical compact
-    // still visible in the startup tail. Once seeded, any unseen id means the
-    // event happened while this bridge generation was running or offline.
-    if (!Object.hasOwn(stateByChannel, channelId)) {
-      stateByChannel[channelId] = visibleIds.slice(-100);
-      state.set(STATE_KEY_COMPACTION_IDS, stateByChannel);
-      return;
-    }
-
-    const seen = new Set(stateByChannel[channelId] || []);
-    const unseen = compactionsToAnnounce(events, seen);
-    if (!unseen.length) return;
-
-    try {
-      await discord.send(channelId, compactionNoticeText(`${name}:${idx}`, unseen));
-      stateByChannel[channelId] = [...new Set([...seen, ...visibleIds])].slice(-100);
-      state.set(STATE_KEY_COMPACTION_IDS, stateByChannel);
-      log(`${name}:${idx} → ${channelId} (compaction notice x${unseen.length})`);
-    } catch (err) {
-      log(`compaction notice failed for ${name}:${idx}: ${err.message}`);
-    }
-  }
-
   function seedCustomToolMigration(channelId, turns = []) {
     const seeded = state.get(STATE_KEY_CUSTOM_TOOLS_SEEDED, {}) || {};
     if (seeded[channelId]) return;
@@ -728,7 +703,12 @@ export function createJsonlWatcher({
       const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
       const readMs = Date.now() - readStarted;
       const readBytes = estimatedReadBytes(fileInfo, tailBytes);
-      await postCompactionNotice(name, idx, channelId, result?.compactions || []);
+      const notice = { state, channelId, send: (to, text) => discord.send(to, text), log, paneName: `${name}:${idx}` };
+      await announceNewPaneEvents({ ...notice, stateKey: STATE_KEY_COMPACTION_IDS, kind: "compaction",
+        events: result?.compactions || [], text: unseen => compactionNoticeText(`${name}:${idx}`, unseen) });
+      await announceNewPaneEvents({ ...notice, stateKey: STATE_KEY_REFUSAL_IDS, kind: "unanswered-turn",
+        events: result?.refusals || [], text: async unseen => refusalNoticeText(`${name}:${idx}`, unseen, await codexTurnError({
+          home: selectedCodexProfile(state, name, idx).home, threadId: codexThreadOfRollout(result.jsonlFile), refusal: unseen.at(-1) })) });
       seedCustomToolMigration(channelId, result?.turns || []);
       if (!result?.turns?.length) {
         if (startupAudit) auditedPanes.add(key);

@@ -1,6 +1,6 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "fs";
+import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createJsonlWatcher } from "../channels/jsonl-watcher.mjs";
@@ -41,7 +41,7 @@ function mkDiscord({ paceMs = 0, failSends = false } = {}) {
  * the Codex reader's latestSessionFor() picks it up. Mirrors the Claude
  * helper's contract so tests stay parallel-readable.
  */
-function setupCodexWatcher({ codexEvents = [], stateInitial = {} } = {}) {
+function setupCodexWatcher({ codexEvents = [], stateInitial = {}, rolloutName = "rollout-2026-05-10T00-00-00-test.jsonl" } = {}) {
   const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-watcher-codex-test-"));
   const origHome = process.env.HOME;
   process.env.HOME = fakeHome;
@@ -54,7 +54,7 @@ function setupCodexWatcher({ codexEvents = [], stateInitial = {} } = {}) {
 
   const sessionDir = join(fakeHome, ".codex", "sessions", "2026", "05", "10");
   mkdirSync(sessionDir, { recursive: true });
-  const rolloutPath = join(sessionDir, "rollout-2026-05-10T00-00-00-test.jsonl");
+  const rolloutPath = join(sessionDir, rolloutName);
   // Inject session_meta with cwd matching paneDir so latestSessionFor matches.
   const events = [{ type: "session_meta", payload: { cwd: paneDirPath, source: "cli", originator: "codex-tui" } }, ...codexEvents];
   writeFileSync(rolloutPath, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
@@ -310,6 +310,20 @@ feature("watcher: narrative with multiple images", () => {
 });
 
 const clock = (iso) => new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+const refusedTurn = (promptAt, closedAt) => [
+  { type: "event_msg", timestamp: promptAt, payload: { type: "task_started" } },
+  { type: "turn_context", timestamp: promptAt, payload: { model: "gpt-6.1" } },
+  { type: "event_msg", timestamp: promptAt, payload: { type: "user_message", message: "Hej" } },
+  { type: "event_msg", timestamp: closedAt, payload: { type: "task_complete", last_agent_message: null } },
+];
+// The columns of Codex's logs table that a refusal lookup reads.
+async function writeCodexTurnError(home, thread, at, body) {
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(join(home, "logs_2.sqlite"));
+  db.exec("CREATE TABLE logs (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, thread_id TEXT, feedback_log_body TEXT)");
+  db.prepare("INSERT INTO logs (ts, thread_id, feedback_log_body) VALUES (?, ?, ?)").run(Date.parse(at) / 1000, thread, body);
+  db.close();
+}
 const compactSummary = (uuid, timestamp) => ({
   type: "user", uuid, timestamp, isCompactSummary: true,
   message: { role: "user", content: "This session is being continued from a compact summary." },
@@ -802,6 +816,57 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
         `Context compacted for **testagent:0** (${clock("2026-05-10T00:00:05.000Z")}). Work continues from the summary.`,
       );
       ctx.cleanup();
+    }],
+  });
+
+  // lsrc:4 on 2026-10-02: two "Hej" to gpt-6.1 closed without any model run
+  // and Discord showed nothing at all.
+  unit("a turn no model answered is announced once with Codex's own reason", {
+    given: ["a refused prompt and the error Codex logged for it", async () => {
+      const thread = "019f4b55-db9f-74d1-9a7d-eac0e1acd4c3";
+      const ctx = setupCodexWatcher({
+        rolloutName: `rollout-2026-07-10T11-22-25-${thread}.jsonl`,
+        codexEvents: refusedTurn("2026-10-02T16:44:04.862Z", "2026-10-02T16:44:05.467Z"),
+        stateInitial: { watcher_refusal_ids: { "ch-codex": [] } },
+      });
+      await writeCodexTurnError(join(process.env.HOME, ".codex"), thread, "2026-10-02T16:44:05Z",
+        'run_turn: Turn error: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-6.1\' model is not supported when using Codex with a ChatGPT account."}}');
+      return ctx;
+    }],
+    when: ["watcher.checkPane observes the same file twice", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["Discord gets one notice that names the refusal", (ctx) => {
+      try {
+        expect(ctx.discord.sends.map((send) => send.payload)).toEqual([
+          `⚠️ **testagent:0** did not answer a message (${clock("2026-10-02T16:44:05.467Z")}). Codex stopped before any model ran: `
+          + "The 'gpt-6.1' model is not supported when using Codex with a ChatGPT account. Nothing was processed, so send it again once this is fixed."]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  unit("an upgraded watcher stays quiet about old refusals but announces the next one", {
+    given: ["an old refused turn and no notice state yet", () => setupCodexWatcher({
+      codexEvents: refusedTurn("2026-10-02T16:44:04.862Z", "2026-10-02T16:44:05.467Z"),
+    })],
+    when: ["a new refusal follows the first read", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      const before = ctx.discord.sends.length;
+      appendFileSync(ctx.rolloutPath, refusedTurn("2026-10-02T16:45:01.587Z", "2026-10-02T16:45:02.224Z")
+        .map((event) => `${JSON.stringify(event)}\n`).join(""));
+      utimesSync(ctx.rolloutPath, new Date(), new Date(Date.now() + 5_000));
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return { ctx, before };
+    }],
+    then: ["only the new refusal is announced, without a reason it cannot read", ({ ctx, before }) => {
+      try {
+        expect(before).toBe(0);
+        expect(ctx.discord.sends.map((send) => send.payload)).toEqual([
+          `⚠️ **testagent:0** did not answer a message (${clock("2026-10-02T16:45:02.224Z")}). Codex stopped before any model ran; `
+          + "the pane shows why. Nothing was processed, so send it again once this is fixed."]);
+      } finally { ctx.cleanup(); }
     }],
   });
 
