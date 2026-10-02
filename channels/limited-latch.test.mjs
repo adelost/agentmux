@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { nextLimitedMemory, clearsLimitedLatch, enteredLimited } from "./auto-compact.mjs";
+import { nextLimitedMemory, clearsLimitedLatch, enteredLimited } from "./limited-latch.mjs";
 
 /** One poll cycle: remember, then ask whether this reading alerts. */
 const poll = (prev, status) => ({

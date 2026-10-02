@@ -106,6 +106,19 @@ feature("decideAutoCompactAction — grace period (no fire)", () => {
   });
 });
 
+feature("decideAutoCompactAction — a compact refused before sending", () => {
+  const refused = (idleMinutes) => decideAutoCompactAction({ ...base,
+    lastActivityMs: base.now - idleMinutes * 60_000,
+    warnings: new Map([[key, { warned_at: base.now - 120_000, refusedReason: "delivery-lease-busy" }]]) });
+  unit("is retried while the prompt cache is warm and postponed once it has expired", {
+    when: ["deciding at 55 and at 60 quiet minutes", () => [55, 60].map(refused)],
+    then: ["compact, then postpone with the refusal reason", (results) => {
+      expect(results.map((r) => r.action)).toEqual(["compact", "postpone"]);
+      expect(results[1].reason).toBe("delivery-lease-busy");
+    }],
+  });
+});
+
 feature("decideAutoCompactAction — activity cancels warning", () => {
   unit("pane went from idle to working during grace → cancel warning", {
     given: ["warning exists, now status=working", () => {

@@ -41,6 +41,10 @@ export const DEFAULT_CONFIG = {
                           // covered — the verify-before-refire guard still
                           // bounds any misfire.
   minIdleMs: CONTEXT_COST_POLICY.idleMs, // One quiet hour; unfinished work is allowed.
+  warmCacheMs: CONTEXT_COST_POLICY.coldMs, // A refused compact is retried only
+                          // while the prompt cache is warm; after that it would
+                          // re-read the whole context, and the next message's
+                          // cold-context policy decides instead.
   warnCooldownMs: 600_000, // 10 minutes. Minimum spacing between Discord
                           // WARNING posts for the SAME pane (bridge-enforced).
                           // The decision loop still runs every poll, so
@@ -54,10 +58,12 @@ export const DEFAULT_CONFIG = {
 
 /** WHAT: Parses auto-compact runtime policy. WHY: Keeps environment overrides consistent across bridge starts. */
 export function parseAutoCompactConfig(env = process.env) {
+  const policy = readContextCostPolicy(env);
   return {
     enabled: env.AUTO_COMPACT_ENABLED !== "false",
     codexEnabled: env.AUTO_COMPACT_CODEX !== "false",
-    maxTokens: readContextCostPolicy(env).maxTokens,
+    maxTokens: policy.maxTokens,
+    warmCacheMs: policy.coldMs,
     graceMs: parseInt(env.AUTO_COMPACT_GRACE_MS || DEFAULT_CONFIG.graceMs, 10),
     pollMs: parseInt(env.AUTO_COMPACT_POLL_MS || DEFAULT_CONFIG.pollMs, 10),
     compactLockMs: parseInt(env.AUTO_COMPACT_LOCK_MS || DEFAULT_CONFIG.compactLockMs, 10),
@@ -125,6 +131,9 @@ export function resolveActivityMs({ turnMs = null, fileMtimeMs = null, fileFully
   return null;
 }
 
+const promptCacheExpired = (lastActivityMs, now, config) =>
+  Number.isFinite(lastActivityMs) && now - lastActivityMs >= config.warmCacheMs;
+
 /**
  * Decide what the poll loop should do for one pane this tick.
  *
@@ -147,9 +156,11 @@ export function resolveActivityMs({ turnMs = null, fileMtimeMs = null, fileFully
  *   pane went active). Defaults to an empty Map for callers that don't track it.
  * @param {object} args.config — { enabled, threshold, graceMs, minIdleMs }
  * @param {number} args.now — current ms timestamp
- * @returns {{ action: "none"|"warn"|"compact"|"cancel"|"suppress", reason?: string }}
+ * @returns {{ action: "none"|"warn"|"compact"|"cancel"|"suppress"|"postpone", reason?: string }}
  *   "suppress" = clear any pending warning but KEEP the floor and do not fire;
  *   used when a prior /compact proved ineffective.
+ *   "postpone" = a warning whose compact was refused before sending
+ *   (`refusedReason`) outlived the warm prompt cache; tell the channel and stop.
  */
 /** WHAT: Maps idle context evidence to a maintenance action. WHY: Prevents active, unobserved or already-compacted panes from receiving repeated compact requests. */
 export function decideAutoCompactAction({
@@ -230,6 +241,10 @@ export function decideAutoCompactAction({
     }
   }
 
+  if (existing?.refusedReason && promptCacheExpired(lastActivityMs, now, config)) {
+    return { action: "postpone", reason: existing.refusedReason };
+  }
+
   // Over threshold + idle long enough. First cross → warn. Second cross after grace → fire.
   if (!existing) {
     return { action: "warn", reason: `idle at ${contextTokens} tokens > ${config.maxTokens}` };
@@ -259,6 +274,16 @@ export function formatWarningMessage(paneKey, contextTokens, graceMs) {
  */
 export function formatCompactFailedMessage(paneKey, reason) {
   return `⚠ Auto-compact of **${paneKey}** did not run: ${reason}. No new attempt until the pane has done new work.`;
+}
+
+// lsrc:2, 2026-10-02: warned at 09:03, refused before sending, then silence
+// until a cold compact at 09:45. A warning must end in a compact or a notice.
+/**
+ * WHAT: Formats the one notice for a compact refused until the prompt cache expired.
+ * WHY: Keeps a warning from ending in silence when every retry was refused.
+ */
+export function formatCompactPostponedMessage(paneKey, reason) {
+  return `⚠ Auto-compact of **${paneKey}** postponed: ${reason}. The prompt cache has expired, so the next message compacts first only if the context is above ${CONTEXT_COST_POLICY.coldMaxTokens} tokens.`;
 }
 
 export function formatCompactedMessage(paneKey, contextPercent) {

@@ -9,7 +9,8 @@ import { feature, unit, component, expect } from "bdd-vitest";
 import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { createAutoCompact, enteredLimited } from "./auto-compact.mjs";
+import { createAutoCompact } from "./auto-compact.mjs";
+import { enteredLimited } from "./limited-latch.mjs";
 import { DEFAULT_CONFIG } from "../core/auto-compact.mjs";
 import { resetCodexSessionIndexForTests } from "../core/context.mjs";
 
@@ -41,6 +42,17 @@ function writeClaudeModel(fakeHome, paneDir, model) {
       usage: { input_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 1 },
     },
   }) + "\n");
+}
+
+function writeClaudeTurn(fakeHome, paneDir, timestamp) {
+  const projectDir = join(fakeHome, ".claude", "projects", encodeClaudePath(paneDir));
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(join(projectDir, "session.jsonl"), [
+    { type: "user", message: { role: "user", content: "check the build" }, timestamp },
+    { type: "assistant", timestamp, message: { role: "assistant", model: "claude-opus-4-8",
+      content: [{ type: "text", text: "ok" }], stop_reason: "end_turn",
+      usage: { input_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 1 } } },
+  ].map((row) => JSON.stringify(row)).join("\n") + "\n");
 }
 
 const CONTENT = {
@@ -301,6 +313,67 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       expect(sends).toHaveLength(2);
       expect(sends[0]).toContain("Auto-compact in");
       expect(sends[1]).toBe("⚠ Auto-compact of **test:0** did not run: Error during compaction: You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm). No new attempt until the pane has done new work.");
+    }],
+  });
+
+  // lsrc:2, 2026-10-02: warned 09:03, refused before sending while lsrc:3 held
+  // the session lease, then silence until a cold compact 42 minutes later.
+  component("a compact refused before sending is retried on the next poll", {
+    given: ["a pane whose first compact is refused because a sibling holds the session lease", () => {
+      const { path, dir } = writeYaml();
+      writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000099\n  panes:\n    - name: claude\n      cmd: claude\n  discord:\n    "ch-test": 0\n`);
+      const sends = [];
+      const results = [{ ok: false, reason: "delivery-lease-busy" }, { ok: true, compacted: true }];
+      const state = { runs: 0, sends };
+      const contextMaintenance = {
+        canAttempt: () => true,
+        run: async () => results[Math.min(state.runs++, results.length - 1)],
+      };
+      const agent = { paneProcessState: async () => ({ running: true }), capturePane: async () => CONTENT.full100 };
+      const config = { ...DEFAULT_CONFIG, graceMs: 0, compactLockMs: 120_000, minIdleMs: 0 };
+      const ac = createAutoCompact({
+        agent, agentsYamlPath: path, discord: { send: async (_channel, text) => { sends.push(text); } },
+        tmux: async () => ({ stdout: "0 50" }), config, contextMaintenance, log: () => {},
+      });
+      return { ac, state };
+    }],
+    when: ["warn, refused compact, then one more poll", async ({ ac, state }) => { await ticks(ac, 3); return state; }],
+    then: ["the compact runs again without a second warning", (state) => {
+      expect(state.runs).toBe(2);
+      expect(state.sends).toHaveLength(1);
+    }],
+  });
+
+  component("a compact refused until the prompt cache expires is reported as postponed", {
+    given: ["a pane quiet for ten minutes whose compact is always refused, with a five-minute cache", () => {
+      const oldHome = process.env.HOME;
+      const fakeHome = mkdtempSync(join(tmpdir(), "amux-ac-home-"));
+      process.env.HOME = fakeHome;
+      const { path, dir } = writeYaml();
+      writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000099\n  panes:\n    - name: claude\n      cmd: claude\n  discord:\n    "ch-test": 0\n`);
+      writeClaudeTurn(fakeHome, join(dir, ".agents", "0"), new Date(Date.now() - 10 * 60_000).toISOString());
+      const sends = [];
+      const state = { runs: 0, sends, oldHome, fakeHome };
+      const contextMaintenance = {
+        canAttempt: () => true,
+        run: async () => { state.runs++; return { ok: false, reason: "delivery-lease-busy" }; },
+      };
+      const agent = { paneProcessState: async () => ({ running: true }), capturePane: async () => CONTENT.full100 };
+      const config = { ...DEFAULT_CONFIG, graceMs: 0, compactLockMs: 0, minIdleMs: 0, warmCacheMs: 5 * 60_000 };
+      const ac = createAutoCompact({
+        agent, agentsYamlPath: path, discord: { send: async (_channel, text) => { sends.push(text); } },
+        tmux: async () => ({ stdout: "0 50" }), config, contextMaintenance, log: () => {},
+      });
+      return { ac, state };
+    }],
+    when: ["five poll ticks", async ({ ac, state }) => {
+      try { await ticks(ac, 5); return state; }
+      finally { process.env.HOME = state.oldHome; rmSync(state.fakeHome, { recursive: true, force: true }); }
+    }],
+    then: ["one warning, one postponed notice with the reason, and no further attempt", (state) => {
+      expect(state.runs).toBe(1);
+      expect(state.sends).toHaveLength(2);
+      expect(state.sends[1]).toBe("⚠ Auto-compact of **test:0** postponed: delivery-lease-busy. The prompt cache has expired, so the next message compacts first only if the context is above 210000 tokens.");
     }],
   });
 

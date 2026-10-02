@@ -9,9 +9,10 @@ import {
   formatWarningMessage,
   formatCompactedMessage,
   formatCompactFailedMessage,
+  formatCompactPostponedMessage,
 } from "../core/auto-compact.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
-import { appendEvent, readEvents } from "../core/events.mjs";
+import { appendEvent } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
 import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { detectPaneStatus, LIMIT_BANNER } from "../cli/format.mjs";
@@ -23,89 +24,12 @@ import { compactReceiptIsAuthoritative } from "../core/dialects.mjs";
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
 import { formatLimitedAlert } from "../core/quota-format.mjs";
 import { parseQuotaRecoveryConfig } from "./quota-recovery.mjs";
+import { enteredLimited, nextLimitedMemory, seedLimitedFromLedger } from "./limited-latch.mjs";
 
 // Panes that have warnings pending (paneKey → { warned_at: ms }).
 // Panes currently mid-compact (paneKey string).
 // Both maps are in-memory — warnings are cheap to re-derive after a
 // bridge restart (next poll re-warns if still over threshold).
-
-export function enteredLimited(prev, status) {
-  return status === "limited" && prev !== "limited";
-}
-
-/**
- * WHAT: Decides what a pane's remembered status becomes after one observation.
- * WHY: `limited` is scraped from a banner in the pane tail (cli/format.mjs:65),
- *      and that banner scrolls out whenever anything else prints — a delivery,
- *      a keystroke, a redraw. The absence of the banner is therefore NOT
- *      evidence that the quota lifted. Overwriting the memory with that absence
- *      manufactures a fresh "entered limited" edge the next time the banner
- *      re-prints, which is why one quota-dead pane re-announced itself roughly
- *      hourly all day: every delivery into it produced one flap.
- *      So `limited` is a latch. Only a pane demonstrably RUNNING clears it;
- *      idle and unknown are absence of evidence, not evidence of recovery.
- *
- *      "Running" cannot be a bare scraped `working` either, and that was the
- *      hole this latch still had. detectPaneStatus DELIBERATELY lets a live
- *      spinner footer beat banner residue, because after a reset the pane really
- *      has resumed while the old banner is still on screen (test/format-status
- *      pins that, and it is right for the compaction decision). But a delivery
- *      into a still-dead pane paints the same footer over a banner that has NOT
- *      expired, so the alert path read the flap as recovery and re-announced the
- *      stall on the next poll. Measured 2026-08-04 on skydive:3, a codex pane
- *      quota-dead until 9 Aug: 427 deliveries, 8 identical alerts to the human,
- *      five of them 60-66s after a delivery burst — one poll interval exactly.
- *
- *      So the two consumers get the standard each needs. Compaction keeps the
- *      scraped status. The latch additionally requires the banner to be GONE:
- *      a visible quota banner is positive evidence the stall persists, and it
- *      outranks a footer that merely proves something was painted.
- */
-export const clearsLimitedLatch = (status, { limitBannerVisible = false } = {}) =>
-  status === "working" && !limitBannerVisible;
-
-export function nextLimitedMemory(prev, status, options = {}) {
-  if (status === "limited") return "limited";
-  if (prev === "limited" && !clearsLimitedLatch(status, options)) return "limited";
-  return status;
-}
-
-/**
- * Events that prove a pane actually RAN a turn, and therefore that a recorded
- * quota stall is over. `delivery_queue` and `notification` say only that
- * something was addressed TO the pane — a quota-dead pane collects those
- * exactly as a live one does, so they prove nothing about whether it can run.
- * They are also the ledger's loudest rows (7158 of 8000+ when this was written),
- * which is why keying on "the newest row of any kind" silently stopped working.
- */
-const TURN_PROVING_EVENTS = new Set(["prompt", "stop", "session_start"]);
-
-/**
- * WHAT: Rebuilds "which panes were already limited" from the durable ledger.
- * WHY: The alert fires on a TRANSITION into limited, but the map holding the
- *      previous state is in memory. A restart therefore looked like every
- *      quota-dead pane had just this moment run out.
- * A pane stays seeded as limited until a row that PROVES it ran again arrives
- * after the stall. Same rule as the runtime latch above: only positive evidence
- * of a turn clears a quota stall; traffic addressed to a silent pane is not it.
- */
-export function seedLimitedFromLedger(prevStatus, {
-  readEventsFn = readEvents, since = null,
-} = {}) {
-  const limitedPerPane = new Map();
-  try {
-    for (const evt of readEventsFn({ since })) {
-      if (!evt?.session) continue;
-      const paneKey = `${evt.session}:${Number(evt.pane) || 0}`;
-      if (evt.event === "limited") limitedPerPane.set(paneKey, true);
-      else if (TURN_PROVING_EVENTS.has(evt.event)) limitedPerPane.set(paneKey, false);
-    }
-  } catch { return prevStatus; }
-  for (const [paneKey, stillLimited] of limitedPerPane) {
-    if (stillLimited) prevStatus.set(paneKey, "limited");
-  }
-  return prevStatus;
-}
 
 /** WHAT: Builds the idle compaction controller. WHY: Keeps quota alerts, admission and compaction effects on the shared pane evidence. */
 export function createAutoCompact({
@@ -222,15 +146,18 @@ export function createAutoCompact({
              limitBannerVisible, limitResetAt: claudeStop ? claudeStopResetAt(paneDir) : null, autoResume: claudeStop && quotaRecoveryEnabled };
   }
 
+  /** WHAT: Sends one maintenance compact and returns why it was refused before sending, if it was. WHY: Lets the poll loop retry a refusal that spent nothing instead of mistaking it for an ineffective compact. */
   async function fireCompact(agentName, paneIdx, paneKey, contextPercent, dialect) {
-    if (compacting.has(paneKey)) return;
+    if (compacting.has(paneKey)) return null;
     compacting.add(paneKey);
+    let refusal = null;
     try {
       if (contextMaintenance) {
         const result = await contextMaintenance.run(agentName, paneIdx);
         log(`${paneKey}: ${result.compacted ? "compact verified" : result.reason || result.cell || "within policy"}`);
         if (result.attempted && !result.ok) await postCompactFailed(agentName, paneIdx, paneKey, result.detail || result.reason);
-        return;
+        if (!result.ok && !result.attempted) refusal = result.reason ?? "refused before sending";
+        return refusal;
       }
       const result = deliveryBroker
         ? await deliveryBroker.enqueueAndWait({
@@ -284,9 +211,23 @@ export function createAutoCompact({
     } finally {
       // Release lock after the configured window. /compact takes 30-90s; we
       // want to prevent a follow-up poll from re-firing while the pane still
-      // shows old context% pre-summary.
-      setTimeout(() => compacting.delete(paneKey), config.compactLockMs ?? 120_000);
+      // shows old context% pre-summary. A refusal sent nothing, so nothing is
+      // in flight and the next poll may retry.
+      if (refusal) compacting.delete(paneKey);
+      else setTimeout(() => compacting.delete(paneKey), config.compactLockMs ?? 120_000);
     }
+  }
+
+  // lsrc:2, 2026-10-02: the compact was refused while lsrc:3 held the session
+  // lease. The floor recorded before the fire then read as "prior /compact
+  // ineffective" on every poll, so the warning ended in silence and the pane
+  // compacted cold 42 minutes later. A refusal spent nothing: keep the warning
+  // and retry each poll until the prompt cache expires (decide → "postpone").
+  function keepWarningForRetry(paneKey, warning, reason) {
+    compactFloors.delete(paneKey);
+    attemptedActivity.delete(paneKey);
+    warnings.set(paneKey, { ...warning, refusedReason: reason });
+    log(`${paneKey}: compact refused before sending (${reason}), retrying next poll while the prompt cache is warm`);
   }
 
   // paneKey → status from the previous tick. Drives the limited-transition
@@ -336,6 +277,13 @@ export function createAutoCompact({
     if (!channelId || !discord) return;
     await discord.send(channelId, formatCompactFailedMessage(paneKey, reason))
       .catch((err) => log(`compact-failed notice send failed for ${paneKey}: ${err.message}`));
+  }
+
+  async function postCompactPostponed(agentName, paneIdx, paneKey, reason) {
+    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
+    if (!channelId || !discord) return;
+    await discord.send(channelId, formatCompactPostponedMessage(paneKey, reason))
+      .catch((err) => log(`compact-postponed notice send failed for ${paneKey}: ${err.message}`));
   }
 
   async function postWarning(agentName, paneIdx, paneKey, contextTokens) {
@@ -445,6 +393,7 @@ export function createAutoCompact({
             await postWarning(a.name, i, paneKey, contextTokens);
           }
         } else if (decision.action === "compact") {
+          const warning = warnings.get(paneKey);
           warnings.delete(paneKey);
           // Record the level we fired at BEFORE the compact runs. Next tick
           // (after the in-flight lock clears) compares against it: if context
@@ -452,7 +401,15 @@ export function createAutoCompact({
           // "suppress" instead of firing again.
           compactFloors.set(paneKey, contextTokens);
           attemptedActivity.set(paneKey, lastActivityMs);
-          await fireCompact(a.name, i, paneKey, contextPercent, paneDialect(a, i));
+          const refusal = await fireCompact(a.name, i, paneKey, contextPercent, paneDialect(a, i));
+          if (refusal) keepWarningForRetry(paneKey, warning, refusal);
+        } else if (decision.action === "postpone") {
+          warnings.delete(paneKey);
+          // Quiet until new work or a lower context clears the floor; the next
+          // message's cold-context admission owns the compact from here.
+          compactFloors.set(paneKey, contextTokens);
+          log(`postponed ${paneKey} (${decision.reason})`);
+          await postCompactPostponed(a.name, i, paneKey, decision.reason);
         } else if (decision.action === "suppress") {
           // Prior /compact didn't help. Clear the pending warning so it can't
           // mature into another fire; keep the floor so we stay suppressed.

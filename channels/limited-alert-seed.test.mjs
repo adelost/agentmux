@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { seedLimitedFromLedger, enteredLimited } from "./auto-compact.mjs";
+import { seedLimitedFromLedger, enteredLimited } from "./limited-latch.mjs";
 
 const ledger = (rows) => () => rows;
 
