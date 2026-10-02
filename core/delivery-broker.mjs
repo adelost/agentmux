@@ -190,7 +190,7 @@ export function createDeliveryBroker({
 
   const cancellationRequested = (job) => job.cancelRequestStatus === "requested";
 
-  async function processJob(initialJob) {
+  async function processJob(initialJob, lease = null) {
     let job = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
     queue.restoreAssets?.(job);
 
@@ -428,7 +428,7 @@ export function createDeliveryBroker({
     });
     queueEvent(job, "attempt", { attempt: job.attempts });
 
-    const wake = await wakeDeliveryTarget({ agent, job, wakeGate, wakeLifecycle, costAdmission,
+    const wake = await wakeDeliveryTarget({ agent, job, wakeGate, wakeLifecycle, costAdmission, lease,
       drafted, ownsPaneDraft, queue, now, retryMs: blockedRetryMs,
       queueEvent, notifyBlocked: maybeNotifyBlocked });
     job = wake.job;
@@ -614,7 +614,7 @@ export function createDeliveryBroker({
         if (yielded && TERMINAL_DELIVERY_STATES.has(yielded.status)) continue;
         await answerBacklogBehindProbe(agentName, pane, head);
         if (Number(head.nextAttemptAt || 0) > now()) return;
-        const outcome = await processJob(head);
+        const outcome = await processJob(head, lease);
         if (TERMINAL_DELIVERY_STATES.has(outcome.status)) continue;
         return;
       }

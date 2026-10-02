@@ -31,7 +31,10 @@ feature("verified Claude compact", () => {
     }],
   });
 
-  unit("shares a single five-minute budget across command and missing boundary", {
+  // The wait is about twice the longest measured Claude compact (294 s of
+  // 190, 2026-08-15 to 2026-10-02), so a long compact is not reported as
+  // not run (Mattias 2026-10-02: "Detta borde inte hända igen").
+  unit("shares a single ten-minute budget across command and missing boundary", {
     when: ["a nearly timed-out command has no matching journal boundary", async () => {
       let clock = 1_000;
       const result = await verifiedClaudeCompact({
@@ -39,7 +42,7 @@ feature("verified Claude compact", () => {
         agentName: "claw", pane: 2, paneDir: "/pane",
         latestIdentity: () => ({ sessionId: "same-session" }), now: () => clock,
         sendSlash: async () => {
-          clock += 299_000;
+          clock += 599_000;
           return { delivered: true, via: "command-receipt" };
         },
         hasBoundary: () => false,
@@ -49,7 +52,51 @@ feature("verified Claude compact", () => {
     }],
     then: ["no success or second full wait is invented", ({ result, elapsed }) => {
       expect(result).toEqual({ ok: false, reason: "compact-boundary-missing" });
-      expect(elapsed).toBeLessThanOrEqual(300_000);
+      expect(elapsed).toBeLessThanOrEqual(600_000);
+    }],
+  });
+
+  unit("verifies a compact that runs longer than the former five-minute wait", {
+    when: ["Claude writes its receipt and boundary after 400 seconds", async () => {
+      let clock = 1_000;
+      const result = await verifiedClaudeCompact({
+        agent: { capturePromptEchoCursor: async () => ({ positions: { journal: 10 } }) },
+        agentName: "lsrc", pane: 2, paneDir: "/pane",
+        latestIdentity: () => ({ sessionId: "same-session" }), now: () => clock,
+        sendSlash: async (_agent, _name, _pane, _command, options) => {
+          clock += Math.min(400_000, options.receiptTimeoutMs);
+          return { delivered: options.receiptTimeoutMs >= 400_000, via: "command-receipt" };
+        },
+        hasBoundary: () => clock >= 401_000,
+        sleep: async (ms) => { clock += ms; },
+      });
+      return result;
+    }],
+    then: ["the compact is verified instead of reported as not run", (result) => {
+      expect(result.ok).toBe(true);
+    }],
+  });
+
+  unit("hands the pane back to other writers as soon as Enter is sent", {
+    when: ["the compact command is submitted", async () => {
+      const events = [];
+      await verifiedClaudeCompact({
+        agent: { capturePromptEchoCursor: async () => ({ positions: { journal: 10 } }) },
+        agentName: "lsrc", pane: 2, paneDir: "/pane",
+        latestIdentity: () => ({ sessionId: "same-session" }),
+        sendSlash: async (_agent, _name, _pane, _command, options) => {
+          await options.onSubmitted();
+          events.push("receipt-wait");
+          return { delivered: true, via: "command-receipt" };
+        },
+        hasBoundary: () => true,
+        onCommandAccepted: () => events.push("accepted"),
+        sleep: async () => {},
+      });
+      return events;
+    }],
+    then: ["the hook runs before the long receipt wait", (events) => {
+      expect(events).toEqual(["accepted", "receipt-wait"]);
     }],
   });
 
@@ -191,4 +238,70 @@ feature("verified Codex compact", () => {
       rmSync(root, { recursive: true, force: true });
     }],
   });
+
+  // lsrc:3, 2026-10-02: the compact started 09:01:21 and finished 09:09:44,
+  // but the 180-poll wait reported it as not run at 09:04:51.
+  unit("verifies a compact that runs past three minutes", {
+    given: ["a rollout whose compact turn has started", () => codexRollout()],
+    when: ["the compaction lands 503 seconds later", async (ctx) => {
+      let polls = 0, accepted = 0;
+      const result = await verifiedCodexCompact({
+        agent: {}, agentName: "lsrc", pane: 3, paneDir: "/pane",
+        latestIdentity: () => ctx.identity,
+        sendSlash: async () => {
+          ctx.append({ type: "event_msg", payload: { type: "task_started" } });
+          return { delivered: true };
+        },
+        onCommandAccepted: () => { accepted += 1; },
+        sleep: async () => {
+          polls += 1;
+          if (polls === 503) {
+            ctx.append({ type: "compacted", payload: {} });
+            ctx.append({ type: "event_msg", payload: { type: "context_compacted" } });
+            ctx.append({ type: "event_msg", payload: { type: "task_complete" } });
+          }
+        },
+      });
+      return { ...ctx, result, accepted };
+    }],
+    then: ["the compact is verified and the pane was handed back once", ({ root, result, accepted }) => {
+      expect(result.ok).toBe(true);
+      expect(accepted).toBe(1);
+      rmSync(root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("a compact turn that closes without compacting fails at once", {
+    given: ["a rollout whose compact turn has started", () => codexRollout()],
+    when: ["Codex closes the turn with no compaction", async (ctx) => {
+      let polls = 0;
+      const result = await verifiedCodexCompact({
+        agent: {}, agentName: "lsrc", pane: 3, paneDir: "/pane",
+        latestIdentity: () => ctx.identity,
+        sendSlash: async () => {
+          ctx.append({ type: "event_msg", payload: { type: "task_started" } });
+          ctx.append({ type: "event_msg", payload: { type: "task_complete" } });
+          return { delivered: true };
+        },
+        sleep: async () => { polls += 1; },
+      });
+      return { ...ctx, result, polls };
+    }],
+    then: ["it is reported as not run without waiting out the budget", ({ root, result, polls }) => {
+      expect(result).toEqual({ ok: false, reason: "compact-ended-without-boundary" });
+      expect(polls).toBe(0);
+      rmSync(root, { recursive: true, force: true });
+    }],
+  });
 });
+
+function codexRollout() {
+  const root = mkdtempSync(join(tmpdir(), "amux-codex-compact-"));
+  const path = join(root, "rollout.jsonl");
+  writeFileSync(path, `${JSON.stringify({ type: "session_meta" })}\n`);
+  return {
+    root,
+    identity: { sessionId: "11111111-1111-4111-8111-111111111111", path },
+    append: (event) => appendFileSync(path, `${JSON.stringify(event)}\n`),
+  };
+}

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { contextMaintenanceAttempt, createContextMaintenance } from "./context-maintenance.mjs";
 import { wakeDeliveryTarget } from "./delivery-wake.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
+import { createDeliveryQueue } from "./delivery-queue.mjs";
 
 function fixture({ fail = false, jobs = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-cost-test-")), path = join(root, "session.jsonl");
@@ -292,5 +293,57 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
     given: ["a delivering head followed by another pending message", () => fixture({ jobs: [{ id: "head", status: "delivering" }, { id: "later", status: "pending" }] })],
     when: ["admitting the first work item", ctx => ctx.maintenance.beforeWork({ agentName: "claw", pane: 2, id: "head" })],
     then: ["one compact releases the head", (result, ctx) => { try { expect(result.ok).toBe(true); expect(ctx.calls).toHaveLength(1); } finally { ctx.cleanup(); } }],
+  });
+});
+
+// lsrc, 2026-10-02: lsrc:3's compact held the whole session lease from 09:01
+// to 09:04:51, so lsrc:2's warned compact was refused and ran cold 42 minutes
+// later. While an engine compacts, only its own pane stays fenced.
+function sharedSession(ctx) {
+  const rootDir = mkdtempSync(join(tmpdir(), "amux-cost-lease-"));
+  const bridge = createDeliveryQueue({ rootDir }), other = createDeliveryQueue({ rootDir });
+  const seen = {};
+  ctx.compactFor = () => async ({ onCommandAccepted }) => {
+    await onCommandAccepted?.();
+    const sibling = other.acquireSessionLease("claw", 3);
+    seen.sibling = Boolean(sibling);
+    sibling?.release();
+    seen.samePane = Boolean(other.acquireSessionLease("claw", 2));
+    ctx.append({ type: "system", subtype: "compact_boundary" });
+    return { ok: true, compactBoundary: true, sessionId: "one" };
+  };
+  return { ...ctx, queue: bridge, other, seen, cleanup: () => { ctx.cleanup(); rmSync(rootDir, { recursive: true, force: true }); } };
+}
+
+feature("a compact waiting on its engine fences only its own pane", () => {
+  component("a sibling pane is served while an idle compact runs", {
+    given: ["claw:2 compacts while claw:3 has work", () => sharedSession(fixture())],
+    when: ["the idle controller compacts claw:2", ctx => createContextMaintenance(ctx).run("claw", 2)],
+    then: ["claw:3 gets the session and claw:2 stays fenced", (result, ctx) => {
+      try {
+        expect(result.compacted).toBe(true);
+        expect(ctx.seen).toEqual({ sibling: true, samePane: false });
+        const after = ctx.other.acquireSessionLease("claw");
+        expect(after).toBeTruthy();
+        after.release();
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a cold compact before delivery hands the session back to the broker", {
+    given: ["the broker holds claw:2's lease for a queued prompt", () => {
+      const ctx = sharedSession(fixture());
+      ctx.agent.getContext = async () => ({ tokens: 250_000 });
+      ctx.brokerLease = ctx.queue.acquireSessionLease("claw", 2);
+      return ctx;
+    }],
+    when: ["admitting the prompt", ctx => createContextMaintenance(ctx).beforeWork({ agentName: "claw", pane: 2, id: "first" }, { lease: ctx.brokerLease })],
+    then: ["siblings were served during the compact and the broker writes with the session", (result, ctx) => {
+      try {
+        expect(result.ok).toBe(true);
+        expect(ctx.seen).toEqual({ sibling: true, samePane: false });
+        expect(ctx.brokerLease.holdsSession()).toBe(true);
+        expect(ctx.other.acquireSessionLease("claw", 3)).toBeNull();
+      } finally { ctx.brokerLease.release(); ctx.cleanup(); }
+    }],
   });
 });

@@ -13,6 +13,7 @@ export async function wakeDeliveryTarget({
   wakeGate,
   wakeLifecycle,
   costAdmission,
+  lease = null,
   drafted,
   ownsPaneDraft,
   queue,
@@ -36,7 +37,7 @@ export async function wakeDeliveryTarget({
 
   const costGate = async () => {
     if (job.kind !== "prompt" || !costAdmission) return { proceed: true, job };
-    const verdict = await costAdmission(job).catch(error => ({ ok: false, reason: error.message }));
+    const verdict = await costAdmission(job, { lease }).catch(error => ({ ok: false, reason: error.message }));
     return verdict?.ok ? { proceed: true, job } : refuse(verdict?.reason || "context-cost-unverified");
   };
   if (!paneNeedsWake(processState)) return costGate();

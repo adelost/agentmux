@@ -23,6 +23,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { appendAskLedger, captureDeliveryAsk, defaultAskLedgerPath } from "./ask-ledger.mjs";
 import { acquireFileLease } from "./file-lease.mjs";
+import { acquireSessionWriteLease } from "./session-lease.mjs";
 import { attachmentReplayConflict, persistAttachmentBackups, restoreAttachmentBackups } from "./delivery-assets.mjs";
 
 export * from "./delivery-queue-policy.mjs";
@@ -410,13 +411,12 @@ export function createDeliveryQueue({
     return acquireFileLease(join(dir, ".consumer.lock"));
   }
 
-  // All configured panes for one agent live in the same tmux window. Zoom is
-  // window-global, so two otherwise independent pane deliveries can still
-  // hide each other's composers. This lease makes the bridge single-writer
-  // per tmux session, including across duplicate bridge processes.
-  function acquireSessionLease(agentName) {
-    return acquireFileLease(join(rootDir, `.session-${encodeURIComponent(agentName)}.lock`));
-  }
+  // Single writer per tmux session, narrowing to one pane fence (session-lease.mjs).
+  const acquireSessionLease = (agentName, pane = null) => acquireSessionWriteLease({
+    session: () => acquireFileLease(join(rootDir, `.session-${encodeURIComponent(agentName)}.lock`)),
+    paneFence: target => acquireTargetLease(agentName, target),
+    fencedPanes: () => allTargets().filter(target => target.agentName === agentName).map(target => target.pane),
+  }, pane);
 
   function prune({ acknowledgedOlderThanMs = 7 * 24 * 60 * 60 * 1000 } = {}) {
     const cutoff = now() - acknowledgedOlderThanMs;
