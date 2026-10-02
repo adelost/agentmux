@@ -3,13 +3,13 @@ import { join } from "node:path";
 import { getAgent } from "./config.mjs";
 import { normalizeClaudeModelName } from "../core/claude-model.mjs";
 import { runLockedClaudeModelChange } from "../core/claude-model-command.mjs";
-import { resolveCodexModelName } from "../core/codex-profiles.mjs";
-import { formatCodexModelChange, runLockedCodexModelChange } from "../core/codex-model-command.mjs";
+import { codexModelRequest, formatCodexModelChange, runLockedCodexModelChange } from "../core/codex-model-command.mjs";
 import { driveCodexStatus } from "../core/codex-status.mjs";
 import { readParkState, unparkPane } from "../core/pane-park.mjs";
 
 /** WHAT: Routes a CLI model selection through exact compact and native verification. WHY: Keeps automation from bypassing the Discord model-change cost boundary. */
-export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaudeModelChange } = {}) {
+export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaudeModelChange,
+  codexModelChanger = runLockedCodexModelChange, codexModels } = {}) {
   const { flags, positional } = parseFlags(args, { p: "number", help: "boolean" });
   if (flags.help) {
     console.log("Usage: amux model AGENT [-p N] MODEL [EFFORT]\nVerifies the current model and exact-session compact receipt; compacts only when a change needs new proof.");
@@ -31,11 +31,12 @@ export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaude
     return;
   }
   if (!/\bcodex\b/.test(entry.panes?.[pane]?.cmd || "")) throw new Error("amux model requires a configured Codex pane");
-  const targetModel = resolveCodexModelName(model);
-  if (!/^[a-z0-9._-]+$/i.test(targetModel) || (effort && !/^(minimal|low|medium|high|xhigh|max|ultra)$/.test(effort))) {
+  if (!/^[a-z0-9._-]+$/i.test(model || "") || (effort && !/^(minimal|low|medium|high|xhigh|max|ultra)$/.test(effort))) {
     throw new Error("Expected a model name and optional reasoning effort");
   }
-  const result = await runLockedCodexModelChange({ agent: ctx.agent, state: ctx.state, name, pane,
+  const { ok, model: targetModel, reason } = codexModelRequest({ state: ctx.state, name, pane, requested: model, models: codexModels });
+  if (!ok) throw new Error(`${reason}. ${name}:${pane} keeps its current model.`);
+  const result = await codexModelChanger({ agent: ctx.agent, state: ctx.state, name, pane,
     targetModel, targetEffort: effort, deliveryBroker: { queue: ctx.deliveryQueue }, statusDriver: driveCodexStatus });
   if (!result.ok) throw new Error(`model change blocked: ${result.error || result.reason || result.stage}`);
   unparkPane({ session: name, pane, detail: `explicit verified model selection: ${result.model}` });

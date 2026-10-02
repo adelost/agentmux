@@ -37,6 +37,33 @@ feature("Codex wake cannot bypass compact-first model selection", () => {
     }],
     then: ["a model change still needs a new compact", valid => expect(valid).toBe(false)],
   });
+  // lsrc:4 on 2026-10-02: two "Hej" prompts to an unsupported model closed
+  // without any model running, then the switch away needed this receipt.
+  component("a prompt the provider refused keeps the compact receipt", {
+    when: ["checking a compact followed by a refused and then an answered prompt", () => {
+      const root = mkdtempSync(join(tmpdir(), "codex-compact-refused-"));
+      const path = join(root, "rollout.jsonl");
+      const append = event => appendFileSync(path, `${JSON.stringify(event)}\n`);
+      const prompt = text => [{ type: "event_msg", payload: { type: "task_started" } },
+        { type: "turn_context", payload: { model: "gpt-6.1" } },
+        { type: "event_msg", payload: { type: "user_message", message: text } }];
+      const receipt = cursor => validCodexCompactReceipt({ ok: true, sessionId: "session-a", compactBoundary: true, cursor }, "session-a");
+      try {
+        writeFileSync(path, "");
+        const cursor = captureJsonlAppendCursor("codex-model-change", [path]);
+        append({ type: "compacted" });
+        [...prompt("Hej"), { type: "event_msg", payload: { type: "task_complete", last_agent_message: null } }].forEach(append);
+        const afterRefused = receipt(cursor);
+        [...prompt("Hej"), { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 9 } } } },
+          { type: "event_msg", payload: { type: "task_complete", last_agent_message: "Hej!" } }].forEach(append);
+        return { afterRefused, afterAnswered: receipt(cursor) };
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+    then: ["only the answered prompt needs a new compact", ({ afterRefused, afterAnswered }) => {
+      expect(afterRefused).toBe(true);
+      expect(afterAnswered).toBe(false);
+    }],
+  });
   component("the exact rollout yields its latest model even when bounded status scans cannot see it", {
     when: ["reading a model between a long head and a long tool tail", async () => {
       const root = mkdtempSync(join(tmpdir(), "codex-rollout-model-"));

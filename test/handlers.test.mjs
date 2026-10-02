@@ -22,6 +22,10 @@ function mockMsg({ content = "hello", channelId = "ch1", id = "msg-1", isBot = f
   };
 }
 
+// The account's Codex catalog on 2026-10-02.
+const CODEX_ACCOUNT = { ok: true, models: ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol"]
+  .map(id => ({ id, listed: true })) };
+
 function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatusDriver, queueFleetRestartRequest, scheduleBridgeRestart, modelChangeOptions, claudeModelChanger } = {}) {
   const defaultMapping = { name: "_ai", dir: "/home/user/project", pane: 0 };
   const mapping = mappingOverride ?? defaultMapping;
@@ -105,6 +109,7 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatus
     agentsYamlPath,
     pollInterval: 1,
     codexStatusDriver,
+    codexModels: () => CODEX_ACCOUNT,
     claudeModelChanger,
     modelChangeOptions: modelChangeOptions || {
       now: () => modelClock,
@@ -249,6 +254,34 @@ feature("/model dialect routing", () => {
       expect(agent.restartCodex).not.toHaveBeenCalled();
       expect(reply).toMatch(/modelbyte avbrutet/i);
       expect(agent.sendOnly).not.toHaveBeenCalled();
+    }],
+  });
+
+  component("a Codex model the account does not offer is refused before any restart", {
+    given: ["an idle Codex pane asked for gpt-7", () => {
+      const path = writeCodexYaml();
+      return { ...setup({ agentsYamlPath: path }), path, msg: mockMsg({ content: "/model gpt-7" }) };
+    }],
+    when: ["onMessage is called", async ({ onMessage, msg }) => onMessage(msg)],
+    then: ["one reply lists what can be chosen", (_, { msg, agent, path }) => {
+      try {
+        expect(agent.restartCodex).not.toHaveBeenCalled();
+        expect(msg.reply.mock.calls.map(call => call[0])).toEqual([
+          "⚠️ gpt-7 is not a Codex model on this account. Available: gpt-6.1-sol, gpt-6-astra, gpt-6-sol, gpt-6-luna, gpt-5.6-sol. _ai:0 keeps its current model."]);
+      } finally { unlinkSync(path); }
+    }],
+  });
+
+  component("a Codex family name is switched as its only catalog model", {
+    given: ["an idle Codex pane asked for gpt-6.1", () => {
+      const path = writeCodexYaml();
+      return { ...setup({ agentsYamlPath: path }), path, msg: mockMsg({ content: "/model gpt-6.1" }) };
+    }],
+    when: ["onMessage is called", async ({ onMessage, msg }) => onMessage(msg)],
+    then: ["the reply names gpt-6.1-sol before the switch starts", (_, { msg, path }) => {
+      try {
+        expect(msg.reply.mock.calls[0][0]).toMatch(/^Preparing _ai:0 for gpt-6\.1-sol \(the only match for gpt-6\.1\)/);
+      } finally { unlinkSync(path); }
     }],
   });
 

@@ -34,6 +34,34 @@ export function resolveCodexModelName(requested) {
   return CODEX_MODEL_ALIASES[name] || name;
 }
 
+/** WHAT: Reads the models the profile's own Codex catalog offers. WHY: Keeps model checks on the list Codex fetched for this account. */
+export function codexModelCatalog(profile) {
+  const path = join(profile.home, "models_cache.json");
+  try {
+    const models = JSON.parse(readFileSync(path, "utf-8")).models;
+    if (!Array.isArray(models)) throw new Error("no models list");
+    return { ok: true, models: models.filter(model => typeof model?.slug === "string")
+      .map(model => ({ id: model.slug, listed: model.visibility !== "hide" })) };
+  } catch (error) {
+    return { ok: false, reason: `cannot read the Codex model list at ${path} (${error.message})` };
+  }
+}
+
+// On 2026-10-02 "gpt-6.1" was accepted though Codex only offers gpt-6.1-sol,
+// and every later prompt to lsrc:4 was refused without a reply.
+/** WHAT: Resolves a requested model to an id the account's catalog offers. WHY: Prevents a model the account cannot run from being selected. */
+export function resolveCatalogCodexModel(requested, catalog) {
+  if (!catalog.ok) return catalog;
+  const name = resolveCodexModelName(requested);
+  if (catalog.models.some(model => model.id === name)) return { ok: true, model: name };
+  const listed = catalog.models.filter(model => model.listed).map(model => model.id);
+  const family = listed.filter(id => id.startsWith(`${name}-`));
+  if (family.length === 1) return { ok: true, model: family[0], requested: name };
+  return { ok: false, reason: family.length
+    ? `${name} matches several models, pick one: ${family.join(", ")}`
+    : `${name} is not a Codex model on this account. Available: ${listed.join(", ")}` };
+}
+
 export const codexPaneKey = (name, pane) => `${name}:${Number(pane) || 0}`;
 
 export function codexProfileCatalog(env = process.env) {

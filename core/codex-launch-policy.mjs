@@ -1,6 +1,6 @@
 import { hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { readCodexRolloutModel } from "./codex-rollout-model.mjs";
-import { codexUserPrompt } from "./codex-user-events.mjs";
+import { codexPromptProgress } from "./codex-user-events.mjs";
 import { codexLaunchDecision } from "../policies/context-cost.mjs";
 
 /** WHAT: Maps exact-session model and compact evidence to resume inputs. WHY: Prevents old remembered settings from hiding a later provider fallback. */
@@ -39,13 +39,15 @@ export function validCodexCompactReceipt(receipt, sessionId) {
   const files = Object.keys(receipt.cursor?.positions || {});
   if (files.length !== 1) return false;
   let compacted = false;
+  const prompts = codexPromptProgress();
   hasJsonlEventAfterCursor(files, receipt.cursor, (event) => {
-    if (event?.type === "compacted" || (event?.type === "event_msg" && event.payload?.type === "context_compacted")) compacted = true;
-    else if ((event?.type === "event_msg" && event.payload?.type === "user_message")
-      || codexUserPrompt(event) !== null) compacted = false;
+    if (event?.type === "compacted" || (event?.type === "event_msg" && event.payload?.type === "context_compacted")) {
+      compacted = true;
+      prompts.settle();
+    } else if (prompts.see(event) === "processed") compacted = false;
     return false;
   });
-  return compacted;
+  return compacted && !prompts.isOpen();
 }
 
 /** WHAT: Routes one exact Codex session through compact-first launch. WHY: Keeps config changes, wake and recovery behind the same cost boundary as /model. */

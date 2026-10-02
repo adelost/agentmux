@@ -6,10 +6,12 @@ import {
   CODEX_MODEL_STATE_KEY,
   CODEX_PROFILE_STATE_KEY,
   codexLoginCommand,
+  codexModelCatalog,
   codexModelOverride,
   codexProfileCatalog,
   isCodexProfileAuthenticated,
   prepareCodexProfile,
+  resolveCatalogCodexModel,
   resolveCodexModelName,
   resolveCodexProfile,
   selectedCodexProfile,
@@ -147,5 +149,63 @@ feature("pane-local model overrides", () => {
     })],
     when: ["reading", (state) => codexModelOverride(state, "claw", 11)],
     then: ["null", (value) => expect(value).toBeNull()],
+  });
+});
+
+// The account catalog on 2026-10-02, when "gpt-6.1" was accepted unchecked.
+const catalog = (...ids) => ({ ok: true, models: ids.map(id => ({ id, listed: id !== "gpt-reserve" })) });
+const ACCOUNT = catalog("gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-reserve", "gpt-5.6-sol");
+
+feature("model requests resolve against the account's Codex catalog", () => {
+  unit("a family name with a single model selects that model", {
+    when: ["asking for gpt-6.1", () => resolveCatalogCodexModel("gpt-6.1", ACCOUNT)],
+    then: ["it selects gpt-6.1-sol and keeps what was asked", (resolved) => {
+      expect(resolved).toEqual({ ok: true, model: "gpt-6.1-sol", requested: "gpt-6.1" });
+    }],
+  });
+
+  unit("exact ids and the documented shortcuts pass unchanged", {
+    when: ["resolving each", () => ["gpt-6.1-sol", "sol", "gpt-6"].map(name => resolveCatalogCodexModel(name, ACCOUNT).model)],
+    then: ["each selects its own model", (models) => expect(models).toEqual(["gpt-6.1-sol", "gpt-5.6-sol", "gpt-6-astra"])],
+  });
+
+  unit("an unknown name is refused with the models to choose from", {
+    when: ["asking for gpt-7", () => resolveCatalogCodexModel("gpt-7", ACCOUNT)],
+    then: ["only listed models are offered", (resolved) => {
+      expect(resolved.ok).toBe(false);
+      expect(resolved.reason).toBe("gpt-7 is not a Codex model on this account. Available: gpt-6.1-sol, gpt-6-astra, gpt-6-sol, gpt-6-luna, gpt-5.6-sol");
+    }],
+  });
+
+  unit("a family with several models asks which one", {
+    when: ["asking for gpt-7 when two exist", () => resolveCatalogCodexModel("gpt-7", catalog("gpt-7-sol", "gpt-7-luna", "gpt-6-astra"))],
+    then: ["only that family is listed", (resolved) => {
+      expect(resolved).toEqual({ ok: false, reason: "gpt-7 matches several models, pick one: gpt-7-sol, gpt-7-luna" });
+    }],
+  });
+
+  unit("the catalog is read from the profile's own Codex home", {
+    given: ["a profile whose Codex cached one listed and one hidden model", () => {
+      const home = join(tmpdir(), `amux-codex-catalog-${process.pid}-${Date.now()}`);
+      mkdirSync(home, { recursive: true });
+      writeFileSync(join(home, "models_cache.json"), JSON.stringify({ models: [
+        { slug: "gpt-6.1-sol", visibility: "list" }, { slug: "codex-auto-review", visibility: "hide" }] }));
+      return home;
+    }],
+    when: ["reading it", (home) => codexModelCatalog({ home })],
+    then: ["both are known, only the listed one is offered", (read, home) => {
+      try {
+        expect(read).toEqual({ ok: true, models: [{ id: "gpt-6.1-sol", listed: true }, { id: "codex-auto-review", listed: false }] });
+      } finally { rmSync(home, { recursive: true, force: true }); }
+    }],
+  });
+
+  unit("a missing catalog refuses instead of guessing", {
+    when: ["resolving without a readable catalog", () => resolveCatalogCodexModel("gpt-6.1",
+      codexModelCatalog({ home: join(tmpdir(), "amux-no-codex-home") }))],
+    then: ["the change is refused with the path", (resolved) => {
+      expect(resolved.ok).toBe(false);
+      expect(resolved.reason).toMatch(/cannot read the Codex model list at .*amux-no-codex-home\/models_cache\.json/);
+    }],
   });
 });

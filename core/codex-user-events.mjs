@@ -44,3 +44,31 @@ export function* iterateCodexUserEvents(events) {
     yield event;
   }
 }
+
+// Any user_message counts, even without text (an image-only prompt).
+const isCodexPrompt = event => (event?.type === "event_msg" && event.payload?.type === "user_message")
+  || codexUserPrompt(event) !== null;
+const isCodexTokenUsage = event => event?.type === "token_usage_record"
+  || (event?.type === "event_msg" && event.payload?.type === "token_count");
+const isCodexTurnEnd = (event, kind) => event?.type === "event_msg" && event.payload?.type === kind;
+
+// A prompt the provider refused before any model ran adds no context. On
+// 2026-10-02 two prompts refused for an unsupported model voided lsrc:4's
+// compact receipt, so switching away needed a compact on that same model.
+/** WHAT: Tracks whether each Codex prompt reached a model. WHY: Keeps refused prompts from counting as work. */
+export function codexPromptProgress() {
+  let open = false;
+  return {
+    see(event) {
+      if (isCodexPrompt(event)) { open = true; return "prompt"; }
+      if (!open) return null;
+      // An aborted turn may have run a model without logging usage yet: count it.
+      if (isCodexTokenUsage(event) || isCodexTurnEnd(event, "turn_aborted")) { open = false; return "processed"; }
+      if (isCodexTurnEnd(event, "task_complete")) { open = false; return "refused"; }
+      return null;
+    },
+    // A compaction folds the open prompt into its summary.
+    settle() { open = false; },
+    isOpen: () => open,
+  };
+}

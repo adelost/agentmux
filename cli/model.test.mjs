@@ -53,3 +53,38 @@ feature("CLI Claude model selection", () => {
     }],
   });
 });
+
+// The account catalog on 2026-10-02, when "/model gpt-6.1" was accepted unchecked.
+const ACCOUNT = { ok: true, models: ["gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-sol"].map(id => ({ id, listed: true })) };
+const codexPane = () => {
+  const root = mkdtempSync(join(tmpdir(), "amux-codex-model-cli-"));
+  const configPath = join(root, "agents.yaml");
+  writeFileSync(configPath, `fixture:\n  dir: ${root}\n  panes:\n    - { name: codex, cmd: codex }\n`);
+  return { root, configPath, changer: vi.fn(async () => ({ ok: false, stage: "compact", reason: "stopped-by-test" })) };
+};
+const runCodexModel = (ctx, model) => cmdModel(["fixture", "-p", "0", model, "xhigh"], {
+  configPath: ctx.configPath, agent: {}, state: { get: (_, fallback) => fallback, set() {} }, deliveryQueue: {},
+}, { codexModelChanger: ctx.changer, codexModels: () => ACCOUNT }).catch(error => error);
+
+feature("CLI Codex model selection", () => {
+  component("a family name reaches the switch as the account's model id", {
+    given: ["a configured Codex pane", codexPane],
+    when: ["asking for gpt-6.1", ctx => runCodexModel(ctx, "gpt-6.1")],
+    then: ["the switch is asked for gpt-6.1-sol", (_, ctx) => {
+      try {
+        expect(ctx.changer).toHaveBeenCalledOnce();
+        expect(ctx.changer.mock.calls[0][0]).toMatchObject({ targetModel: "gpt-6.1-sol", targetEffort: "xhigh" });
+      } finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
+  component("an unknown model is refused before any compact or restart", {
+    given: ["a configured Codex pane", codexPane],
+    when: ["asking for gpt-7", ctx => runCodexModel(ctx, "gpt-7")],
+    then: ["nothing runs and the choices are shown", (error, ctx) => {
+      try {
+        expect(ctx.changer).not.toHaveBeenCalled();
+        expect(error.message).toBe("gpt-7 is not a Codex model on this account. Available: gpt-6.1-sol, gpt-6-astra, gpt-5.6-sol. fixture:0 keeps its current model.");
+      } finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
+});

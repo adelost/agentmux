@@ -13,7 +13,7 @@ import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
 import { readQuotaSnapshot } from "./core/quota-usage.mjs";
 import { formatQuotaSnapshot } from "./core/quota-format.mjs";
 import { prepareCodexIdle } from "./core/codex-tui.mjs";
-import { formatCodexModelChange, runLockedCodexModelChange } from "./core/codex-model-command.mjs";
+import { codexModelRequest, formatCodexModelChange, formatCodexModelFailure, runLockedCodexModelChange } from "./core/codex-model-command.mjs";
 import { runLockedClaudeModelChange } from "./core/claude-model-command.mjs";
 import {
   clearCodexModelOverride,
@@ -21,7 +21,7 @@ import {
   codexModelOverride,
   codexProfileCatalog,
   isCodexProfileAuthenticated,
-  prepareCodexProfile, resolveCodexModelName,
+  prepareCodexProfile,
   resolveCodexProfile,
   selectedCodexProfile,
   setCodexModelOverride,
@@ -172,7 +172,7 @@ export function renderCatchupLine(countResult) {
  *
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentmuxYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, deliveryBroker = null, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus, claudeModelChanger = runLockedClaudeModelChange, modelChangeOptions = {}, queueFleetRestartRequest = queueFleetRestart, scheduleBridgeRestart = (delayMs) => setTimeout(() => process.exit(75), delayMs) }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, deliveryBroker = null, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus, codexModels, claudeModelChanger = runLockedClaudeModelChange, modelChangeOptions = {}, queueFleetRestartRequest = queueFleetRestart, scheduleBridgeRestart = (delayMs) => setTimeout(() => process.exit(75), delayMs) }) {
   const noopRecorder = { save: () => {}, enabled: false };
   const rec = recorder || noopRecorder;
   const sendLocks = new Map();
@@ -589,8 +589,9 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           return;
         }
         const [, requestedModel, targetEffort] = spec;
-        const targetModel = resolveCodexModelName(requestedModel);
-        await msg.reply(`Preparing ${mapping.name}:${pane}: waiting for the session lock, then checking the selected model and compact receipt. Compact runs only if needed.`);
+        const { ok, model: targetModel, reply } = codexModelRequest({ state, name: mapping.name, pane, requested: requestedModel, models: codexModels });
+        await msg.reply(reply);
+        if (!ok) return;
         const result = await withPaneSendLock(`${mapping.name}:${pane}`, () => runLockedCodexModelChange({
           agent, state, deliveryBroker, name: mapping.name, pane, targetModel, targetEffort,
           statusDriver: codexStatusDriver,
@@ -603,12 +604,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           }
           await msg.reply(`✅ ${formatCodexModelChange(mapping.name, pane, result)}`);
         } else {
-          const error = result.error || `${result.stage}: ${result.reason}`;
-          const recovery = result.stage === "switch"
-            ? (result.rollbackError ? ` Återställningen misslyckades också: ${result.rollbackError}` : " Föregående modell återställdes.")
-            : " Modellen ändrades inte.";
-          await msg.reply(`⚠️ modelbyte avbrutet före osäkert cachebyte: ${error}.` +
-            recovery);
+          await msg.reply(formatCodexModelFailure(result));
         }
         return;
       }

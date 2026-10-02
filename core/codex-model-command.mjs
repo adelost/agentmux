@@ -1,7 +1,9 @@
 import { prepareCodexIdle } from "./codex-tui.mjs";
 import {
   clearCodexModelOverride,
+  codexModelCatalog,
   codexModelOverride,
+  resolveCatalogCodexModel,
   selectedCodexProfile,
   setCodexModelOverride,
 } from "./codex-profiles.mjs";
@@ -18,6 +20,23 @@ export function formatCodexModelChange(name, pane, result) {
     : result.reusedCompact ? `selected ${selected}; reused the existing compact receipt`
       : `compact verified; selected ${selected}`;
   return `${name}:${pane}: ${action}; global default unchanged`;
+}
+
+/** WHAT: Reports why a model change stopped and what the pane runs now. WHY: Keeps a failed switch from looking like a changed model. */
+export function formatCodexModelFailure(result) {
+  const error = result.error || `${result.stage}: ${result.reason}`;
+  const recovery = result.stage === "switch"
+    ? (result.rollbackError ? ` Återställningen misslyckades också: ${result.rollbackError}` : " Föregående modell återställdes.")
+    : " Modellen ändrades inte.";
+  return `⚠️ modelbyte avbrutet före osäkert cachebyte: ${error}.${recovery}`;
+}
+
+/** WHAT: Resolves one pane's model request and its first reply. WHY: Keeps a name the account cannot run from reaching compact or restart. */
+export function codexModelRequest({ state, name, pane, requested, models = codexModelCatalog }) {
+  const resolved = resolveCatalogCodexModel(requested, models(selectedCodexProfile(state, name, pane)));
+  if (!resolved.ok) return { ...resolved, reply: `⚠️ ${resolved.reason}. ${name}:${pane} keeps its current model.` };
+  const match = resolved.requested ? ` (the only match for ${resolved.requested})` : "";
+  return { ...resolved, reply: `Preparing ${name}:${pane} for ${resolved.model}${match}: waiting for the session lock, then checking the selected model and compact receipt. Compact runs only if needed.` };
 }
 
 /** WHAT: Returns a shared session lease after bounded waiting. WHY: Prevents unrelated pane maintenance from rejecting an explicit model choice immediately. */

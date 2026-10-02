@@ -7,7 +7,7 @@ import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { prepareCodexIdle } from "./codex-tui.mjs";
 import { getContextPercent } from "./context.mjs";
 import { hasEmptyClaudeEpoch } from "./claude-empty-epoch.mjs";
-import { codexUserPrompt } from "./codex-user-events.mjs";
+import { codexPromptProgress } from "./codex-user-events.mjs";
 import { regainSessionLease } from "./session-lease.mjs";
 
 const STATE_KEY = "context_maintenance_by_pane_v1";
@@ -20,11 +20,16 @@ const compactEvent = e => e?.type === "compacted" || e?.payload?.type === "conte
 // 2026-09-27). A path such as "/tmp/x is broken" is still a prompt.
 const isSlashCommand = text => /^\s*\/[a-z][\w:-]*(?:\s|$)/iu.test(text);
 const isClaudeWorkText = text => !/^\s*<(?:local-command|command-)/u.test(text) && !isSlashCommand(text);
-const workEvent = e => e?.type === "event_msg" && e.payload?.type === "user_message"
-  || codexUserPrompt(e) !== null
-  || (e?.type === "user" && !e.isMeta && !e.isCompactSummary
-    && (typeof e.message?.content === "string" ? isClaudeWorkText(e.message.content)
-      : e.message?.content?.some(part => part.type === "text")));
+const claudeWorkEvent = e => e?.type === "user" && !e.isMeta && !e.isCompactSummary
+  && (typeof e.message?.content === "string" ? isClaudeWorkText(e.message.content)
+    : e.message?.content?.some(part => part.type === "text"));
+// A Codex prompt is work once a model ran on it or while its turn is open.
+// One the provider refused (an unsupported model) added nothing to compact.
+function hasWorkAfter(files, cursor) {
+  const prompts = codexPromptProgress();
+  return hasJsonlEventAfterCursor(files, cursor, e => claudeWorkEvent(e) || prompts.see(e) === "processed")
+    || prompts.isOpen();
+}
 
 function write(state, key, record) {
   state.set(STATE_KEY, { ...state.get(STATE_KEY, {}), [key]: record });
@@ -41,7 +46,7 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null) {
   const record = state?.get?.(STATE_KEY, {})?.[paneKey(name, pane)];
   if (!record || record.status === "NOT_SENT" || (identity && record.sessionId !== identity.sessionId)) return null;
   const files = Object.keys(record.cursor?.positions || {});
-  if (!files.length || hasJsonlEventAfterCursor(files, record.cursor, workEvent)) return null;
+  if (!files.length || hasWorkAfter(files, record.cursor)) return null;
   if (record.status !== "VERIFIED" && hasJsonlEventAfterCursor(files, record.cursor, compactEvent)) {
     const verified = { ...record, status: "VERIFIED" };
     write(state, paneKey(name, pane), verified);

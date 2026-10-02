@@ -50,6 +50,29 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
       try { expect(receipt).toBeNull(); } finally { ctx.cleanup(); }
     }],
   });
+  component("a Codex prompt the provider refused leaves the maintenance receipt in force", {
+    given: ["a compact receipt followed by a prompt no model ran on", () => {
+      const ctx = fixture();
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [ctx.identityFor().path]);
+      ctx.state.set("context_maintenance_by_pane_v1", { "lsrc:4": { sessionId: "one", cursor, status: "VERIFIED" } });
+      ctx.append({ type: "compacted" });
+      ctx.append({ type: "event_msg", payload: { type: "user_message", message: "Hej" } });
+      ctx.append({ type: "event_msg", payload: { type: "task_complete", last_agent_message: null } });
+      return ctx;
+    }],
+    when: ["reading the receipt before and after an answered prompt", ctx => {
+      const refused = contextMaintenanceAttempt(ctx.state, "lsrc", 4, { sessionId: "one" });
+      ctx.append({ type: "event_msg", payload: { type: "user_message", message: "Hej" } });
+      ctx.append({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 9 } } } });
+      return { refused, answered: contextMaintenanceAttempt(ctx.state, "lsrc", 4, { sessionId: "one" }) };
+    }],
+    then: ["only work a model ran on expires it", ({ refused, answered }, ctx) => {
+      try {
+        expect(refused?.status).toBe("VERIFIED");
+        expect(answered).toBeNull();
+      } finally { ctx.cleanup(); }
+    }],
+  });
   component("a cold first message enters an exact session with no work after compact", {
     given: ["the compacted Claude journal has only local command output and bridge metadata", () => {
       const ctx = fixture();
