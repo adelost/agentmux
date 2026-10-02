@@ -16,6 +16,8 @@ import {
   writeFileSync,
 } from "fs";
 import { join, resolve } from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { CODEX_EXTERNAL_NAVIGATION_RULES } from "./execution-safety.mjs";
 
 export const CODEX_PROFILE_STATE_KEY = "codex_profile_by_pane";
@@ -34,16 +36,24 @@ export function resolveCodexModelName(requested) {
   return CODEX_MODEL_ALIASES[name] || name;
 }
 
-/** WHAT: Reads the models the profile's own Codex catalog offers. WHY: Keeps model checks on the list Codex fetched for this account. */
-export function codexModelCatalog(profile) {
-  const path = join(profile.home, "models_cache.json");
+const execFileAsync = promisify(execFile);
+
+// The server answers by client version, and every Codex sharing a home
+// rewrites models_cache.json: at 19:15 on 2026-10-02 a 0.155.1 client left a
+// cache without gpt-6.1-sol while the panes ran 0.159.2. So ask the same
+// `codex` the panes are launched with, for this profile's home.
+/** WHAT: Reads the models the installed Codex offers for a profile. WHY: Keeps model checks on what the pane's own Codex can run. */
+export async function codexModelCatalog(profile, { run = execFileAsync } = {}) {
   try {
-    const models = JSON.parse(readFileSync(path, "utf-8")).models;
+    const { stdout } = await run("codex", ["debug", "models"], {
+      env: { ...process.env, CODEX_HOME: profile.home }, timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+    const models = JSON.parse(stdout).models;
     if (!Array.isArray(models)) throw new Error("no models list");
     return { ok: true, models: models.filter(model => typeof model?.slug === "string")
       .map(model => ({ id: model.slug, listed: model.visibility !== "hide" })) };
   } catch (error) {
-    return { ok: false, reason: `cannot read the Codex model list at ${path} (${error.message})` };
+    const detail = String(error.stderr || error.message).trim().split("\n").at(-1);
+    return { ok: false, reason: `could not list the Codex models for ${profile.home} (${detail})` };
   }
 }
 

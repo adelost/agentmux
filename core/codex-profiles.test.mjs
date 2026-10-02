@@ -184,28 +184,30 @@ feature("model requests resolve against the account's Codex catalog", () => {
     }],
   });
 
-  unit("the catalog is read from the profile's own Codex home", {
-    given: ["a profile whose Codex cached one listed and one hidden model", () => {
-      const home = join(tmpdir(), `amux-codex-catalog-${process.pid}-${Date.now()}`);
-      mkdirSync(home, { recursive: true });
-      writeFileSync(join(home, "models_cache.json"), JSON.stringify({ models: [
-        { slug: "gpt-6.1-sol", visibility: "list" }, { slug: "codex-auto-review", visibility: "hide" }] }));
-      return home;
+  unit("the catalog comes from the pane's own Codex for the profile's home", {
+    given: ["a Codex that lists one model and one hidden helper", () => {
+      const calls = [];
+      const run = async (file, args, options) => {
+        calls.push({ file, args, home: options.env.CODEX_HOME });
+        return { stdout: JSON.stringify({ models: [
+          { slug: "gpt-6.1-sol", visibility: "list" }, { slug: "codex-auto-review", visibility: "hide" }] }) };
+      };
+      return { calls, run };
     }],
-    when: ["reading it", (home) => codexModelCatalog({ home })],
-    then: ["both are known, only the listed one is offered", (read, home) => {
-      try {
-        expect(read).toEqual({ ok: true, models: [{ id: "gpt-6.1-sol", listed: true }, { id: "codex-auto-review", listed: false }] });
-      } finally { rmSync(home, { recursive: true, force: true }); }
+    when: ["reading it", ({ run }) => codexModelCatalog({ home: "/home/test/.codex" }, { run })],
+    then: ["both are known, only the listed one is offered", (read, { calls }) => {
+      expect(calls).toEqual([{ file: "codex", args: ["debug", "models"], home: "/home/test/.codex" }]);
+      expect(read).toEqual({ ok: true, models: [{ id: "gpt-6.1-sol", listed: true }, { id: "codex-auto-review", listed: false }] });
     }],
   });
 
-  unit("a missing catalog refuses instead of guessing", {
-    when: ["resolving without a readable catalog", () => resolveCatalogCodexModel("gpt-6.1",
-      codexModelCatalog({ home: join(tmpdir(), "amux-no-codex-home") }))],
-    then: ["the change is refused with the path", (resolved) => {
-      expect(resolved.ok).toBe(false);
-      expect(resolved.reason).toMatch(/cannot read the Codex model list at .*amux-no-codex-home\/models_cache\.json/);
+  unit("a Codex that cannot list its models refuses instead of guessing", {
+    when: ["resolving while codex debug models fails", () => codexModelCatalog({ home: "/missing" }, {
+      run: async () => { throw Object.assign(new Error("exit 1"), { stderr: 'Error: CODEX_HOME points to "/missing", but that path does not exist\n' }); },
+    }).then(catalog => resolveCatalogCodexModel("gpt-6.1", catalog))],
+    then: ["the change is refused with Codex's own reason", (resolved) => {
+      expect(resolved).toEqual({ ok: false,
+        reason: 'could not list the Codex models for /missing (Error: CODEX_HOME points to "/missing", but that path does not exist)' });
     }],
   });
 });

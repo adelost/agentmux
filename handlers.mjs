@@ -589,7 +589,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           return;
         }
         const [, requestedModel, targetEffort] = spec;
-        const { ok, model: targetModel, reply } = codexModelRequest({ state, name: mapping.name, pane, requested: requestedModel, models: codexModels });
+        const { ok, model: targetModel, reply } = await codexModelRequest({ state, name: mapping.name, pane, requested: requestedModel, models: codexModels });
         await msg.reply(reply);
         if (!ok) return;
         const result = await withPaneSendLock(`${mapping.name}:${pane}`, () => runLockedCodexModelChange({

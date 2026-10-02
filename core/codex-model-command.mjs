@@ -40,8 +40,8 @@ export function formatCodexModelFailure(name, pane, result) {
 }
 
 /** WHAT: Resolves one pane's model request and its first reply. WHY: Keeps a name the account cannot run from reaching compact or restart. */
-export function codexModelRequest({ state, name, pane, requested, models = codexModelCatalog }) {
-  const resolved = resolveCatalogCodexModel(requested, models(selectedCodexProfile(state, name, pane)));
+export async function codexModelRequest({ state, name, pane, requested, models = codexModelCatalog }) {
+  const resolved = resolveCatalogCodexModel(requested, await models(selectedCodexProfile(state, name, pane)));
   if (!resolved.ok) return { ...resolved, reply: `⚠️ ${resolved.reason}. ${name}:${pane} keeps its current model.` };
   const match = resolved.requested ? ` (the only ${resolved.requested} model)` : "";
   return { ...resolved, reply: `🔄 Switching ${name}:${pane} to ${resolved.model}${match}. This takes seconds, or minutes if a compact has to run first.` };

@@ -34,7 +34,7 @@ export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaude
   if (!/^[a-z0-9._-]+$/i.test(model || "") || (effort && !/^(minimal|low|medium|high|xhigh|max|ultra)$/.test(effort))) {
     throw new Error("Expected a model name and optional reasoning effort");
   }
-  const { ok, model: targetModel, reason } = codexModelRequest({ state: ctx.state, name, pane, requested: model, models: codexModels });
+  const { ok, model: targetModel, reason } = await codexModelRequest({ state: ctx.state, name, pane, requested: model, models: codexModels });
   if (!ok) throw new Error(`${reason}. ${name}:${pane} keeps its current model.`);
   const result = await codexModelChanger({ agent: ctx.agent, state: ctx.state, name, pane,
     targetModel, targetEffort: effort, deliveryBroker: { queue: ctx.deliveryQueue }, statusDriver: driveCodexStatus });
