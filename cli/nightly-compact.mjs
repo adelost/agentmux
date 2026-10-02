@@ -147,10 +147,10 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
 
     // Same cross-process lease as the broker. Enqueue remains possible; the
     // final observation sees it, or delivery waits until compact releases.
-    let lease = queue.acquireSessionLease(target.agent.name);
+    let lease = queue.acquireSessionLease(target.agent.name, target.pane.index);
     for (let retry = 0; !lease && retry < 2; retry++) {
       await sleep(2_000);
-      lease = queue.acquireSessionLease(target.agent.name);
+      lease = queue.acquireSessionLease(target.agent.name, target.pane.index);
     }
     if (!lease) { rows.push({ pane: key, status: "skipped", reason: "delivery-lease-busy" }); continue; }
     let intent;
@@ -208,7 +208,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       beginContextCompact(ctx.state, target.agent.name, target.pane.index, { sessionId: first.sessionId, path: first.sessionPath });
       const receipt = await compact({ agent: guardedAgent, agentName: target.agent.name, pane: target.pane.index,
         paneDir: target.paneDir, latestIdentity: (dir) => latestPaneSessionIdentity(target.engine, dir),
-        command, sleep, maxRescues: 0 });
+        command, sleep, maxRescues: 0, onCommandAccepted: () => lease.releaseSession?.() });
       rememberContextCompact(ctx.state, target.agent.name, target.pane.index, receipt);
       await sleep(500);
       const after = await observe(ctx, target, { queue, now });

@@ -248,3 +248,25 @@ feature("nightly context budget", () => {
     then: ["the failure stays visible but does not suppress the independent budget pass", (result) => expect(result).toEqual({ nightly: 1, failed: true })],
   });
 });
+
+// lsrc, 2026-10-02: a compact that held the whole session lease refused a
+// sibling's warned compact. Nightly compacts fence only their own pane too.
+feature("a nightly compact fences only its own pane", () => {
+  component("a sibling pane is served while the nightly compact runs", {
+    when: ["another bridge needs claw:5 and claw:4 during claw:4's compact", async () => {
+      const fx = fixture(), other = createDeliveryQueue({ rootDir: join(fx.root, "queue") }), seen = {};
+      fx.deps.compact = async ({ agent, onCommandAccepted }) => {
+        await agent.sendOnly("claw", "/compact", 4);
+        await onCommandAccepted?.();
+        const sibling = other.acquireSessionLease("claw", 5);
+        seen.sibling = Boolean(sibling);
+        sibling?.release();
+        seen.samePane = Boolean(other.acquireSessionLease("claw", 4));
+        fx.change({ tokens: 23_000 });
+        return { ok: true, sessionId: "same-session", compactBoundary: true };
+      };
+      try { await runNightlyCompact(fx.ctx, {}, fx.deps); return seen; } finally { fx.clean(); }
+    }],
+    then: ["claw:5 gets the session and claw:4 stays fenced", (seen) => expect(seen).toEqual({ sibling: true, samePane: false })],
+  });
+});
