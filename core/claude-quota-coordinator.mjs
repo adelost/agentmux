@@ -101,8 +101,41 @@ export function createClaudeQuotaCoordinator({
       .filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status));
   }
 
+  function isQuotaParked(job) {
+    return job.nextAttemptAt === PAUSED_UNTIL_RECOVERY && Boolean(job.metadata?.quotaLimitEventId);
+  }
+
+  function resumeScheduling(job, reason) {
+    const current = queue.read(job.agentName, job.pane, job.id);
+    if (!current || TERMINAL_DELIVERY_STATES.has(current.status) || current.cancelRequestStatus === "requested" || !isQuotaParked(current)) return current;
+    // Status and submit fences belong to delivery reconciliation, not quota scheduling.
+    const resumed = queue.update(current, { nextAttemptAt: now(), metadata: { quotaRecoveredAt: now() }, lastReason: reason });
+    queueEvent(resumed, "quota_unpaused", current.metadata.quotaLimitEventId);
+    return resumed;
+  }
+
+  async function reconcileRecoveredTarget(agentName, pane, cwd) {
+    const lease = queue.acquireSessionLease(agentName, pane);
+    if (!lease) return { recovered: false, reason: "delivery-session-busy" };
+    try {
+      if (lifecycle.activeReceipt(agentName, pane)) return { recovered: false, reason: "limit-still-active" };
+      let count = 0;
+      for (const job of jobsFor(agentName, pane).filter(isQuotaParked)) {
+        if (job.cancelRequestStatus === "requested") continue;
+        const proof = await lifecycle.recoveredSession?.(agentName, pane, job.metadata.quotaSessionId);
+        if (!proof?.ok || lifecycle.activeReceipt(agentName, pane)) continue;
+        if (exactEcho(job, cwd)) acknowledge(job, "echo-after-manual-quota-recovery");
+        else if (job.source === "quota-recovery" && job.status === "pending" && !job.submitFenceAt && !job.submittedAt && !job.draftOwned) {
+          queue.requestCancellation(job.id, { reason: "exact session already resumed manually; continuation is superseded", requestedBy: "quota-recovery" });
+        } else resumeScheduling(job, "same Claude session already recovered; delivery fences preserved");
+        count++;
+      }
+      return { recovered: count > 0, restarted: false, count };
+    } finally { lease.release(); }
+  }
+
   function parkTarget(agentName, pane, receipt, cwd) {
-    const lease = queue.acquireSessionLease(agentName);
+    const lease = queue.acquireSessionLease(agentName, pane);
     if (!lease) return { parked: false, reason: "delivery-session-busy" };
     try {
       if (!sameReceipt(lifecycle.activeReceipt(agentName, pane), receipt)) {
@@ -119,12 +152,15 @@ export function createClaudeQuotaCoordinator({
     }
   }
 
-  async function recoverTarget(agentName, pane, receipt, cwd) {
-    const lease = queue.acquireSessionLease(agentName);
+  async function recoverTarget(agentName, pane, receipt, cwd, expectedProfileKey = null) {
+    const lease = queue.acquireSessionLease(agentName, pane);
     if (!lease) return { recovered: false, reason: "delivery-session-busy" };
     try {
       if (!sameReceipt(lifecycle.activeReceipt(agentName, pane), receipt)) {
         return { recovered: false, reason: "limit-receipt-superseded" };
+      }
+      if (expectedProfileKey && lifecycle.profileFor?.(agentName, pane)?.key !== expectedProfileKey) {
+        return { recovered: false, reason: "quota-profile-changed" };
       }
       const idempotencyKey = quotaRecoveryJobKey(agentName, pane, receipt);
       let continuation = queue.enqueue({
@@ -140,6 +176,11 @@ export function createClaudeQuotaCoordinator({
         },
       });
       if (continuation.status === "acknowledged" || continuation.metadata?.quotaRestartedAt) {
+        for (const job of jobsFor(agentName, pane)) {
+          if (job.metadata?.quotaLimitEventId !== receipt.limitEventId) continue;
+          if (exactEcho(job, cwd)) acknowledge(job, "echo-after-quota-restart");
+          else resumeScheduling(job, "exact session was already restarted; no repeated continuation or restart");
+        }
         return { recovered: true, restarted: false, replayed: true, job: continuation };
       }
       pause(continuation, receipt);
@@ -149,7 +190,9 @@ export function createClaudeQuotaCoordinator({
         else pause(job, receipt);
       }
 
-      const restart = await lifecycle.restart(agentName, pane, receipt);
+      const restart = expectedProfileKey
+        ? await lifecycle.restart(agentName, pane, receipt, expectedProfileKey)
+        : await lifecycle.restart(agentName, pane, receipt);
       if (!restart.ok) {
         continuation = queue.update(continuation, {
           nextAttemptAt: PAUSED_UNTIL_RECOVERY,
@@ -201,30 +244,41 @@ export function createClaudeQuotaCoordinator({
       log(`config read failed: ${error.message}`);
       return [];
     }
-    const limited = [];
+    const targets = [];
     for (const entry of agents) {
       if (entry.backend === "native") continue;
       for (let pane = 0; pane < entry.panes.length; pane++) {
         if (!/claude/iu.test(String(entry.panes[pane]?.cmd || entry.panes[pane]?.name || ""))) continue;
         const receipt = lifecycle.activeReceipt(entry.name, pane);
-        if (receipt) limited.push({ agentName: entry.name, pane, receipt });
+        if (receipt || jobsFor(entry.name, pane).some(isQuotaParked)) targets.push({ agentName: entry.name, pane, receipt });
       }
     }
-    if (!limited.length) return [];
-
-    let quota;
-    try { quota = await readQuota(); }
-    catch (error) { quota = { ok: false, engine: "claude", error: error.message }; }
     const results = [];
-    for (const target of limited) {
+    const quotas = new Map();
+    for (const target of targets) {
       const entry = agents.find((agent) => agent.name === target.agentName);
       const cwd = join(entry.dir, ".agents", String(target.pane));
+      if (!target.receipt) {
+        const outcome = await reconcileRecoveredTarget(target.agentName, target.pane, cwd);
+        results.push({ ...target, outcome });
+        continue;
+      }
+      let quota;
+      const profileKey = lifecycle.profileFor?.(target.agentName, target.pane)?.key;
+      try {
+        if (profileKey && quotas.has(profileKey)) quota = quotas.get(profileKey);
+        else {
+          quota = await readQuota(target);
+          if (profileKey && quota?.profile?.key === profileKey) quotas.set(profileKey, quota);
+        }
+      }
+      catch (error) { quota = { ok: false, engine: "claude", error: error.message }; }
       const readiness = claudeQuotaRecoveryReadiness(target.receipt, quota, {
         now: now(),
         resetGraceMs,
       });
       const outcome = readiness.ready
-        ? await recoverTarget(target.agentName, target.pane, target.receipt, cwd)
+        ? await recoverTarget(target.agentName, target.pane, target.receipt, cwd, quota?.profile?.key || null)
         : parkTarget(target.agentName, target.pane, target.receipt, cwd);
       if (outcome.restarted) {
         log(`${target.agentName}:${target.pane} resumed ${target.receipt.sessionId} via ${readiness.via}`);

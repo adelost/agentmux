@@ -42,7 +42,7 @@ if (!config.enabled) {
     queue,
     lifecycle,
     configPath,
-    readQuota: () => readClaudeQuota(),
+    readQuota: ({ agentName, pane }) => readClaudeQuota({ profile: lifecycle.profileFor(agentName, pane) }),
     resetGraceMs: config.resetGraceMs,
   });
   const loop = createQuotaRecoveryLoop({ coordinator, config });

@@ -1,10 +1,13 @@
 // Exact-session process boundary for the quota recovery sidecar.
 
 import { appendEvent } from "./events.mjs";
+import { readFileSync } from "node:fs";
+import { getAgent } from "../cli/config.mjs";
 import { buildClaudeLaunchCommand } from "./agent-launch-command.mjs";
 import { createTmuxAdapter } from "./tmux.mjs";
 import { findBlockingPrompt, hasEmptyClaudeComposer } from "./dismiss.mjs";
-import { persistedSessionIdentity } from "./native-session-identity.mjs";
+import { latestClaudeSessionIdentity, persistedSessionIdentity } from "./native-session-identity.mjs";
+import { runtimeProfileCatalog, runtimeProfileLaunchHome, selectedRuntimeProfile } from "./runtime-account-profiles.mjs";
 import { getContextPercent } from "./context.mjs";
 import { paneModelSelection } from "./pane-model-state.mjs";
 import {
@@ -28,6 +31,23 @@ function hasExactResumeLaunch(screen, sessionId) {
     .test(String(screen || ""));
 }
 
+function processResumes(rootPid, sessionId, readProc) {
+  const pending = [String(rootPid)];
+  if (!/^\d+$/u.test(pending[0])) return false;
+  for (let index = 0; index < pending.length && index < 64; index++) {
+    const pid = pending[index];
+    try {
+      const argv = readProc(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+      const claude = /(?:^|\/)claude$/u.test(argv[0] || "")
+        || argv.some(arg => /\/claude-code\/cli\.(?:js|mjs)$/u.test(arg));
+      if (claude) return argv[argv.indexOf("--resume") + 1] === sessionId && argv.includes("--resume");
+      const children = readProc(`/proc/${pid}/task/${pid}/children`, "utf8").trim();
+      if (children) pending.push(...children.split(/\s+/u));
+    } catch { return false; }
+  }
+  return false;
+}
+
 /**
  * WHAT: Routes the destructive tmux boundary for exact-session Claude recovery.
  * WHY: Keeps quota polling separate from process identity and manual-draft guards.
@@ -41,6 +61,8 @@ export function createClaudeQuotaLifecycle({
   record = appendEvent,
   state = null,
   contextFor = getContextPercent,
+  profiles = () => runtimeProfileCatalog("claude"),
+  readProc = readFileSync,
 } = {}) {
   if (!configPath) throw new Error("Claude quota lifecycle requires configPath");
   if (!tmuxSocket || typeof tmuxExec !== "function") {
@@ -51,6 +73,29 @@ export function createClaudeQuotaLifecycle({
     configPath,
     homeDir,
   });
+
+  /** WHAT: Resolves the pane's selected Claude account. WHY: Quota and resumed process must use the same profile. */
+  function profileFor(agentName, pane) {
+    return selectedRuntimeProfile({ state, agentName, pane, provider: "claude", catalog: profiles(),
+      paneConfig: getAgent(configPath, agentName).panes?.[Number(pane) || 0] });
+  }
+
+  /** WHAT: Verifies an already resumed exact session. WHY: A vanished banner alone cannot release another session's queue. */
+  async function recoveredSession(agentName, pane, expectedSessionId) {
+    const targetConfig = configuredClaudeTarget(agentName, pane, { configPath });
+    if (!targetConfig) return { ok: false, reason: "not-a-tmux-claude-target" };
+    if (activeReceipt(agentName, pane)) return { ok: false, reason: "limit-still-active" };
+    const identity = latestClaudeSessionIdentity(targetConfig.cwd, { homeDir });
+    if (!identity || identity.sessionId !== expectedSessionId) return { ok: false, reason: "quota-session-changed" };
+    const target = `${agentName}:.${Number(pane) || 0}`;
+    const [command, screen] = await Promise.all([tmux.currentCommand(target).catch(() => ""), tmux.captureScreen(target).catch(() => "")]);
+    if (!CLAUDE_PROCESS.test(command) || !hasEmptyClaudeComposer(screen)) return { ok: false, reason: "recovered-composer-not-ready" };
+    const pid = await tmux.panePid(target).catch(() => "");
+    if (!processResumes(pid, expectedSessionId, readProc)) return { ok: false, reason: "live-session-unproven" };
+    const current = latestClaudeSessionIdentity(targetConfig.cwd, { homeDir });
+    if (activeReceipt(agentName, pane) || current?.sessionId !== expectedSessionId) return { ok: false, reason: "recovery-evidence-changed" };
+    return { ok: true, sessionId: expectedSessionId };
+  }
 
   async function waitForShell(target) {
     for (let attempt = 0; attempt < 50; attempt++) {
@@ -83,7 +128,7 @@ export function createClaudeQuotaLifecycle({
    * WHAT: Replaces one limited pane and resumes only its receipt-bound session.
    * WHY: Prevents stale observations from killing a manual recovery or starting fresh.
    */
-  async function restart(agentName, pane, expectedReceipt) {
+  async function restart(agentName, pane, expectedReceipt, expectedProfileKey = null) {
     const targetConfig = configuredClaudeTarget(agentName, pane, { configPath });
     if (!targetConfig) return { ok: false, reason: "not-a-tmux-claude-target" };
     if (!expectedReceipt?.sessionId || !expectedReceipt?.limitEventId) {
@@ -99,6 +144,9 @@ export function createClaudeQuotaLifecycle({
     if (!sameReceipt(activeReceipt(agentName, pane), expectedReceipt)) {
       return { ok: false, reason: "limit-receipt-superseded" };
     }
+
+    const profile = profileFor(agentName, pane);
+    if (expectedProfileKey && profile?.key !== expectedProfileKey) return { ok: false, reason: "quota-profile-changed" };
 
     const target = `${agentName}:.${Number(pane) || 0}`;
     const [command, screen] = await Promise.all([
@@ -143,6 +191,7 @@ export function createClaudeQuotaLifecycle({
     if (!sameReceipt(activeReceipt(agentName, pane), expectedReceipt)) {
       return { ok: false, reason: "limit-receipt-superseded" };
     }
+    if (profileFor(agentName, pane)?.key !== profile?.key) return { ok: false, reason: "quota-profile-changed" };
 
     const selected = paneModelSelection(state, agentName, pane);
     const observed = contextFor(targetConfig.cwd, "claude");
@@ -155,6 +204,7 @@ export function createClaudeQuotaLifecycle({
       resumeSessionId: expectedReceipt.sessionId,
       model,
       effort,
+      profileHome: runtimeProfileLaunchHome(profile),
     });
     await tmux.runShell(target, `cd '${targetConfig.cwd.replaceAll("'", "'\\''")}' && ${launch}`);
     if (!await waitForComposer(target)) return { ok: false, reason: "resumed-composer-not-ready" };
@@ -176,5 +226,5 @@ export function createClaudeQuotaLifecycle({
     };
   }
 
-  return { activeReceipt, restart };
+  return { activeReceipt, profileFor, recoveredSession, restart };
 }

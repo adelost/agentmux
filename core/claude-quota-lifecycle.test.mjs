@@ -8,7 +8,7 @@ import { assertClaudeQuotaAvailable } from "./claude-quota-target.mjs";
 import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
 
 function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch = false,
-  selected = null, configuredCmd = "claude", observed = null } = {}) {
+  selected = null, configuredCmd = "claude", observed = null, selectedProfile = "1", liveSessionId = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-quota-lifecycle-"));
   const homeDir = join(root, "home");
   const repoDir = join(root, "repo");
@@ -55,6 +55,7 @@ function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch =
     if (command.includes("display-message") && command.includes("pane_current_command")) {
       return { stdout: `${currentCommand}\n` };
     }
+    if (command.includes("display-message") && command.includes("pane_pid")) return { stdout: "100\n" };
     if (command.includes("respawn-pane")) {
       currentCommand = "bash";
       screen = "$ ";
@@ -92,9 +93,19 @@ function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch =
     homeDir,
     delay: async () => {},
     record: () => {},
-    state: { get: (key, fallback) => key === "watcher_last_model" && selected
-      ? { "claw:0": selected } : fallback },
+    state: { get: (key, fallback) => key === "account_profile_by_pane_v1" ? { "claw:0": selectedProfile }
+      : key === "watcher_last_model" && selected ? { "claw:0": selected } : fallback },
     contextFor: () => observed,
+    profiles: () => [
+      { provider: "claude", id: "1", key: "claude:1", source: "primary", home: join(homeDir, ".claude") },
+      { provider: "claude", id: "2", key: "claude:2", source: "isolated", home: join(homeDir, "account-2") },
+    ],
+    readProc: path => {
+      if (path === "/proc/100/cmdline") return "bash\0";
+      if (path === "/proc/100/task/100/children") return "101";
+      if (path === "/proc/101/cmdline") return `claude\0--resume\0${liveSessionId || sessionId}\0`;
+      throw new Error("unknown process");
+    },
   });
   const receipt = lifecycle.activeReceipt("claw", 0);
   return {
@@ -122,6 +133,46 @@ function pendingResumeFixture({ exact = true } = {}) {
 }
 
 feature("Claude quota process boundary", () => {
+  component("quota restart keeps the selected account instead of borrowing the default login", {
+    given: ["a pane explicitly assigned to Claude profile 2", () => fixture({ selectedProfile: "2" })],
+    when: ["resuming its exact session", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt, "claude:2")],
+    then: ["the same selected home reaches the launch, without an account change", (result, ctx) => {
+      try {
+        expect(result.ok).toBe(true);
+        expect(ctx.commands.find(command => command.includes("ANTHROPIC_DISABLE_SURVEY"))).toContain(`CLAUDE_CONFIG_DIR='${join(ctx.homeDir, "account-2")}'`);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("manual recovery needs the same live resume process as well as the journal", {
+    given: ["a later accepted user turn in the same session", () => {
+      const ctx = fixture();
+      writeFileSync(ctx.sessionPath, JSON.stringify({ type: "user", uuid: "33333333-3333-4333-8333-333333333333",
+        timestamp: "2026-07-16T17:16:46.827Z", message: { content: "continue" } }) + "\n", { flag: "a" });
+      return ctx;
+    }],
+    when: ["checking the already running exact process", ({ lifecycle, sessionId }) => lifecycle.recoveredSession("claw", 0, sessionId)],
+    then: ["it is verified read-only", (result, ctx) => {
+      try {
+        expect(result).toEqual({ ok: true, sessionId: ctx.sessionId });
+        expect(ctx.commands.some(command => /respawn-pane|send-keys/u.test(command))).toBe(false);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a matching old journal cannot qualify a different live process", {
+    given: ["the old session's journal but another resumed session in the pane", () => {
+      const ctx = fixture({ liveSessionId: "99999999-9999-4999-8999-999999999999" });
+      writeFileSync(ctx.sessionPath, JSON.stringify({ type: "user", uuid: "33333333-3333-4333-8333-333333333333",
+        timestamp: "2026-07-16T17:16:46.827Z", message: { content: "continue" } }) + "\n", { flag: "a" });
+      return ctx;
+    }],
+    when: ["checking that old session", ({ lifecycle, sessionId }) => lifecycle.recoveredSession("claw", 0, sessionId)],
+    then: ["no automatic queue reopening is authorised", (result, ctx) => {
+      try { expect(result).toEqual({ ok: false, reason: "live-session-unproven" }); }
+      finally { ctx.cleanup(); }
+    }],
+  });
   component("quota restart preserves the exact pane model and effort", {
     given: ["Opus 5.5 high saved over an older displayed model", () => fixture({
       selected: { model: "claude-opus-5-5", effort: "high" },

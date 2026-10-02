@@ -15,7 +15,7 @@ const receipt = {
   resetAt: 20_000,
 };
 
-function fixture() {
+function fixture({ readQuota = async () => ({ ok: true, limits: [{ kind: "session", usedPercent: 7 }] }) } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-quota-coordinator-"));
   const repoDir = join(root, "repo");
   const cwd = join(repoDir, ".agents", "0");
@@ -34,6 +34,7 @@ function fixture() {
   const queue = createDeliveryQueue({ rootDir: join(root, "queue"), now: () => clock });
   const lifecycle = {
     activeReceipt: () => activeReceipt,
+    recoveredSession: async () => ({ ok: true, sessionId: receipt.sessionId }),
     restart: async (...args) => {
       restarts.push(args);
       return { ok: true, sessionId: receipt.sessionId };
@@ -43,7 +44,7 @@ function fixture() {
     queue,
     lifecycle,
     configPath,
-    readQuota: async () => ({ ok: true, limits: [{ kind: "session", usedPercent: 7 }] }),
+    readQuota,
     now: () => clock,
     log: () => {},
   });
@@ -132,6 +133,49 @@ feature("durable quota parking", () => {
 });
 
 feature("quota polling", () => {
+  component("one account is collected once per poll while each pane keeps its own restart boundary", {
+    given: ["two limited panes on the same selected profile", () => {
+      let reads = 0;
+      const ctx = fixture({ readQuota: async () => {
+        reads++;
+        return { ok: true, profile: { key: "claude:1" }, limits: [{ kind: "weekly_all", usedPercent: 0 }] };
+      } });
+      writeFileSync(ctx.configPath, ["lsrc:", `  dir: ${join(ctx.cwd, "../..")}`, "  panes:",
+        "    - { name: first, cmd: claude }", "    - { name: second, cmd: claude }", ""].join("\n"));
+      ctx.lifecycle.profileFor = () => ({ key: "claude:1" });
+      ctx.readCount = () => reads;
+      return ctx;
+    }],
+    when: ["the coordinator polls both panes", ({ coordinator }) => coordinator.tick()],
+    then: ["one usage request qualifies two separate exact-session boundaries", (results, ctx) => {
+      try {
+        expect(results).toHaveLength(2);
+        expect(ctx.readCount()).toBe(1);
+        expect(ctx.restarts).toHaveLength(2);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("an account change during quota collection cannot authorise a restart", {
+    given: ["a successful usage response for the previously selected account", () => {
+      let selected = "claude:1";
+      const ctx = fixture({ readQuota: async () => {
+        selected = "claude:2";
+        return { ok: true, profile: { key: "claude:1" }, limits: [{ kind: "weekly_all", usedPercent: 0 }] };
+      } });
+      ctx.lifecycle.profileFor = () => ({ key: selected });
+      return ctx;
+    }],
+    when: ["quota arrives after the selection changed", ({ coordinator }) => coordinator.tick()],
+    then: ["there is no process change or new continuation", (results, ctx) => {
+      try {
+        expect(results[0].outcome).toMatchObject({ recovered: false, reason: "quota-profile-changed" });
+        expect(ctx.restarts).toEqual([]);
+        expect(ctx.queue.list("lsrc", 0)).toHaveLength(0);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
   component("fresh capacity drives the exact configured Claude pane", {
     given: ["one limited Claude pane", fixture],
     when: ["the coordinator reads a topped-up subscription", ({ coordinator }) => coordinator.tick()],
@@ -174,6 +218,66 @@ feature("quota polling", () => {
       expect(ctx.restarts).toHaveLength(2);
       expect(ctx.queue.list("lsrc", 0).filter((job) => job.source === "quota-recovery")).toHaveLength(1);
       ctx.cleanup();
+    }],
+  });
+
+  component("manual same-session recovery reopens scheduling without replaying a submitted job", {
+    given: ["pending and submitted jobs parked before a verified manual resume", () => {
+      const ctx = fixture();
+      ctx.pending = ctx.queue.enqueue({ agentName: "lsrc", pane: 0, text: "not sent yet" });
+      const created = ctx.queue.enqueue({ agentName: "lsrc", pane: 0, text: "already submitted, no receipt yet" });
+      ctx.submitted = ctx.queue.update(created, { status: "submitted", submitFenceAt: 25_000, submittedAt: 25_000 });
+      ctx.coordinator.parkTarget("lsrc", 0, receipt, ctx.cwd);
+      ctx.setActiveReceipt(null);
+      return ctx;
+    }],
+    when: ["the poll sees the exact session already recovered", ({ coordinator }) => coordinator.tick()],
+    then: ["pending delivery and submitted reconciliation resume, with no restart or cleared fence", (_, ctx) => {
+      try {
+        expect(ctx.queue.read("lsrc", 0, ctx.pending.id)).toMatchObject({ status: "pending", nextAttemptAt: 30_000 });
+        expect(ctx.queue.read("lsrc", 0, ctx.submitted.id)).toMatchObject({
+          status: "submitted", submitFenceAt: 25_000, submittedAt: 25_000, nextAttemptAt: 30_000,
+        });
+        expect(ctx.restarts).toEqual([]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a different or unverified manual session cannot unpark old delivery", {
+    given: ["an old parked job and no current limit, but another session in the pane", () => {
+      const ctx = fixture();
+      ctx.job = ctx.queue.enqueue({ agentName: "lsrc", pane: 0, text: "keep my fence" });
+      ctx.coordinator.parkTarget("lsrc", 0, receipt, ctx.cwd);
+      ctx.setActiveReceipt(null);
+      ctx.lifecycle.recoveredSession = async () => ({ ok: false, reason: "quota-session-changed" });
+      return ctx;
+    }],
+    when: ["the coordinator polls", ({ coordinator }) => coordinator.tick()],
+    then: ["the old queue remains parked without a process change", (_, ctx) => {
+      try {
+        expect(ctx.queue.read("lsrc", 0, ctx.job.id).nextAttemptAt).toBe(Number.MAX_SAFE_INTEGER);
+        expect(ctx.restarts).toEqual([]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a parked continuation resumes when capacity returns without a second restart", {
+    given: ["a restarted continuation parked again before it could be delivered", async () => {
+      const ctx = fixture();
+      ctx.job = ctx.queue.enqueue({ agentName: "lsrc", pane: 0, text: "follow the continuation" });
+      ctx.first = await ctx.coordinator.recoverTarget("lsrc", 0, receipt, ctx.cwd);
+      ctx.coordinator.parkTarget("lsrc", 0, receipt, ctx.cwd);
+      return ctx;
+    }],
+    when: ["the same receipt becomes recoverable again", ({ coordinator, cwd }) => coordinator.recoverTarget("lsrc", 0, receipt, cwd)],
+    then: ["one continuation and its FIFO are schedulable again, with exactly one restart", (result, ctx) => {
+      try {
+        expect(result).toMatchObject({ recovered: true, restarted: false, replayed: true });
+        expect(ctx.restarts).toHaveLength(1);
+        expect(ctx.queue.read("lsrc", 0, ctx.first.job.id).nextAttemptAt).toBe(30_000);
+        expect(ctx.queue.read("lsrc", 0, ctx.job.id).nextAttemptAt).toBe(30_000);
+        expect(ctx.queue.list("lsrc", 0).filter(job => job.source === "quota-recovery")).toHaveLength(1);
+      } finally { ctx.cleanup(); }
     }],
   });
 });
