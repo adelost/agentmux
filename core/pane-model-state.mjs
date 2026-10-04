@@ -30,10 +30,14 @@ export function launchModelId(model) {
   return spoken.ok ? spoken.model : raw;
 }
 
-/** WHAT: Stores one observed pane model reading. WHY: Keeps a model's last effort when a reading omits it, so restarts never guess (E93). */
+/** WHAT: Stores one observed pane model reading. WHY: Keeps a missing or cut-short effort from replacing the one restarts launch (E93). */
 export function recordPaneModelReading(state, name, pane, model, effort = null) {
   const prev = paneModelSelection(state, name, pane);
-  setPaneModelSelection(state, name, pane, model, effort ?? (prev?.model === launchModelId(model) ? prev.effort : null));
+  const ran = prev?.model === launchModelId(model) ? prev.effort : null;
+  const read = effort == null ? null : String(effort).trim().toLowerCase();
+  // a line cut at the pane's edge shows only the front ("m" of max); no effort Claude accepts is the front of another
+  const cut = read != null && ran != null && read !== ran && ran.startsWith(read);
+  setPaneModelSelection(state, name, pane, model, read == null || cut ? ran : read);
   return paneModelSelection(state, name, pane);
 }
 

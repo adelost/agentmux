@@ -63,4 +63,18 @@ feature("durable pane model selection", () => {
       expect(other).toEqual({ model: "claude-sonnet-5-5", effort: null });
     }],
   });
+
+  unit("a reading that shows only the front of the effort keeps the whole effort (E93)", {
+    given: ["a pane that ran Opus 5.5 at max", () => memoryState({
+      watcher_last_model: { "lsrc:0": { model: "claude-opus-5-5", effort: "max" } },
+    })],
+    when: ["the same model is read as 'm', a line cut at the pane's edge, then as medium", (state) => ({
+      cut: recordPaneModelReading(state, "lsrc", 0, "Opus 5.5", "m"),
+      changed: recordPaneModelReading(state, "lsrc", 0, "Opus 5.5", "medium"),
+    })],
+    then: ["the cut reading keeps max; a whole other effort becomes the new one", ({ cut, changed }) => {
+      expect(cut).toEqual({ model: "claude-opus-5-5", effort: "max" });
+      expect(changed).toEqual({ model: "claude-opus-5-5", effort: "medium" });
+    }],
+  });
 });

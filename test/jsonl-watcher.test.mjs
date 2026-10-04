@@ -1049,7 +1049,8 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
 // E93, 2026-10-04: lsrc:0's narrow pane showed "thinking: m…"; the watcher stored effort "m" over the session's max
 // and the next restart refused with "invalid claudeEffort: m", which held the pane from 08:45 to 17:09.
 feature("watcher: a footer cut short never replaces the pane's effort", () => {
-  unit("a footer showing 'thinking: m…' leaves the pane on max, and its restart launches max", {
+  // cut by the terminal's own ellipsis, or at the pane's edge with none
+  for (const cut of ["m…", "m"]) unit(`a footer showing 'thinking: ${cut}' leaves the pane on max, and its restart launches max`, {
     given: ["a Claude pane that ran Opus 5.5 at max, its footer cut short by a narrow terminal", () => {
       const userTs = "2026-10-04T08:40:00.000Z";
       const ctx = setupWatcher({
@@ -1060,7 +1061,7 @@ feature("watcher: a footer cut short never replaces the pane's effort", () => {
         },
       });
       ctx.agent.capturePane.mockResolvedValue("old text\n────────────\n❯ \n────────────\n"
-        + "  ⬆ /gsd-update │ Opus 5.5 │ 0 ██░░░░░░░░ 26% · thinking: m…\n bypass permissions on");
+        + `  ⬆ /gsd-update │ Opus 5.5 │ 0 ██░░░░░░░░ 26% · thinking: ${cut}\n bypass permissions on`);
       return ctx;
     }],
     when: ["the watcher mirrors the finished turn and reads the footer", async (ctx) => {
