@@ -4,6 +4,7 @@ import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSy
 import { join } from "path";
 import { tmpdir } from "os";
 import { createJsonlWatcher } from "../channels/jsonl-watcher.mjs";
+import { buildClaudeLaunchCommand } from "../core/agent-launch-command.mjs";
 
 // --- Setup helpers --------------------------------------------------------
 
@@ -1041,6 +1042,39 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
       expect(bodies.some((body) => body.includes("Run amux ps"))).toBe(true);
       expect(bodies.some((body) => body.includes("wait cell_id"))).toBe(false);
       ctx.cleanup();
+    }],
+  });
+});
+
+// E93, 2026-10-04: lsrc:0's narrow pane showed "thinking: m…"; the watcher stored effort "m" over the session's max
+// and the next restart refused with "invalid claudeEffort: m", which held the pane from 08:45 to 17:09.
+feature("watcher: a footer cut short never replaces the pane's effort", () => {
+  unit("a footer showing 'thinking: m…' leaves the pane on max, and its restart launches max", {
+    given: ["a Claude pane that ran Opus 5.5 at max, its footer cut short by a narrow terminal", () => {
+      const userTs = "2026-10-04T08:40:00.000Z";
+      const ctx = setupWatcher({
+        jsonlLines: [userTurn("status", userTs), assistantText("klart", "2026-10-04T08:40:01.000Z", "end_turn")],
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-test": new Date(userTs).getTime() - 1 },
+          watcher_last_model: { "testagent:0": { model: "claude-opus-5-5", effort: "max" } },
+        },
+      });
+      ctx.agent.capturePane.mockResolvedValue("old text\n────────────\n❯ \n────────────\n"
+        + "  ⬆ /gsd-update │ Opus 5.5 │ 0 ██░░░░░░░░ 26% · thinking: m…\n bypass permissions on");
+      return ctx;
+    }],
+    when: ["the watcher mirrors the finished turn and reads the footer", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["the pane keeps max, and a restart from that selection launches max", (ctx) => {
+      try {
+        const selected = ctx.state._data.watcher_last_model["testagent:0"];
+        expect(buildClaudeLaunchCommand({ model: selected.model, effort: selected.effort })).toContain("--effort 'max'");
+        expect(selected).toEqual({ model: "claude-opus-5-5", effort: "max" });
+      } finally {
+        ctx.cleanup();
+      }
     }],
   });
 });

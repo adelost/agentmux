@@ -63,6 +63,7 @@ import { announceNewPaneEvents } from "../core/pane-notices.mjs";
 import { codexThreadOfRollout, codexTurnError, refusalNoticeText } from "../core/codex-refusal-notice.mjs";
 import {
   paneModelSelection,
+  recordPaneModelReading,
   setPaneModelSelection,
 } from "../core/pane-model-state.mjs";
 
@@ -350,8 +351,7 @@ export function createJsonlWatcher({
     if (ctx.modelSource && ctx.modelSource !== "turn") return;
     const key = paneKey(name, idx);
     const prev = paneModelSelection(state, name, idx);
-    const next = { model: ctx.model, effort: ctx.effort ?? null };
-    setPaneModelSelection(state, name, idx, next.model, next.effort);
+    const next = { model: ctx.model, effort: recordPaneModelReading(state, name, idx, ctx.model, ctx.effort ?? null).effort };
     if (isExpectedCodexModel(state, name, idx, config?.[name]?.panes?.[idx], next)) return;
     if (!prev) return;
 

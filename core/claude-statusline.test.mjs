@@ -6,8 +6,20 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   decorateClaudeStatusline,
   normalizeClaudeEffort,
+  readClaudeScreenStatus,
   writeClaudeStatuslineBridge,
 } from "./claude-statusline.mjs";
+
+describe("Claude footer effort on screen", () => {
+  const screen = (effort) => `old text\n────────────\n❯ \n────────────\n`
+    + `  ⬆ /gsd-update │ Opus 5.5 │ 0 ██░░░░░░░░ 26% · thinking: ${effort}\n bypass permissions on`;
+
+  // E93, 2026-10-04: lsrc:0's narrow pane showed "thinking: m…" and AMUX restarted it with effort "m"
+  it("reads only a whole effort label, never one the terminal cut short", () => {
+    expect(readClaudeScreenStatus(screen("m…"))).toMatchObject({ model: "Opus 5.5", percent: 26, effort: null });
+    expect(readClaudeScreenStatus(screen("max"))).toMatchObject({ model: "Opus 5.5", percent: 26, effort: "max" });
+  });
+});
 
 describe("Claude statusline effort bridge", () => {
   const roots = [];

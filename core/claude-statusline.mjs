@@ -21,7 +21,8 @@ export function readClaudeScreenStatus(screen) {
   for (const line of footer) {
     if (!/[█▓▒░│|]/u.test(line) || !/\b\d{1,3}\s*%/u.test(line)) continue;
     const model = line.match(/(?:^|[│|]\s*)(claude-[\w.\[\]-]+|(?:Fable|Mythos|Opus|Sonnet|Haiku)\s+\d+(?:[.\-]\d+)*(?:\s*\(1M context\))?)(?=\s*[│|])/iu)?.[1];
-    const effort = normalizeClaudeEffort(line.match(/\b(?:thinking|effort)\s*:\s*([\w-]+)\b/iu)?.[1]);
+    // a label the terminal cut short ("thinking: m…") is no effort at all (E93)
+    const effort = normalizeClaudeEffort(line.match(/\b(?:thinking|effort)\s*:\s*([\w-]+)\b(?!…|\.\.\.)/iu)?.[1]);
     const percent = Number(line.match(/\b(\d{1,3})\s*%/u)?.[1]);
     if (model && Number.isFinite(percent) && percent <= 100) {
       const counter = footer.findLast((entry) => /^\s*\d+\s+tokens\s*$/u.test(entry));

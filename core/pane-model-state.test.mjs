@@ -1,6 +1,7 @@
 import { expect, feature, unit } from "bdd-vitest";
 import {
   paneModelSelection,
+  recordPaneModelReading,
   setPaneModelSelection,
 } from "./pane-model-state.mjs";
 
@@ -47,5 +48,19 @@ feature("durable pane model selection", () => {
     when: ["reading the pane after upgrade", (state) => paneModelSelection(state, "skydive", 3)],
     then: ["the prior selection remains authoritative", (selection) =>
       expect(selection).toEqual({ model: "fable", effort: null })],
+  });
+
+  unit("a reading that does not show the effort keeps the effort its model ran with (E93)", {
+    given: ["a pane that ran Opus 5.5 at max", () => memoryState({
+      watcher_last_model: { "lsrc:0": { model: "claude-opus-5-5", effort: "max" } },
+    })],
+    when: ["the same model is read without an effort, then another model is", (state) => ({
+      same: recordPaneModelReading(state, "lsrc", 0, "Opus 5.5", null),
+      other: recordPaneModelReading(state, "lsrc", 0, "claude-sonnet-5-5", null),
+    })],
+    then: ["the same model keeps max; another model inherits nothing", ({ same, other }) => {
+      expect(same).toEqual({ model: "claude-opus-5-5", effort: "max" });
+      expect(other).toEqual({ model: "claude-sonnet-5-5", effort: null });
+    }],
   });
 });
