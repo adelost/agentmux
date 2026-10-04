@@ -7,6 +7,20 @@ const pasted = (text, closeId = "0b44") =>
 const userEvent = (text) => ({ type: "user", message: { content: text } });
 
 feature("Claude pasted-content delivery receipts", () => {
+  unit("Claude's removed discretionary soft hyphens do not hide the whole received prompt", {
+    given: ["a complete paste recorded without its invisible U+00AD layout hints", () => ({
+      sent: "in\u00adgen ändring: först\u00adgång, keep ordinary-hyphen",
+      received: userEvent(pasted("ingen ändring: förstgång, keep ordinary-hyphen")),
+    })],
+    when: ["matching the actual recorded paste, never a substring", ({ sent, received }) => ({
+      exactVisibleText: promptEventMatches(received, sent),
+      changedHyphen: promptEventMatches(received, sent.replace("ordinary-hyphen", "ordinaryhyphen")),
+      changedJoiner: promptEventMatches(received, sent.replace("först", "först\u200d")),
+    })],
+    then: ["only the observed presentation rewrite is accepted", (result) => expect(result).toEqual({
+      exactVisibleText: true, changedHyphen: false, changedJoiner: false,
+    })],
+  });
   for (const [name, event] of [
     ["direct user text", userEvent(pasted(prompt))],
     ["text content parts", { type: "user", message: { content: [{ type: "text", text: pasted(prompt) }] } }],

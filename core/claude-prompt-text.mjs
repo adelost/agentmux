@@ -44,7 +44,9 @@ export function normalizePrompt(text) {
   // puts "[Image #N]" first, so both sides drop markers and image paths.
   // They go before unwrapping: a marker ahead of a paste envelope must not
   // hide the envelope.
-  let s = String(text).replace(/\r\n?/g, "\n")
+  // Claude's paste renderer removes discretionary soft hyphens (U+00AD).
+  // Match that observed layout-only rewrite, not ordinary hyphens or joiners.
+  let s = String(text).replace(/\u00ad/g, "").replace(/\r\n?/g, "\n")
     .replace(/\[Image #\d+\]/g, " ")
     .replace(/(?<!\S)[~/]\S*\.(?:png|jpe?g|gif|webp)(?!\S)/gi, " ");
   s = unwrapPastedContent(s).trim();
