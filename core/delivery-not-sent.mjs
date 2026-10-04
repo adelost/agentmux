@@ -30,6 +30,9 @@ export function createDeliveryNotSent({
   /** WHAT: Checks whether a pre-submit job spent its retry budget. WHY: Prevents one wedged composer from consuming the FIFO forever. */
   function stalePreSubmit(job) {
     if (!PRE_SUBMIT_STATES.has(job.status) || Number(job.attempts || 0) <= 0) return false;
+    // Exact-session recovery already authorized the next attempt. Its old
+    // submit age is not a pre-submit budget; notSentCause cannot settle it.
+    if (job.metadata?.submittedRecoveryAt || job.metadata?.submittedRecoveryKind) return false;
     const firstAttemptAt = Number(job.firstAttemptAt || job.createdAt || 0);
     const age = firstAttemptAt ? Math.max(0, now() - firstAttemptAt) : 0;
     return age >= STALE_PRE_SUBMIT_TERMINAL_MS
