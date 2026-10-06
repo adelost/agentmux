@@ -249,11 +249,12 @@ export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}
 
   const rows = [...unique.values()].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
   const deliveries = rows.filter((row) => row.source !== "pane-hook");
+  const deliveriesBySameAsk = groupBySameAsk(deliveries);
   const standaloneHooks = [];
   const claimed = new Set();
   for (const hook of rows.filter((row) => row.source === "pane-hook")) {
     const hookAt = Date.parse(hook.ts);
-    const candidate = deliveries
+    const candidate = (deliveriesBySameAsk.get(sameAskKey(hook)) || [])
       .filter((row) => !claimed.has(row.id)
         && row.agent === hook.agent
         && row.pane === hook.pane
@@ -271,4 +272,20 @@ export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}
     claimed.add(candidate.id);
   }
   return [...deliveries, ...standaloneHooks].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
+}
+
+// A hook can only fold into a delivery of the same agent, pane and text, so it
+// is compared with that group instead of with every delivery in the ledger.
+// The key may merge values such as pane 1 and "1"; the exact checks decide.
+const sameAskKey = (row) => `${row.agent}\u0000${row.pane}\u0000${row.verbatim}`;
+
+function groupBySameAsk(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = sameAskKey(row);
+    const group = groups.get(key);
+    if (group) group.push(row);
+    else groups.set(key, [row]);
+  }
+  return groups;
 }

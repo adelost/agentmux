@@ -8,12 +8,45 @@ import {
   appendAskLedger,
   askLedgerFiles,
   capturePaneHookAsk,
+  coalesceAskLedger,
   persistAskCompletionEvidence,
   readAskLedger,
 } from "./ask-ledger.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 
 const freshRoot = () => mkdtempSync(join(tmpdir(), "amux-ask-ledger-"));
+const minutesAfter = (minutes) => new Date(Date.parse("2026-10-01T08:00:00Z") + minutes * 60_000).toISOString();
+const delivered = (id, minute, pane = 1, verbatim = "kör testerna") => ({
+  id, ts: minutesAfter(minute), agent: "lsrc", pane, source: "discord", verbatim,
+});
+const hooked = (id, minute, pane = 1, verbatim = "kör testerna") => ({
+  id, ts: minutesAfter(minute), agent: "lsrc", pane, source: "pane-hook", verbatim,
+  sessionFile: `/sessions/${id}.jsonl`,
+});
+
+// Every delivered ask is echoed by its pane hook, and as many prompts are typed
+// straight into panes. Comparing every hook with every delivery is quadratic.
+function fleetLedger(count) {
+  const rows = [];
+  for (let i = 0; i < count; i++) {
+    const at = (offsetMs) => new Date(Date.parse("2026-09-01T00:00:00Z") + i * 60_000 + offsetMs).toISOString();
+    const pane = { agent: `agent${i % 8}`, pane: i % 6 };
+    const verbatim = `kör uppdrag ${i} och rapportera med bevis`;
+    rows.push(
+      { ...pane, id: `delivery:${i}`, ts: at(0), source: "discord", verbatim },
+      { ...pane, id: `echo:${i}`, ts: at(2_000), source: "pane-hook", verbatim, sessionFile: `/sessions/${i}.jsonl` },
+      { ...pane, id: `typed:${i}`, ts: at(3_000), source: "pane-hook", verbatim: `skrivet direkt ${i}` },
+    );
+  }
+  return rows;
+}
+
+const cpuMsOf = (work) => {
+  const before = process.cpuUsage();
+  const result = work();
+  const used = process.cpuUsage(before);
+  return { result, cpuMs: (used.user + used.system) / 1000 };
+};
 
 feature("durable ask ledger", () => {
   unit("preserves exact UTF-8 and concrete session provenance", {
@@ -173,6 +206,41 @@ feature("durable ask ledger", () => {
       } finally {
         rmSync(ctx.root, { recursive: true, force: true });
       }
+    }],
+  });
+
+  unit("a pane hook folds into the nearest unclaimed identical delivery on its own pane", {
+    given: ["repeated identical asks, their hook echoes, and near misses", () => [
+      delivered("d-first", 0), delivered("d-second", 10),
+      hooked("h-near-second", 9), hooked("h-takes-first", 11), hooked("h-both-claimed", 12),
+      hooked("h-other-pane", 0, 2),
+      delivered("d-late", 60), hooked("h-too-early", 40),
+      delivered("d-tie-early", 115), delivered("d-tie-late", 125), hooked("h-tie", 120),
+    ]],
+    when: ["the ledger rows are coalesced", (rows) => coalesceAskLedger(rows)],
+    then: ["each delivery keeps the session of the hook that claimed it and the rest stay standalone", (rows) => {
+      const sessionOf = Object.fromEntries(rows.filter((row) => row.source === "discord")
+        .map((row) => [row.id, row.sessionFile ?? null]));
+      expect(sessionOf).toEqual({
+        "d-first": "/sessions/h-takes-first.jsonl",
+        "d-second": "/sessions/h-near-second.jsonl",
+        "d-late": null,
+        "d-tie-early": "/sessions/h-tie.jsonl",
+        "d-tie-late": null,
+      });
+      expect(rows.filter((row) => row.source === "pane-hook").map((row) => row.id))
+        .toEqual(["h-other-pane", "h-both-claimed", "h-too-early"]);
+    }],
+  });
+
+  unit("a fleet-sized ledger coalesces in time proportional to its rows, not rows squared", {
+    given: ["4,000 delivered asks with hook echoes and 4,000 typed prompts", () => fleetLedger(4_000)],
+    when: ["the ledger rows are coalesced", (rows) => cpuMsOf(() => coalesceAskLedger(rows))],
+    then: ["every echo folds into its delivery and the pass stays far below a pairwise scan", ({ result, cpuMs }) => {
+      expect(result).toHaveLength(8_000);
+      expect(result.filter((row) => row.source === "discord")
+        .every((row) => row.sessionFile === `/sessions/${row.id.slice("delivery:".length)}.jsonl`)).toBe(true);
+      expect(cpuMs).toBeLessThan(250);
     }],
   });
 });
