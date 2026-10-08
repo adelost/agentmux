@@ -3,7 +3,7 @@ import {
   CLAUDE, CODEX, KIMI, QWEN, ALL_DIALECTS, detectDialect, isCodingDialect,
   matchesAnyBullet, matchesAnyToolResult, matchesAnyToolCall,
   matchesAnyPromptPrefix, matchesAnyPromptWithText, stripBullet,
-  COMPOSER_LINE_RE, composerLines, foreignComposerText,
+  COMPOSER_LINE_RE, composerLines, composerDraft, foreignComposerText,
 } from "./dialects.mjs";
 
 // --- Data integrity ------------------------------------------------------
@@ -311,6 +311,27 @@ feature("composer lines", () => {
     ].join("\n")],
     when: ["reading the composer", (screen) => composerLines(screen)],
     then: ["only the line between the two rules", (lines) => expect(lines).toEqual(["❯ /compact"])],
+  });
+
+  // A named session's composer: Claude writes the name into its top rule, here under a quoted `amux log` turn.
+  const namedComposer = (typed) => [
+    "● Bash(amux log lsrc -p 3 -n 1)", "  ⎿  21:55 CEST", `     ${"─".repeat(60)}`,
+    "     Turn 1 of 1 (2026-10-08T19:55:09.803Z)", `     ${"─".repeat(60)}`, "     > [from skyvw:0] …", "",
+    "● SUMMARY: lsrc:3 started the new landing page at 21:55.", "", "✻ Sautéed for 15s · done 9:56 PM",
+    `${"─".repeat(102)} watch:0 ─`, `❯ ${typed}`, "─".repeat(112),
+    "  ⬆ /gsd-update │ Opus 5.5 │ 54%", "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents",
+  ].join("\n");
+
+  unit("reads a named composer, not a prompt quoted above it", {
+    given: ["skyvw:0's empty composer on 2026-10-08, named watch:0", () => namedComposer("")],
+    when: ["reading the draft", (screen) => ({ lines: composerLines(screen), draft: composerDraft(screen) })],
+    then: ["the empty composer", (read) => expect(read).toEqual({ lines: ["❯"], draft: "" })],
+  });
+
+  unit("still sees a draft in a named composer", {
+    given: ["the same screen with /compact typed", () => namedComposer("/compact")],
+    when: ["reading the draft", (screen) => composerDraft(screen)],
+    then: ["the typed text", (draft) => expect(draft).toBe("/compact")],
   });
 
   unit("keeps the last five lines on a screen without the two rules", {
