@@ -251,6 +251,30 @@ feature("tmux adapter: parsed reads", () => {
     then: ["3", (n) => expect(n).toBe(3)],
   });
 
+  unit("paneCount of an empty listing is 0, not a default pane", {
+    given: ["list-panes printing nothing", () => fakeTmux({ stdout: "\n" })],
+    when: ["counting", ({ t }) => t.paneCount("claw")],
+    then: ["0", (n) => expect(n).toBe(0)],
+  });
+
+  unit("paneRows reads stable ids, process and a path containing a pipe", {
+    given: ["two listed rows", () => fakeTmux({ stdout: "1|%9|0|bash|/repo/.agents/1\n0|%4|0|claude|/re|po/.agents/0\n" })],
+    when: ["listing rows", async ({ t, calls }) => ({ rows: await t.paneRows("claw"), calls })],
+    then: ["index-ordered rows from one formatted list-panes", ({ rows, calls }) => {
+      expect(calls[0]).toBe(PREFIX + "list-panes -t 'claw' -F '#{pane_index}|#{pane_id}|#{pane_dead}|#{pane_current_command}|#{pane_current_path}'");
+      expect(rows).toEqual([
+        { index: 0, id: "%4", dead: false, command: "claude", path: "/re|po/.agents/0" },
+        { index: 1, id: "%9", dead: false, command: "bash", path: "/repo/.agents/1" },
+      ]);
+    }],
+  });
+
+  unit("paneRows refuses a listing it cannot read", {
+    given: ["default-format list-panes output", () => fakeTmux({ stdout: "0: [80x24] [history 0/2000, 0 bytes] %4\n" })],
+    when: ["listing rows", ({ t }) => t.paneRows("claw").catch((error) => error)],
+    then: ["an error, never a guessed row", (error) => expect(error.message).toContain("unreadable list-panes row for 'claw'")],
+  });
+
   unit("paneInMode and paneDead parse the display flag", {
     given: ["display returning 1", () => fakeTmux({ stdout: "1\n" })],
     when: ["reading both flags", async ({ t }) => ({

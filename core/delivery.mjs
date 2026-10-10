@@ -57,6 +57,21 @@ export async function deliverToPane(agent, agentName, pane, text, opts = {}) {
     : sendPromptVerified(agent, agentName, pane, resolved, opts);
 }
 
+// Prefixes of ENGINE_START_REFUSED and PANE_LAYOUT_UNSAFE behind a broker wake refusal.
+const PANE_SAFETY_REFUSAL = /^wake-refused:\s*((?:engine start refused|pane layout unsafe):.*)$/su;
+
+/**
+ * WHAT: Formats the Discord reply for a slash command handed to the broker.
+ * WHY: Keeps a refused pane start from reading as an ordinary durable queue.
+ */
+export function slashQueueReply(command, result) {
+  if (result?.delivered) return `sent \`${command}\``;
+  const refused = String(result?.reason || "").match(PANE_SAFETY_REFUSAL)?.[1];
+  return refused
+    ? `⚠️ \`${command}\` is queued but its pane was not started: ${refused}`
+    : `queued durably \`${command}\``;
+}
+
 /** "/model fable" yes; "/home/x/file" no (path, not command). */
 export function isSlashCommand(text) {
   return /^\/[a-z][\w-]*(\s|$)/i.test(String(text).trimStart());

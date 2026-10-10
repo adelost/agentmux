@@ -30,6 +30,7 @@ export function qwenRuntimeCases(createRuntime, reader) {
         isBusy: async () => false, isPaneDead: async () => false, respawnPane: async () => {},
         isAlreadyRunning: async () => false, isShellProcess: () => true,
         captureScreen: async () => '> Type your message or @path/to/file', stateRoot,
+        assertEngineStartAllowed: async () => {}, // no other pane or process holds the session
       });
       const start = (launch = null) => runtime.startQwen('demo', 'demo:.4', config.dir, 4, launch);
       try { await run({ root, paneDir, stateRoot, config, commands, start }); return true; }

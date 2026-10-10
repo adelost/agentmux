@@ -85,6 +85,7 @@ export function createKimiAgentRuntime({
   isShellProcess,
   captureScreen,
   promptAlreadyInComposer,
+  assertEngineStartAllowed,
 }) {
   const runtimeProfileFor = createRuntimeProfileResolver({ state, configFor: agentConfig });
   function blocked(message) {
@@ -139,6 +140,7 @@ export function createKimiAgentRuntime({
       || paneConfig.resumeSessionId
       || discovered?.sessionId
       || null;
+    await assertEngineStartAllowed({ session: name, pane, dir, sessionId: resumeSessionId, engine: "kimi" });
     const model = launch?.model || paneConfig.model || "kimi-code/k3";
     const executable = process.env.KIMI_CODE_BIN
       || `${process.env.HOME}/.kimi-code/bin/kimi`;

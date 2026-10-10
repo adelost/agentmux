@@ -143,6 +143,7 @@ feature("Qwen exact-session launch", () => {
         isAlreadyRunning: async () => false,
         isShellProcess: () => true,
         captureScreen: async () => "*   Type your message or @path/to/file",
+        assertEngineStartAllowed: async () => {}, // no other pane or process holds the session
         stateRoot,
       });
       return { root, runtime, commands };

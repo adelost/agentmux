@@ -52,6 +52,7 @@ export function createQwenAgentRuntime({
   isAlreadyRunning,
   isShellProcess,
   captureScreen,
+  assertEngineStartAllowed,
   stateRoot = null,
 } = {}) {
   async function waitForQwenUiReady(target, agentName, pane, files, timeoutMs = READY_TIMEOUT_MS) {
@@ -89,6 +90,7 @@ export function createQwenAgentRuntime({
     const paneConfig = agentConfig(name).panes?.[pane] || {};
     const previous = latestQwenSessionIdentity(dir, { stateRoot, strict: true });
     const resumeSessionId = launch?.resumeSessionId || paneConfig.resumeSessionId || previous?.sessionId;
+    await assertEngineStartAllowed({ session: name, pane, dir, sessionId: resumeSessionId, engine: "qwen" });
     const sessionId = resumeSessionId || randomUUID();
     const model = launch?.model || paneConfig.model || previous?.model || "qwen3.8-max";
     const executable = process.env.QWEN_CODE_BIN || `${process.env.HOME}/.local/bin/qwen`;

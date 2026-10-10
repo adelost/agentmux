@@ -54,6 +54,7 @@ function fixture({ selected = { model: "claude-fable-5[1m]", effort: null }, com
     isBusy: async () => true,
     promptTransportState: async () => ({ state: "hidden", busy: false }),
     restartCodex: async () => {},
+    assertEngineStartAllowed: async () => {}, // no other pane or process holds the session
   });
   return { root, oldHome, workspace, sessionId, recovery, commands, keys };
 }

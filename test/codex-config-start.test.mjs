@@ -42,6 +42,10 @@ function fixture({ model = "gpt-6-astra", effort = null, fresh = false, override
   const calls = [];
   const tmuxExec = async (command) => {
     calls.push(command);
+    // The engine start guard lists the window's panes before any launch.
+    if (command.includes("list-panes") && command.includes(" -F ")) {
+      return { stdout: `0|%0|0|${running ? "node" : "bash"}|${join(root, ".agents", "0")}\n` };
+    }
     if (command.includes("#{pane_current_command}")) return { stdout: running ? "node\n" : "bash\n" };
     if (command.includes("send-keys") && command.includes("codex ")) running = true;
     return { stdout: "0\n" };

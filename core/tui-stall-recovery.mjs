@@ -37,6 +37,8 @@ export const isCodingPaneCommand = (command) =>
   || isKimiPaneCommand(command) || isQwenPaneCommand(command);
 /** WHAT: Checks whether a process is an interactive shell. WHY: Keeps restart commands behind a ready PTY. */
 export const isShellProcess = (command) => /^(bash|zsh|sh|fish|dash)$/u.test(String(command || ""));
+/** WHAT: Checks whether a pane's live process is a coding engine. WHY: Keeps running-engine detection one rule for delivery and start guards. */
+export const isEngineProcess = (command) => /^(claude|codex|kimi|kimi-code|qwen|node)$/u.test(String(command || ""));
 
 /**
  * WHAT: Builds exact-session Claude and exact-pane recovery operations.
@@ -45,7 +47,7 @@ export const isShellProcess = (command) => /^(bash|zsh|sh|fish|dash)$/u.test(Str
 export function createTuiStallRecovery({
   tmux, state, delay, configFor, paneDirectory, isPaneDead, respawnPane,
   isAlreadyRunning, resolveSessionFlag, isBusy, promptTransportState, restartCodex, restartKimi, restartQwen,
-  now = Date.now,
+  assertEngineStartAllowed, now = Date.now,
 } = {}) {
   const runtimeProfileFor = createRuntimeProfileResolver({ state, configFor });
   /** WHAT: Observes one pane process. WHY: Proves whether a fenced submission can still be ingested. */
@@ -57,7 +59,7 @@ export function createTuiStallRecovery({
       command,
       dead,
       shell: isShellProcess(command),
-      running: /^(claude|codex|kimi|kimi-code|qwen|node)$/u.test(command || ""),
+      running: isEngineProcess(command),
     };
   }
 
@@ -74,6 +76,7 @@ export function createTuiStallRecovery({
       || configuredSessionId
       || discovered?.sessionId
       || null;
+    await assertEngineStartAllowed({ session: name, pane, dir, sessionId: resumeSessionId, engine: "claude" });
     const sessionFlag = resumeSessionId ? "" : await resolveSessionFlag(dir, name, pane);
     const selected = paneModelSelection(state, name, pane);
     const observed = selected?.model ? null : getContextPercent(dir, "claude");

@@ -27,7 +27,7 @@ import {
   setCodexModelOverride,
   setCodexProfile,
 } from "./core/codex-profiles.mjs";
-import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
+import { sendPromptVerified, sendSlashVerified, slashQueueReply } from "./core/delivery.mjs";
 import { MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, resumeBrief } from "./core/model-watch.mjs";
 import { queueFleetRestart } from "./core/fleet-restart.mjs";
 import { normalizeClaudeModelName } from "./core/claude-model.mjs";
@@ -742,14 +742,15 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         // session still has old panes with wrong commands (bash where claude
         // is expected, etc). Shared with the CLI-triggered triggerSync path.
         let reconcileSummaries = [];
+        const lines = [];
         try {
           const { parseConfig } = await import("./sync.mjs");
           const cfg = parseConfig(configYaml);
-          reconcileSummaries = await reconcileAllSessions(agent, cfg.agents.keys(), (msg) => console.warn(msg));
+          // A refused reconcile (unknown pane count, shifted pane) must reach the human, not only the log.
+          reconcileSummaries = await reconcileAllSessions(agent, cfg.agents.keys(), (line) => { console.warn(line); lines.push(`⚠️ ${line}`); });
         } catch (err) {
           console.warn(`/sync: reconcile skipped: ${err.message}`);
         }
-        const lines = [];
         if (results.created.length) lines.push(`**created:** ${results.created.join(", ")}`);
         if (results.renamed?.length) lines.push(`**renamed:** ${results.renamed.join(", ")}`);
         if (results.existing.length) lines.push(`**existing:** ${results.existing.join(", ")}`);
@@ -1062,9 +1063,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
               : null,
             metadata: { channelId: msg.channelId, messageId: msg.id },
           });
-          await msg.reply(result.delivered
-            ? `sent \`${parsed.cmd}\``
-            : `queued durably \`${parsed.cmd}\``);
+          await msg.reply(slashQueueReply(parsed.cmd, result));
         } else {
           const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
             sendSlashVerified(agent, mapping.name, pane, claudeCmd));

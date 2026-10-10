@@ -127,6 +127,7 @@ describe("Kimi workspace-trust pre-seed and modal backstop", () => {
         isShellProcess: () => false,
         captureScreen: async () => " │ >  │ ",
         promptAlreadyInComposer: async () => false,
+        assertEngineStartAllowed: async () => {}, // no other pane or process holds the session
       });
       await runtime.startKimi("ai", "ai:.7", dirnameOf(paneDir), 7, {
         profile: { home },

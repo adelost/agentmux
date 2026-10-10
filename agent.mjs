@@ -9,6 +9,8 @@ import { FLEET_PROCESS_HINTS } from "./core/hints-fleet-process.mjs";
 import { contextMaintenanceAttempt } from "./core/context-maintenance.mjs";
 import { prepareCodexResume } from "./core/codex-launch-policy.mjs";
 import { createTmuxAdapter } from "./core/tmux.mjs";
+import { appendMissingPanes, countPanes as countPanesStrict } from "./core/pane-provisioning.mjs";
+import { createEngineStartGuard } from "./core/engine-start-guard.mjs";
 import { ensureHeadlessWindow, settleTmuxWindowSize } from "./core/tmux-window-size.mjs";
 import { stripPaneChrome } from "./core/pane-chrome.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
@@ -208,13 +210,15 @@ function ensureGitignored(rootDir, entry) {
 
 // --- Agent factory ---
 /** WHAT: Builds the tmux agent lifecycle API. WHY: Keeps bridge routing independent from pane mechanics. */
-export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec, state = null }) {
+export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec, state = null, procRoot = "/proc" }) {
   const wait = delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
   // All tmux syntax lives in the adapter (core/tmux.mjs). agent.mjs speaks
   // intent-level primitives; escaping is the adapter's tested concern.
   const t = createTmuxAdapter({ socket: tmuxSocket, exec: tmuxExec });
   const claudeGuards = createClaudeComposerGuards({ wait, capture: (name, pane) => capturePane(name, pane, 15),
     panePid: (name, pane) => t.panePid(`${name}:.${pane}`), sendLiteral: t.sendLiteral, sendKeys: t.sendKeys });
+  // Every engine start awaits this before typing its launch command.
+  const assertEngineStartAllowed = createEngineStartGuard({ tmux: t, wait, procRoot });
 
   // --- Config ---
 
@@ -305,27 +309,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // Guarantee room + reflow any sliver panes before the first split.
     await ensureSplitRoom(name);
     await applyLayout();
-    const existing = await countPanes(name);
-    for (let i = existing; i < panes.length; i++) {
-      // -c pins the new pane's cwd to its own .agents/N. Without it,
-      // tmux inherits cwd from whichever pane is active at split-time —
-      // unpredictable after select-layout, and the cause of the
-      // pane-N-writes-jsonl-to-agents-M bug that broke Discord channel
-      // mapping. paneDir mkdir:s the dir so -c can't fail on it missing.
-      const targetDir = paneDir(dir, i);
-      const splitTarget = `${name}:.${i - 1}`;
-      try {
-        await t.splitWindowRight(splitTarget, targetDir);
-        await applyLayout();
-      } catch (err) {
-        console.warn(`setupPanes: split-window ${name} failed: ${err.message}`);
-        break;
-      }
-    }
-
+    // Each split pins the new pane's cwd to its own .agents/N (-c). Without
+    // it tmux inherits the active pane's cwd, and pane N wrote its jsonl into
+    // .agents/M. Growth is append-only (core/pane-provisioning.mjs).
+    const growth = await appendMissingPanes({ tmux: t, session: name, wantedCount: panes.length,
+      dirFor: (i) => paneDir(dir, i), afterSplit: applyLayout });
+    if (growth.splitError) console.warn(`setupPanes: split-window ${name} failed: ${growth.splitError}`);
     await applyLayout();
 
-    const actualPanes = await countPanes(name);
+    const actualPanes = growth.rows.length;
     if (actualPanes < panes.length) {
       console.warn(`setupPanes: ${name} has ${actualPanes}/${panes.length} panes after split; skipping missing panes`);
     }
@@ -352,14 +344,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await settleWindowSize(name, layout);
   }
 
-  async function countPanes(name) {
-    try {
-      return await t.paneCount(name);
-    } catch (err) {
-      // Session may not exist yet, treat as 1 default pane
-      return 1;
-    }
-  }
+  // Throws when tmux cannot answer. The old "treat as 1 pane" fallback made
+  // reconcile split .0 of a live 4-pane window (skyvw 2026-10-10).
+  const countPanes = (name) => countPanesStrict(t, name);
 
   async function paneCountAfterReconcile(name, wantedCount) {
     const actual = await countPanes(name);
@@ -452,19 +439,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       await applyLayout();
     }
 
-    const currentCount = await countPanes(name);
-    for (let i = currentCount; i < wanted.length; i++) {
-      try {
-        // See setupPanes for why -c is mandatory. Same bug, same fix.
-        const targetDir = paneDir(cfg.dir, i);
-        const splitTarget = `${name}:.${i - 1}`;
-        await t.splitWindowRight(splitTarget, targetDir);
-        summary.added++;
-        await applyLayout();
-      } catch (err) {
-        console.warn(`reconcile: split-window ${name} failed: ${err.message}`);
-        break;
-      }
+    // Same append-only growth as setupPanes; a shifted live pane throws.
+    if (needsPanes) {
+      const growth = await appendMissingPanes({ tmux: t, session: name, wantedCount: wanted.length,
+        dirFor: (i) => paneDir(cfg.dir, i), afterSplit: applyLayout });
+      summary.added = growth.added;
+      if (growth.splitError) console.warn(`reconcile: split-window ${name} failed: ${growth.splitError}`);
     }
     if (summary.added > 0) {
       await applyLayout();
@@ -578,6 +558,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const holders = decision.heldBy?.length ? ` (live writer ${decision.heldBy.join(",")})` : "";
       throw new Error(`Codex continuity blocked for ${owner}: ${decision.reason}${holders}`);
     }
+    await assertEngineStartAllowed({ session: name, pane, dir, engine: "codex",
+      sessionId: decision.action === "resume" ? decision.sessionId : null });
 
     const persistSession = (record) => {
       if (!state?.set) return;
@@ -833,11 +815,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   const { maybeRescueKimiSubmit, restartKimi, startKimi, submitKimiPromptNow,
     waitForKimiPromptReady, waitForKimiUiReady } = createKimiAgentRuntime({
     t, state, wait, paneDir, agentConfig, isBusy, isPaneDead, respawnPane,
-    isAlreadyRunning, isShellProcess: isShellProc, captureScreen, promptAlreadyInComposer,
+    isAlreadyRunning, isShellProcess: isShellProc, captureScreen, promptAlreadyInComposer, assertEngineStartAllowed,
   });
   const { restartQwen, startQwen, submitPrompt: submitQwenPrompt } = createQwenAgentRuntime({
     t, wait, paneDir, agentConfig, isBusy, isPaneDead, respawnPane,
-    isAlreadyRunning, isShellProcess: isShellProc, captureScreen,
+    isAlreadyRunning, isShellProcess: isShellProc, captureScreen, assertEngineStartAllowed,
   });
   const maybeRescueClaudeSubmit = createClaudeSubmitRescue({
     t, wait, paneDir, agentConfig, paneDialectName, isBusy, capturePane,
@@ -1802,6 +1784,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     restartCodex,
     restartKimi,
     restartQwen,
+    assertEngineStartAllowed,
   });
   return {
     ensureReady, sendAndWait, sendOnly,

@@ -59,6 +59,11 @@ function actorName(requestedBy) {
 }
 
 const REASON_WORDS = [
+  // Prefixes of ENGINE_START_REFUSED (engine-start-guard) and PANE_LAYOUT_UNSAFE (pane-provisioning).
+  [/^engine start refused:/u,
+    () => "panelens session kör redan i en annan process eller panel, så amux startar den inte en gång till"],
+  [/^pane layout unsafe:/u,
+    () => "amux kan inte lita på panelernas numrering i tmux just nu, så inget startas eller läggs till"],
   [/^Codex work blocked: selected (\S+), running (\S+);/u,
     (m) => `panelen kör ${m[2]} men är inställd på ${m[1]}`],
   [/^Codex work blocked:/u,

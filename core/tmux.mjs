@@ -19,6 +19,20 @@ import { esc } from "../lib.mjs";
 import { CLEARLINE_RECIPE } from "./composer-control.mjs";
 
 const CLEAR_COMPOSER_KEYS = CLEARLINE_RECIPE.join(" ");
+const PANE_ROW_FORMAT = "#{pane_index}|#{pane_id}|#{pane_dead}|#{pane_current_command}|#{pane_current_path}";
+
+/** WHAT: Parses list-panes rows strictly. WHY: Keeps a malformed listing from becoming a guessed pane layout. */
+export function parsePaneRows(stdout, name) {
+  const rows = String(stdout || "").split("\n").filter((line) => line.trim()).map((line) => {
+    const [index, id, dead, command, ...path] = line.split("|");
+    if (!/^\d+$/u.test(index) || !/^%\d+$/u.test(id)) {
+      throw new Error(`unreadable list-panes row for '${name}': ${JSON.stringify(line)}`);
+    }
+    return { index: Number(index), id, dead: dead === "1", command: command || "", path: path.join("|") };
+  });
+  if (!rows.length) throw new Error(`list-panes returned no panes for '${name}'`);
+  return rows.sort((a, b) => a.index - b.index);
+}
 
 export function createTmuxAdapter({ socket, exec }) {
   const raw = (cmd) => exec(`tmux -S '${esc(socket)}' ${cmd}`);
@@ -127,9 +141,21 @@ export function createTmuxAdapter({ socket, exec }) {
       await raw(`resize-pane -Z -t ${q(target)}`);
     },
 
+    /** Listed pane count. Empty output is 0, never a default; callers decide what 0 means. */
     async paneCount(name) {
       const { stdout } = await raw(`list-panes -t ${q(name)}`);
-      return stdout.trim().split("\n").length;
+      return stdout.split("\n").filter((line) => line.trim()).length;
+    },
+
+    /**
+     * Index-ordered rows of the window: { index, id, dead, command, path }.
+     * pane_id is stable across renumbering, so callers compare ids, not
+     * indexes. Throws on a failed or malformed listing; a guess is never
+     * returned. The path field is last so a `|` inside it survives.
+     */
+    async paneRows(name) {
+      const { stdout } = await raw(`list-panes -t ${q(name)} -F '${PANE_ROW_FORMAT}'`);
+      return parsePaneRows(stdout, name);
     },
 
     /** One #{...} format value for a pane, trimmed. */
