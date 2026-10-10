@@ -1697,8 +1697,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   // --- Low-level (exposed for CLI) ---
 
+  // An Escape left at a shell prompt joins the next typed key: on lsrc:3
+  // (2026-10-11) the engine launch "cd … && codex resume" ran as "d …".
   async function sendEscape(agentName, pane) {
-    await t.sendEscape(`${agentName}:.${pane}`);
+    const target = `${agentName}:.${pane}`;
+    const command = await t.currentCommand(target);
+    if (isShellProc(command)) throw new Error(`${target} is at a ${command} prompt, not an engine; no Escape sent`);
+    await t.sendEscape(target);
   }
 
   /** Open Codex's non-interrupting queue composer while a turn is working. */
