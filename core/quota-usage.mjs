@@ -9,8 +9,10 @@ import {
   CLAUDE_QUOTA_SOURCE,
   CLAUDE_USAGE_URL,
   normalizeClaudeUsage,
+  readClaudeProfileIdentity,
   readClaudeQuota,
 } from "./claude-account-quota.mjs";
+import { readClaudeQuotaBudgeted } from "./claude-quota-budget.mjs";
 import { readCodexAccountQuota } from "./codex-account-quota.mjs";
 import { readKimiAccountQuota } from "./kimi-account-quota.mjs";
 import { readTailWindow } from "./jsonl-reader.mjs";
@@ -20,7 +22,7 @@ import {
   QUOTA_OBSERVATION_SCHEMA_VERSION,
   QUOTA_REFRESH_INTERVAL_MS,
 } from "./quota-observation.mjs";
-import { quotaProfileCatalog } from "./quota-profiles.mjs";
+import { quotaAccountCatalog } from "./quota-profiles.mjs";
 
 export {
   CLAUDE_OAUTH_BETA,
@@ -168,26 +170,75 @@ const collectProfile = async (profile, options, readers, now) => {
   }
 };
 
+// Logins of one account, keyed by the email Claude Code stored at login.
+const claudeAccountGroups = (profiles, identityOf) => {
+  const groups = new Map();
+  for (const profile of profiles) {
+    const email = identityOf(profile)?.email?.toLowerCase();
+    const key = email ? `email:${email}` : `profile:${profile.key}`;
+    groups.set(key, [...(groups.get(key) || []), profile]);
+  }
+  return [...groups.values()];
+};
+
+// Refused before reaching the usage endpoint: another login of the same account may answer.
+const TRY_NEXT_LOGIN = new Set([
+  "credentials_unavailable", "credentials_expired", "login_expired", "login_required", "refresh_busy",
+]);
+
+const asAccount = (result, members, identity) => ({
+  ...result,
+  account: result.account ?? { email: identity?.email ?? null,
+    organization: identity?.organization ?? null, plan: null },
+  sharedBy: members.map((member) => ({ id: member.id, key: member.key, source: member.source })),
+});
+
+/** WHAT: Reads one Claude account through the first of its logins that answers. WHY: Keeps one line and one usage call per account. */
+const collectClaudeAccount = async (members, options, readers, now, identityOf) => {
+  let first = null;
+  for (const profile of members) {
+    const result = await collectProfile(profile, options, readers, now);
+    first ??= result;
+    if (result.ok || !TRY_NEXT_LOGIN.has(result.error)) {
+      return asAccount(result, members, identityOf(profile));
+    }
+  }
+  return asAccount(first, members, identityOf(members[0]));
+};
+
 const providerHeadline = (accounts, provider) =>
   accounts.find((account) => account.provider === provider && account.ok)
   ?? accounts.find((account) => account.provider === provider)
   ?? { ok: false, engine: provider, provider, error: "profile_missing" };
 
-/** WHAT: Collects every coding-subscription profile. WHY: Keeps all clients on one account snapshot. */
+/**
+ * WHAT: Collects every coding-subscription profile, and each Claude account once.
+ * WHY: Keeps all clients on one account snapshot, including Claude logins that are in no launch slot.
+ */
 export async function readQuotaSnapshot({
   claude,
   codex,
   kimi,
-  profiles = quotaProfileCatalog(),
+  profiles = quotaAccountCatalog(),
   readers = {
-    claude: readClaudeQuota,
+    claude: readClaudeQuotaBudgeted,
     codex: readCodexAccountQuota,
     kimi: readKimiAccountQuota,
   },
+  identityOf = readClaudeProfileIdentity,
   now = Date.now,
 } = {}) {
-  const accounts = await Promise.all(profiles.map((profile) =>
-    collectProfile(profile, { claude, codex, kimi }, readers, now)));
+  const options = { claude, codex, kimi };
+  const ofProvider = (provider) => profiles.filter((profile) => profile.provider === provider);
+  const collectAll = (provider) => Promise.all(ofProvider(provider).map((profile) =>
+    collectProfile(profile, options, readers, now)));
+  const [codexAccounts, claudeAccounts, kimiAccounts] = await Promise.all([
+    collectAll("codex"),
+    Promise.all(claudeAccountGroups(ofProvider("claude"), identityOf).map((members) =>
+      collectClaudeAccount(members, options, readers, now, identityOf))),
+    collectAll("kimi"),
+  ]);
+  const accounts = [...codexAccounts, ...claudeAccounts, ...kimiAccounts];
   return {
     schemaVersion: 2,
     generatedAt: new Date(now()).toISOString(),

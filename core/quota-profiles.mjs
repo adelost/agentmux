@@ -3,7 +3,7 @@
 // Only paths and operator labels live here. Tokens remain in Codex, Claude
 // Code and Kimi Code's own homes.
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -75,11 +75,13 @@ const profile = (provider, id, home, env, source, operatorProfiles) => {
     identityPath: defaultIdentity };
 };
 
+const accountProfilesRoot = (env, home) => resolve(env.AMUX_ACCOUNT_PROFILES_DIR
+  || join(home, ".config", "agent", "account-profiles"));
+
 /** WHAT: Builds the coding-client profile catalog. WHY: Keeps credentials in provider-owned homes. */
 export function quotaProfileCatalog(env = process.env, options = {}) {
   const home = resolve(env.HOME || homedir());
-  const roots = resolve(env.AMUX_ACCOUNT_PROFILES_DIR
-    || join(home, ".config", "agent", "account-profiles"));
+  const roots = accountProfilesRoot(env, home);
   const operatorProfiles = readOperatorProfiles(env, home, options.readFile || readFileSync);
   const windows = Object.fromEntries(PROVIDERS.map((provider) =>
     [provider, windowsProviderHome(provider, options)]));
@@ -93,6 +95,40 @@ export function quotaProfileCatalog(env = process.env, options = {}) {
     profile("kimi", 2, windows.kimi || join(roots, "kimi", "2"), env,
       windows.kimi ? "windows" : "isolated", operatorProfiles),
   ];
+}
+
+const holdsClaudeLogin = (home, readFile) => {
+  try { return Boolean(JSON.parse(readFile(join(home, ".credentials.json"), "utf8"))?.claudeAiOauth); }
+  catch { return false; }
+};
+
+const claudeLoginProfile = (name, home) => ({
+  provider: "claude", id: name, key: `claude:login:${name}`, label: name, home, source: "login",
+  credentialsPath: join(home, ".credentials.json"), identityPath: join(home, ".claude.json"),
+});
+
+// Runtime selection still uses quotaProfileCatalog alone.
+/**
+ * WHAT: Builds the launch slots plus every Claude login dir that is in no slot.
+ * WHY: Keeps a subscription's usage visible without making it a launch target.
+ */
+export function quotaAccountCatalog(env = process.env, options = {}) {
+  const slots = quotaProfileCatalog(env, options);
+  const { readDir = readdirSync, readFile = readFileSync, realpath = realpathSync } = options;
+  const canonical = (path) => { try { return realpath(path); } catch { return resolve(path); } };
+  const slotHomes = new Set(slots.filter((profile) => profile.provider === "claude")
+    .map((profile) => canonical(profile.home)));
+  const root = join(accountProfilesRoot(env, resolve(env.HOME || homedir())), "claude");
+  let entries;
+  try { entries = readDir(root, { withFileTypes: true }); }
+  catch { entries = []; }
+  const logins = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({ name: entry.name, home: join(root, entry.name) }))
+    .filter(({ home }) => !slotHomes.has(canonical(home)) && holdsClaudeLogin(home, readFile))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map(({ name, home }) => claudeLoginProfile(name, home));
+  return [...slots, ...logins];
 }
 
 /** WHAT: Resolves one profile key. WHY: Keeps operator input bound to declared accounts. */

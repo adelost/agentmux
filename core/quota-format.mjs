@@ -96,23 +96,34 @@ const kimiLine = (kimi) => {
   return `Kimi    ${cells.join(" · ")}`;
 };
 
+// A Claude account read once for all its logins names the launch slots that use it.
+const launchSlotIds = (account) => (Array.isArray(account?.sharedBy)
+  ? account.sharedBy.filter((member) => member.source !== "login").map((member) => member.id)
+  : null);
+
 const accountSuffix = (account, duplicate) => {
   const identity = account?.account?.email || account?.profile?.label;
   const plan = account?.account?.plan;
   const values = [identity, plan].filter(Boolean);
+  if (launchSlotIds(account)?.length === 0) values.push("ingen plats");
   if (duplicate) values.push("⚠ samma inloggning");
   return values.length ? ` · ${values.join(" · ")}` : "";
+};
+
+const accountName = (account) => {
+  const providerName = account.provider === "claude" ? "Claude"
+    : account.provider === "kimi" ? "Kimi" : "Codex";
+  const slots = launchSlotIds(account);
+  if (!slots) return `${providerName} ${account.profile.id}`;
+  return slots.length ? `${providerName} ${slots.join("+")}` : providerName;
 };
 
 const accountLine = (account, duplicates = new Set()) => {
   const rendered = account?.provider === "claude" ? claudeLine(account)
     : account?.provider === "kimi" ? kimiLine(account)
       : codexLine(account);
-  const id = account?.profile?.id;
-  if (!id) return rendered;
-  const providerName = account.provider === "claude" ? "Claude"
-    : account.provider === "kimi" ? "Kimi" : "Codex";
-  return `${providerName} ${id}${accountSuffix(account, duplicates.has(account.profile?.key))}  `
+  if (!account?.profile?.id) return rendered;
+  return `${accountName(account)}${accountSuffix(account, duplicates.has(account.profile?.key))}  `
     + rendered.replace(/^\S+\s+/u, "");
 };
 

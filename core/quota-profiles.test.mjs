@@ -1,5 +1,52 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { profileLoginInstruction, quotaProfileCatalog } from "./quota-profiles.mjs";
+import { profileLoginInstruction, quotaAccountCatalog, quotaProfileCatalog } from "./quota-profiles.mjs";
+import { resolveRuntimeProfile, runtimeProfileCatalog, runtimeProfileLaunchHome } from "./runtime-account-profiles.mjs";
+
+const ROOT = "/home/matt/.config/agent/account-profiles/claude";
+// Four login dirs: one is slot 2's home, one holds no Claude login.
+const loginDirsFs = {
+  readDir: (path) => (path === ROOT
+    ? ["adelost", "wetterlind", "2", "empty"].map((name) => ({ name, isDirectory: () => true }))
+    : []),
+  exists: () => false,
+  realpath: (path) => path,
+  readFile: (path) => {
+    if (path === "/home/matt/.agentmux/account-profiles.json") {
+      return JSON.stringify({ version: 1, profiles: { "claude:2": { home: `${ROOT}/adelost` } } });
+    }
+    if (path.endsWith("/empty/.credentials.json")) return "{}";
+    if (path.endsWith(".credentials.json")) return JSON.stringify({ claudeAiOauth: {} });
+    throw Object.assign(new Error("missing"), { code: "ENOENT" });
+  },
+};
+
+feature("Claude logins outside the launch slots", () => {
+  unit("a login dir in no slot is listed for quota as a login, not a slot", {
+    when: ["building the account catalog", () =>
+      quotaAccountCatalog({ HOME: "/home/matt" }, loginDirsFs)
+        .filter((row) => row.provider === "claude")],
+    then: ["both slots plus the two foreign logins, each once", (claude) => {
+      expect(claude.map((row) => row.key)).toEqual([
+        "claude:1", "claude:2", "claude:login:2", "claude:login:wetterlind",
+      ]);
+      expect(claude.find((row) => row.key === "claude:login:wetterlind")).toMatchObject({
+        source: "login",
+        credentialsPath: `${ROOT}/wetterlind/.credentials.json`,
+        identityPath: `${ROOT}/wetterlind/.claude.json`,
+      });
+    }],
+  });
+
+  unit("launch slots and their homes do not change when more logins exist", {
+    when: ["resolving the runtime catalog next to the same login dirs", () =>
+      runtimeProfileCatalog("claude", { HOME: "/home/matt" }, loginDirsFs)],
+    then: ["only slots 1 and 2 can launch, with the same homes as before", (catalog) => {
+      expect(catalog.map((row) => row.id)).toEqual(["1", "2"]);
+      expect(catalog.map(runtimeProfileLaunchHome)).toEqual([null, `${ROOT}/adelost`]);
+      expect(resolveRuntimeProfile("claude", "wetterlind", catalog)).toBeNull();
+    }],
+  });
+});
 
 feature("subscription account profile catalog", () => {
   unit("keeps tokens provider-owned and discovers one Windows profile", {
