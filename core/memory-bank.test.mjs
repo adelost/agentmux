@@ -1,9 +1,10 @@
 import { component, feature, unit, expect } from "bdd-vitest";
 import { execFileSync } from "child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { bankMemory, formatMemoryBank, scanAddedSecrets } from "./memory-bank.mjs";
+import { lintMemory } from "./memory-lint.mjs";
 
 const git = (root, ...args) => execFileSync("git", args, { cwd: root, encoding: "utf-8" }).trim();
 // Built at runtime so this file itself never carries a token-shaped string.
@@ -55,6 +56,23 @@ feature("memory bank", () => {
       expect(git(root, "log", "--format=%s")).toBe("base");
       expect(git(root, "diff", "--cached", "--name-only")).toBe("");
       expect(formatMemoryBank(result)).not.toContain(FAKE_KEY);
+    }],
+  });
+
+  component("notes left uncommitted for more than a day are a lint warning", {
+    given: ["a note edited 30 hours ago and never banked", () => {
+      const root = repo();
+      const path = join(root, "memory", "old.md");
+      writeFileSync(path, "> summary: old, edited\n");
+      const then = new Date(Date.now() - 30 * 3_600_000);
+      utimesSync(path, then, then);
+      return root;
+    }],
+    when: ["linting", (root) => lintMemory(root, { home: join(root, "home") })],
+    then: ["memory_unbanked names the backlog", (result) => {
+      const row = result.findings.find((finding) => finding.code === "memory_unbanked");
+      expect(row?.severity).toBe("warning");
+      expect(row?.message).toContain("1 memory path(s) uncommitted, oldest 30 h");
     }],
   });
 

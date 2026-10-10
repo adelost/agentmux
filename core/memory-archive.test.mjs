@@ -27,7 +27,9 @@ feature("memory archive", () => {
   component("an old oversized day moves byte-for-byte and leaves a five-line stub", {
     given: ["an old day with a Dream digest", () => {
       const root = workspace();
-      const original = day("2026-05-01", 60);
+      const original = day("2026-05-01", 60, { extra: ["- Detaljer → `references/kamera.md`"] });
+      mkdirSync(join(root, "memory", "references"), { recursive: true });
+      writeFileSync(join(root, "memory", "references", "kamera.md"), "> summary: kamera\n> why: test\n");
       writeFileSync(join(root, "memory", "2026-05-01.md"), original);
       writeFileSync(join(root, "memory", "dream", "2026-05-01-run.md"), "## Underlag och kontinuitet\n## Nattens beslut\n");
       return { root, original };
@@ -36,14 +38,16 @@ feature("memory archive", () => {
     then: ["the archive is identical, the stub links it and lint sees no backlog", ({ root, result }) => {
       expect(result.archived.map((row) => row.dateKey)).toEqual(["2026-05-01"]);
       const archived = readFileSync(join(root, "memory", "archive", "daily", "2026-05-01.md"));
-      expect(archived.equals(Buffer.from(day("2026-05-01", 60)))).toBe(true);
+      expect(archived.equals(Buffer.from(day("2026-05-01", 60, { extra: ["- Detaljer → `references/kamera.md`"] })))).toBe(true);
       const stub = readFileSync(join(root, "memory", "2026-05-01.md"), "utf-8");
       expect(lines(stub).length).toBeLessThanOrEqual(5);
       expect(stub).toContain("> summary: Full notes for 2026-05-01.");
       expect(stub).toContain("`memory/archive/daily/2026-05-01.md`");
       expect(stub).toContain("`memory/dream/2026-05-01-run.md`");
       expect(parseArchiveStub(stub)?.archivePath).toBe("memory/archive/daily/2026-05-01.md");
-      expect(lintMemory(root, { now: NOW, home: join(root, "home") }).compactable).toEqual([]);
+      const lint = lintMemory(root, { now: NOW, home: join(root, "home") });
+      expect(lint.compactable).toEqual([]);
+      expect(lint.findings.some((row) => row.code === "reference_unlinked")).toBe(false);
     }],
   });
 

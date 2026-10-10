@@ -76,7 +76,10 @@ function latestDreamSentinel(text) {
   return { date: m[1], time: m[2], ok: Number(m[3]), failed: Number(m[4]) };
 }
 
+// Only a workspace that is its own repository is checked, so lint never
+// spawns git for plain directories or picks up an unrelated parent repo.
 function safePendingMemory(root) {
+  if (!existsSync(join(root, ".git"))) return null;
   try { return pendingMemoryPaths(root); } catch { return null; }
 }
 
@@ -342,8 +345,10 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
     if (!memoryText.includes(name) && !ignores.has(relKey)) add("warning", "people_reference", file, "not listed in MEMORY.md");
     if (!memoryText.includes(name) && !peopleText.includes(name)) add("warning", "people_orphan", file, "not linked from people.md or MEMORY.md");
   }
+  // Archived days are full originals, so a reference they link stays reachable.
   const allReachabilityText = [
     ...markdownFiles(root), ...immediateMemoryMd, ...referenceMd, ...peopleMd,
+    ...markdownFiles(join(memoryDir, "archive", "daily")),
   ].map((file) => ({ file, text: readFileSync(file, "utf-8") }));
   for (const file of referenceMd) {
     if (basename(file).includes("TEMPLATE")) continue;
