@@ -1,6 +1,7 @@
 import { feature, unit, expect } from "bdd-vitest";
+import { isAbsolute } from "node:path";
 import {
-  claudeComposerHasCollapsedPaste, claudeComposerIsPasting, endClaudeClipboardLookups,
+  claudeComposerHasCollapsedPaste, claudeComposerIsPasting, claudeSafePasteParts, endClaudeClipboardLookups,
   findClaudeClipboardLookups, isClaudeClipboardScript,
 } from "./claude-paste-stall.mjs";
 
@@ -81,5 +82,39 @@ feature("only the pane's own Claude lookup is ever signalled", () => {
       expect(ended).toEqual([12]);
       expect(signals).toEqual(["12:SIGTERM"]);
     }],
+  });
+});
+
+// Claude Code 2.1.295's check on one paste, as tmux delivers it (line breaks as CR): the pieces it reads as an
+// image path, attached when absolute, sent to the clipboard lookup otherwise.
+const imagePathPieces = (part) => part.replace(/\n/gu, "\r").split(/ (?=\/|[A-Za-z]:\\)/u)
+  .flatMap((piece) => piece.split("\n")).map((piece) => piece.trim().replace(/^(["'])(.*)\1$/u, "$2"))
+  .filter((piece) => /\.(png|jpe?g|gif|webp)$/iu.test(piece));
+
+feature("amux never pastes a piece Claude reads as an image path", () => {
+  const messages = [
+    "[from lsrc:1]\n\n/home/adelost/lsrc/.artifacts/cutkit-quality-2026-10-09/e283-share/e283-fore-efter-390.png\n",
+    "[from skyvw:0]\n\nbilden ligger här:\n/a.png\n",
+    "[from skyvw:0]\n\nSe bilden /tmp/x.png\n",
+    "two shots /tmp/a.JPG and /tmp/b.jpeg\nand C:\\Users\\m\\c.webp",
+    "no image here\nline two",
+  ];
+  unit("each message is pasted in parts that join to exactly the message", {
+    when: ["cutting five messages", () => messages.map((message) => claudeSafePasteParts(message))],
+    then: ["the parts join back byte for byte, and a message without an image path stays whole", (parts) => {
+      expect(parts.map((list) => list.join(""))).toEqual(messages);
+      expect(parts.map((list) => list.length)).toEqual([2, 2, 2, 3, 1]);
+    }],
+  });
+  unit("no part contains a piece Claude would read as an image path", {
+    when: ["checking every part as Claude 2.1.295 does", () => messages.flatMap((message) => claudeSafePasteParts(message))
+      .flatMap(imagePathPieces)],
+    then: ["there is none", (pieces) => expect(pieces).toEqual([])],
+  });
+  unit("the uncut messages are what started the lookup or the attachment", {
+    when: ["checking each whole message as Claude 2.1.295 does", () => messages.map((message) => imagePathPieces(message)
+      .map((piece) => (isAbsolute(piece) || /^[A-Za-z]:\\/u.test(piece) ? "attached" : "lookup")))],
+    then: ["the first four are read as image paths (a Windows path is absolute under WSL)", (reads) =>
+      expect(reads).toEqual([["lookup"], ["lookup"], ["attached"], ["attached"], []])],
   });
 });

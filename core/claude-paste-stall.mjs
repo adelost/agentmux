@@ -42,6 +42,30 @@ export function claudeComposerIsPasting(screen) {
 /** WHAT: Checks whether Claude's composer holds a collapsed paste whose text the screen hides. WHY: Keeps an unattributable paste from reading as empty or as amux's own draft. */
 export const claudeComposerHasCollapsedPaste = (screen) => COLLAPSED_PASTE_RE.test(composerDraft(screen) ?? "");
 
+// The root fix (skyvw:0's decision 2026-10-10 under Mattias's "bestäm själv hur de ska fixas"): amux never
+// pastes a piece Claude reads as an image path. Claude cuts a paste into pieces at a space before "/" or a drive
+// ("C:\\") and at LF; tmux turns amux's line breaks into CR, so a multi-line message is one piece. A piece ending
+// in an image extension is an absolute path Claude attaches in place of its text, or a relative one that starts
+// the clipboard lookup. Pasting the text in parts, each cut just after the "." of such an extension, leaves no
+// part ending in one, while Claude still receives every byte in order. Line breaks count as cuts here too, which
+// only adds harmless parts.
+const PIECE_BREAK_RE = / (?=\/|[A-Za-z]:\\)|[\r\n]/gu;
+const IMAGE_EXTENSION_TAIL_RE = /\.(?=(?:png|jpe?g|gif|webp)["']?\s*$)/iu;
+
+/** WHAT: Collects the parts amux pastes so no Claude paste piece ends in an image extension. WHY: Keeps a message from becoming an image or a clipboard lookup. */
+export function claudeSafePasteParts(text) {
+  const value = String(text);
+  const ends = [...value.matchAll(PIECE_BREAK_RE)].map((match) => match.index).concat(value.length);
+  const cuts = [];
+  let start = 0;
+  for (const end of ends) {
+    const dot = IMAGE_EXTENSION_TAIL_RE.exec(value.slice(start, end));
+    if (dot) cuts.push(start + dot.index + 1);
+    start = end + 1;
+  }
+  return [0, ...cuts].map((from, index) => value.slice(from, cuts[index] ?? value.length));
+}
+
 /** WHAT: Checks whether a shell script is Claude Code's own clipboard read. WHY: Keeps the same script under a tool shell from ever being signalled. */
 export const isClaudeClipboardScript = (script) => CLAUDE_CLIPBOARD_SCRIPT_RE.test(String(script || ""));
 

@@ -82,7 +82,7 @@ import {
 } from "./core/tui-stall-recovery.mjs";
 import { eraseKeys, shouldPastePrompt, submitCheckOrErase, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
-import { claudePasteTransportState, createClaudeComposerGuards } from "./core/claude-composer-guards.mjs";
+import { claudePasteTransportState, claudeSafePasteParts, createClaudeComposerGuards } from "./core/claude-composer-guards.mjs";
 import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
 import { assertCodexWorkModel, createCodexCompact, startCodexProcess } from "./core/codex-process-launch.mjs";
 export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchCommand, buildQwenLaunchCommand } from "./core/agent-launch-command.mjs";
@@ -1159,7 +1159,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         if (onPasteStarted) await onPasteStarted();
       }
       if (promptRequiresAtomicPaste(prompt)) {
-        await pastePrompt({ tmux: t, target, prompt, sleep: wait });
+        await pastePrompt({ tmux: t, target, prompt, sleep: wait, parts: dialect === "claude" ? claudeSafePasteParts(prompt) : undefined });
       } else {
         await t.sendLiteral(target, prompt);
         await wait(1000);

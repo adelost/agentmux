@@ -44,6 +44,30 @@ feature("atomic prompt paste", () => {
     }],
   });
 
+  component("pastes the given parts in order into the same pane and removes every file", {
+    given: ["a two-part Claude paste", () => {
+      const loaded = [];
+      const pasted = [];
+      const sleeps = [];
+      const tmux = {
+        loadBuffer: async (buffer, file) => loaded.push({ buffer, file, content: readFileSync(file, "utf-8") }),
+        pasteBuffer: async (buffer, target) => pasted.push({ buffer, target }),
+      };
+      return { loaded, pasted, sleeps, tmux };
+    }],
+    when: ["pasting the parts", async (fixture) => {
+      await pastePrompt({ tmux: fixture.tmux, target: "skyvw:.0", prompt: "see\n/a.png\n", parts: ["see\n/a.", "png\n"],
+        sleep: async (ms) => { fixture.sleeps.push(ms); } });
+      return fixture;
+    }],
+    then: ["two buffers in order, a pause between them, and no file left", (fixture) => {
+      expect(fixture.loaded.map(({ content }) => content)).toEqual(["see\n/a.", "png\n"]);
+      expect(fixture.pasted.map(({ buffer, target }) => [buffer, target])).toEqual(fixture.loaded.map(({ buffer }) => [buffer, "skyvw:.0"]));
+      expect(fixture.sleeps).toEqual([100, 250]);
+      expect(fixture.loaded.every(({ file }) => !existsSync(file))).toBe(true);
+    }],
+  });
+
   component("cleans up the payload when tmux paste fails", {
     given: ["a tmux adapter that rejects paste", () => {
       let file = null;

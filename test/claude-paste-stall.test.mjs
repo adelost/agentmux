@@ -154,23 +154,24 @@ const deliver = (fixture, text, options = {}) => fixture.agent
 const restarted = ({ calls }) => calls.some((call) => /respawn-pane|kill-pane|kill-session|new-session/u.test(call));
 
 feature("a Claude paste that waits on the clipboard never holds delivery", () => {
-  component("lsrc:1's image path from job 4513bc1d is submitted once after the stalled lookup ends", {
-    given: ["a Claude pane whose clipboard lookup never answers", () => claudePane()],
-    when: ["the exact stalled message is delivered", async (fixture) => ({
-      error: await deliver(fixture, STALLED_JOB),
-      lookupAlive: alive(fixture.lookups[0]),
-    })],
-    then: ["the message is submitted exactly once and only the lookup ended", async (result, fixture) => {
-      try {
-        expect(result.error).toBeNull();
-        expect(fixture.pane.submitted).toEqual([STALLED_JOB]);
-        expect(fixture.lookups).toHaveLength(1);
-        expect(result.lookupAlive).toBe(false);
-        expect(alive(fixture.claude.pid)).toBe(true);
-        expect(restarted(fixture.pane)).toBe(false);
-      } finally { await fixture.clean(); }
-    }],
-  });
+  // skyvw:0's decision 2026-10-10 under Mattias's "bestäm själv hur de ska fixas": amux never pastes text Claude
+  // reads as an image path, so delivery itself starts no clipboard lookup.
+  for (const [name, message] of [["lsrc:1's image path from job 4513bc1d", STALLED_JOB],
+    ["a message whose last line is /a.png", "[from skyvw:0]\n\nbilden ligger här:\n/a.png\n"]]) {
+    component(`${name} is pasted in parts, starts no clipboard lookup and is submitted once`, {
+      given: ["a Claude pane whose clipboard lookup would never answer", () => claudePane()],
+      when: ["the message is delivered", async (fixture) => deliver(fixture, message)],
+      then: ["no lookup ran and exactly the message was submitted once", async (error, fixture) => {
+        try {
+          expect(error).toBeNull();
+          expect(fixture.lookups).toEqual([]);
+          expect(fixture.pane.submitted).toEqual([message]);
+          expect(fixture.pane.calls.filter((call) => call.includes("paste-buffer"))).toHaveLength(2);
+          expect(restarted(fixture.pane)).toBe(false);
+        } finally { await fixture.clean(); }
+      }],
+    });
+  }
 
   // lsrc:3 review 2026-10-10: a landed collapsed paste is never attributed by its line count.
   component("the transport reports a held paste as pasting and a landed collapsed paste as foreign", {
@@ -257,22 +258,24 @@ feature("a Claude paste that waits on the clipboard never holds delivery", () =>
   });
 
   component("a lookup that a tool shell started is not Claude's and is never signalled", {
-    given: ["Claude's own stalled lookup and the same script under a tool shell", async () => {
+    given: ["Claude's own stalled lookup from an earlier paste and the same script under a tool shell", async () => {
       const fixture = claudePane();
+      await fixture.pasteEarlier(STALLED_JOB);
       const tool = await fixture.toolLookup();
       return { fixture, tool };
     }],
-    when: ["the stalled message is delivered", async ({ fixture, tool }) => ({
-      error: await deliver(fixture, STALLED_JOB),
+    when: ["the next message is delivered", async ({ fixture, tool }) => ({
+      error: await deliver(fixture, QUESTION),
+      ownAlive: alive(fixture.lookups[0]),
       toolAlive: alive(tool),
       toolChildren: descendants(tool).length,
     })],
     then: ["only Claude's own lookup ended", async (result, { fixture }) => {
       try {
-        expect(result.error).toBeNull();
+        expect(result.ownAlive).toBe(false);
         expect(result.toolAlive).toBe(true);
         expect(result.toolChildren).toBeGreaterThan(0);
-        expect(fixture.pane.submitted).toEqual([STALLED_JOB]);
+        expect(result.error).toMatch(/draft amux did not type/u);
       } finally { await fixture.clean(); }
     }],
   });

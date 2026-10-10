@@ -9,24 +9,29 @@ export function promptRequiresAtomicPaste(prompt) {
   return text.length > 500 || /[\r\n]/.test(text);
 }
 
+// A Claude paste in parts (core/claude-paste-stall.mjs): the pause lets Claude insert one part before the next.
+const PART_GAP_MS = 100;
+
 /**
- * Paste one prompt through an isolated file and one-shot tmux buffer.
- * Unique identities prevent concurrent sends in the bridge from crossing
- * payloads. Cleanup runs on both successful and failed tmux calls.
+ * WHAT: Routes one prompt, in the given parts, through isolated files and one-shot tmux buffers.
+ * WHY: Keeps concurrent bridge sends from crossing payloads; cleanup runs on success and failure.
  */
-export async function pastePrompt({ tmux, target, prompt, sleep, log = console.warn }) {
-  const token = randomUUID();
-  const payloadPath = join(tmpdir(), `agentmux-prompt-${token}.txt`);
-  const buffer = `prompt_${token}`;
-  writeFileSync(payloadPath, prompt);
-  try {
-    await tmux.loadBuffer(buffer, payloadPath);
-    await tmux.pasteBuffer(buffer, target);
-  } finally {
+export async function pastePrompt({ tmux, target, prompt, sleep, log = console.warn, parts = [prompt] }) {
+  for (const [index, part] of parts.entries()) {
+    if (index) await sleep(PART_GAP_MS);
+    const token = randomUUID();
+    const payloadPath = join(tmpdir(), `agentmux-prompt-${token}.txt`);
+    const buffer = `prompt_${token}`;
+    writeFileSync(payloadPath, part);
     try {
-      unlinkSync(payloadPath);
-    } catch (error) {
-      if (error?.code !== "ENOENT") log(`pastePrompt: cleanup ${payloadPath} failed: ${error.message}`);
+      await tmux.loadBuffer(buffer, payloadPath);
+      await tmux.pasteBuffer(buffer, target);
+    } finally {
+      try {
+        unlinkSync(payloadPath);
+      } catch (error) {
+        if (error?.code !== "ENOENT") log(`pastePrompt: cleanup ${payloadPath} failed: ${error.message}`);
+      }
     }
   }
   await sleep(250);

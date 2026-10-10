@@ -7,6 +7,8 @@ import { eraseKeys } from "./delivery-fence.mjs";
 import { composerDraft } from "./dialects.mjs";
 import { claudeComposerHasCollapsedPaste, claudeComposerIsPasting, settleClaudePaste } from "./claude-paste-stall.mjs";
 
+export { claudeSafePasteParts } from "./claude-paste-stall.mjs";
+
 /**
  * WHAT: Maps Claude's held paste to "pasting" and a collapsed paste to "foreign", or returns null.
  * WHY: Keeps either from reading as an idle empty composer or as amux's own draft.
