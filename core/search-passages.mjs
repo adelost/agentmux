@@ -1,7 +1,8 @@
 import { basename } from "node:path";
 import { createHash } from "node:crypto";
+import { statSync } from "node:fs";
 import { dateFromPath, execRg } from "./search.mjs";
-import { chunkMarkdown } from "./search-semantic.mjs";
+import { markdownUnits } from "./search-units.mjs";
 import { readTopicFile } from "./memory-topics.mjs";
 import { swedishStem } from "./swedish-stem.mjs";
 
@@ -21,31 +22,43 @@ function stem(word) {
   return value;
 }
 
+// Versions, hashes and dotted names ("1.25.131", "e5-small") are also kept
+// whole: their parts ("25", "131") match countless unrelated notes.
+const IDENTIFIER = /[\p{L}\p{N}]+(?:[._-][\p{L}\p{N}]+)*/gu;
+const WORD = /[\p{L}\p{N}]+/gu;
+
+function tokensOf(text) {
+  const lower = String(text).toLowerCase();
+  const words = lower.match(WORD) || [];
+  const identifiers = (lower.match(IDENTIFIER) || []).filter(token => /[._-]/u.test(token) && /\p{N}/u.test(token));
+  return [...words, ...identifiers];
+}
+
 function terms(text) {
-  return (String(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])
-    .filter(word => word.length > 1 && !STOP.has(word)).map(stem);
+  return tokensOf(text).filter(word => word.length > 1 && !STOP.has(word))
+    .map(word => (/[._-]/u.test(word) ? word : stem(word)));
 }
 
 // Snowball only strips suffixes, so a word can share a query stem only when it
 // starts with that stem. Checking the prefix first keeps stemming off the hot
 // path for the millions of words that cannot match.
 function stemIndex(word, stems) {
+  if (/[._-]/u.test(word)) return stems.get(word);
   for (const [value, index] of stems) {
     if (word.startsWith(value) && stem(word) === value) return index;
   }
   return undefined;
 }
 
-function observeWords(text, stems, count) {
-  const counts = Array(count).fill(0);
+function wordsOf(text) {
+  const tf = new Map();
   let length = 0;
-  for (const word of text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []) {
+  for (const word of tokensOf(text)) {
     if (word.length < 2 || STOP.has(word)) continue;
-    length++;
-    const index = stemIndex(word, stems);
-    if (index !== undefined) counts[index]++;
+    if (!/[._-]/u.test(word)) length++;
+    tf.set(word, (tf.get(word) || 0) + 1);
   }
-  return { counts, length };
+  return { tf, length };
 }
 
 function sourceFiles(root) {
@@ -55,60 +68,109 @@ function sourceFiles(root) {
   return execRg(args).split("\n").filter(path => path.endsWith(".md"));
 }
 
-function documentPassages(path, root, tokens, stems) {
+/**
+ * WHAT: Parses one file into units with their word counts, independent of
+ * any query.
+ * WHY: A long-lived process (the search daemon) reuses it for every query
+ * while the file is unchanged; only scoring is per query.
+ */
+function fileSegment(path) {
   const bytes = readTopicFile(path, SOURCE_MAX_BYTES);
   const text = bytes.toString("utf8");
   const title = text.match(/^# .+$/mu)?.[0] || basename(path);
-  const digest = hash(bytes);
-  let offset = 0;
-  let section = "";
-  return chunkMarkdown(text).map(chunk => {
-    const start = text.indexOf(chunk.text, offset);
-    if (start < 0) throw new Error("passage is not present in its source");
-    // Track heading context without repeatedly splitting the entire prefix.
-    const prior = text.slice(offset, start);
-    section = [...prior.matchAll(/^#{1,4} .+$/gmu)].at(-1)?.[0] || section;
-    section = chunk.text.match(/^#{1,4} .+$/mu)?.[0] || section;
-    offset = start + chunk.text.length;
-    const labels = observeWords(`${basename(path, ".md").replace(/-/gu, " ")} ${title} ${section}`, stems, tokens.length);
-    const { counts, length } = observeWords(chunk.text, stems, tokens.length);
-    return { path, line: chunk.line, root: root.name, weight: root.weight, date: dateFromPath(path),
-      text: chunk.text, counts, labelMatches: labels.counts.map(Boolean), length,
-      passage: { sha256: digest, start, length: chunk.text.length } };
+  const name = basename(path, ".md").replace(/-/gu, " ");
+  const vocabulary = new Set();
+  let totalLength = 0;
+  const units = markdownUnits(text).map(unit => {
+    const context = [...unit.headings, ...(unit.entry ? [unit.entry] : []), ...(unit.tableHeader ? [unit.tableHeader] : [])];
+    const body = wordsOf(unit.text);
+    const labels = new Set(wordsOf(`${name} ${title} ${context.join(" ")}`).tf.keys());
+    for (const word of body.tf.keys()) vocabulary.add(word);
+    for (const word of labels) vocabulary.add(word);
+    totalLength += body.length;
+    return { line: unit.line, start: unit.start, length: unit.length, section: unit.section, context,
+      snippet: unit.text.replace(/\s+/gu, " ").slice(0, 160), tf: body.tf, words: body.length, labels };
   });
+  return { sha256: hash(bytes), date: dateFromPath(path), units, vocabulary, totalLength };
 }
 
-/** WHAT: Returns source-bound paragraphs ranked for natural questions. WHY: Prevents file-level word-AND from hiding answers behind incidental question words. */
-export function searchPassages(query, roots, { max = 12, excludePath = () => false, onWarning = console.warn } = {}) {
+/** WHAT: Returns a file's segment, rebuilt only when it changed. WHY: Keeps repeated queries in one process from re-reading the corpus. */
+function cachedSegment(path, cache) {
+  const info = statSync(path);
+  const hit = cache?.get(path);
+  if (hit && hit.mtimeMs === info.mtimeMs && hit.size === info.size) return hit.segment;
+  const segment = fileSegment(path);
+  cache?.set(path, { mtimeMs: info.mtimeMs, size: info.size, segment });
+  return segment;
+}
+
+/** WHAT: Returns source-bound note items ranked for natural questions. WHY: Prevents file-level word-AND from hiding answers behind incidental question words. */
+export function searchPassages(query, roots, { max = 12, excludePath = () => false, onWarning = console.warn, cache = null } = {}) {
   const tokens = [...new Set(terms(query))];
   if (!tokens.length) return [];
   const stems = new Map(tokens.map((token, index) => [token, index]));
+  const matchOf = new Map();
+  const termOf = (word) => {
+    let value = matchOf.get(word);
+    if (value === undefined) {
+      value = stemIndex(word, stems) ?? -1;
+      matchOf.set(word, value);
+    }
+    return value;
+  };
   const docs = [];
   const seen = new Set();
+  let unitCount = 0;
+  let totalLength = 0;
   for (const root of roots.filter(root => root.semantic)) {
     for (const path of sourceFiles(root)) {
       if (seen.has(path) || excludePath(path)) continue;
       seen.add(path);
-      try { docs.push(...documentPassages(path, root, tokens, stems)); }
-      catch (error) { onWarning(`Passage source omitted: ${path} (${error.code || error.message}); original search remains available.`); }
+      let segment;
+      try { segment = cachedSegment(path, cache); }
+      catch (error) { onWarning(`Passage source omitted: ${path} (${error.code || error.message}); original search remains available.`); continue; }
+      unitCount += segment.units.length;
+      totalLength += segment.totalLength;
+      const matching = [...segment.vocabulary].filter(word => termOf(word) >= 0);
+      if (!matching.length) continue;
+      for (const unit of segment.units) {
+        const counts = Array(tokens.length).fill(0);
+        const labelMatches = Array(tokens.length).fill(false);
+        let any = false;
+        for (const word of matching) {
+          const term = matchOf.get(word);
+          const count = unit.tf.get(word);
+          if (count) { counts[term] += count; any = true; }
+          if (unit.labels.has(word)) { labelMatches[term] = true; any = true; }
+        }
+        if (any) docs.push({ path, root, segment, unit, counts, labelMatches });
+      }
     }
   }
   if (!docs.length) return [];
-  const average = docs.reduce((n, doc) => n + doc.length, 0) / docs.length;
+  const average = totalLength / Math.max(1, unitCount);
   const frequency = tokens.map((_, i) => docs.filter(doc => doc.counts[i] || doc.labelMatches[i]).length);
-  return docs.map(doc => {
-    let score = 0, matches = 0;
+  const idfs = frequency.map(f => Math.log(1 + (unitCount - f + 0.5) / (f + 0.5)));
+  const idfTotal = idfs.reduce((sum, value) => sum + value, 0) || 1;
+  return docs.map(({ path, root, segment, unit, counts, labelMatches }) => {
+    let score = 0, matches = 0, covered = 0;
     for (let i = 0; i < tokens.length; i++) {
-      const count = doc.counts[i];
-      if (!count && !doc.labelMatches[i]) continue;
+      const count = counts[i];
+      if (!count && !labelMatches[i]) continue;
       matches++;
-      const idf = Math.log(1 + (docs.length - frequency[i] + 0.5) / (frequency[i] + 0.5));
-      score += idf * (count * 2.2 / (count + 1.2 * (0.25 + 0.75 * doc.length / average))
-        + Number(doc.labelMatches[i]));
+      covered += idfs[i];
+      score += idfs[i] * (count * 2.2 / (count + 1.2 * (0.25 + 0.75 * unit.words / average))
+        + Number(labelMatches[i]));
     }
-    return { path: doc.path, line: doc.line, root: doc.root, weight: doc.weight, date: doc.date,
-      snippet: doc.text.replace(/\s+/gu, " ").slice(0, 160), passage: doc.passage, layer: "passage", score, matches };
-  }).filter(hit => hit.matches >= Math.min(2, tokens.length) && hit.score > 0)
+    // Weight by how much of the question's rare vocabulary the unit covers.
+    // A hard "two words must match" rule hid answers that share only the
+    // decisive word with the question ("hur gammal är Axel" → "**Axel** —
+    // systerson, 1.5 år"), while a common word alone still scores near zero.
+    score *= covered / idfTotal;
+    return { path, line: unit.line, root: root.name, weight: root.weight, date: segment.date, snippet: unit.snippet,
+      passage: { sha256: segment.sha256, start: unit.start, length: unit.length, context: unit.context, section: unit.section },
+      layer: "passage", score, matches };
+  }).filter(hit => hit.score > 0)
     .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.line - b.line)
     .filter(topPassagesPerFile()).slice(0, max);
 }
@@ -141,16 +203,47 @@ export function mergePassageHits(original, passages) {
   });
 }
 
-/** WHAT: Reads a selected paragraph from its verified source version. WHY: Prevents stale search positions from presenting different content after an edit. */
+const CONTEXT_CHARS = 2400;
+
+// A bullet is retrieved alone for precision, but its meaning often depends
+// on the neighbouring bullets and the heading it sits under.
+/**
+ * WHAT: Returns the section span around a passage, or a centred window.
+ * WHY: Keeps an expanded bullet from losing its heading and neighbours.
+ */
+export function passageContextRange(text, { start, length, section }) {
+  let from = start;
+  let to = start + length;
+  if (section && Number.isSafeInteger(section.start) && Number.isSafeInteger(section.end)
+    && section.start <= start && section.end >= to && section.end <= text.length) {
+    from = section.start;
+    to = section.end;
+    if (to - from > CONTEXT_CHARS) {
+      const spare = Math.max(0, CONTEXT_CHARS - length);
+      from = Math.max(section.start, start - Math.floor(spare / 2));
+      to = Math.min(section.end, start + length + Math.ceil(spare / 2));
+      if (from > section.start) from = text.indexOf("\n", from - 1) + 1 || start;
+      if (from > start) from = start;
+      const lineEnd = text.lastIndexOf("\n", to);
+      if (to < section.end && lineEnd >= start + length) to = lineEnd;
+    }
+  }
+  return { from, to };
+}
+
+/** WHAT: Reads a selected passage and its section from the verified source version. WHY: Prevents stale search positions from presenting different content after an edit. */
 export function expandPassage(hit) {
   try {
     const { sha256, start, length } = hit.passage || {};
     if (!/^[a-f0-9]{64}$/u.test(sha256 || "") || !Number.isSafeInteger(start) || start < 0
-      || !Number.isSafeInteger(length) || length < 1 || length > 2400) throw new Error("invalid passage reference");
+      || !Number.isSafeInteger(length) || length < 1 || length > CONTEXT_CHARS) throw new Error("invalid passage reference");
     const bytes = readTopicFile(hit.path, SOURCE_MAX_BYTES);
     if (hash(bytes) !== sha256) return "Source changed since search; repeat the search before using this passage.";
     const text = bytes.toString("utf8");
     if (start + length > text.length) throw new Error("invalid passage range");
-    return `[original passage; source SHA256 ${sha256}]\n${text.slice(start, start + length)}\n[end of excerpt; full source remains available]`;
+    const { from, to } = passageContextRange(text, hit.passage);
+    const before = text.slice(from, start);
+    const after = text.slice(start + length, to);
+    return `[original passage in its section; source SHA256 ${sha256}]\n${before}${text.slice(start, start + length)}${after}\n[end of excerpt; full source remains available]`;
   } catch (error) { return `Passage unavailable: ${error.code || error.message}; repeat the search.`; }
 }

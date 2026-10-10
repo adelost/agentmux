@@ -137,8 +137,9 @@ Usage:
   agent memory compact --dry      Preview old daily-file backlog (automatic model rewrite disabled)
   agent search "term"             Source-bound topics + memory/ledger; --show N expands, --raw omits topics
     --deep                        Include large raw session archives
-    --semantic                    Opt into slower semantic search (index age is always shown)
-    --reindex                     Rebuild the semantic index explicitly
+    --lexical                     Skip the semantic layer (natural questions use it by default)
+    --semantic                    Use the semantic layer even for exact lookups
+    --reindex                     Update the semantic unit index (incremental)
     --dry                         List deletion candidates, change nothing
     --days N                      Retention window (default: 14)
   agent playwright-reap           Reap stale Playwright-MCP/browser processes

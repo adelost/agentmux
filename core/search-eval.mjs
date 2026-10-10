@@ -12,7 +12,9 @@ const normalize = (text) => String(text ?? "").normalize("NFC").toLocaleLowerCas
 
 /** WHAT: Parses golden JSONL cases. WHY: Prevents malformed cases from skewing a score. */
 export function parseGoldenCases(text) {
-  return String(text).split("\n").map((line, index) => ({ line, index })).filter(({ line }) => line.trim())
+  // "#" lines carry the set's provenance and labelling rules, not cases.
+  return String(text).split("\n").map((line, index) => ({ line, index }))
+    .filter(({ line }) => line.trim() && !line.trimStart().startsWith("#"))
     .map(({ line, index }) => {
       let row;
       try { row = JSON.parse(line); } catch { throw new Error(`golden line ${index + 1}: invalid JSON`); }

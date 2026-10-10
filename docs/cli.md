@@ -53,10 +53,11 @@ transfer it to managed background ownership.
 ```bash
 amux search "restart WSL"
 amux search --show 2
-amux search "previous decision" --raw # original lexical search only
+amux search "previous decision" --raw     # original lexical search only
+amux search "vem organiserade Bumbi" --lexical   # skip the semantic layer
 amux search "old raw pane detail" --deep
-amux search "recovery contract" --semantic
 amux search --reindex
+amux search --eval ~/.agentmux/search-eval/golden.jsonl --split heldout
 ```
 
 Source-bound notes in `memory/topics/`, when published, provide a compact
@@ -64,22 +65,34 @@ orientation layer alongside lexical memory and durable-ledger results. `--raw`
 omits it; `amux memory topics --json` shows each note's state and deciding DSL
 cell. Topic expansion revalidates both page and original sources. See [memory](memory.md).
 
-When there is no exact Markdown phrase match, the same command also ranks
-current Markdown paragraphs from configured curated (`semantic: true`) roots.
-This uses local word matching with inflections, headings and BM25-style scores,
-not a database or an embedding call. Exclusions remain in force; topic files
-cannot enter through this original-source path. Exact receipts and validated
-topics retain their existing priority. `--raw` also omits paragraph ranking.
-`--show N` checks the original file hash before returning the bounded paragraph;
-if the file changed, search again. A relevant passage is evidence, not an
-automatic answer or proof that every later correction has been found. A new
-query reads current sources, without waiting for the semantic index rebuild.
+When there is no exact Markdown phrase match, the same command ranks the
+items of current Markdown notes from configured curated (`semantic: true`)
+roots: each bullet, `**Name** — …` entry, table row or paragraph is one unit
+and carries its title, heading path and entry name. Scores are BM25 over
+Swedish word stems, weighted by how much of the question's rare vocabulary a
+unit covers, at most two units per file. `--show N` checks the original file
+hash and shows the unit inside its section (bounded to 2400 characters); if
+the file changed, search again. A relevant passage is evidence, not an
+automatic answer or proof that every later correction has been found.
+
+Natural questions also use the local semantic layer: the same units embedded
+by a small multilingual model on the CPU, fused with the lexical ranking by
+reciprocal rank. Identifiers and one- or two-word names stay lexical. The
+model and index stay loaded in a per-user background process
+(`bin/search-embedder.mjs`, Unix socket under `~/.agentmux/`) that starts on
+the first question and exits after 30 idle minutes
+(`AMUX_EMBEDDER_IDLE_MIN`). Until it is warm, that one question is answered
+lexically and the output says so. Models are cached in
+`~/.cache/agentmux/models`, outside the install. `--reindex` (also run
+nightly) embeds only changed files, at most `AMUX_REINDEX_MAX_UNITS` (25 000)
+units per run; a larger backlog continues on the next run and the output
+notes the incomplete index. Reindexing is never an implicit side effect of a
+query.
 
 `--deep` adds the much larger raw session archives. Result state is isolated per
 terminal or tmux pane, so one agent cannot replace another agent's `--show N`
-list. `--semantic` is explicit because loading the embedding layer is slower;
-it always reports the index build time and warns when the index is stale.
-Reindexing is never an implicit side effect of a query.
+list. `--eval FILE` scores a private golden set (hit@1, hit@3, MRR, latency per
+question kind); `#` lines in the set carry its provenance and labelling rules.
 
 ## Native cutover
 

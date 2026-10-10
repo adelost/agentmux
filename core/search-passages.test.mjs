@@ -101,6 +101,42 @@ feature("fresh original passage retrieval", () => {
     }],
   });
 
+  component("the decisive word alone finds a short entry", {
+    given: ["a people index whose entry shares only the name with the question", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-passages-"));
+      writeFileSync(join(dir, "people.md"), "# People\n## Familj\n**Axel** — systerson, 1.5 år\n**Petrus** — kollega\n");
+      // Question words are common across notes; the name is rare.
+      writeFileSync(join(dir, "log.md"), "# Logg\n- Gammal anteckning om annat.\n- Gammal lista.\n- Gammal kod.\n");
+      return { dir, roots: [{ name: "memory", path: dir, semantic: true, exclude: [] }] };
+    }],
+    when: ["asking how old Axel is", ({ roots }) => searchPassages("hur gammal är Axel", roots)],
+    then: ["the entry ranks first", (hits, { dir }) => {
+      try {
+        expect(hits[0].snippet).toBe("**Axel** — systerson, 1.5 år");
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }],
+  });
+
+  component("a bullet expands with the section it belongs to", {
+    given: ["a section whose answer is split over two bullets", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-passages-"));
+      writeFileSync(join(dir, "day.md"), "# Dag\n## Rotorsak för 191 commits\n- Siffran var falsk.\n- git status jämför mot indexet.\n## Annat\n- Orelaterat.\n");
+      return { dir, roots: [{ name: "memory", path: dir, semantic: true, exclude: [] }] };
+    }],
+    when: ["expanding the hit on the first bullet", ({ roots }) => {
+      const hit = searchPassages("siffran falsk", roots)[0];
+      return { hit, view: expandPassage(hit) };
+    }],
+    then: ["the view shows the heading and the neighbouring bullet, not the next section", ({ hit, view }, { dir }) => {
+      try {
+        expect(hit.snippet).toBe("- Siffran var falsk.");
+        expect(view).toContain("## Rotorsak för 191 commits");
+        expect(view).toContain("git status jämför mot indexet");
+        expect(view).not.toContain("Orelaterat");
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }],
+  });
+
   unit("exact evidence remains first and history stays reachable", {
     given: ["an exact receipt, broad history and a relevant paragraph", () => ({
       original: [{ path: "/receipt.jsonl", line: 8, layer: "L1" }, { path: "/history.jsonl", line: 6, layer: "L2" }],

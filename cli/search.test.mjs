@@ -5,6 +5,10 @@ import { join } from "path";
 import { vi } from "vitest";
 import { cmdSearch } from "./search.mjs";
 
+// The semantic layer needs a model and a daemon; these tests pin the lexical
+// contract, so the layer reports itself unavailable instead of starting one.
+const noSemantic = { query: async () => ({ hits: [], unavailable: "semantic layer disabled in tests" }), passages: async () => null };
+
 feature("search CLI contract", () => {
   component("a natural question retrieves the original answer paragraph", {
     given: ["a current memory note, not a matching full question", () => {
@@ -24,7 +28,7 @@ feature("search CLI contract", () => {
       try {
         await cmdSearch({ configPath }, "Vad hjälpte mig när jag städade och kände mig ensam?", {
           workspace: root, show: "1", max: 3,
-        }, { statePath: join(root, "result.json") });
+        }, { statePath: join(root, "result.json"), semantic: noSemantic });
         return output.mock.calls.flat().join("\n");
       } finally {
         output.mockRestore();
@@ -80,7 +84,7 @@ feature("search CLI contract", () => {
         await cmdSearch({ configPath: fixture.configPath }, "flytta in klockan i soluret", {
           fast: true,
           show: "1",
-        }, { statePath: fixture.statePath });
+        }, { statePath: fixture.statePath, semantic: noSemantic });
         return { fixture, text: output.mock.calls.flat().join("\n") };
       } finally {
         output.mockRestore();

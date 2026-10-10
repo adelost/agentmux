@@ -3188,7 +3188,7 @@ export async function dispatch(argv, ctx) {
     case "search": {
       const { flags, positional } = parseFlags(rest, {
         max: "number", show: "string", context: "number", raw: "boolean", workspace: "string",
-        source: "string", fast: "boolean", deep: "boolean", semantic: "boolean", reindex: "boolean", help: "boolean", h: "boolean", eval: "string", split: "string",
+        source: "string", fast: "boolean", deep: "boolean", semantic: "boolean", lexical: "boolean", reindex: "boolean", help: "boolean", h: "boolean", eval: "string", split: "string",
       });
       return cmdSearch(ctx, positional.join(" "), flags);
     }

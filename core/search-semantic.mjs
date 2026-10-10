@@ -1,56 +1,73 @@
-// Semantic layer for amux search — local CPU embeddings over the CURATED
-// roots (memory markdown, digests), never raw session jsonl (gigabytes that
-// rotate away after 14d; low value per token). Closes the paraphrase gap
-// lexical search cannot: "löneförhöjning" must find the note that says
-// "1k höjning" (benchmark 2026-07-10: 0 lexical hits).
+// Semantic layer for amux search: local CPU embeddings over the curated
+// memory roots, never raw session JSONL. It closes the gap lexical search
+// cannot: a question worded differently from the note ("organiserade" vs
+// "ORGANIZED BY", "taktkontrollen" vs "taktkoll"). No GPU by design.
 //
-// Model: Xenova/multilingual-e5-small via @huggingface/transformers —
-// 384-dim, handles the Swedish/English mix, embeds this corpus in minutes
-// on CPU. The dependency is OPTIONAL: importing this module throws if the
-// package is missing, and cmdSearch degrades to lexical-only with a hint.
-// No GPU involved by design (the 3090 is for heavy jobs).
+// The index embeds the same item-sized units the passage layer ranks
+// (core/search-units.mjs), each prefixed with its title, heading path and
+// entry name, so a semantic hit and a lexical hit on the same bullet are the
+// same unit and fuse cleanly.
+//
+// Models download once into a cache outside the install
+// (~/.cache/agentmux/models): the package's own default cache lived inside
+// node_modules, so every amux release deleted it and the next query paid the
+// download again.
 //
 // Index layout (~/.agentmux/search-index/):
-//   meta.json    [{file, mtimeMs, root, chunks: [{line, text}]}] — text kept
-//                for snippet display; corpus is small (MBs), not sessions.
-//   vectors.bin  Float32Array rows in meta order, normalized (dot = cosine).
+//   meta.json    {schemaVersion 3, model, dimension, complete, files: [{file,
+//                mtimeMs, size, root, weight, units: [{line, start, length,
+//                section}]}]}
+//   vectors.bin  Float32 rows in meta order, normalized (dot = cosine).
 
-import { readFileSync, writeFileSync, statSync, mkdirSync } from "fs";
-import { join } from "path";
+import { readFileSync, writeFileSync, statSync, mkdirSync, renameSync } from "fs";
+import { basename, join } from "path";
 import { dateFromPath, execRg } from "./search.mjs";
+import { markdownUnits } from "./search-units.mjs";
 
-const DIM = 384;
-const MODEL = "Xenova/multilingual-e5-small";
-const INDEX_DIR = () => join(process.env.HOME, ".agentmux", "search-index");
+/** WHAT: Names the unit index layout version. WHY: Keeps old chunk indexes from being read as unit indexes. */
+export const SCHEMA_VERSION = 3;
+/** WHAT: Names the default embedding model. WHY: Keeps index and query on one model unless configured otherwise. */
+export const DEFAULT_MODEL = "Xenova/multilingual-e5-small";
+const MODELS = {
+  "Xenova/multilingual-e5-small": { pooling: "mean", query: "query: ", passage: "passage: " },
+  "Xenova/multilingual-e5-base": { pooling: "mean", query: "query: ", passage: "passage: " },
+  "onnx-community/gte-multilingual-base": { pooling: "cls", query: "", passage: "" },
+};
+const EMBED_CHARS = 1200;
+const BATCH = 32;
 
-let embedderPromise = null;
-async function embedder() {
-  if (!embedderPromise) {
-    embedderPromise = (async () => {
-      const { pipeline } = await import("@huggingface/transformers");
-      return pipeline("feature-extraction", MODEL);
-    })();
-  }
-  return embedderPromise;
+/** WHAT: Resolves the semantic index directory. WHY: Keeps tests and experiments off the live index. */
+export const indexDir = () => process.env.AMUX_SEARCH_INDEX_DIR || join(process.env.HOME, ".agentmux", "search-index");
+/** WHAT: Resolves the model cache outside the install. WHY: Keeps releases from deleting downloaded models. */
+export const modelCacheDir = () => join(process.env.HOME, ".cache", "agentmux", "models");
+
+/** WHAT: Resolves the configured embedding model. WHY: Keeps index and query on one model, with prefixes that model expects. */
+export function semanticModel(name = process.env.AMUX_SEARCH_MODEL || DEFAULT_MODEL) {
+  const spec = MODELS[name];
+  if (!spec) throw new Error(`unknown semantic model ${name}; supported: ${Object.keys(MODELS).join(", ")}`);
+  return { name, ...spec };
 }
 
-/** E5 convention: passages and queries carry distinct prefixes. */
-async function embed(texts, kind) {
-  const pipe = await embedder();
-  const prefixed = texts.map((t) => `${kind}: ${t}`);
-  const out = await pipe(prefixed, { pooling: "mean", normalize: true });
-  // out.data is a flat Float32Array [n * DIM]
-  const rows = [];
-  for (let i = 0; i < texts.length; i++) {
-    rows.push(out.data.slice(i * DIM, (i + 1) * DIM));
-  }
-  return rows;
+// Threads: the machine is shared with many agents. A query is one short text
+// (2 threads suffice); a full reindex used ~17 cores and 3 GB RSS unbounded,
+// so it defaults to 6 threads (AMUX_EMBED_THREADS) and takes longer instead.
+/** WHAT: Loads a feature-extraction pipeline once per process. WHY: Keeps model load out of every query; the daemon keeps one warm. */
+export async function loadEmbedder(model = semanticModel(), { threads = Number(process.env.AMUX_EMBED_THREADS) || 6 } = {}) {
+  const { pipeline, env } = await import("@huggingface/transformers");
+  env.cacheDir = modelCacheDir();
+  const pipe = await pipeline("feature-extraction", model.name, { dtype: "q8",
+    session_options: { intraOpNumThreads: threads, interOpNumThreads: 1 } });
+  return async (texts, kind) => {
+    const prefix = kind === "query" ? model.query : model.passage;
+    const out = await pipe(texts.map((text) => `${prefix}${text}`), { pooling: model.pooling, normalize: true });
+    const dim = out.dims[1];
+    return texts.map((_, i) => out.data.slice(i * dim, (i + 1) * dim));
+  };
 }
 
 /**
- * Heading-aware chunking: split on markdown headings, then pack paragraphs
- * up to maxChars. Each chunk remembers its 1-based start line so --show can
- * open the right spot in the file.
+ * WHAT: Parses Markdown into heading-aware chunks with start lines.
+ * WHY: Keeps section-sized text available to callers; the index uses item units.
  */
 export function chunkMarkdown(text, { maxChars = 1200 } = {}) {
   const lines = text.split("\n");
@@ -75,19 +92,23 @@ export function chunkMarkdown(text, { maxChars = 1200 } = {}) {
   return chunks;
 }
 
+/** WHAT: Returns the text embedded for one unit, prefixed with its headings. WHY: Keeps a bullet from losing which project or person it concerns. */
+export function unitEmbeddingText(file, text, unit) {
+  const title = text.match(/^# (.+)$/mu)?.[1] || basename(file, ".md");
+  const context = [title, ...unit.headings.filter((heading) => heading !== title), ...(unit.entry ? [unit.entry] : []),
+    ...(unit.tableHeader ? [unit.tableHeader] : [])];
+  return `${context.join(" > ")}\n${unit.text}`.slice(0, EMBED_CHARS);
+}
+
 function listMarkdownFiles(root) {
   const args = ["--files", "--no-ignore", "--hidden", "-g", root.glob || "*.md"];
-  // Lexical excludes apply here too, plus semantic-only ones: raw transcripts
-  // and bulk reference material are grep-territory (huge, low curation) —
-  // embedding them costs hours for marginal paraphrase recall. The knob makes
-  // that tradeoff config, not code.
   for (const ex of root.exclude || []) args.push("-g", `!${ex}`);
   for (const ex of root.semanticExclude || []) args.push("-g", `!${ex}`);
   args.push(root.path);
-  return execRg(args).split("\n").filter(Boolean);
+  return execRg(args).split("\n").filter(Boolean).sort();
 }
 
-function loadIndex(dir = INDEX_DIR()) {
+function loadIndex(dir = indexDir()) {
   try {
     const raw = JSON.parse(readFileSync(join(dir, "meta.json"), "utf-8"));
     const meta = Array.isArray(raw) ? raw : raw.files;
@@ -97,134 +118,148 @@ function loadIndex(dir = INDEX_DIR()) {
     const builtAt = Array.isArray(raw)
       ? new Date(statSync(join(dir, "meta.json")).mtimeMs).toISOString()
       : raw.builtAt;
-    return { meta, vectors, builtAt, schemaVersion: raw.schemaVersion || 1 };
+    return { meta, vectors, builtAt, schemaVersion: raw.schemaVersion || 1, model: raw.model || null,
+      dimension: raw.dimension || 384, complete: raw.complete !== false };
   } catch {
     return null;
   }
 }
 
 /** WHAT: Reports semantic-index provenance. WHY: Prevents old embeddings from masquerading as current search truth. */
-export function semanticIndexStatus({ now = Date.now(), maxAgeMs = 36 * 60 * 60 * 1000, indexDir = INDEX_DIR() } = {}) {
-  const index = loadIndex(indexDir);
-  if (!index) return { available: false, stale: true, reason: "missing" };
+export function semanticIndexStatus({ now = Date.now(), maxAgeMs = 36 * 60 * 60 * 1000, indexDir: dir = indexDir(),
+  model = process.env.AMUX_SEARCH_MODEL || DEFAULT_MODEL } = {}) {
+  const index = loadIndex(dir);
+  if (!index) return { available: false, usable: false, stale: true, reason: "missing" };
   const builtMs = Date.parse(index.builtAt || "");
   const ageMs = Number.isFinite(builtMs) ? Math.max(0, now - builtMs) : Number.POSITIVE_INFINITY;
+  const usable = index.schemaVersion === SCHEMA_VERSION && index.model === model;
   return {
     available: true,
+    usable,
+    reason: usable ? null : `index schema ${index.schemaVersion}/${index.model || "unknown model"} needs a rebuild for ${model}`,
     stale: !Number.isFinite(ageMs) || ageMs > maxAgeMs,
+    complete: index.complete,
     builtAt: index.builtAt || null,
     ageMs,
     files: index.meta.length,
-    chunks: index.meta.reduce((sum, file) => sum + (file.chunks?.length || 0), 0),
+    chunks: index.meta.reduce((sum, file) => sum + ((file.units || file.chunks)?.length || 0), 0),
     schemaVersion: index.schemaVersion,
+    model: index.model,
   };
 }
 
+// Nightly runs embed only what changed; maxUnits bounds a night after a model
+// change, and the next run continues where it stopped.
 /**
- * (Re)build the index over semantic-enabled roots. Incremental: files whose
- * mtime matches the previous index keep their rows without re-embedding.
+ * WHAT: Builds the unit index, reusing rows of files whose mtime and size match.
+ * WHY: Keeps a model change or backlog from turning one night into hours of embedding.
  */
-export async function reindex(roots, { log = () => {} } = {}) {
-  const semRoots = roots.filter((r) => r.semantic);
+export async function reindex(roots, { log = () => {}, maxUnits = Number(process.env.AMUX_REINDEX_MAX_UNITS) || 25_000,
+  dir = indexDir(), embed = null, model = semanticModel() } = {}) {
+  const semRoots = roots.filter((root) => root.semantic);
   if (!semRoots.length) {
     log("Inga rötter med semantic: true i config — inget att indexera.");
     return { files: 0, chunks: 0 };
   }
-  const prev = loadIndex();
+  const startedAt = Date.now();
+  const prev = loadIndex(dir);
+  const compatible = prev && prev.schemaVersion === SCHEMA_VERSION && prev.model === model.name;
   const prevByFile = new Map();
-  if (prev) {
+  if (compatible) {
     let row = 0;
-    for (const f of prev.meta) {
-      prevByFile.set(f.file, { ...f, firstRow: row });
-      row += f.chunks.length;
+    for (const file of prev.meta) {
+      prevByFile.set(file.file, { ...file, firstRow: row });
+      row += file.units.length;
     }
   }
-
+  const embedder = embed || await loadEmbedder(model);
   const meta = [];
   const rows = [];
-  let reused = 0, embedded = 0;
+  const pending = [];
+  let reused = 0;
+  let deferred = 0;
   for (const root of semRoots) {
     for (const file of listMarkdownFiles(root)) {
-      let mtimeMs;
-      try { mtimeMs = statSync(file).mtimeMs; } catch { continue; }
+      let stat;
+      try { stat = statSync(file); } catch { continue; }
       const old = prevByFile.get(file);
-      if (old && old.mtimeMs === mtimeMs && prev) {
-        meta.push({ file, mtimeMs, root: root.name, weight: root.weight, chunks: old.chunks });
-        for (let i = 0; i < old.chunks.length; i++) {
-          rows.push(prev.vectors.slice((old.firstRow + i) * DIM, (old.firstRow + i + 1) * DIM));
+      if (old && old.mtimeMs === stat.mtimeMs && old.size === stat.size) {
+        meta.push(old);
+        for (let i = 0; i < old.units.length; i++) {
+          rows.push(prev.vectors.slice((old.firstRow + i) * prev.dimension, (old.firstRow + i + 1) * prev.dimension));
         }
-        reused += old.chunks.length;
+        reused += old.units.length;
         continue;
       }
-      const chunks = chunkMarkdown(readFileSync(file, "utf-8"));
-      if (!chunks.length) continue;
-      // Batch to keep peak memory flat on big transcript files.
-      for (let i = 0; i < chunks.length; i += 32) {
-        const batch = chunks.slice(i, i + 32);
-        rows.push(...await embed(batch.map((c) => c.text), "passage"));
-      }
-      embedded += chunks.length;
-      meta.push({ file, mtimeMs, root: root.name, weight: root.weight, chunks });
-      if (embedded % 320 < chunks.length % 320) log(`  ${embedded} chunks embeddade...`);
+      const text = readFileSync(file, "utf-8");
+      const units = markdownUnits(text);
+      if (!units.length) continue;
+      if (pending.length + units.length > maxUnits) { deferred++; continue; }
+      const entry = { file, mtimeMs: stat.mtimeMs, size: stat.size, root: root.name, weight: root.weight,
+        units: units.map(({ line, start, length, section }) => ({ line, start, length, section })) };
+      meta.push(entry);
+      const firstRow = rows.length;
+      units.forEach((unit, i) => {
+        rows.push(null);
+        pending.push({ row: firstRow + i, text: unitEmbeddingText(file, text, unit) });
+      });
     }
   }
-
-  const dir = INDEX_DIR();
+  // Similar lengths per batch: padding to the longest member wasted most of
+  // the CPU time with mixed one-line and long units.
+  pending.sort((a, b) => a.text.length - b.text.length);
+  for (let i = 0; i < pending.length; i += BATCH) {
+    const batch = pending.slice(i, i + BATCH);
+    const vectors = await embedder(batch.map((item) => item.text), "passage");
+    batch.forEach((item, k) => { rows[item.row] = vectors[k]; });
+    if (i && i % (BATCH * 100) === 0) log(`  ${i}/${pending.length} units embeddade...`);
+  }
+  const dimension = rows[0]?.length || prev?.dimension || 0;
   mkdirSync(dir, { recursive: true });
-  const flat = new Float32Array(rows.length * DIM);
-  rows.forEach((r, i) => flat.set(r, i * DIM));
-  writeFileSync(join(dir, "vectors.bin"), Buffer.from(flat.buffer));
-  writeFileSync(join(dir, "meta.json"), JSON.stringify({
-    schemaVersion: 2,
-    builtAt: new Date().toISOString(),
-    model: MODEL,
-    dimension: DIM,
-    files: meta,
-  }));
-  log(`Index klart: ${meta.length} filer, ${rows.length} chunks (${embedded} nya, ${reused} återanvända).`);
-  return { files: meta.length, chunks: rows.length };
+  const flat = new Float32Array(rows.length * dimension);
+  rows.forEach((row, i) => flat.set(row, i * dimension));
+  // Readers (CLI, daemon) load meta then vectors; write vectors first and
+  // swap each file atomically so a reader never pairs new meta with old rows
+  // of a different length.
+  writeFileSync(join(dir, "vectors.bin.tmp"), Buffer.from(flat.buffer));
+  writeFileSync(join(dir, "meta.json.tmp"), JSON.stringify({ schemaVersion: SCHEMA_VERSION, builtAt: new Date().toISOString(),
+    model: model.name, dimension, complete: deferred === 0, files: meta }));
+  renameSync(join(dir, "vectors.bin.tmp"), join(dir, "vectors.bin"));
+  renameSync(join(dir, "meta.json.tmp"), join(dir, "meta.json"));
+  const seconds = Math.round((Date.now() - startedAt) / 1000);
+  log(`Index klart: ${meta.length} filer, ${rows.length} units (${pending.length} nya, ${reused} återanvända`
+    + `${deferred ? `, ${deferred} filer väntar till nästa körning` : ""}), ${seconds}s, modell ${model.name}.`);
+  return { files: meta.length, chunks: rows.length, embedded: pending.length, reused, deferred, seconds };
 }
 
-// Similarity filtering, calibrated 2026-07-10 against a known-answer corpus
-// (5 Lovecraft + Strindberg + Lagerlöf + the live memory index):
-//   EN→EN: correct clusters at 0.83-0.86, first wrong hit ~0.003-0.012 below
-//   SV→SV: correct 0.85-0.88, wrong right behind at 0.849
-//   SV→EN cross-lingual: correct answers do NOT rank with e5-small at all —
-//   no threshold fixes broken ranking, the floor just keeps that noise out.
-// Absolute cutoffs are useless inside the 0.82-0.88 band; distance-to-top is
-// the real signal. Upgrade path if cross-lingual matters: bge-m3.
-const SIM_FLOOR = 0.82;
-const SIM_GAP = 0.02;
-
-/** Top-k cosine over the index. Returns search.mjs-shaped hits. */
-export async function semanticSearch(query, { k = 8, floor = SIM_FLOOR, gap = SIM_GAP, minScore = null } = {}) {
-  const index = loadIndex();
-  if (!index) throw new Error("inget semantiskt index — kör: amux search --reindex");
-  const [q] = await embed([query], "query");
-
-  const flat = [];
-  let row = 0;
-  for (const f of index.meta) {
-    for (const c of f.chunks) flat.push({ file: f.file, root: f.root, weight: f.weight, chunk: c, row: row++ });
+/** WHAT: Loads the unit index once for repeated queries. WHY: Keeps the daemon from re-reading the vectors per query. */
+export function openIndex(dir = indexDir()) {
+  const index = loadIndex(dir);
+  if (!index || index.schemaVersion !== SCHEMA_VERSION) return null;
+  const units = [];
+  for (const file of index.meta) {
+    for (const unit of file.units) units.push({ file, unit });
   }
-  const scored = flat.map((entry) => {
+  return { ...index, units };
+}
+
+/** WHAT: Returns the top-k units by cosine similarity. WHY: Keeps semantic hits in the same unit space as passages for fusion. */
+export function rankUnits(index, queryVector, { k = 30 } = {}) {
+  const dim = index.dimension;
+  const top = [];
+  for (let row = 0; row < index.units.length; row++) {
     let dot = 0;
-    const off = entry.row * DIM;
-    for (let i = 0; i < DIM; i++) dot += q[i] * index.vectors[off + i];
-    return { ...entry, sim: dot };
+    const offset = row * dim;
+    for (let i = 0; i < dim; i++) dot += queryVector[i] * index.vectors[offset + i];
+    if (top.length < k || dot > top[top.length - 1].sim) {
+      top.push({ row, sim: dot });
+      top.sort((a, b) => b.sim - a.sim);
+      if (top.length > k) top.pop();
+    }
+  }
+  return top.map(({ row, sim }) => {
+    const { file, unit } = index.units[row];
+    return { path: file.file, line: unit.line, root: file.root, weight: file.weight, date: dateFromPath(file.file),
+      layer: "sem", sim: Number(sim.toFixed(4)), unit, indexedMtimeMs: file.mtimeMs, indexedSize: file.size };
   });
-  scored.sort((a, b) => b.sim - a.sim);
-  const topSim = scored[0]?.sim ?? 0;
-  const cutoff = minScore !== null ? minScore : Math.max(floor, topSim - gap);
-  return scored.slice(0, k)
-    .filter((e) => e.sim >= cutoff)
-    .map((e) => ({
-      path: e.file,
-      line: e.chunk.line,
-      snippet: e.chunk.text.replace(/\s+/g, " ").slice(0, 160),
-      root: e.root,
-      weight: e.weight,
-      date: dateFromPath(e.file),
-      sim: Number(e.sim.toFixed(3)),
-    }));
 }
