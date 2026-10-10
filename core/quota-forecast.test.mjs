@@ -33,7 +33,7 @@ feature("weekly quota forecast", () => {
       expect(level).toBe("threshold");
       const lines = text.split("\n");
       expect(lines[1]).toMatch(/^1\. Om du har en gratis reset: använd den på claude\.ai/u);
-      expect(lines[2]).toMatch(/^2\. Annars byt konto: `amux accounts rotate claude:adelost@gmail\.com --dry`.*adelost@gmail\.com har 26 % av veckan, reset /u);
+      expect(lines[2]).toMatch(/^2\. Annars byt konto: adelost@gmail\.com har 26 % av veckan, reset .*`\/byt adelost@gmail\.com` i Discord, så får du planen per panel innan något byts\.$/u);
     }],
   });
 

@@ -37,6 +37,7 @@ receipt. Unknown post-submit outcome is not permission to resend or delete fence
 - \`amux doctor\`: classify before restarting. Installed CLI, running bridge
   and product-only merges can differ. Do not start disabled services for green.
 - \`amux quota\`: actual provider/window, not a guessed reading of an error.
+  Accounts and switching: the amux-accounts skill.
 - \`amux compact --dry\`: inspect eligibility; preserve task evidence. Never
   force compact/respawn through active work.
 - \`amux memory status\` and \`amux dream --help\`: the existing memory/digest

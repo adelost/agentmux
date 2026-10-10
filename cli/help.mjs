@@ -155,9 +155,9 @@ Usage:
     -c <channelId>                Explicit Discord channel ID
     -p <agent>:<pane>             Explicit agent:pane channel mapping
     --voice <name>                Override the configured edge-tts voice
-  agent quota [--all] [--json]    Subscription quota for every configured coding account
+  agent quota [--all] [--json]    Quota per account and the panes running on it now
   agent accounts                  Same account overview, grouped by provider profile
-  agent accounts login TYPE:ID    Print a provider-scoped login command; never exposes tokens\n  agent accounts rotate claude:ID Switch idle Claude panes to a slot, login or email; warm large contexts compact first (--dry)
+  agent accounts login TYPE:ID    Print a login command for a slot, login dir or new login name; never exposes tokens\n  agent accounts rotate claude:ID Switch idle Claude panes to a slot, login or email; warm large contexts compact first (--dry)
   agent r                         Resume last agent
   agent help                      Show this message
 

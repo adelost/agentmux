@@ -63,7 +63,7 @@ feature("weekly Claude quota warning", () => {
     then: ["two notices: the ordinary, then one urgent naming adelost as the target, never attrois", (notify) => {
       expect(notify.mock.calls.map(([, options]) => options.level)).toEqual(["warn", "urgent"]);
       expect(notify.mock.calls[1][0]).toMatch(/tar slut om ca \d+ h/u);
-      expect(notify.mock.calls[1][0]).toMatch(/rotate claude:adelost@gmail\.com --dry/u);
+      expect(notify.mock.calls[1][0]).toMatch(/`\/byt adelost@gmail\.com`/u);
       expect(notify.mock.calls.map(([text]) => text).join("\n")).not.toMatch(/attrois/u);
     }],
   });

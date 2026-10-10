@@ -127,6 +127,51 @@ const accountLine = (account, duplicates = new Set()) => {
     + rendered.replace(/^\S+\s+/u, "");
 };
 
+// A login nobody can use and no pane runs on is noise next to the accounts that matter.
+const LOGGED_OUT = new Set(["login_expired", "credentials_expired", "credentials_unavailable", "login_required"]);
+const isIdleLoggedOut = (account) => !account?.ok && LOGGED_OUT.has(account?.error)
+  && Array.isArray(account.inUse) && account.inUse.length === 0;
+
+const loggedOutName = (account) => {
+  const email = account?.account?.email;
+  return account.provider === "claude" && email ? `Claude ${email.split("@")[0]}` : accountName(account);
+};
+
+const runsOf = (panes) => panes.reduce((runs, pane) => {
+  const last = runs.at(-1);
+  if (last && pane === last.at(-1) + 1) last.push(pane);
+  else runs.push([pane]);
+  return runs;
+}, []);
+
+const runText = (run) => run.length > 2 ? `${run[0]}–${run.at(-1)}` : run.join(",");
+
+/** WHAT: Formats pane keys as one range per project ("api:0–2, claw:0"). WHY: Keeps the in-use line readable at a glance. */
+export const compactPaneList = (keys) => {
+  const byProject = new Map();
+  for (const key of keys) {
+    const split = key.lastIndexOf(":");
+    const project = key.slice(0, split);
+    byProject.set(project, [...(byProject.get(project) || []), Number(key.slice(split + 1))]);
+  }
+  return [...byProject].sort(([left], [right]) => left.localeCompare(right))
+    .map(([project, panes]) => `${project}:${runsOf([...new Set(panes)].sort((a, b) => a - b)).map(runText).join(",")}`)
+    .join(", ");
+};
+
+const inUseLine = (account) => (account.inUse.length
+  ? `  i bruk: ${compactPaneList(account.inUse)}` : "  ingen panel");
+
+const accountLines = (account, duplicates) => (Array.isArray(account?.inUse)
+  ? [accountLine(account, duplicates), inUseLine(account)] : [accountLine(account, duplicates)]);
+
+const trailingLines = (snapshot, collapsed) => [
+  ...(collapsed.length ? [`Utloggade: ${collapsed.map(loggedOutName).join(" · ")}`] : []),
+  ...(snapshot.panesOnUnknownLogin?.length
+    ? [`Paneler på en inloggning amux inte känner: ${snapshot.panesOnUnknownLogin
+      .map((pane) => `${pane.key} (${pane.home})`).join(", ")}`] : []),
+];
+
 const snapshotLines = (snapshot) => {
   if (Array.isArray(snapshot?.accounts) && snapshot.accounts.length) {
     const order = ["codex", "claude", "kimi"];
@@ -140,9 +185,11 @@ const snapshotLines = (snapshot) => {
     }
     const duplicates = new Set([...identities.values()]
       .filter((keys) => keys.length > 1).flat());
-    return order.flatMap((provider) =>
-      snapshot.accounts.filter((account) => account.provider === provider)
-        .map((account) => accountLine(account, duplicates)));
+    const ordered = order.flatMap((provider) => snapshot.accounts.filter((account) => account.provider === provider));
+    return [
+      ...ordered.filter((account) => !isIdleLoggedOut(account)).flatMap((account) => accountLines(account, duplicates)),
+      ...trailingLines(snapshot, ordered.filter(isIdleLoggedOut)),
+    ];
   }
   return [claudeLine(snapshot?.claude), codexLine(snapshot?.codex)];
 };

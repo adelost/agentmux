@@ -1,9 +1,29 @@
 # Subscription profiles
 
-`amux quota` shows provider usage and reset windows for the configured profiles.
-`amux accounts login claude:2` prints that isolated profile's provider login
-command. Tokens stay in provider-owned files, never in memory or reports.
-Profile labels are routing names, not proof of distinct subscriptions.
+`amux quota` (Discord `/quota`) shows provider usage and reset windows for the
+configured profiles. Tokens stay in provider-owned files, never in memory or
+reports. Profile labels are routing names, not proof of distinct subscriptions.
+Agents load the `amux-accounts` skill for reading quota, switching and logins.
+
+## Which account is in use
+
+Under each account `amux quota` prints the panes that run on it right now, for
+example `i bruk: api:0–2, claw:0`, or `ingen panel`. It reads the config dir of
+the live engine process under each tmux pane (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+`KIMI_CODE_HOME`, else the default home), not the selection a pane gets at its
+next start. A logged-out login no pane runs on is folded into one last line,
+`Utloggade: Claude attrois · Kimi 1 · Kimi 2`. A pane on a dir no profile knows
+is named with that dir.
+
+## Logins
+
+One account per dir. `amux accounts login claude:<1|2|login|email>` prints the
+command for that dir, `CLAUDE_CONFIG_DIR=<dir> claude auth login`; a new login
+name gets its own dir, `~/.config/agent/account-profiles/claude/<login>`. Open
+the printed URL in the browser that is logged in as that account, approve, and
+paste the code back. `amux quota` then shows the account. Never copy credentials
+between dirs and never run `/logout`, which can revoke the refresh token.
+Codex and Kimi slots keep `amux accounts login codex:<1|2>` / `kimi:<1|2>`.
 
 ## Every Claude login
 
@@ -22,6 +42,13 @@ Claude token only while it holds Claude Code's own refresh locks
 the read reports `refresh_busy` and writes nothing.
 
 ## Claude rotation
+
+From Discord, `/byt <login|email>` replies with the `--dry` plan below and
+changes nothing. `/byt <login> ok` from the operator (the Discord user in
+`~/.openclaw/credentials/discord-allowFrom.json` or `AMUX_NOTIFY_USER_ID`), within
+10 minutes and while every pane's verdict is unchanged, runs the switch and
+replies with the outcome per pane. A late or changed confirm shows the plan
+again instead.
 
 The target is a slot id, a login dir name or the account email `amux quota`
 shows: `amux accounts rotate claude:wetterlind`, `claude:2` or
@@ -80,7 +107,7 @@ weekly used). The forecast uses the account's own readings from the last day,
 or the average since the window began when they span less than an hour. The
 notice leads with the cheapest action: "ingen åtgärd" when the pace lasts until
 the reset, otherwise a free reset on claude.ai if he has one (amux cannot see
-those), and only then the switch command with the target's own usage. Past the
+those), and only then the target's own usage and `/byt <target>` for the plan. Past the
 threshold, a second, stronger notice comes once when the limit is less than
 `AMUX_QUOTA_WARN_URGENT_HOURS` (default 12) away and before the reset; below it,
 a fast hour is treated as a burst. Nothing switches automatically.

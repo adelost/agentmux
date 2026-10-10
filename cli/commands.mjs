@@ -1715,45 +1715,6 @@ async function cmdTopic(ctx, agentName, paneIdx, text) {
   }
 }
 
-async function cmdNotifyUser(args) {
-  const { notifyUser, formatUserNotification } = await import("./send-notify.mjs");
-  const { flags, positional } = parseFlags(args, {
-    level: "string", l: "string",
-    title: "string",
-    user: "string", u: "string",
-    channel: "string", c: "string",
-    force: "boolean", f: "boolean",
-    dry: "boolean",
-    test: "boolean",
-    "idempotency-key": "string",
-  });
-  const level = flags.level || flags.l || "info";
-  const title = flags.title || "amux";
-  const text = flags.test
-    ? "Test notification from amux notifyuser."
-    : positional.join(" ").trim();
-  if (!text) {
-    console.error(`Usage: amux notifyuser "message" [--level info|done|warn|error] `
-      + `[--idempotency-key KEY] [--force]`);
-    process.exit(1);
-  }
-  const opts = {
-    level,
-    title,
-    userId: flags.user || flags.u,
-    channel: flags.channel || flags.c,
-    idempotencyKey: flags["idempotency-key"],
-    force: !!(flags.force || flags.f || flags.test),
-  };
-  if (flags.dry) {
-    console.log(formatUserNotification(text, opts));
-    return;
-  }
-  const result = await notifyUser(text, opts);
-  if (result.deduped) console.log("notifyuser skipped duplicate");
-  else console.log(`notifyuser sent → ${result.target}${result.fallback ? " (fallback)" : ""}`);
-}
-
 /**
  * Read todos and send a notifyuser push if any active items exist.
  * Intended for cron at 08:00 daily. Idempotent; safe to run repeatedly.
@@ -3301,7 +3262,7 @@ export async function dispatch(argv, ctx) {
 
     case "notifyuser":
     case "notify-user":
-      return cmdNotifyUser(rest);
+      return (await import("./notify-user-command.mjs")).cmdNotifyUser(rest);
 
     case "todo":
     case "todos":

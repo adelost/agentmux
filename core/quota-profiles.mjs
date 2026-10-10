@@ -128,6 +128,14 @@ export function claudeLoginProfiles(env = process.env, options = {}, slots = quo
     .map(({ name, home }) => claudeLoginProfile(name, home));
 }
 
+const LOGIN_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/iu;
+
+/** WHAT: Names a new Claude login dir under the account-profiles root. WHY: Keeps a second account in its own dir from its first login. */
+export function newClaudeLoginProfile(name, env = process.env) {
+  if (!LOGIN_NAME.test(String(name || ""))) return null;
+  return claudeLoginProfile(name, join(accountProfilesRoot(env, resolve(env.HOME || homedir())), "claude", name));
+}
+
 /**
  * WHAT: Builds the launch slots plus every Claude login dir that is in no slot.
  * WHY: Keeps a subscription's usage visible whether or not a pane runs on it.

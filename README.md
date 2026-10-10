@@ -517,6 +517,10 @@ switches the profile and resumes each exact session. Sleeping panes are only
 marked for their next wake; they are not started. A failed restart rolls that pane back to
 its previous profile and reports `PARTIAL` or `BLOCKED`, never false success.
 
+From Discord, `/byt <login>` replies with the same plan and changes nothing;
+`/byt <login> ok` from the operator, within 10 minutes, switches. `amux quota`
+shows under each account the panes that run on it right now.
+
 The secondary Claude profile shares only the `projects` session-history
 directory with profile 1. Credentials, settings, and quota remain isolated.
 No logout or token copy is part of the workflow.

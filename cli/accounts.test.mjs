@@ -46,6 +46,35 @@ feature("account subscription CLI", () => {
     }],
   });
 
+  unit("login accepts a login dir, its email or a new login name", {
+    given: ["slots plus the wetterlind login dir", () => {
+      const lines = [];
+      return {
+        lines,
+        output: (line) => lines.push(line),
+        prepare: () => {},
+        identityOf: (profile) => (profile.id === "wetterlind" ? { email: "mattias.wetterlind@gmail.com" } : null),
+        newLogin: (name) => ({ provider: "claude", id: name, key: `claude:login:${name}`, home: `/profiles/claude/${name}`, source: "login" }),
+        catalog: [
+          { provider: "claude", id: "1", key: "claude:1", home: "/home/.claude", source: "primary" },
+          { provider: "claude", id: "wetterlind", key: "claude:login:wetterlind", home: "/profiles/claude/wetterlind", source: "login" },
+        ],
+      };
+    }],
+    when: ["logging in by dir name, by email and by a new name", async (ctx) => [
+      await cmdAccounts(["login", "claude:wetterlind"], ctx),
+      await cmdAccounts(["login", "claude:mattias.wetterlind@gmail.com"], ctx),
+      await cmdAccounts(["login", "claude:tredje"], ctx),
+    ]],
+    then: ["each prints its own dir and nothing touches slot 1", (results) => {
+      expect(results.map((result) => result.instruction)).toEqual([
+        "CLAUDE_CONFIG_DIR='/profiles/claude/wetterlind' claude auth login",
+        "CLAUDE_CONFIG_DIR='/profiles/claude/wetterlind' claude auth login",
+        "CLAUDE_CONFIG_DIR='/profiles/claude/tredje' claude auth login",
+      ]);
+    }],
+  });
+
   unit("routes an explicit Claude dry-run to the fleet safety boundary", {
     given: ["a runtime context and injected rotation", () => {
       const calls = [];

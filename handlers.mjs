@@ -10,7 +10,7 @@ import { shortModelName } from "./core/context.mjs";
 import { loadConfig } from "./cli/config.mjs";
 import { blockedSendMessage, decideParkedSend, readParkState, unparkPane } from "./core/pane-park.mjs";
 import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
-import { readQuotaSnapshot } from "./core/quota-usage.mjs";
+import { readQuotaSnapshotWithPanes } from "./core/quota-in-use.mjs";
 import { formatQuotaSnapshot } from "./core/quota-format.mjs";
 import { prepareCodexIdle } from "./core/codex-tui.mjs";
 import { codexModelRequest, formatCodexModelChange, formatCodexModelFailure, runLockedCodexModelChange } from "./core/codex-model-command.mjs";
@@ -32,6 +32,8 @@ import { MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, resumeBrief } from 
 import { queueFleetRestart } from "./core/fleet-restart.mjs";
 import { normalizeClaudeModelName } from "./core/claude-model.mjs";
 import { mergeInboundTarget } from "./core/inbound-target.mjs";
+import { HELP_TEXT } from "./channels/discord-help.mjs";
+import { createAccountSwitchCommand } from "./channels/account-switch-command.mjs";
 /**
  * Reconcile every configured agent's live tmux session against the
  * regenerated config. Per-agent failures are isolated: one broken agent
@@ -70,31 +72,6 @@ export async function reconcileAllSessions(agent, agentNames, log = (msg) => con
 // risked unlinking files the agent was still reading via Bash —
 // we'd rather leak a few MB to /tmp for a few days than lose a PDF
 // in the middle of a long agent turn.
-
-const HELP_TEXT = [
-  "**Commands:**",
-  "`/help`: show this message",
-  "`/peek`: last response from agent",
-  "`/raw`: last 50 lines of tmux pane (raw)",
-  "`/status`: native Codex account, model, context and usage limits",
-  "`/quota`: shared account quota: Claude session/week/Fable + Codex week",
-  "`/switch`: toggle this Codex pane between account profiles 1 and 2",
-  "`/model`: show current model; Codex aliases: astra/gpt-6/sol; Claude: fable/opus/sonnet/haiku",
-  "`/restore`: restore the model that was active before the latest downgrade",
-  "`/dismiss`: dismiss blocking prompt (survey etc.)",
-  "`/esc`: interrupt (send Escape)",
-  "`/use <agent>[.pane]`: switch channel target",
-  "`/use reset`: back to yaml default",
-  "`/thinking`: toggle real-time text streaming (default: on)",
-  "`/follow`: toggle: stream output even when typing in tmux",
-  "`/tts`: toggle text-to-speech for this channel",
-  "`/sync`: create/sync Discord channels from agentmux.yaml",
-  "`/reload`: reload agents.yaml",
-  "`/restart`: restart agentmux bridge",
-  "`/restart all`: recreate every configured tmux session + restart bridge (interrupts active work)",
-  "",
-  "Prefix with `.N` to target pane N (e.g. `.1 /raw`)",
-].join("\n");
 
 function formatContext(ctx) {
   if (!ctx) return "";
@@ -337,9 +314,10 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     // Account-wide shared quota (Claude weekly/Fable + Codex weekly) — unlike
     // /status this is not pane-specific, so it needs no mapping or pane.
     "/quota": async (msg) => {
-      const snapshot = await readQuotaSnapshot();
-      await msg.reply(formatQuotaSnapshot(snapshot));
+      await msg.reply(formatQuotaSnapshot(await readQuotaSnapshotWithPanes()));
     },
+    "/byt": createAccountSwitchCommand({ state, runtime: () => deliveryBroker?.queue
+      && { agent, deliveryQueue: deliveryBroker.queue, state, configPath: agentsYamlPath } }),
 
     "/peek": async (msg, mapping, pane) => {
       if (isNativePane(mapping, pane)) {

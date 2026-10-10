@@ -73,8 +73,8 @@ function paceText(pace) {
 function switchStep(alternatives) {
   const best = alternatives[0];
   if (!best) return "2. Inget annat Claude-konto går att byta till just nu.";
-  return `2. Annars byt konto: \`amux accounts rotate claude:${best.email} --dry\` visar planen per panel, `
-    + `samma kommando utan --dry byter. ${best.email} har ${percent(best.usedPercent)} av veckan, ${formatReset(best.resetsAt)}.`;
+  return `2. Annars byt konto: ${best.email} har ${percent(best.usedPercent)} av veckan, ${formatReset(best.resetsAt)}. `
+    + `Skriv \`/byt ${best.email}\` i Discord, så får du planen per panel innan något byts.`;
 }
 
 /**
