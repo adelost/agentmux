@@ -47,6 +47,6 @@
     "vitest": "^4.0.18"
   },
   "optionalDependencies": {
-    "@huggingface/transformers": "^4.2.0"
+    "@huggingface/transformers": "4.2.0"
   }
 }
