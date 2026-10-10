@@ -21,6 +21,7 @@ import {
   setRuntimeProfile,
 } from "../core/runtime-account-profiles.mjs";
 import { readClaudeQuotaBudgeted } from "../core/claude-quota-budget.mjs";
+import { readClaudeProfileIdentity } from "../core/claude-account-quota.mjs";
 import { assertRotationContinuity, readRotationContinuity } from "../core/rotation-continuity.mjs";
 import { accountSwitchPlan } from "../policies/account-switch-cost.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
@@ -154,20 +155,30 @@ const planReason = ({ reason, tokens, idleMs }) => [reason,
   .filter(Boolean).join(" ");
 
 // Dormant and already-selected rows keep the wording they always had.
-const DRY_STATUS = { KEEP: () => "would-already-selected", SELECT: (pane) => `would-${pane.mode}`,
+const DRY_STATUS = { SELECT: (pane) => `would-${pane.mode}`,
   RESTART: (pane) => `would-${pane.mode}`, COMPACT_THEN_RESTART: () => "would-compact-then-restart" };
 
-function dryRow(pane) {
+const keepReason = (pane, target) => pane.currentProfile?.id === target.id ? pane.reason : "same-account";
+
+function dryRow(pane, target) {
   if (pane.plan.action === "HOLD") return { ...pane, status: "blocked", reason: planReason(pane.plan) };
+  if (pane.plan.action === "KEEP") return { ...pane, status: "would-already-selected", reason: keepReason(pane, target) };
   const moving = pane.plan.action === "RESTART" || pane.plan.action === "COMPACT_THEN_RESTART";
   return { ...pane, status: DRY_STATUS[pane.plan.action](pane), reason: moving ? planReason(pane.plan) : pane.reason };
 }
+
+const emailOf = (profile, identityOf) => profile ? identityOf(profile)?.email?.toLowerCase() || null : null;
+
+// Another dir of the same login changes Claude Code's system prompt (its config path), so moving is a cache miss for nothing.
+const onTargetAccount = (pane, target, identityOf) => !pane.pending && (pane.currentProfile?.id === target.id
+  || (emailOf(pane.currentProfile, identityOf) !== null
+    && emailOf(pane.currentProfile, identityOf) === emailOf(target, identityOf)));
 
 /** WHAT: Attaches each allowed pane's cost-aware switch action. WHY: Keeps a warm large context from moving without its compact. */
 async function planPanes(ctx, observed, target, deps, compactedKeys = new Set()) {
   const planned = [];
   for (const pane of observed) {
-    const alreadySelected = pane.currentProfile?.id === target.id && !pane.pending;
+    const alreadySelected = onTargetAccount(pane, target, deps.identityOf);
     const context = pane.mode === "running" && !alreadySelected ? await deps.observeContext(ctx, pane) : null;
     const plan = accountSwitchPlan({ mode: pane.mode, alreadySelected, facts: context?.facts,
       compactRefusal: context?.compactRefusal, compacted: context?.compacted || compactedKeys.has(pane.key) }, deps.policy);
@@ -208,8 +219,8 @@ async function switchPanes(ctx, observed, target, deps, rows, prepareOnce) {
       rows.push({ ...pane, status: "failed", reason });
       continue;
     }
-    if (pane.currentProfile?.id === target.id && !pane.pending) {
-      rows.push({ ...pane, status: "already-selected", reason: null });
+    if (pane.plan.action === "KEEP") {
+      rows.push({ ...pane, status: "already-selected", reason: pane.currentProfile?.id === target.id ? null : "same-account" });
       continue;
     }
     if (pane.mode === "dormant") {
@@ -282,10 +293,10 @@ async function rotateProject(ctx, agentName, panes, target, deps, { dry, rows, p
     }
     let planned = await planPanes(ctx, observed, target, deps);
     if (dry) {
-      rows.push(...planned.map(dryRow));
+      rows.push(...planned.map((pane) => dryRow(pane, target)));
       return;
     }
-    rows.push(...planned.filter((pane) => pane.plan.action === "HOLD").map(dryRow));
+    rows.push(...planned.filter((pane) => pane.plan.action === "HOLD").map((pane) => dryRow(pane, target)));
     let movers = planned.filter((pane) => pane.plan.action !== "HOLD");
     if (movers.some((pane) => pane.plan.action === "COMPACT_THEN_RESTART")) {
       lease.release();
@@ -331,12 +342,11 @@ export async function rotateClaudeFleet(ctx, requested, {
     policy: dependencies.policy || readContextCostPolicy(),
     observeContext: dependencies.observeContext || ((context, pane) => observeSwitchContext(context, pane)),
     compactPane: dependencies.compactPane || ((context, compactTarget) => compactBeforeSwitch(context, compactTarget)),
-    identityOf: dependencies.identityOf,
+    identityOf: dependencies.identityOf || readClaudeProfileIdentity,
     output: dependencies.output || console.log,
     setExitCode: dependencies.setExitCode || ((code) => { process.exitCode = code; }),
   };
-  const target = resolveClaudeAccountTarget(requested, deps.catalog,
-    deps.identityOf ? { identityOf: deps.identityOf } : {});
+  const target = resolveClaudeAccountTarget(requested, deps.catalog, { identityOf: deps.identityOf });
   if (!target) throw new Error(`unknown Claude account profile: ${requested}`);
   if (!deps.authenticated(target)) {
     const reason = "target-login-required";

@@ -40,6 +40,7 @@ on the limits `policies/context-cost.mjs` documents (80k tokens, one hour):
 
 | Pane | Action | Output |
 |---|---|---|
+| already on the target account, in any of its dirs | stays where it is | `would-already-selected (same-account)` |
 | asleep or offline | selection only, for its next ordinary wake | `would-dormant` / `selected-for-next-wake` |
 | idle for an hour or more | restart on the target, no compact (its cache is cold anyway) | `would-running (cache-cold …)` |
 | warm and at most 80k | restart on the target, no compact | `would-running (context-small …)` |
