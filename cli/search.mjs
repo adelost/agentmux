@@ -25,7 +25,8 @@ import { daemonAlive, daemonPassages, daemonRerank, semanticQuery } from "../cor
 import { gpuEnv, holdReindexLock } from "../core/search-gpu.mjs";
 import { spawnSync } from "node:child_process";
 import { blendRerank, RERANK_CANDIDATES, rerankText } from "../core/search-rerank.mjs";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 /** WHAT: Describes the search CLI contract. WHY: Keeps actual flags and user guidance in one place. */
 export const SEARCH_HELP = `Usage:
@@ -254,15 +255,28 @@ async function reindexOnBestDevice(roots) {
   const dir = sem.indexDir();
   if (process.env.AMUX_SEARCH_DEVICE === "cuda") {
     const release = holdReindexLock(dir);
-    try { return await sem.reindex(roots, { log: console.log, device: "cuda" }); } finally { release(); }
+    try {
+      const result = await sem.reindex(roots, { log: console.log, device: "cuda" });
+      if (process.env.AMUX_REINDEX_RESULT) writeFileSync(process.env.AMUX_REINDEX_RESULT, JSON.stringify(result));
+      return result;
+    } finally { release(); }
   }
   const env = gpuEnv(process.env);
   if (!env) console.log("ℹ no CUDA libraries (cuDNN or the ONNX Runtime CUDA provider in ~/.cache/agentmux); reindexing on CPU");
   else if (await daemonAlive()) console.log("ℹ the search daemon is running; reindexing changed units on CPU to stay within the VRAM budget");
   else {
+    // The child reports its result in a file: ONNX Runtime's CUDA provider can
+    // crash while the process tears down after a finished, written index.
+    const resultPath = join(dir, `reindex-result-${process.pid}.json`);
+    rmSync(resultPath, { force: true });
     const child = spawnSync(process.execPath, [process.argv[1], "search", "--reindex"], {
-      env: { ...env, AMUX_SEARCH_DEVICE: "cuda" }, stdio: "inherit" });
-    if (child.status === 0) return;
+      env: { ...env, AMUX_SEARCH_DEVICE: "cuda", AMUX_REINDEX_RESULT: resultPath }, stdio: "inherit" });
+    const finished = existsSync(resultPath);
+    rmSync(resultPath, { force: true });
+    if (finished) {
+      if (child.status !== 0) console.log(`ℹ GPU process exited with ${child.status ?? child.signal} after writing the index; the index is complete`);
+      return;
+    }
     console.log(`⚠ GPU reindex failed (exit ${child.status ?? child.signal}); continuing on CPU`);
   }
   return sem.reindex(roots, { log: console.log });
