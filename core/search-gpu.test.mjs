@@ -2,7 +2,8 @@ import { expect, feature, unit } from "bdd-vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gpuEnv, gpuReady } from "./search-gpu.mjs";
+import { writeFileSync } from "node:fs";
+import { ensureCudaProvider, gpuEnv, gpuReady } from "./search-gpu.mjs";
 
 feature("optional GPU libraries", () => {
   unit("CUDA paths are offered only when agentmux's own cuDNN exists, and can be switched off", {
@@ -13,11 +14,13 @@ feature("optional GPU libraries", () => {
       return { empty, full };
     }],
     when: ["resolving environments", ({ empty, full }) => {
-      const withLibs = gpuEnv({ AMUX_CUDA_LIBS: full, LD_LIBRARY_PATH: "/usr/lib" });
+      const provider = { provider: () => true };
+      const withLibs = gpuEnv({ AMUX_CUDA_LIBS: full, LD_LIBRARY_PATH: "/usr/lib" }, provider);
       return {
-        missing: gpuEnv({ AMUX_CUDA_LIBS: empty }),
+        missing: gpuEnv({ AMUX_CUDA_LIBS: empty }, provider),
+        noProvider: gpuEnv({ AMUX_CUDA_LIBS: full }, { provider: () => false }),
         withLibs,
-        disabled: gpuEnv({ AMUX_CUDA_LIBS: full, AMUX_SEARCH_GPU: "0" }),
+        disabled: gpuEnv({ AMUX_CUDA_LIBS: full, AMUX_SEARCH_GPU: "0" }, provider),
         ready: gpuReady(withLibs),
         plainProcess: gpuReady({ AMUX_CUDA_LIBS: full, LD_LIBRARY_PATH: "/usr/lib" }),
       };
@@ -25,6 +28,7 @@ feature("optional GPU libraries", () => {
     then: ["no libraries or opt-out means CPU; a started-with-libraries process is GPU-ready", (result, { empty, full }) => {
       try {
         expect(result.missing).toBeNull();
+        expect(result.noProvider).toBeNull();
         expect(result.disabled).toBeNull();
         expect(result.withLibs.LD_LIBRARY_PATH).toBe(`${join(full, "cudnn", "lib")}:${join(full, "cublas", "lib")}:/usr/lib`);
         expect(result.ready).toBe(true);
@@ -32,6 +36,25 @@ feature("optional GPU libraries", () => {
       } finally {
         rmSync(empty, { recursive: true, force: true });
         rmSync(full, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  unit("a release install without the CUDA provider gets it back from agentmux's cache", {
+    given: ["a package without provider files and a cache with them", () => {
+      const binaryDir = mkdtempSync(join(tmpdir(), "amux-ort-bin-"));
+      const cacheDir = mkdtempSync(join(tmpdir(), "amux-ort-cache-"));
+      for (const name of ["libonnxruntime_providers_shared.so", "libonnxruntime_providers_cuda.so"]) writeFileSync(join(cacheDir, name), name);
+      return { binaryDir, cacheDir };
+    }],
+    when: ["ensuring the provider", (dirs) => ({ ok: ensureCudaProvider({}, dirs), again: ensureCudaProvider({}, dirs) })],
+    then: ["the files are restored and the check passes", ({ ok, again }, { binaryDir, cacheDir }) => {
+      try {
+        expect(ok).toBe(true);
+        expect(again).toBe(true);
+      } finally {
+        rmSync(binaryDir, { recursive: true, force: true });
+        rmSync(cacheDir, { recursive: true, force: true });
       }
     }],
   });

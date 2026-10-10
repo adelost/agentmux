@@ -257,7 +257,7 @@ async function reindexOnBestDevice(roots) {
     try { return await sem.reindex(roots, { log: console.log, device: "cuda" }); } finally { release(); }
   }
   const env = gpuEnv(process.env);
-  if (!env) console.log("ℹ no CUDA libraries in ~/.cache/agentmux/cuda; reindexing on CPU");
+  if (!env) console.log("ℹ no CUDA libraries (cuDNN or the ONNX Runtime CUDA provider in ~/.cache/agentmux); reindexing on CPU");
   else if (await daemonAlive()) console.log("ℹ the search daemon is running; reindexing changed units on CPU to stay within the VRAM budget");
   else {
     const child = spawnSync(process.execPath, [process.argv[1], "search", "--reindex"], {

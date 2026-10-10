@@ -7,19 +7,51 @@
 // Without the libraries, or when CUDA fails, the CPU models answer and the
 // output says so.
 
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 const LIBRARIES = ["cudnn", "cublas", "cuda_nvrtc"];
+// onnxruntime-node downloads these in its postinstall, which a release
+// install skips (npm --ignore-scripts); agentmux keeps a copy per version.
+const PROVIDERS = ["libonnxruntime_providers_shared.so", "libonnxruntime_providers_cuda.so"];
+
+function onnxRuntimeDirs(env) {
+  const require = createRequire(import.meta.url);
+  const packageDir = dirname(require.resolve("onnxruntime-node/package.json"));
+  const version = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")).version;
+  const binaryDir = join(packageDir, "bin", "napi-v6", process.platform, process.arch);
+  return { binaryDir, cacheDir: join(dirname(gpuLibraryRoot(env)), `onnxruntime-node-${version}`) };
+}
+
+/**
+ * WHAT: Checks the ONNX Runtime CUDA provider files, restoring them from agentmux's cache.
+ * WHY: Keeps a release install, which skips postinstall downloads, from silently losing the GPU.
+ */
+export function ensureCudaProvider(env = process.env, dirs = onnxRuntimeDirs(env)) {
+  const has = (dir) => PROVIDERS.every((name) => existsSync(join(dir, name)));
+  try {
+    if (has(dirs.binaryDir)) {
+      if (!has(dirs.cacheDir)) {
+        mkdirSync(dirs.cacheDir, { recursive: true });
+        for (const name of PROVIDERS) copyFileSync(join(dirs.binaryDir, name), join(dirs.cacheDir, name));
+      }
+      return true;
+    }
+    if (!has(dirs.cacheDir)) return false;
+    for (const name of PROVIDERS) copyFileSync(join(dirs.cacheDir, name), join(dirs.binaryDir, name));
+    return has(dirs.binaryDir);
+  } catch { return false; }
+}
 
 /** WHAT: Resolves agentmux's own CUDA library directory. WHY: Keeps GPU search independent of other projects' environments. */
 export const gpuLibraryRoot = (env = process.env) => env.AMUX_CUDA_LIBS || join(process.env.HOME, ".cache", "agentmux", "cuda", "nvidia");
 
 /** WHAT: Returns an environment that lets ONNX Runtime load CUDA, or null when unavailable. WHY: Keeps a missing install a reported CPU fallback, not a crash. */
-export function gpuEnv(env = process.env) {
+export function gpuEnv(env = process.env, { provider = () => ensureCudaProvider(env) } = {}) {
   if (env.AMUX_SEARCH_GPU === "0") return null;
   const dirs = LIBRARIES.map((name) => join(gpuLibraryRoot(env), name, "lib")).filter((dir) => existsSync(dir));
-  if (!dirs.some((dir) => dir.includes("cudnn"))) return null;
+  if (!dirs.some((dir) => dir.includes("cudnn")) || !provider()) return null;
   return { ...env, LD_LIBRARY_PATH: [...dirs, env.LD_LIBRARY_PATH].filter(Boolean).join(":") };
 }
 

@@ -89,11 +89,16 @@ two-word names stay lexical; an exact Markdown hit opens the units most about
 the phrase (density, a heading or bold lead naming it, decision words)
 across all matching notes, with recency only breaking ties.
 
-GPU: ONNX Runtime's CUDA provider ships with agentmux; it also needs cuDNN 9,
-kept in agentmux's own directory:
+GPU: ONNX Runtime's CUDA provider comes with onnxruntime-node's postinstall,
+which a release install skips; agentmux keeps a copy in
+`~/.cache/agentmux/cuda/onnxruntime-node-<version>` and restores it into the
+installed package. The provider also needs cuDNN 9, kept in agentmux's own
+directory. One-time setup:
 
 ```bash
 uv pip install --target ~/.cache/agentmux/cuda nvidia-cudnn-cu12==9.*
+# once per onnxruntime-node version, from a checkout whose npm install ran scripts:
+(cd node_modules/onnxruntime-node && node script/install.js --onnxruntime-node-install=cuda12)
 ```
 
 With it, the daemon runs the reranker on the GPU (about 2.6 GB VRAM, released

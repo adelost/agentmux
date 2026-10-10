@@ -133,7 +133,7 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
   const loadBestReranker = async () => {
     let note = null;
     if (process.env.AMUX_SEARCH_GPU === "0") note = "GPU disabled (AMUX_SEARCH_GPU=0); CPU reranker in use";
-    else if (!gpuReady()) note = "no CUDA libraries in ~/.cache/agentmux/cuda; CPU reranker in use";
+    else if (!gpuReady()) note = "no CUDA libraries (cuDNN or the ONNX Runtime CUDA provider in ~/.cache/agentmux); CPU reranker in use";
     else if (reindexRunning(dir)) note = "GPU busy with a reindex; CPU reranker in use";
     else {
       try { reranker = await loadReranker("gpu"); rerankNote = null; return; }
