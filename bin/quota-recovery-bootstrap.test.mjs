@@ -17,6 +17,7 @@ vi.mock("../core/claude-quota-budget.mjs", () => ({ readClaudeQuotaBudgeted: asy
 vi.mock("../core/claude-quota-coordinator.mjs", () => ({ createClaudeQuotaCoordinator: options => {
   context.options = options; return {};
 } }));
+vi.mock("../channels/quota-warning-runtime.mjs", () => ({ startQuotaWarning: () => null }));
 vi.mock("../channels/quota-recovery.mjs", () => ({
   parseQuotaRecoveryConfig: () => ({ enabled: true }),
   createQuotaRecoveryLoop: () => ({ start: () => { context.starts++; } }),

@@ -1,4 +1,4 @@
-// Node preload that attaches quota recovery without growing the bridge entrypoint.
+// Node preload that attaches quota recovery and the weekly quota warning without growing the bridge entrypoint.
 
 import { exec as execCallback } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -13,6 +13,7 @@ import { createClaudeQuotaCoordinator } from "../core/claude-quota-coordinator.m
 import { createQuotaRecoveryLoop, parseQuotaRecoveryConfig } from "../channels/quota-recovery.mjs";
 import { writeQuotaRecoveryHeartbeat } from "../core/quota-recovery-heartbeat.mjs";
 import { DEFAULT_TMUX_SOCKET, runtimeAgentsPath } from "../core/runtime-defaults.mjs";
+import { startQuotaWarning } from "../channels/quota-warning-runtime.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 try {
@@ -54,3 +55,7 @@ if (!config.enabled) {
   globalThis[LOOP_KEY] = loop;
   loop.start();
 }
+
+// The weekly warning has its own switch (AMUX_QUOTA_WARNING_ENABLED) and never stops recovery.
+try { startQuotaWarning(); }
+catch (error) { console.error(`quota-warning | not started: ${error.message}`); }

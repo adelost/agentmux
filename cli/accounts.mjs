@@ -13,7 +13,7 @@ import { rotateClaudeFleet } from "./account-rotation.mjs";
 const usage = `Usage:
   amux accounts
   amux accounts login <codex|claude|kimi>:<1|2>
-  amux accounts rotate claude:<1|2> [--dry]
+  amux accounts rotate claude:<1|2|login|email> [--dry]
   amux quota [--all] [--json]`;
 
 /** WHAT: Builds one shared quota view. WHY: Keeps text and JSON views on one collection pass. */

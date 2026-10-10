@@ -157,7 +157,7 @@ Usage:
     --voice <name>                Override the configured edge-tts voice
   agent quota [--all] [--json]    Subscription quota for every configured coding account
   agent accounts                  Same account overview, grouped by provider profile
-  agent accounts login TYPE:ID    Print a provider-scoped login command; never exposes tokens\n  agent accounts rotate claude:ID Switch idle Claude panes with exact history, no source model turn (--dry)
+  agent accounts login TYPE:ID    Print a provider-scoped login command; never exposes tokens\n  agent accounts rotate claude:ID Switch idle Claude panes to a slot, login or email; warm large contexts compact first (--dry)
   agent r                         Resume last agent
   agent help                      Show this message
 
