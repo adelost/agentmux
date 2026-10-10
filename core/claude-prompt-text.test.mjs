@@ -36,6 +36,47 @@ feature("Claude pasted-content delivery receipts", () => {
     });
   }
 
+  // Recorded by the real Claude Code 2.1.296 in an isolated pane on 2026-10-10 after amux pasted this
+  // message in two parts (a line ends in .png). Queued while busy, Claude stores the same envelopes
+  // without the outer line breaks (skyvw:0's JSONL, 07:35:20Z).
+  const splitMessage = "[from skyvw:1]\n\nÖverlämning för provet: skissen för Mark-sidan ligger i samma mapp.\n\n"
+    + "I samma mapp:\n- arken: mark-in-cutkit-style-en.png och pieces-how-to-use-en.png\n"
+    + "- skissen, ritad med Cutkits egna CSS-filer\n\nDela ut P1 till P3. Frågor om designen tar du med mig.\n";
+  const storedInTwoEnvelopes = "\n\n<pasted_content id=\"130a\">\n[from skyvw:1]\n\nÖverlämning för provet: skissen för Mark-sidan ligger i samma mapp.\n\n"
+    + "I samma mapp:\n- arken: mark-in-cutkit-style-en.png och pieces-how-to-use-en.\n</pasted_content id=\"130a\">\n\n\n"
+    + "<pasted_content id=\"130a\">\npng\n- skissen, ritad med Cutkits egna CSS-filer\n\nDela ut P1 till P3. Frågor om designen tar du med mig.\n</pasted_content id=\"130a\">\n";
+  for (const [name, event] of [
+    ["a direct user turn", userEvent(storedInTwoEnvelopes)],
+    ["queued input", { type: "queue-operation", operation: "enqueue", content: storedInTwoEnvelopes.trim() }],
+    ["a queued-command attachment", { type: "attachment", attachment: { type: "queued_command", prompt: storedInTwoEnvelopes.trim() } }],
+  ]) {
+    unit(`a message amux pasted in two parts acknowledges once from ${name}`, {
+      given: ["Claude's record of the message as two envelopes split mid-word", () => event],
+      when: ["checking the durable receipt", (value) => promptEventMatches(value, splitMessage)],
+      then: ["the delivered message releases its queue instead of being pasted again", (received) => expect(received).toBe(true)],
+    });
+  }
+  // Same session: a message ending in an image path. Claude keeps the short last part as typed text.
+  const endsInImagePath = "[from lsrc:1]\n\nHär är bilden från provkörningen, före och efter:\n"
+    + "/home/adelost/lsrc/.artifacts/cutkit-quality-2026-10-09/e283-share/e283-fore-efter-390.png\n";
+  unit("a message ending in an image path acknowledges once the path is split from its extension", {
+    given: ["Claude's record of the path's last part outside the envelope", () => userEvent(
+      "\n\n<pasted_content id=\"ee29\">\n[from lsrc:1]\n\nHär är bilden från provkörningen, före och efter:\n"
+      + "/home/adelost/lsrc/.artifacts/cutkit-quality-2026-10-09/e283-share/e283-fore-efter-390.\n</pasted_content id=\"ee29\">\n\npng")],
+    when: ["checking the durable receipt", (event) => promptEventMatches(event, endsInImagePath)],
+    then: ["the delivered message releases its queue instead of being pasted again", (received) => expect(received).toBe(true)],
+  });
+  for (const [name, stored] of [
+    ["only the first part", storedInTwoEnvelopes.slice(0, storedInTwoEnvelopes.indexOf("\n\n\n<pasted_content"))],
+    ["text between the parts", storedInTwoEnvelopes.replace("\n\n\n<pasted_content", "\nmore\n<pasted_content")],
+  ]) {
+    unit(`a split message with ${name} does not acknowledge`, {
+      given: ["a record that is not exactly the two delivered parts", () => userEvent(stored)],
+      when: ["checking the durable receipt", (event) => promptEventMatches(event, splitMessage)],
+      then: ["the pending message remains unacknowledged", (received) => expect(received).toBe(false)],
+    });
+  }
+
   for (const [name, text] of [
     ["different text", pasted(prompt.replace("nästa", "första"))],
     ["different attachment", pasted(prompt.replace("notes.txt", "other.txt"))],
