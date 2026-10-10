@@ -570,6 +570,34 @@ function itemIdFor(uuid, blockIndex) {
   return uuid ? `${uuid}:${blockIndex}` : null;
 }
 
+// Mattias 2026-10-10 after "Delegate to fork" in #api-0 for a fork the guard had refused: "Borde vi ändra så att
+// Discord skriver ut rätt ... så att det inte förvirrar lika mycket i framtiden." Claude Code journals a call a
+// PreToolUse hook refused as an error result: "PreToolUse:Agent hook error: [<command>]: BLOCKED: <reason>".
+const HOOK_REFUSAL = /^PreToolUse:\S+ hook error: \[[\s\S]*?\]: (?:BLOCKED:\s*)?([\s\S]*)$/u;
+
+const toolResultText = (part) => (typeof part.content === "string" ? part.content
+  : (part.content || []).map((piece) => piece?.text || "").join("\n"));
+
+/**
+ * WHAT: Returns the short reason a PreToolUse hook gave for refusing a call, or null.
+ * WHY: Keeps a refused call from reading as one that ran.
+ */
+export function hookRefusalReason(part) {
+  if (part?.type !== "tool_result" || part.is_error !== true) return null;
+  const match = HOOK_REFUSAL.exec(toolResultText(part).trim());
+  if (!match) return null;
+  const reason = match[1].replace(/^\/\S+\s+/u, "").split(/ \(|: |\. |, /u)[0].trim();
+  return (reason || "refused by a hook").slice(0, 60);
+}
+
+function markRefusedCalls(turn, event) {
+  for (const part of event.message.content) {
+    const reason = hookRefusalReason(part);
+    const item = reason && turn.items.find((candidate) => candidate.toolUseId === part.tool_use_id);
+    if (item) item.content = `${item.content} · blocked: ${reason}`;
+  }
+}
+
 /**
  * Group events into turns. A turn starts at a type:"user" event with string
  * content (not a tool_result) and ends at the next such event. Assistant and
@@ -601,6 +629,10 @@ export function groupIntoTurns(events, { headless = false } = {}) {
     };
   };
   for (const e of events) {
+    if (e.type === "user" && Array.isArray(e.message?.content) && current) {
+      markRefusedCalls(current, e);
+      continue;
+    }
     if (e.type === "user" && typeof e.message?.content === "string") {
       if (current) turns.push(current);
       current = {
@@ -633,6 +665,7 @@ export function groupIntoTurns(events, { headless = false } = {}) {
             kind: display.kind,
             source: "claude",
             id: itemIdFor(e.uuid, blockIndex),
+            toolUseId: block.id,
           });
         }
       });
