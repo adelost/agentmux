@@ -506,4 +506,26 @@ feature("Claude fleet account rotation", () => {
       expect(fx.deps.observeContext).not.toHaveBeenCalled();
     }],
   });
+
+  unit("a pane already on the target account through the other slot stays where it is", {
+    given: ["slots 1 and 2 both logged in as adelost, a warm large pane on slot 1", () => {
+      const fx = fixture();
+      fx.deps.identityOf = () => ({ email: "adelost@gmail.com" });
+      fx.deps.observeContext.mockResolvedValue({ facts: { tokens: 150_000, idleMs: 60_000 },
+        compactRefusal: null, compacted: false, target: null });
+      fx.ctx.agent.restartClaudeAccount = vi.fn();
+      return fx;
+    }],
+    when: ["rotating to slot 2", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["no compact, no restart and no selection: the switch would only cost a cache miss", (result, fx) => {
+      expect(result.status).toBe("RECOVERED");
+      expect(result.rows.map((row) => [row.key, row.status, row.reason])).toEqual([
+        ["lsrc:0", "already-selected", "same-account"],
+        ["lsrc:1", "already-selected", "same-account"],
+      ]);
+      expect(fx.deps.compactPane).not.toHaveBeenCalled();
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({});
+    }],
+  });
 });
