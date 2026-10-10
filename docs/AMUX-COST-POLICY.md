@@ -49,7 +49,7 @@ Elapsed idle time is a risk signal, not proof of an exact cache hit, miss or bil
 
 Do not claim that compact always adds exactly 80k tokens, that every cache has exactly a one-hour lifetime, or that every compact saves money. Large idle contexts are compacted as a bounded protective policy, not under such a guarantee.
 
-`compacted-unmeasured` means the exact compact receipt was verified but the new token count was unavailable. It does not mean no compaction occurred. A missing `isCompactSummary` field alone does not disprove a Claude compact boundary.
+`compacted-unmeasured` means the exact compact receipt was verified but the new token count was unavailable. It does not mean no compaction occurred. A missing `isCompactSummary` field alone does not disprove a Claude compact boundary. A pane compacted by an earlier pass with no work since is reported as `already-compacted` (2026-10-10: 15 of the night's 16 unresolved rows were such panes); it is never a retry and never counts as unresolved.
 
 The tmux delivery lease remains per session because pane delivery can zoom the shared window. Changing it to per pane without removing that shared effect is unsafe.
 

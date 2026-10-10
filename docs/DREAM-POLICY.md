@@ -80,8 +80,13 @@ the list exists to provide.
 8. Require all three receipts: bounded valid output, exact final journal-text
    `DREAM_OK` for this run, and idle completion. Earlier working commentary is
    not part of the final reply; a later action or screen-only match is not a
-   completion receipt. Also prove today's memory remained
-   byte-identical while the pane worked.
+   completion receipt. Also prove the curator did not write today's memory:
+   the file is unchanged since the controller read it, or every change is a
+   pure append whose every line another pane typed in its own tool call since
+   that read and the curator's exact session typed none of them. Fleet panes
+   log to the daily file at any hour (2026-10-08 lost its digest to lsrc:0's
+   04:01 note). Any other change refuses the commit as
+   `daily-memory-changed-during-dream:<reason>`.
 9. The controller publishes the validated result without replacement as a
    read-only `memory/dream/DATE-RUN.md` snapshot, then atomically inserts its
    hash-bound link into the one marked daily Dream block. Only then are pane

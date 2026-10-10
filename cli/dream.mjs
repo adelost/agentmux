@@ -29,6 +29,7 @@ import { recoverDreamRun } from "../core/dream-recovery.mjs";
 import { acquireDreamLock } from "../core/dream-lock.mjs";
 import { claimScheduledDream } from "../core/dream-schedule.mjs";
 import { commitDreamProduct, writeDreamAtomic } from "../core/dream-commit.mjs";
+import { concurrentNotesJudge } from "../core/dream-memory-race.mjs";
 export { commitDreamProduct } from "../core/dream-commit.mjs";
 export { isPidAlive } from "../core/dream-lock.mjs";
 export { waitForDreamOwnerResult } from "../core/dream-result.mjs";
@@ -376,6 +377,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
 
     ensureDreamDailyFile(memPath, dateKey);
     const memoryBefore = readFileSync(memPath, "utf8");
+    const memoryReadAt = Date.now();
     const input = (dependencies.writeInput || writeDreamOwnerInput)({
       schemaVersion: 1,
       memoryFormat: 2,
@@ -427,8 +429,11 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       sleep: dependencies.sleep,
     });
     if (!product.ok) throw new Error(`dream-owner-product-invalid:${product.reason}`);
+    const judgeConcurrentNotes = (dependencies.concurrentNotesJudge || concurrentNotesJudge)({
+      agents, owner, ownerSessionId: compact.sessionId, sinceMs: memoryReadAt });
     commitDreamProduct({ memPath, memoryBefore, product, dateKey, included: batch.included,
-      omitted: batch.omitted, receipts, receiptPath, now, recordReceipts, input, unreadable: observed.unreadable });
+      omitted: batch.omitted, receipts, receiptPath, now, recordReceipts, input, unreadable: observed.unreadable,
+      judgeConcurrentNotes });
 
     if (!flags.deferSentinel && !flags["defer-sentinel"]) {
       writeDreamRunSentinel(memPath, dateKey, timeStr, batch.included.length, observed.unreadable.length);

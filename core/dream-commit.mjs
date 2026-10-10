@@ -35,9 +35,15 @@ export function writeDreamAtomic(path, content, { immutable = false } = {}) {
 /** WHAT: Stores the verified commit intent before changing daily memory. WHY: Preserves terminal proof across the block/cursor/sentinel crash gaps without another model turn. */
 export function commitDreamProduct({ memPath, memoryBefore, product, dateKey, included, omitted,
   receipts, receiptTargets = included, receiptPath = defaultDreamReceiptPath(), now,
-  recordReceipts = recordDreamReceipts, input, unreadable = [] }) {
+  recordReceipts = recordDreamReceipts, input, unreadable = [], judgeConcurrentNotes = null }) {
+  // The block goes into the file as it is now. Without a judge (recovery, old
+  // callers) any change since the controller's read still refuses the commit.
   const check = () => {
-    if (readFileSync(memPath, "utf8") !== memoryBefore) throw new Error("dream-owner-touched-memory-before-controller-commit");
+    const current = readFileSync(memPath, "utf8");
+    if (current === memoryBefore) return current;
+    const verdict = judgeConcurrentNotes?.(memoryBefore, current) ?? { ok: false, reason: "changed" };
+    if (!verdict.ok) throw new Error(`daily-memory-changed-during-dream:${verdict.reason}`);
+    return current;
   };
   check();
   const snapshot = publishDreamSnapshot(memPath, product.content, dateKey, included, omitted);
@@ -51,8 +57,7 @@ export function commitDreamProduct({ memPath, memoryBefore, product, dateKey, in
       included: included.length, unreadable: unreadable.length, committedAt: now.toISOString() };
     writeDreamAtomic(intentPath(input.path), `${JSON.stringify(record)}\n`, { immutable: true });
   }
-  check();
-  writeDreamAtomic(memPath, upsertDreamSummary(memoryBefore, dateKey, snapshot.block));
+  writeDreamAtomic(memPath, upsertDreamSummary(check(), dateKey, snapshot.block));
   recordReceipts(receipts, receiptTargets, { path: receiptPath, dateKey, now });
 }
 

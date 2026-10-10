@@ -402,6 +402,9 @@ and actual receipt outcome. A failed or blocked budget pass exits nonzero so the
 existing cron failure notification also covers maintenance, not just the digest.
 A compact still above budget or without a new token
 measurement is unresolved, never reported as within budget or blindly retried.
+A context another pass already compacted, with no work since, is
+`already-compacted`: tonight attempted nothing and may not retry, so it shows
+its size when known but does not fail the night.
 The budget is a target, not a guarantee about the engine's native summarizer.
 Dream's own curator is already compacted before its task; its fresh activity
 keeps the later nightly pass from compacting it again. The thin memory hook

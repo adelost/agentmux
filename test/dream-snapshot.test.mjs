@@ -56,7 +56,10 @@ describe("separate verified Dream snapshot and editable daily notes", () => {
   });
   it("preserves a concurrent manual edit before the controller commit", () => {
     const fx = fixture(); writeFileSync(fx.memPath, fx.memoryBefore + "Ny anteckning\n");
-    expect(fx.commit).toThrow("touched-memory");
+    // Without the fleet journals no change since the read is accepted; the
+    // reason names the file, since a fleet note, not the curator, wrote it on 2026-10-08.
+    expect(fx.commit).toThrow("daily-memory-changed-during-dream:changed");
+    expect(readFileSync(fx.memPath, "utf8")).toBe(fx.memoryBefore + "Ny anteckning\n");
     expect(fx.recordReceipts).not.toHaveBeenCalled();
   });
 });

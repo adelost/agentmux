@@ -17,7 +17,8 @@ import { codexComposerText } from "../core/codex-tui.mjs";
 import { findBlockingPrompt } from "../core/dismiss.mjs";
 import { createDeliveryQueue, TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
-import { compactAccessBlocker, nightlyCompactDecision, nightlyCompactOutcome, nightlyCompactPolicy, sharedNightlyCompactOutcome } from "../core/nightly-compact.mjs";
+import { compactAccessBlocker, nightlyCompactDecision, nightlyCompactOutcome, nightlyCompactPolicy, nightlyUnresolvedCount,
+  sharedNightlyCompactOutcome } from "../core/nightly-compact.mjs";
 import { claudeComposerIsPasting } from "../core/claude-paste-stall.mjs";
 
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -137,7 +138,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     catch { rows.push({ pane: key, status: "skipped", reason: "observation-unavailable" }); continue; }
     const previous = readReport(receiptPath, dateKey).panes[key];
     const sharedOutcome = () => sharedNightlyCompactOutcome(contextMaintenanceAttempt(ctx.state,
-      target.agent.name, target.pane.index, { sessionId: first.sessionId }), first, policy.maxTokens);
+      target.agent.name, target.pane.index, { sessionId: first.sessionId }), first);
     const priorShared = sharedOutcome();
     if (priorShared) {
       rows.push({ pane: key, ...priorShared });
@@ -230,9 +231,9 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     }
   }
   const reportPath = join(path, "runs", `${randomUUID()}.json`);
-  const unresolved = rows.filter((row) => ["failed", "unverified"].includes(row.status) || row.status.startsWith("compacted-")
-    || (row.beforeTokens > policy.maxTokens && /^(claude-subscription-access-disabled|provider-usage-limited|activity-unknown|already-attempted:(failed|attempting|compacted-))/u.test(row.reason || ""))).length;
+  const unresolved = nightlyUnresolvedCount(rows, policy);
   if (!flags.dry && targets.length) writeReport(reportPath, { dateKey, policy, rows, unresolved, observedAt: new Date(now()).toISOString() });
-  console.log(`${label}: ${flags.dry ? `${rows.filter((row) => row.status === "eligible").length} eligible` : `${rows.filter((row) => row.status === "within-budget").length} verified within budget`}; ${unresolved} unresolved; ${rows.filter((row) => row.status === "skipped").length} skipped. ${flags.dry ? "No receipt written" : `Report ${reportPath}`}`);
+  const count = (status) => rows.filter((row) => row.status === status).length;
+  console.log(`${label}: ${flags.dry ? `${count("eligible")} eligible` : `${count("within-budget")} verified within budget`}; ${count("already-compacted")} already compacted; ${unresolved} unresolved; ${count("skipped")} skipped. ${flags.dry ? "No receipt written" : `Report ${reportPath}`}`);
   return { policy, rows, unresolved, path: reportPath, dryRun: !!flags.dry };
 }

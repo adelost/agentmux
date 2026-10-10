@@ -55,14 +55,25 @@ export function nightlyCompactOutcome(receipt, before, after, maxTokens) {
   };
 }
 
+const UNRESOLVED_SKIP = /^(claude-subscription-access-disabled|provider-usage-limited|activity-unknown|already-attempted:(failed|attempting|compacted-))/u;
+
+/** WHAT: Calculates how many rows leave tonight's budget work undone. WHY: Keeps one definition behind the report, the exit code and Dream's maintenance state. */
+export function nightlyUnresolvedCount(rows, policy) {
+  return rows.filter((row) => ["failed", "unverified"].includes(row.status) || row.status.startsWith("compacted-")
+    || (row.beforeTokens > policy.maxTokens && UNRESOLVED_SKIP.test(row.reason || ""))).length;
+}
+
 /** WHAT: Reports a shared maintenance attempt without authorizing another call. WHY: Keeps failed or ambiguous work visible separately from retry prevention. */
-export function sharedNightlyCompactOutcome(record, facts, maxTokens) {
+export function sharedNightlyCompactOutcome(record, facts) {
   if (!record) return null;
   const base = { sessionId: record.sessionId, sharedStatus: record.status,
     beforeTokens: record.beforeTokens ?? facts.tokens, afterTokens: facts.tokens ?? null };
+  // Another pass already compacted this context and nothing happened since, so
+  // tonight attempted nothing and may not retry. Its size stays visible but
+  // cannot fail the night: a size Claude has not journaled yet is unknown, and
+  // re-reporting it would fail every night until the pane works again.
   if (record.status === "VERIFIED") {
-    return { ...base, ...nightlyCompactOutcome({ ok: true, compactBoundary: true, sessionId: record.sessionId },
-      facts, facts, maxTokens), reason: "compact-already-verified-without-new-work" };
+    return { ...base, status: "already-compacted", reason: "compact-already-verified-without-new-work" };
   }
   return { ...base, status: record.status === "FAILED" ? "failed" : "unverified",
     reason: record.reason || (record.status === "FAILED" ? "previous-compact-failed" : "previous-compact-outcome-unknown") };

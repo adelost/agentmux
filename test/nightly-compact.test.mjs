@@ -2,7 +2,7 @@ import { feature, unit, component, expect } from "bdd-vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nightlyCompactPolicy, nightlyCompactDecision, nightlyCompactOutcome, compactAccessBlocker } from "../core/nightly-compact.mjs";
+import { nightlyCompactPolicy, nightlyCompactDecision, nightlyCompactOutcome, nightlyUnresolvedCount, compactAccessBlocker } from "../core/nightly-compact.mjs";
 import { runNightlyCompact } from "../cli/nightly-compact.mjs";
 import { cmdDream } from "../cli/dream.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
@@ -163,9 +163,43 @@ feature("nightly context budget", () => {
       try { return { result: await runNightlyCompact(fx.ctx, {}, fx.deps), calls: fx.calls() }; }
       finally { fx.clean(); }
     }],
-    then: ["nightly checks the receipt and spends no second compact", ({ result, calls }) => {
+    // Mattias 2026-10-10 ("har amux dream funkat som det ska? annars undersök
+    // och fixa"): 15 of the 16 "unresolved" on 2026-10-10 were panes like
+    // this one. Nothing was attempted and nothing may be, so the night is not
+    // failed by it; its size stays visible in the row.
+    then: ["nightly checks the receipt, spends no second compact and is not failed by it", ({ result, calls }) => {
       expect(result.rows[0].reason).toBe("compact-already-verified-without-new-work"); expect(calls).toBe(0);
-      expect(result.rows[0].status).toBe("compacted-above-budget"); expect(result.unresolved).toBe(1);
+      expect(result.rows[0]).toMatchObject({ status: "already-compacted", afterTokens: 227_000 });
+      expect(result.unresolved).toBe(0);
+    }],
+  });
+  unit("only undone budget work is unresolved", {
+    when: ["counting each outcome alone", () => [
+      { status: "already-compacted", beforeTokens: 776_409, afterTokens: null },
+      { status: "within-budget" }, { status: "nothing-to-compact" },
+      { status: "skipped", reason: "within-budget", beforeTokens: 81_279 },
+      { status: "failed", reason: "compact-command-unverified" }, { status: "unverified" },
+      { status: "compacted-unmeasured" }, { status: "compacted-above-budget" },
+      { status: "skipped", reason: "provider-usage-limited", beforeTokens: 300_000 },
+    ].map((row) => nightlyUnresolvedCount([row], policy))],
+    then: ["a pane compacted earlier counts like a finished one", (counts) =>
+      expect(counts).toEqual([0, 0, 0, 0, 1, 1, 1, 1, 1])],
+  });
+  component("a pane compacted earlier whose new size is not yet journaled does not fail the night", {
+    when: ["the verified compact has no turn after it, so its token count is unknown", async () => {
+      const fx = fixture(), data = {};
+      const path = join(fx.root, "session.jsonl");
+      writeFileSync(path, JSON.stringify({ type: "system", subtype: "compact_boundary" }) + "\n");
+      fx.ctx.state = { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
+      rememberContextCompact(fx.ctx.state, "claw", 4, { ok: true, sessionId: "same-session", cursor: { positions: { [path]: 0 } } });
+      fx.change({ tokens: null });
+      try { return { result: await runNightlyCompact(fx.ctx, {}, fx.deps), calls: fx.calls() }; }
+      finally { fx.clean(); }
+    }],
+    then: ["it reads as already compacted without a number, and nothing is unresolved", ({ result, calls }) => {
+      expect(calls).toBe(0);
+      expect(result.rows[0]).toMatchObject({ status: "already-compacted", afterTokens: null });
+      expect(result.unresolved).toBe(0);
     }],
   });
   component("temporary lease contention retries without spending the night's model attempt", {
