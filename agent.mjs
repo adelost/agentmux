@@ -1278,8 +1278,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
           && kimiComposerHasCollapsedPaste(raw)) {
         return true;
       }
-      // Claude collapses a landed multi-line paste to "[Pasted text #N +M lines]"; same owned-only contract.
-      if (dialect === "claude" && ownedDraft && claudePasteTransportState(raw, prompt) === "drafted") return true;
       return false;
     } catch {
       return false;
@@ -1296,8 +1294,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const dialect = await livePaneDialectName(agentName, pane);
     const busy = Boolean(await isBusy(agentName, pane).catch(() => true));
     // A paste waiting on Claude's clipboard lookup shows an empty composer; it is neither idle nor empty.
-    const paste = dialect === "claude" ? claudePasteTransportState(await capturePane(agentName, pane, 15).catch(() => ""), prompt) : null;
-    if (paste) return { state: paste, busy, dialect };
+    const paste = dialect === "claude" ? claudePasteTransportState(await capturePane(agentName, pane, 15).catch(() => "")) : null;
+    if (paste) return { state: paste, busy, dialect, detail: paste === "pasting" ? "Pasting…" : "a collapsed paste amux cannot attribute" };
     if (dialect !== "codex") {
       const drafted = await promptAlreadyInComposer(agentName, pane, prompt);
       if (drafted) return { state: "drafted", busy, dialect };

@@ -12,7 +12,7 @@
 
 import { readFileSync, readdirSync } from "node:fs";
 import { basename } from "node:path";
-import { COMPOSER_RULE_RE, composerLines } from "./dialects.mjs";
+import { COMPOSER_RULE_RE, composerDraft } from "./dialects.mjs";
 
 // About five seconds at the transport's 250 ms poll. A healthy lookup answers in milliseconds.
 const CLAUDE_PASTE_SETTLE_POLLS = 20;
@@ -21,7 +21,7 @@ const CLAUDE_PASTE_LAND_POLLS = 12;
 const POLL_MS = 250;
 
 const PASTING_FOOTER_RE = /^Pasting…(?:\s{2,}\S.*)?$/u;
-const COLLAPSED_PASTE_RE = /^❯\s*\[Pasted text #\d+ \+(\d+) lines?\]$/u;
+const COLLAPSED_PASTE_RE = /\[Pasted text #\d+(?: \+\d+ lines?)?\]/u;
 // Claude's own Linux clipboard scripts (path lookup, image check, image save) all start with an xclip
 // read and fall back to wl-paste. The same script run through a tool shell is not Claude's own child.
 const CLAUDE_CLIPBOARD_SCRIPT_RE = /^xclip -selection clipboard -t \S+ -o\b.*\|\| wl-paste\b/su;
@@ -37,13 +37,10 @@ export function claudeComposerIsPasting(screen) {
     && lines.slice(ruleBelow + 1, ruleBelow + 4).some((line) => PASTING_FOOTER_RE.test(line));
 }
 
-/** WHAT: Checks whether the composer holds only Claude's collapsed copy of this multi-line prompt. WHY: Keeps a landed paste from reading as empty and inviting a second paste. */
-export function claudeComposerHoldsPaste(screen, prompt) {
-  const [first = "", ...rest] = composerLines(screen);
-  const collapsed = COLLAPSED_PASTE_RE.exec(first);
-  const breaks = (String(prompt).match(/\r\n|\r|\n/gu) || []).length;
-  return Boolean(collapsed) && Number(collapsed[1]) === breaks && rest.every((line) => !line);
-}
+// lsrc:3 review 2026-10-10: "Radantal är inte identitet." The placeholder hides the text and its number is
+// Claude's own session counter, so a collapsed paste is real content that amux never claims as its draft.
+/** WHAT: Checks whether Claude's composer holds a collapsed paste whose text the screen hides. WHY: Keeps an unattributable paste from reading as empty or as amux's own draft. */
+export const claudeComposerHasCollapsedPaste = (screen) => COLLAPSED_PASTE_RE.test(composerDraft(screen) ?? "");
 
 /** WHAT: Checks whether a shell script is Claude Code's own clipboard read. WHY: Keeps the same script under a tool shell from ever being signalled. */
 export const isClaudeClipboardScript = (script) => CLAUDE_CLIPBOARD_SCRIPT_RE.test(String(script || ""));

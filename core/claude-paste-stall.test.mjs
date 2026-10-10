@@ -1,6 +1,6 @@
 import { feature, unit, expect } from "bdd-vitest";
 import {
-  claudeComposerHoldsPaste, claudeComposerIsPasting, endClaudeClipboardLookups,
+  claudeComposerHasCollapsedPaste, claudeComposerIsPasting, endClaudeClipboardLookups,
   findClaudeClipboardLookups, isClaudeClipboardScript,
 } from "./claude-paste-stall.mjs";
 
@@ -11,7 +11,6 @@ const PASTING = screen("", "  Pasting…");
 const LANDED = screen("[Pasted text #1 +3 lines]", "  paste again to expand");
 const IDLE = screen("", "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents");
 const QUOTED = ["⏺ The footer said Pasting…", "  Pasting…", RULE, "❯ ", RULE, "  ⏵⏵ bypass permissions on"].join("\n");
-const STALLED_JOB = "[from lsrc:1]\n\n/home/adelost/lsrc/.artifacts/cutkit-quality-2026-10-09/e283-share/e283-fore-efter-390.png\n";
 
 // Claude Code 2.1.295's Linux clipboard scripts, copied from the binary.
 const PATH_LOOKUP = "xclip -selection clipboard -t text/plain -o 2>/dev/null || wl-paste 2>/dev/null";
@@ -24,13 +23,10 @@ feature("Claude's held paste is recognised from its own screen", () => {
     then: ["the held paste alone is pasting", (result) => expect(result).toEqual([true, false, false, false])],
   });
 
-  unit("a landed paste is this prompt only when its line count matches", {
-    when: ["matching the collapsed paste against three prompts", () => [
-      claudeComposerHoldsPaste(LANDED, STALLED_JOB),
-      claudeComposerHoldsPaste(LANDED, "one\ntwo"),
-      claudeComposerHoldsPaste(IDLE, STALLED_JOB),
-    ]],
-    then: ["only the 3-break prompt owns it", (result) => expect(result).toEqual([true, false, false])],
+  // lsrc:3 review 2026-10-10: "Radantal är inte identitet." The collapsed paste is seen, never matched to a prompt.
+  unit("a collapsed paste is seen in the composer only", {
+    when: ["reading four real screens", () => [LANDED, PASTING, IDLE, QUOTED].map(claudeComposerHasCollapsedPaste)],
+    then: ["only the landed paste is a collapsed paste", (result) => expect(result).toEqual([true, false, false, false])],
   });
 
   unit("only Claude's own clipboard scripts count as its lookup", {

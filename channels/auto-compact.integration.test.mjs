@@ -439,7 +439,7 @@ const HELD_SCREENS = {
   frozenTurn: ["✻ Working… (52m 10s · ↓ 1.2k tokens)", "────", "❯ ", "────", "  ⬆ test │ Opus 4.7 │ 4 ██████████ 100%", "  1000000 tokens"].join("\n"),
 };
 
-function heldHarness({ screen, quietMinutes, refusal = "context-cost:not-idle:pasting" }) {
+function heldHarness({ screen, quietMinutes, refusal = "context-cost:not-idle:pasting", send = null }) {
   const oldHome = process.env.HOME;
   const fakeHome = mkdtempSync(join(tmpdir(), "amux-ac-home-"));
   process.env.HOME = fakeHome;
@@ -452,7 +452,7 @@ function heldHarness({ screen, quietMinutes, refusal = "context-cost:not-idle:pa
   // Production thresholds: 50 quiet minutes, a 60-minute prompt cache.
   const config = { ...DEFAULT_CONFIG, graceMs: 0, compactLockMs: 0 };
   const ac = createAutoCompact({
-    agent, agentsYamlPath: path, discord: { send: async (_channel, text) => { state.sends.push(text); } },
+    agent, agentsYamlPath: path, discord: { send: send ? (channel, text) => send(state, text) : async (_channel, text) => { state.sends.push(text); } },
     tmux: async () => ({ stdout: "0 50" }), config, contextMaintenance, log: () => {},
   });
   return { ac, state, restore: () => { process.env.HOME = oldHome; rmSync(fakeHome, { recursive: true, force: true }); } };
@@ -492,6 +492,30 @@ feature("a quiet pane the compact cannot reach is reported before its cache goes
     then: ["nothing is sent and nothing runs", (state) => {
       expect(state.runs).toBe(0);
       expect(state.sends).toEqual([]);
+    }],
+  });
+});
+
+// lsrc:3 review 2026-10-10: a held notice was remembered before Discord accepted it, so a rejected send
+// silenced the rest of the quiet episode. Only a delivered notice counts.
+feature("a held notice counts only once Discord has accepted it", () => {
+  component("a rejected notice is sent again on the next poll and then only once", {
+    given: ["a frozen-turn pane whose first held notice Discord rejects", () => heldHarness({
+      screen: HELD_SCREENS.frozenTurn, quietMinutes: 51,
+      send: async (state, text) => {
+        state.attempts = (state.attempts || 0) + 1;
+        if (state.attempts === 1) throw new Error("Discord 503");
+        state.sends.push(text);
+      },
+    })],
+    when: ["four poll ticks", async ({ ac, state, restore }) => {
+      try { await ticks(ac, 4); return state; } finally { restore(); }
+    }],
+    then: ["two send attempts, one delivered notice, no compact", (state) => {
+      expect(state.attempts).toBe(2);
+      expect(state.sends).toHaveLength(1);
+      expect(state.sends[0]).toMatch(/is held: its screen shows a running turn/u);
+      expect(state.runs).toBe(0);
     }],
   });
 });

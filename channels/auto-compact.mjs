@@ -284,14 +284,22 @@ export function createAutoCompact({
       .catch((err) => log(`compact-failed notice send failed for ${paneKey}: ${err.message}`));
   }
 
+  // lsrc:3 review 2026-10-10: only a notice Discord accepted counts; a rejected one is tried on the next poll.
   async function postCompactHeld(agentName, paneIdx, paneKey, reason, { lastActivityMs, contextTokens }) {
     if (heldNotices.get(paneKey) === lastActivityMs) return;
-    heldNotices.set(paneKey, lastActivityMs);
-    log(`${paneKey}: compact held (${reason})`);
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
-    if (!channelId || !discord) return;
-    await discord.send(channelId, formatCompactHeldMessage(paneKey, reason, contextTokens, lastActivityMs + config.warmCacheMs))
-      .catch((err) => log(`compact-held notice send failed for ${paneKey}: ${err.message}`));
+    if (!channelId || !discord) {
+      heldNotices.set(paneKey, lastActivityMs);
+      log(`${paneKey}: compact held (${reason}); no Discord channel to tell`);
+      return;
+    }
+    try {
+      await discord.send(channelId, formatCompactHeldMessage(paneKey, reason, contextTokens, lastActivityMs + config.warmCacheMs));
+      heldNotices.set(paneKey, lastActivityMs);
+      log(`${paneKey}: compact held (${reason}); notice sent`);
+    } catch (err) {
+      log(`compact-held notice send failed for ${paneKey}: ${err.message}; retrying on the next poll`);
+    }
   }
 
   async function postCompactPostponed(agentName, paneIdx, paneKey, reason) {

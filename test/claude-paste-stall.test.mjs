@@ -5,6 +5,8 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { createAgent } from "../agent.mjs";
+import { createDeliveryQueue } from "../core/delivery-queue.mjs";
+import { recoverSubmittedTui } from "../core/submitted-tui-recovery.mjs";
 
 // Observed with the real Claude Code 2.1.295 in an isolated tmux on 2026-10-10: tmux pastes amux's
 // line breaks as CR, Claude splits a paste into pieces only at LF, and a piece that ends in an image
@@ -138,7 +140,7 @@ function claudePane() {
   }
 
   return {
-    agent, pane, claude, lookups, clean,
+    agent, pane, claude, lookups, clean, root,
     /** A paste that reached Claude before this test's delivery, still waiting on its lookup. */
     pasteEarlier: (text) => paste(text.replace(/\n/gu, "\r")),
     toolLookup: () => startLookup("tool"),
@@ -170,7 +172,8 @@ feature("a Claude paste that waits on the clipboard never holds delivery", () =>
     }],
   });
 
-  component("the transport reports a held paste as pasting and the landed paste as this prompt's draft", {
+  // lsrc:3 review 2026-10-10: a landed collapsed paste is never attributed by its line count.
+  component("the transport reports a held paste as pasting and a landed collapsed paste as foreign", {
     given: ["an earlier paste still waiting on its lookup", async () => {
       const fixture = claudePane();
       await fixture.pasteEarlier(STALLED_JOB);
@@ -183,7 +186,7 @@ feature("a Claude paste that waits on the clipboard never holds delivery", () =>
       return { held: held.state, landed: (await fixture.agent.promptTransportState("probe", 0, STALLED_JOB)).state };
     }],
     then: ["neither state invites a restart or a second paste", async (states, fixture) => {
-      try { expect(states).toEqual({ held: "pasting", landed: "drafted" }); } finally { await fixture.clean(); }
+      try { expect(states).toEqual({ held: "pasting", landed: "foreign" }); } finally { await fixture.clean(); }
     }],
   });
 
@@ -206,7 +209,9 @@ feature("a Claude paste that waits on the clipboard never holds delivery", () =>
     }],
   });
 
-  component("Mattias's next message frees the pane without merging into the stalled paste", {
+  // lsrc:3 review 2026-10-10: the stalled paste cannot be proven to be the earlier job's text, so it
+  // stays a draft: no job submits it, nothing types after it, and nothing pastes it again.
+  component("Mattias's next message frees the pane and the landed paste stays a draft no one submits", {
     given: ["an earlier amux paste still waiting on its lookup", async () => {
       const fixture = claudePane();
       await fixture.pasteEarlier(STALLED_JOB);
@@ -217,14 +222,17 @@ feature("a Claude paste that waits on the clipboard never holds delivery", () =>
       composerAfterFirst: fixture.pane.composer,
       retry: await deliver(fixture, STALLED_JOB, { knownDrafted: true }),
       second: await deliver(fixture, QUESTION),
+      lookupAlive: alive(fixture.lookups[0]),
     })],
-    then: ["each message is submitted once, in order, with no second paste", async (result, fixture) => {
+    then: ["the hang is over, nothing is submitted, merged or pasted again, and the draft is intact", async (result, fixture) => {
       try {
-        expect(fixture.pane.submitted).toEqual([STALLED_JOB, QUESTION]);
+        expect(fixture.pane.submitted).toEqual([]);
+        expect(result.lookupAlive).toBe(false);
         expect(result.first).toMatch(/draft amux did not type/u);
         expect(result.composerAfterFirst).toBe("[Pasted text #1 +3 lines]");
-        expect(result.retry).toBeNull();
-        expect(result.second).toBeNull();
+        expect(result.retry).toMatch(/refusing to paste it again/u);
+        expect(result.second).toMatch(/draft amux did not type/u);
+        expect(fixture.pane.composer).toBe("[Pasted text #1 +3 lines]");
         expect(fixture.pane.calls.filter((call) => call.includes("paste-buffer"))).toHaveLength(0);
         expect(restarted(fixture.pane)).toBe(false);
       } finally { await fixture.clean(); }
@@ -266,6 +274,54 @@ feature("a Claude paste that waits on the clipboard never holds delivery", () =>
         expect(result.toolChildren).toBeGreaterThan(0);
         expect(fixture.pane.submitted).toEqual([STALLED_JOB]);
       } finally { await fixture.clean(); }
+    }],
+  });
+});
+
+// lsrc:3 review 2026-10-10: "Radantal är inte identitet." A job that was submitted is no proof that a later
+// collapsed paste with the same line count is its text, so recovery must not Enter, erase or restart it.
+feature("a collapsed paste amux cannot attribute is never submitted, erased or restarted", () => {
+  component("a person's same-length collapsed draft after a submitted job gets nothing and no receipt", {
+    given: ["a job submitted ten minutes ago and a person's own two-line paste in an idle composer", () => {
+      const fixture = claudePane();
+      const oldHome = process.env.HOME;
+      const home = mkdtempSync(join(tmpdir(), "amux-paste-owner-home-"));
+      process.env.HOME = home;
+      const paneDir = join(fixture.root, ".agents", "0");
+      const project = join(home, ".claude", "projects", paneDir.replace(/[\/\.]/gu, "-"));
+      mkdirSync(project, { recursive: true });
+      const turnAt = new Date(Date.now() - 20 * 60_000).toISOString();
+      writeFileSync(join(project, "session.jsonl"), [
+        { type: "user", timestamp: turnAt, message: { role: "user", content: "earlier turn" } },
+        { type: "assistant", timestamp: turnAt, message: { role: "assistant", model: "claude-opus-5-5", stop_reason: "end_turn",
+          content: [{ type: "text", text: "done" }], usage: { input_tokens: 1, output_tokens: 1 } } },
+      ].map((row) => JSON.stringify(row)).join("\n") + "\n");
+      const queue = createDeliveryQueue({ rootDir: join(home, "queue") });
+      const created = queue.enqueue({ agentName: "probe", pane: 0, text: "first private message\n/a.png" });
+      const job = queue.update(created, { status: "submitted", submittedAt: Date.now() - 10 * 60_000,
+        echoCursor: { kind: "claude-prompt-events-v1", positions: {} } });
+      fixture.pane.composer = "[Pasted text #7 +1 lines]";
+      return { fixture, queue, job, restore: () => { process.env.HOME = oldHome; rmSync(home, { recursive: true, force: true }); } };
+    }],
+    when: ["recovery visits the job twice", async ({ fixture, queue, job }) => {
+      const pass = (current) => recoverSubmittedTui({
+        job: current, agent: fixture.agent, queue, now: Date.now, onRecovered: () => {},
+        exactEcho: async () => false, acknowledge: () => { throw new Error("no receipt exists"); },
+      });
+      await pass(job);
+      await pass(queue.read("probe", 0, job.id));
+      return queue.read("probe", 0, job.id);
+    }],
+    then: ["no Enter, erase or restart, the draft is intact and the job has no receipt", async (current, { fixture, restore }) => {
+      try {
+        const keys = fixture.pane.calls.filter((call) => /send-keys/u.test(call));
+        expect(fixture.pane.submitted).toEqual([]);
+        expect(keys.filter((call) => /Enter$/u.test(call))).toEqual([]);
+        expect(keys.filter((call) => /BSpace|C-u|Escape/u.test(call))).toEqual([]);
+        expect(restarted(fixture.pane)).toBe(false);
+        expect(fixture.pane.composer).toBe("[Pasted text #7 +1 lines]");
+        expect(current).toMatchObject({ status: "submitted", acknowledgedAt: null });
+      } finally { restore(); await fixture.clean(); }
     }],
   });
 });

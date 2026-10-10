@@ -5,16 +5,15 @@ import { appendEvent } from "./events.mjs";
 import { codexDeliveryBlocked } from "./codex-delivery-blocked.mjs";
 import { eraseKeys } from "./delivery-fence.mjs";
 import { composerDraft } from "./dialects.mjs";
-import { promptRequiresAtomicPaste } from "./prompt-paste.mjs";
-import { claudeComposerHoldsPaste, claudeComposerIsPasting, settleClaudePaste } from "./claude-paste-stall.mjs";
+import { claudeComposerHasCollapsedPaste, claudeComposerIsPasting, settleClaudePaste } from "./claude-paste-stall.mjs";
 
 /**
- * WHAT: Maps Claude's held or landed paste of this prompt to a delivery transport state, or null.
- * WHY: Keeps a held paste from reading as an idle empty composer that invites restart or compact.
+ * WHAT: Maps Claude's held paste to "pasting" and a collapsed paste to "foreign", or returns null.
+ * WHY: Keeps either from reading as an idle empty composer or as amux's own draft.
  */
-export function claudePasteTransportState(screen, prompt) {
+export function claudePasteTransportState(screen) {
   if (claudeComposerIsPasting(screen)) return "pasting";
-  return promptRequiresAtomicPaste(prompt) && claudeComposerHoldsPaste(screen, prompt) ? "drafted" : null;
+  return claudeComposerHasCollapsedPaste(screen) ? "foreign" : null;
 }
 
 function recordLookupEnded(agentName, pane, released, scripts) {

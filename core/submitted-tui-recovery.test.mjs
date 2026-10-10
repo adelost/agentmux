@@ -10,7 +10,8 @@ const STALLED_JOB = "[from lsrc:1]\n\n/home/adelost/lsrc/.artifacts/cutkit-quali
 feature("a submitted Claude prompt held by Pasting… is recovered in place", () => {
   // skyvw:0, 2026-10-09 22:09Z: recovery read the held paste as an idle empty composer, restarted the
   // pane and pasted the same text into the same clipboard wait, which then held the pane for hours.
-  component("the lookup is ended, the pane is never restarted, and the draft gets one Enter", {
+  // lsrc:3 review 2026-10-10: the landed collapsed paste is not provably this job's text, so no Enter.
+  component("the lookup is ended, the pane is never restarted, and the landed paste gets no Enter", {
     given: ["a prompt submitted ten minutes ago whose paste still waits on Claude's clipboard lookup", () => {
       const rootDir = mkdtempSync(join(tmpdir(), "amux-submitted-paste-"));
       let clock = 600_000;
@@ -24,7 +25,7 @@ feature("a submitted Claude prompt held by Pasting… is recovered in place", ()
       const agent = {
         paneProcessState: async () => ({ running: true, dead: false, shell: false, command: "claude" }),
         promptTransportState: async () => ({ state: composer, busy: false, dialect: "claude" }),
-        settleClaudePaste: async () => { calls.settle++; composer = "drafted"; return { ok: true, released: [21, 22] }; },
+        settleClaudePaste: async () => { calls.settle++; composer = "foreign"; return { ok: true, released: [21, 22] }; },
         restartPaneExact: async () => { calls.restart++; return { ok: true, dialect: "claude" }; },
         sendEnter: async () => { calls.enter++; },
       };
@@ -40,11 +41,12 @@ feature("a submitted Claude prompt held by Pasting… is recovered in place", ()
       const second = await pass(ctx.queue.read("skyvw", 0, ctx.job.id));
       return { first, second };
     }],
-    then: ["one settle, one Enter on the landed draft, no restart and no second paste", ({ first, second }, ctx) => {
+    then: ["one settle, no Enter, no restart, and the job keeps waiting for its own receipt", ({ first, second }, ctx) => {
       try {
-        expect(ctx.calls).toEqual({ settle: 1, enter: 1, restart: 0 });
+        expect(ctx.calls).toEqual({ settle: 1, enter: 0, restart: 0 });
         expect(first.lastReason).toMatch(/ended pids 21, 22/u);
-        expect(second).toMatchObject({ status: "submitted", metadata: { submittedRecoveryKind: "exact-draft-enter" } });
+        expect(second).toBeNull();
+        expect(ctx.queue.read("skyvw", 0, ctx.job.id)).toMatchObject({ status: "submitted", acknowledgedAt: null });
       } finally { rmSync(ctx.rootDir, { recursive: true, force: true }); }
     }],
   });

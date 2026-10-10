@@ -43,9 +43,9 @@ export async function recoverSubmittedTui({
       ? acknowledge(current, "late-echo-before-dead-tui-recovery")
       : current;
   }
-  // Claude held our Enter while the paste waited on its clipboard lookup. A restart would paste the
-  // same text into the same wait (skyvw:0, 2026-10-09 22:09Z). End the lookup so the paste lands;
-  // the exact-draft Enter below submits it on the next pass.
+  // A paste held by Claude's clipboard lookup: a restart would paste the same text into the same wait
+  // (skyvw:0, 2026-10-09 22:09Z). End the lookup so the paste lands as a visible draft. The transport
+  // never attributes a collapsed paste to this job, so it then gets no Enter, erase or restart here.
   if (transport.state === "pasting") {
     if (typeof agent.settleClaudePaste !== "function") return null;
     const settled = await agent.settleClaudePaste(current.agentName, current.pane)
@@ -55,8 +55,8 @@ export async function recoverSubmittedTui({
       nextAttemptAt: now() + 1_000,
       lastReason: !settled.ok ? settled.reason
         : settled.released.length
-          ? `Claude held the submitted paste on its clipboard lookup; ended pids ${settled.released.join(", ")} so the draft can land`
-          : "Claude finished the held paste; checking the draft before one recovery Enter",
+          ? `Claude held a paste on its clipboard lookup; ended pids ${settled.released.join(", ")} so it lands as a draft that is not this job's receipt`
+          : "Claude finished a held paste; it is not this job's receipt",
     });
   }
   if (!recoveryKind && runtime?.running === true && transport.state === "drafted"
