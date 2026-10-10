@@ -33,6 +33,12 @@ feature("second-stage reranking", () => {
     }],
   });
 
+  unit("a long unit is cut to what the model reads, so tokenizing stays cheap", {
+    given: ["a 5000-character note line", () => ({ path: "/day.md", snippet: "x", passage: { start: 0, length: 5000, context: ["Dag"] } })],
+    when: ["building its text", (hit) => rerankText(hit, () => "a".repeat(5000))],
+    then: ["at most 800 characters reach the tokenizer", (text) => expect(text.length).toBe(800)],
+  });
+
   unit("the reranker reads the unit under its headings", {
     given: ["a passage hit inside a people note", () => ({ path: "/people.md", snippet: "x",
       passage: { start: 9, length: 28, context: ["People", "Övriga"] } })],

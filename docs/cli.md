@@ -83,9 +83,11 @@ candidates together with the question: `bge-reranker-v2-m3` on the GPU (top
 neighbours, and every served topic page whether or not it shares a word with
 the question), or the smaller
 `mmarco-mMiniLMv2-L12-H384-v1` on the CPU (top 30, blended with the first-stage
-order). The reranker reads each unit with its headings, its entry name and
-the lines just around it, so "- Kommunicerar på engelska" is judged as part
-of Smara's entry. Proper names (capitalised words, and names of people in the
+order). Dense retrieval's top 50 always enter that pool, so an English line
+answering a Swedish question is judged even when lexical matches fill the
+budget. The reranker reads each unit with its headings, its entry name and
+the lines just around it (at most 800 characters, about what fits in its 256
+tokens), so "- Kommunicerar på engelska" is judged as part of Smara's entry. Proper names (capitalised words, and names of people in the
 people notes) are matched as written or in the genitive, never stemmed:
 "Elina" does not match "Elin". Names written apart, joined or hyphenated ("Cut kit", "cutkit",
 "cut-kit") match each other, and a long question word matches compounds that
@@ -140,6 +142,10 @@ Reindexing is never an implicit side effect of a query.
 terminal or tmux pane, so one agent cannot replace another agent's `--show N`
 list. `--eval FILE` scores a private golden set (hit@1, hit@3, MRR, latency per
 question kind); `#` lines in the set carry its provenance and labelling rules.
+`--profile` adds per-stage median and p95 (BM25, dense query, rerank
+tokenization and GPU pass, and more) and pool recall: how many answers
+reached the reranker, and for each top-3 miss whether it was lost in the
+first stage or in the rerank.
 
 ## Native cutover
 

@@ -101,7 +101,9 @@ export async function semanticQuery(query, { k = 30, roots = null, dir = indexDi
 export async function daemonPassages(query, roots, { max = 30, workspace, dates = [], perFile, dir = indexDir(), model = semanticModel().name } = {}) {
   try {
     const result = await request(embedderSocketPath(dir, model), { op: "passages", query, roots, max, workspace, dates, perFile }, 30_000);
-    return Array.isArray(result.hits) ? result.hits : null;
+    if (!Array.isArray(result.hits)) return null;
+    result.hits.timing = result.timing;
+    return result.hits;
   } catch { return null; }
 }
 
@@ -113,7 +115,7 @@ export async function daemonRerank(query, texts, { dir = indexDir(), model = sem
   try {
     const result = await request(embedderSocketPath(dir, model), { op: "rerank", query, texts }, 30_000);
     if (Array.isArray(result.scores) && result.scores.length && result.scores.length <= texts.length) {
-      return { scores: result.scores, weight: result.weight, kind: result.kind, note: result.note };
+      return { scores: result.scores, weight: result.weight, kind: result.kind, note: result.note, timing: result.timing };
     }
     return { scores: null, unavailable: result.unavailable || "reranker returned no scores" };
   } catch (error) { return { scores: null, unavailable: `reranker unreachable: ${error.message}` }; }
@@ -164,14 +166,16 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
         if (ping) { socket.end("{}"); return; }
         if (op === "rerank") {
           if (!reranker || !Array.isArray(texts)) { socket.end(JSON.stringify({ scores: null, unavailable: rerankNote })); return; }
-          const scores = await reranker.score(String(query), texts.slice(0, reranker.candidates).map(String));
-          socket.end(JSON.stringify({ scores, ...rerankInfo() }));
+          const timing = {};
+          const scores = await reranker.score(String(query), texts.slice(0, reranker.candidates).map(String), timing);
+          socket.end(JSON.stringify({ scores, ...rerankInfo(), timing }));
           return;
         }
         if (op === "passages") {
+          const started = performance.now();
           const hits = searchPassages(String(query), roots, { max, dates, perFile, cache: segments, onWarning: () => {},
             excludePath: (path) => Boolean(workspace) && isTopicPath(path, workspace) });
-          socket.end(JSON.stringify({ hits }));
+          socket.end(JSON.stringify({ hits, timing: { "d:bm25": performance.now() - started } }));
           return;
         }
         const loaded = live.index();
@@ -179,10 +183,17 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
           socket.end(JSON.stringify({ hits: [], unavailable: "semantic index missing or built for another model; run: amux search --reindex" }));
           return;
         }
+        let started = performance.now();
         if (Array.isArray(roots)) live.refresh(roots);
+        const timing = { "d:overlayScan": performance.now() - started };
+        started = performance.now();
         const [vector] = await embed([String(query)], "query");
-        socket.end(JSON.stringify({ hits: live.rank(vector, k), builtAt: loaded.builtAt, complete: loaded.complete,
-          pendingFiles: live.pendingFiles(), reranker: rerankInfo() }));
+        timing["d:queryEmbed"] = performance.now() - started;
+        started = performance.now();
+        const hits = live.rank(vector, k);
+        timing["d:denseSearch"] = performance.now() - started;
+        socket.end(JSON.stringify({ hits, builtAt: loaded.builtAt, complete: loaded.complete,
+          pendingFiles: live.pendingFiles(), reranker: rerankInfo(), timing }));
       } catch (error) {
         socket.end(JSON.stringify({ hits: [], unavailable: `semantic query failed: ${error.message}` }));
       } finally {

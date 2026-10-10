@@ -89,6 +89,25 @@ function stemIndex(word, stems) {
   return undefined;
 }
 
+function lowerBound(sorted, value) {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (sorted[middle] < value) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+function wordsWithPrefixes(sorted, prefixes) {
+  const found = new Set();
+  for (const prefix of prefixes) {
+    for (let index = lowerBound(sorted, prefix); index < sorted.length && sorted[index].startsWith(prefix); index++) found.add(sorted[index]);
+  }
+  return [...found];
+}
+
 function wordsOf(text) {
   const tf = new Map();
   let length = 0;
@@ -141,7 +160,11 @@ function fileSegment(path) {
       for (const word of String(value || "").toLowerCase().match(WORD) || []) if (word.length >= 3 && !/\d/u.test(word)) names.add(word);
     }
   }
-  return { sha256: hash(bytes), date: dateFromPath(path), units, vocabulary, totalLength, names };
+  // Sorted once per file version: every query term matches words that start
+  // with it, so a binary search finds them instead of scanning the file's
+  // whole vocabulary (that scan was ~0.7 s of every query over 39k units).
+  const sortedVocabulary = [...vocabulary].sort();
+  return { sha256: hash(bytes), date: dateFromPath(path), units, vocabulary, sortedVocabulary, totalLength, names };
 }
 
 /** WHAT: Returns a file's segment, rebuilt only when it changed. WHY: Keeps repeated queries in one process from re-reading the corpus. */
@@ -188,6 +211,13 @@ export function searchPassages(query, roots, { max = 12, excludePath = () => fal
     }
     return value;
   };
+  // A term can only match words that start with it (stems, compound heads,
+  // identifiers) or, for a genitive name, with the name less its "s".
+  const prefixes = [...new Set(tokens.flatMap(token => {
+    if (!token.startsWith(NAME)) return [token];
+    const name = token.slice(NAME.length);
+    return name.endsWith("s") ? [name, name.slice(0, -1)] : [name];
+  }))];
   const docs = [];
   let unitCount = 0;
   let totalLength = 0;
@@ -196,7 +226,7 @@ export function searchPassages(query, roots, { max = 12, excludePath = () => fal
     if (!segment) continue;
     unitCount += segment.units.length;
     totalLength += segment.totalLength;
-    const matching = [...segment.vocabulary].filter(word => termOf(word) >= 0);
+    const matching = wordsWithPrefixes(segment.sortedVocabulary, prefixes).filter(word => termOf(word) >= 0);
     if (!matching.length) continue;
     for (const unit of segment.units) {
       const counts = Array(tokens.length).fill(0);

@@ -12,7 +12,10 @@
 import { readFileSync } from "node:fs";
 import { modelCacheDir } from "./search-semantic.mjs";
 
-const TEXT_CHARS = 1200;
+// About what fits in 256 tokens with the question. The tokenizer is plain
+// JavaScript and costs per character: 1200 characters made tokenizing the
+// costliest stage of a query (~0.5 s), and the model never read the rest.
+const TEXT_CHARS = 800;
 const NEIGHBOUR_CHARS = 240;
 
 /**
@@ -44,14 +47,21 @@ export async function loadReranker(kind = "cpu", { threads = Number(process.env.
   const net = await AutoModelForSequenceClassification.from_pretrained(spec.model, spec.device === "cuda"
     ? { device: "cuda", dtype: spec.dtype, session_options: { enableCpuMemArena: false } }
     : { dtype: spec.dtype, session_options: { intraOpNumThreads: threads, interOpNumThreads: 1, enableCpuMemArena: false } });
-  const score = async (query, texts) => {
+  const score = async (query, texts, timing = {}) => {
     const scores = [];
+    const started = performance.now();
     // Chunks bound the activation memory, which on the GPU is VRAM.
     for (let i = 0; i < texts.length; i += spec.chunk) {
       const part = texts.slice(i, i + spec.chunk);
-      const { logits } = await net(tokenizer(part.map(() => query), { text_pair: part, padding: true, truncation: true, max_length: spec.maxTokens }));
+      const tokenizeStart = performance.now();
+      const inputs = tokenizer(part.map(() => query), { text_pair: part, padding: true, truncation: true, max_length: spec.maxTokens });
+      timing["d:tokenize"] = (timing["d:tokenize"] || 0) + performance.now() - tokenizeStart;
+      const forwardStart = performance.now();
+      const { logits } = await net(inputs);
+      timing["d:forward"] = (timing["d:forward"] || 0) + performance.now() - forwardStart;
       scores.push(...Array.from(logits.data));
     }
+    timing["d:rerankTotal"] = performance.now() - started;
     return scores;
   };
   return { kind, ...spec, score };
@@ -83,7 +93,7 @@ export function rerankText(hit, read = (path) => readFileSync(path, "utf8")) {
       const text = read(hit.path);
       const { start, length, section } = hit.passage;
       body = text.slice(start, start + length);
-      if (process.env.AMUX_RERANK_NEIGHBOURS !== "0" && section) {
+      if (section) {
         // The bullets next to a unit often carry its subject ("**Smara** —"
         // above "- Kommunicerar på engelska"); the unit comes first so it
         // survives the token limit.

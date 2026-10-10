@@ -129,6 +129,53 @@ feature("search CLI contract", () => {
     then: ["the fallback is in the output", ({ warned }, { note }) => expect(warned).toContain(note)],
   });
 
+  component("dense retrieval's top hits reach the reranker even when lexical units fill the budget", {
+    given: ["120 lexical matches and an English answer only the dense layer finds, at dense rank 45", () => {
+      const files = {};
+      for (let f = 0; f < 20; f++) files[`n${f}.md`] = `# N${f}\n${Array.from({ length: 6 }, (_, i) => `- Ljudboken hjälpte vid städningen, del ${f}.${i}.`).join("\n")}\n`;
+      const other = Array.from({ length: 60 }, (_, i) => `- Line ${i} about something else entirely.`);
+      other[44] = "- Shortcut OK if the end result is realistic.";
+      files["english.md"] = `# English\n${other.join("\n")}\n`;
+      const judged = [];
+      const makeSemantic = (root) => ({
+        query: async () => {
+          const text = files["english.md"];
+          const info = statSync(join(root, "english.md"));
+          const hits = other.map((line, i) => ({ path: join(root, "english.md"), line: i + 2, root: "memory", weight: 3, date: null,
+            sim: 0.9 - i * 0.005, unit: { start: text.indexOf(line), length: line.length, section: { start: 0, end: text.length } },
+            indexedMtimeMs: info.mtimeMs, indexedSize: info.size }));
+          return { hits, reranker: { kind: "gpu", candidates: 100, perFile: 6, semanticK: 60, note: null } };
+        },
+        passages: async () => null,
+        rerank: async (query, texts) => { judged.push(...texts); return { scores: texts.map(() => 0), weight: 1, kind: "gpu" }; },
+      });
+      return { files, makeSemantic, judged };
+    }],
+    when: ["asking a question that shares no word with the answer", ({ files, makeSemantic }) =>
+      runSearch(files, "ljudboken städningen fuska fysiken", { max: 3 }, makeSemantic)],
+    then: ["the reranker judged the English line", (_, { judged }) => {
+      expect(judged.some((text) => text.includes("Shortcut OK if the end result is realistic."))).toBe(true);
+    }],
+  });
+
+  component("--eval --profile reports stage timings and whether answers reached the reranker", {
+    given: ["a golden set with one question", () => ({
+      "notes.md": "# Anteckningar\n- Ljudboken hjälpte vid städningen.\n",
+      "golden.jsonl": `${JSON.stringify({ id: "q1", query: "vad hjälpte vid städningen", expect: ["Ljudboken hjälpte"], split: "dev" })}\n`,
+    })],
+    when: ["profiling the eval", async (files) => {
+      const root = mkdtempSync(join(tmpdir(), "amux-search-profile-"));
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(root, name), text);
+      const result = await runSearch(files, "", { eval: join(root, "golden.jsonl"), split: "dev", profile: true });
+      rmSync(root, { recursive: true, force: true });
+      return result;
+    }],
+    then: ["a per-stage table and the pool-recall line are printed", ({ text }) => {
+      expect(text).toMatch(/Stage timings:[\s\S]*lexical +n= *1/u);
+      expect(text).toContain("Pool recall:");
+    }],
+  });
+
   unit("help is handled before config access", {
     when: ["requesting help without a CLI context", async () => {
       const output = vi.spyOn(console, "log").mockImplementation(() => {});
