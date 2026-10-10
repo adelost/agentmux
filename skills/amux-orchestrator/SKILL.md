@@ -1,6 +1,6 @@
 ---
 name: amux-orchestrator
-description: Coordinate existing AMUX agents, inspect their current work and delivery evidence, and unblock a concrete stalled handoff without duplicating work. Use for fleet overviews, cross-project follow-through, and AMUX delivery or process triage; not for ordinary single-repo coding.
+description: Coordinate existing AMUX agents, inspect their current work and delivery evidence, and unblock a concrete stalled handoff without duplicating work. Use for fleet overviews, cross-project follow-through, running a plan to its stop conditions, and AMUX delivery or process triage; not for ordinary single-repo coding.
 ---
 
 # AMUX orchestration
@@ -97,6 +97,9 @@ For a requested queue/role/provider migration, read [the handoff checklist](refe
   changes. Judge by later comparable receipts: elapsed, rework, tokens
   (waiting and cached input separated). No new measurement system, no speedup
   percentages from unlike tasks. Research only for a concrete bottleneck.
+- In a run to stop conditions (section 9) this is the hourly review, on its
+  own cron at an off-minute (`28 * * * *`): at most 10 minutes and two
+  changes, and every score cites a fact against the plan's own 9/10 criteria.
 
 ## 5. Inspect AMUX transport only when relevant
 
@@ -146,6 +149,10 @@ re-read the fleet every tick. Pattern, in force from 2026-09-17:
   prompt says: run the script; no deviation, reply one line; a deviation,
   read only what the line points at, act by the written rule, tell the human
   in one line.
+- In a run to stop conditions (section 9) the round fires every 30 minutes at
+  off-minutes (`13,43 * * * *`) and its prompt opens with section 9's
+  reminders. Cron has no even 50-minute interval: round to one that divides
+  the hour and say so.
 - The script prints DRAINED when every lane is empty, and the prompt deletes
   its own cron on that word. A watch that outlives its work is a cost and a
   false signal.
@@ -182,3 +189,44 @@ force from 2026-09-14 (`skydive-altimeter/TASKS.md`), written down 2026-09-19.
 - Report from the ledger: closed today with their release, open with their
   state, the decisions that are the human's. The watch in section 7 reads the
   same file.
+
+## 9. Run a plan to done, through restarts
+
+For an outcome with stop conditions that the human wants carried on until
+done. The ledger (section 8) holds the rows, the round (section 7) moves them,
+the review (section 4) corrects the plan. Pattern from the Cutkit run, written
+down 2026-10-10.
+
+- Before the run: a plan that changes architecture goes back and forth with
+  one peer until both rate it at least 9/10, criteria and evidence named. A
+  diagram is an explanatory render, labelled as not the source, until it is
+  generated from the declarations the code consumes. A parked plan carries a
+  measured trigger, never a date.
+- Every round opens with these reminders, before any reading:
+  1. Anti-churn: no rewrite without a measured problem for a person (a number
+     with a start and an end). Smallest fix first, and a written reason
+     before anything larger.
+  2. Launch first: an idle builder gets the next launch row.
+  3. Claims: a number names its start and end event, a cause its mechanism.
+     Timestamps come from `date`, never from memory.
+  4. Scope: every active row serves a stop condition or a direct request.
+  5. Restart: the checklist below.
+- Session crons die with their process. The lead keeps one waker that survives
+  a reboot: a systemd user timer from real unit files in
+  `~/.config/systemd/user` (enabled, `Persistent=true`, lingering on), never a
+  `systemd-run` transient, which a reboot removes. Money guards likewise.
+- On every session start or resume:
+  1. `CronList` (or the engine's loop command): re-create a missing round or
+     review.
+  2. `uptime -s` against the last round.
+  3. After a reboot: `amux revive --dry`, then `amux revive`.
+  4. Owners with open rows: `amux wake PROJECT -p N` for a stopped pane (it
+     resumes the recorded session, or refuses without release identity and
+     memory headroom), then one short resume note each (a file, `--stdin`).
+  5. `find <repo>/.git/objects -type f -empty`: move empty files aside, never
+     delete them, then `git fetch origin` and `git fsck --connectivity-only`.
+  6. Each money guard: `systemctl --user is-enabled <guard>.timer` and
+     `systemctl --user show <guard>.service -p Result -p ExecMainStatus`
+     (success, 0).
+- Stop when the stop conditions hold: delete both crons, report in section 6's
+  four buckets with images, and leave the reboot waker to its owner.
