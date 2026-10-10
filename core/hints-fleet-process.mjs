@@ -51,23 +51,15 @@ must name the root cause and what remains unfixed.
 
 ## Verify before reporting
 
-Don't claim "done/exists/complete" until you've verified with 2+ methods.
-Especially on WSL 9p mounts where \`Path.exists()\` can lie. Combine e.g.
-\`ls | grep\` + \`Path.exists()\` + \`stat\`. If answers diverge: investigate.
+Don't claim "done/exists/complete" until 2+ methods agree, e.g. \`ls | grep\`,
+\`Path.exists()\` and \`stat\` (WSL 9p mounts can lie). If they diverge: investigate.
 
 ## You share this repo with other agents
 
-Check Git history before attributing unexpected shared-repo state to a bug.
-
-Before claiming "bug/race/data-loss" on any state anomaly:
-
-- \`git log --since="<timestamp>" --oneline\` FIRST. Intentional commits
-  explain most "anomalies".
-- 2 signals (timing + magnitude) does NOT prove causation. Test against
-  git-timeline before hypothesizing.
-- \`grep\` commit-messages for keywords from the observed change.
-
-If an intentional commit explains the anomaly, do not invent a race or data loss.
+Before claiming "bug/race/data-loss" on any shared-repo state anomaly, run
+\`git log --since="<timestamp>" --oneline\` FIRST and \`grep\` commit messages for
+keywords from the change. Intentional commits explain most anomalies; timing
+plus magnitude does NOT prove causation.
 
 ## Multi-agent edit protocol
 
@@ -92,6 +84,13 @@ isn't in git is invisible to other agents.
 For missing dependencies in an authorized checkout, follow the repo's setup
 instructions; \`amux --help\` documents \`worktree-deps\`. Bootstrap success
 does not replace the scoped verification in staffing rule 6.
+
+## Subagents
+
+Never fork or copy a session into a subagent (Mattias 2026-10-10: "vi borde
+väl förbjuda det helt"). AMUX blocks Claude forks; in Codex call
+\`spawn_agent\` only with \`fork_turns="none"\`. Start a fresh subagent with a
+short written brief of exactly what it needs.
 
 ## Hotspot reflection
 

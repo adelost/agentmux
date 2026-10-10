@@ -34,6 +34,11 @@ const SUGGESTIONS_GUARD_CMD = `exec node "${INSTALLED_GUARD}"`;
 export const HOTSPOT_GUARD_CMD = `p=$(cat); case "$p" in *commit*) printf '%s' "$p" | exec node "${join(__dir, "hotspot-commit-guard.mjs")}";; esac`;
 // rm targets Claude Code stops for a person are refused before the call; only payloads naming rm start node.
 const RM_GUARD_CMD = `p=$(cat); case "$p" in *rm*) printf '%s' "$p" | exec node "${join(__dir, "rm-target-guard.mjs")}";; esac`;
+// Forks are banned (Mattias 2026-10-10: "vi borde väl förbjuda det helt"). Claude Code's own switch removes the
+// fork type; the guard names the fresh-subagent alternative. Only payloads naming fork start node.
+const FORK_GUARD_CMD = `p=$(cat); case "$p" in *fork*) printf '%s' "$p" | exec node "${join(__dir, "fork-guard.mjs")}";; esac`;
+const FORK_GUARD_MATCHER = "Agent|Task";
+const FORK_SWITCH = "CLAUDE_CODE_FORK_SUBAGENT";
 // WHAT: Defines the PostToolUse command for the daily memory section rule.
 // WHY: Keeps every other tool call free of a node start; only payloads naming a daily note reach it.
 export const MEMORY_SECTION_REMINDER_CMD = `p=$(cat); case "$p" in *memory/20*) printf '%s' "$p" | exec node "${join(__dir, "memory-section-reminder.mjs")}";; esac`;
@@ -47,6 +52,8 @@ const isHotspotGuard = (h) => h?.type === "command"
   && /hotspot-commit-guard\.mjs/.test(h?.command || "");
 const isRmGuard = (h) => h?.type === "command"
   && /rm-target-guard\.mjs/.test(h?.command || "");
+const isForkGuard = (h) => h?.type === "command"
+  && /fork-guard\.mjs/.test(h?.command || "");
 const isMemorySectionReminder = (h) => h?.type === "command"
   && /memory-section-reminder\.mjs/.test(h?.command || "");
 
@@ -145,7 +152,8 @@ function main() {
     if (kept.length) hooks[event] = kept;
     else delete hooks[event];
   }
-  const preToolUse = without(without(without(hooks.PreToolUse, isSuggestionsGuard), isHotspotGuard), isRmGuard);
+  const preToolUse = [isSuggestionsGuard, isHotspotGuard, isRmGuard, isForkGuard]
+    .reduce(without, hooks.PreToolUse);
   if (!remove) {
     preToolUse.push({ matcher: "Bash", hooks: [{
       type: "command", command: SUGGESTIONS_GUARD_CMD, timeout: 5,
@@ -156,6 +164,10 @@ function main() {
     preToolUse.push({ matcher: "Bash", hooks: [{
       type: "command", command: RM_GUARD_CMD, timeout: 10,
     }] });
+    preToolUse.push({ matcher: FORK_GUARD_MATCHER, hooks: [{
+      type: "command", command: FORK_GUARD_CMD, timeout: 10,
+    }] });
+    settings.env = { ...settings.env, [FORK_SWITCH]: "0" };
   }
   if (preToolUse.length) hooks.PreToolUse = preToolUse;
   else delete hooks.PreToolUse;
@@ -187,6 +199,7 @@ function main() {
   console.log(`Suggestions mutations: PreToolUse/Bash -> ${SUGGESTIONS_GUARD_CMD}`);
   console.log(`Hotspot reflection on git commit: PreToolUse/Bash -> ${HOTSPOT_GUARD_CMD}`);
   console.log(`rm targets Claude Code stops for a person: PreToolUse/Bash -> ${RM_GUARD_CMD}`);
+  console.log(`Forks banned: env ${FORK_SWITCH}=0, PreToolUse/${FORK_GUARD_MATCHER} -> ${FORK_GUARD_CMD}`);
   console.log(`Daily memory section rule: PostToolUse/${MEMORY_SECTION_MATCHER} -> ${MEMORY_SECTION_REMINDER_CMD}`);
 }
 

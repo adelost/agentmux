@@ -59,6 +59,13 @@ feature("agentmux hook installer", () => {
       expect(commands.filter((command) => command.includes("hotspot-commit-guard.mjs"))).toHaveLength(1);
       // 2026-09-29: rm targets Claude Code stops for a person are refused before the call, once per install
       expect(commands.filter((command) => command.includes("rm-target-guard.mjs"))).toHaveLength(1);
+      // 2026-10-10: forks are banned (Mattias: "vi borde väl förbjuda det helt"), by Claude Code's own switch and
+      // by a guard that names the fresh-subagent alternative, once per install
+      expect(settings.env.CLAUDE_CODE_FORK_SUBAGENT).toBe("0");
+      const forkGuards = settings.hooks.PreToolUse.filter((row) => row.hooks.some(
+        (hook) => hook.command.includes("fork-guard.mjs"),
+      ));
+      expect(forkGuards.map((row) => row.matcher)).toEqual(["Agent|Task"]);
       // 2026-10-10: the daily memory section rule reaches the writer while writing, once per install
       const reminders = settings.hooks.PostToolUse.filter((row) => row.hooks.some(
         (hook) => hook.command.includes("memory-section-reminder.mjs"),
