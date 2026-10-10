@@ -43,6 +43,22 @@ export async function recoverSubmittedTui({
       ? acknowledge(current, "late-echo-before-dead-tui-recovery")
       : current;
   }
+  // Claude held our Enter while the paste waited on its clipboard lookup. A restart would paste the
+  // same text into the same wait (skyvw:0, 2026-10-09 22:09Z). End the lookup so the paste lands;
+  // the exact-draft Enter below submits it on the next pass.
+  if (transport.state === "pasting") {
+    if (typeof agent.settleClaudePaste !== "function") return null;
+    const settled = await agent.settleClaudePaste(current.agentName, current.pane)
+      .catch((error) => ({ ok: false, reason: `Claude paste could not be inspected: ${error.message}` }));
+    log(`submitted recovery for ${current.agentName}:${current.pane}: ${settled.ok ? "paste settled" : settled.reason}`);
+    return queue.update(current, {
+      nextAttemptAt: now() + 1_000,
+      lastReason: !settled.ok ? settled.reason
+        : settled.released.length
+          ? `Claude held the submitted paste on its clipboard lookup; ended pids ${settled.released.join(", ")} so the draft can land`
+          : "Claude finished the held paste; checking the draft before one recovery Enter",
+    });
+  }
   if (!recoveryKind && runtime?.running === true && transport.state === "drafted"
       && typeof agent.sendEnter === "function") {
     const fenced = queue.update(current, {

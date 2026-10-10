@@ -86,8 +86,10 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       activity = usage?.source?.endsWith("-jsonl") ? Date.parse(usage.observedAt) : NaN;
     }
     const attempt = prior ? (prior.status === "VERIFIED" ? "VERIFIED" : "FAILED") : "NEW";
-    const safe = !await agent.isBusy(name, pane)
-      && (await agent.promptTransportState(name, pane, "").catch(() => null))?.state === "empty-idle";
+    // Names what holds the pane, e.g. "pasting" for a composer held by Claude's clipboard lookup.
+    const input = await agent.isBusy(name, pane) ? "busy"
+      : (await agent.promptTransportState(name, pane, "").catch(() => null))?.state || "unreadable";
+    const safe = input === "empty-idle";
     const decision = contextCostDecision({ tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, safe, attempt }, policy);
     if (decision.values.action === "CONTINUE") return { ok: true, cell: decision.cell };
     if (cold && target.engine === "claude" && decision.cell === "unknown-evidence" && attempt === "NEW"
@@ -100,7 +102,8 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
         return { ok: true, cell: "empty-after-compact" };
       }
     }
-    if (decision.values.action === "HOLD") return { ok: false, reason: `context-cost:${decision.cell}${prior?.reason ? `:${prior.reason}` : ""}` };
+    const holder = decision.cell === "not-idle" ? `:${input}` : "";
+    if (decision.values.action === "HOLD") return { ok: false, reason: `context-cost:${decision.cell}${holder}${prior?.reason ? `:${prior.reason}` : ""}` };
     const lease = leaseHeld ? null : queue.acquireSessionLease(name, pane);
     if (!leaseHeld && !lease) return { ok: false, reason: "delivery-lease-busy" };
     // Once the command is sent only this pane stays fenced, so its siblings

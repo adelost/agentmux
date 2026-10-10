@@ -18,6 +18,7 @@ import { findBlockingPrompt } from "../core/dismiss.mjs";
 import { createDeliveryQueue, TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
 import { compactAccessBlocker, nightlyCompactDecision, nightlyCompactOutcome, nightlyCompactPolicy, sharedNightlyCompactOutcome } from "../core/nightly-compact.mjs";
+import { claudeComposerIsPasting } from "../core/claude-paste-stall.mjs";
 
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 /** WHAT: Returns the Stockholm date that names a compact receipt directory. WHY: Keeps nightly and stop-time receipts on the same day boundary. */
@@ -78,7 +79,8 @@ export async function observeNightlyPane(ctx, target, { queue, now = Date.now } 
     model: quality?.sessionId === after?.sessionId ? quality.model : null,
     effort: quality?.sessionId === after?.sessionId ? quality.effort : null,
     idleMs: Number.isFinite(activity) ? now() - activity : null, activity,
-    blocker: compactAccessBlocker(screen),
+    blocker: compactAccessBlocker(screen)
+      || (engine === "claude" && claudeComposerIsPasting(screen) ? "composer-pasting" : null),
   };
 }
 

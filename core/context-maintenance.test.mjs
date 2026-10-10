@@ -370,3 +370,40 @@ feature("a compact waiting on its engine fences only its own pane", () => {
     }],
   });
 });
+
+feature("a held Claude paste never buys or fakes a compact", () => {
+  // skyvw:0, 2026-10-09 23:09Z: the cold compact typed /compact into a composer held by "Pasting…",
+  // waited ten minutes for a receipt that could not come, and the pane kept 889 855 tokens.
+  component("a cold compact never starts while Claude is still pasting", {
+    given: ["a large idle Claude session whose composer a paste holds", () => {
+      const ctx = fixture();
+      ctx.agent.promptTransportState = async () => ({ state: "pasting", busy: false, dialect: "claude" });
+      return ctx;
+    }],
+    when: ["the first delivery after the night is admitted", ctx => createContextMaintenance(ctx).beforeWork({ agentName: "skyvw", pane: 0, id: "first" })],
+    then: ["no compact is attempted and the work is still delivered", (result, ctx) => {
+      try {
+        expect(ctx.calls).toHaveLength(0);
+        expect(result).toMatchObject({ ok: true, cell: "delivered-uncompacted", reason: "context-cost:not-idle:pasting" });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a compact without a receipt stays failed until Claude journals its boundary", {
+    given: ["the FAILED compact-command-unverified record skyvw:0 kept overnight", () => {
+      const ctx = fixture();
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [ctx.identityFor().path]);
+      ctx.state.set("context_maintenance_by_pane_v1", {
+        "skyvw:0": { sessionId: "one", cursor, status: "FAILED", reason: "compact-command-unverified" },
+      });
+      return ctx;
+    }],
+    when: ["reading it before and after a real compact boundary", ctx => {
+      const before = contextMaintenanceAttempt(ctx.state, "skyvw", 0, { sessionId: "one" });
+      ctx.append({ type: "system", subtype: "compact_boundary" });
+      return { before: before?.status, after: contextMaintenanceAttempt(ctx.state, "skyvw", 0, { sessionId: "one" })?.status };
+    }],
+    then: ["only the journaled boundary makes it verified", (result, ctx) => {
+      try { expect(result).toEqual({ before: "FAILED", after: "VERIFIED" }); } finally { ctx.cleanup(); }
+    }],
+  });
+});

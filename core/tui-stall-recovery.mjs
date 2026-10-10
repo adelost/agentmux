@@ -167,7 +167,8 @@ export function createTuiStallRecovery({
     const paneCmd = config.panes?.[pane]?.cmd || "";
     if (await isBusy(agentName, pane)) return { ok: false, reason: "pane-is-busy" };
     const transport = await promptTransportState(agentName, pane, expectedDraft || "").catch(() => null);
-    if (transport?.state === "foreign" || (transport?.state === "drafted" && !expectedDraft)) {
+    if (transport?.state === "foreign" || transport?.state === "pasting"
+        || (transport?.state === "drafted" && !expectedDraft)) {
       return { ok: false, reason: `composer-${transport.state}` };
     }
     if (isCodexPaneCommand(paneCmd)) {

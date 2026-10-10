@@ -286,7 +286,8 @@ export const COMPOSER_LINE_RE = new RegExp(
 // A named session's composer carries its name at the end of the top rule ("──── watch:0 ─"). Read as text, that rule
 // paired the bottom rule with a rule in a quoted `amux log` turn above, whose "> [from skyvw:0] …" then counted as a
 // draft and held Mattias's message to skyvw:0 for over 20 minutes (2026-10-08).
-const COMPOSER_RULE_RE = /^─{8,}(?: [^─]+ ─+)?$/u;
+/** WHAT: Defines Claude's composer rule, with or without a session name at its end. WHY: Keeps composer reads and the paste footer check on one rule shape. */
+export const COMPOSER_RULE_RE = /^─{8,}(?: [^─]+ ─+)?$/u;
 
 /**
  * WHAT: Returns the composer lines between Claude's two horizontal rules, or the last five screen lines without them.

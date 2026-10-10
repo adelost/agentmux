@@ -12,7 +12,7 @@ import { createTmuxAdapter } from "./core/tmux.mjs";
 import { ensureHeadlessWindow, settleTmuxWindowSize } from "./core/tmux-window-size.mjs";
 import { stripPaneChrome } from "./core/pane-chrome.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
-import { detectDialect, COMPOSER_LINE_RE, composerDraft, composerLines, foreignComposerText } from "./core/dialects.mjs";
+import { detectDialect, COMPOSER_LINE_RE, composerLines, foreignComposerText } from "./core/dialects.mjs";
 import { createPaneDialectResolver } from "./core/pane-dialect.mjs";
 import {
   captureClaudePromptEchoCursor,
@@ -82,6 +82,7 @@ import {
 } from "./core/tui-stall-recovery.mjs";
 import { eraseKeys, shouldPastePrompt, submitCheckOrErase, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
+import { claudePasteTransportState, createClaudeComposerGuards } from "./core/claude-composer-guards.mjs";
 import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
 import { assertCodexWorkModel, createCodexCompact, startCodexProcess } from "./core/codex-process-launch.mjs";
 export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchCommand, buildQwenLaunchCommand } from "./core/agent-launch-command.mjs";
@@ -212,6 +213,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   // All tmux syntax lives in the adapter (core/tmux.mjs). agent.mjs speaks
   // intent-level primitives; escaping is the adapter's tested concern.
   const t = createTmuxAdapter({ socket: tmuxSocket, exec: tmuxExec });
+  const claudeGuards = createClaudeComposerGuards({ wait, capture: (name, pane) => capturePane(name, pane, 15),
+    panePid: (name, pane) => t.panePid(`${name}:.${pane}`), sendLiteral: t.sendLiteral, sendKeys: t.sendKeys });
 
   // --- Config ---
 
@@ -1108,6 +1111,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (dialect === "codex") await assertCodexWorkModel({ state, name: agentName, pane, prompt,
       configured: agentConfig(agentName).panes?.[pane], screen: () => captureScreen(agentName, pane),
       previous: () => getContextPercentByDialect(paneDir(agentConfig(agentName).dir, pane), "codex") });
+    if (dialect === "claude") await claudeGuards.requireSettledPaste(agentName, pane, { maintenance: Boolean(maintenanceGuard) });
     if (dialect === "qwen") {
       if (maintenanceGuard) await maintenanceGuard("submit");
       await submitWithDurableFence({
@@ -1144,7 +1148,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // Normal delivery may recover a draft; unattended maintenance must not clear one.
       if (maintenanceGuard) await maintenanceGuard("paste");
       else await clearForeignComposerText(agentName, pane, target, prompt, dialect);
-      if (dialect === "claude") await refuseToTypeAfterClaudeDraft(agentName, pane, target);
+      if (dialect === "claude") await claudeGuards.refuseToTypeAfterDraft(agentName, pane, target);
       if (dialect === "codex") {
         const ready = maintenanceGuard ? { busy: false } : await waitForCodexPromptReady(agentName, pane);
         busyAtSend = Boolean(ready?.busy);
@@ -1192,6 +1196,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if ((dialect === "codex" && !busyAtSend) || dialect === "kimi") {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
+    // Claude holds an Enter pressed during "Pasting…" and drops it when the paste lands.
+    if (dialect === "claude" && !maintenanceGuard) await claudeGuards.requireSettledPaste(agentName, pane, { maintenance: false });
     // Persist ambiguity before Enter; a crash must never authorize a second paste.
     const eraseTyped = shouldPastePrompt({ knownDrafted, alreadyComposed }) ? () => t.sendKeys(target, eraseKeys(prompt)) : null;
     if (maintenanceGuard) await submitCheckOrErase(maintenanceGuard, eraseTyped);
@@ -1272,6 +1278,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
           && kimiComposerHasCollapsedPaste(raw)) {
         return true;
       }
+      // Claude collapses a landed multi-line paste to "[Pasted text #N +M lines]"; same owned-only contract.
+      if (dialect === "claude" && ownedDraft && claudePasteTransportState(raw, prompt) === "drafted") return true;
       return false;
     } catch {
       return false;
@@ -1287,6 +1295,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function promptTransportState(agentName, pane, prompt) {
     const dialect = await livePaneDialectName(agentName, pane);
     const busy = Boolean(await isBusy(agentName, pane).catch(() => true));
+    // A paste waiting on Claude's clipboard lookup shows an empty composer; it is neither idle nor empty.
+    const paste = dialect === "claude" ? claudePasteTransportState(await capturePane(agentName, pane, 15).catch(() => ""), prompt) : null;
+    if (paste) return { state: paste, busy, dialect };
     if (dialect !== "codex") {
       const drafted = await promptAlreadyInComposer(agentName, pane, prompt);
       if (drafted) return { state: "drafted", busy, dialect };
@@ -1322,24 +1333,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       captureScreen: () => captureScreen(agentName, pane),
       sleep: wait,
     });
-
-  /**
-   * WHAT: Refuses to type while Claude's composer holds text amux did not write, and leaves that text as it was.
-   * WHY: Typing appends to the draft, so "/compact/compact" turned Mattias's question into
-   *   "/compact/compact[…] Hej, var är ni någonstans?" (lsrc:1, 2026-09-28). A suggestion in the box
-   *   disappears on the first keystroke and a draft does not, so one probe space tells them apart and is erased.
-   */
-  async function refuseToTypeAfterClaudeDraft(agentName, pane, target) {
-    if (!composerDraft(await capturePane(agentName, pane, 15))) return;
-    await t.sendLiteral(target, " ");
-    await wait(300);
-    const draft = composerDraft(await capturePane(agentName, pane, 15));
-    await t.sendKeys(target, eraseKeys(" "));
-    if (draft === "") return;
-    throw codexDeliveryBlocked(
-      `Claude prompt delivery blocked: the composer holds a draft amux did not type ("${String(draft).slice(0, 40)}")`,
-    );
-  }
 
   /**
    * A previous failed delivery can leave ITS text sitting in the composer.
@@ -1816,7 +1809,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     ensureReady, sendAndWait, sendOnly,
     memorySnapshot: createPaneMemorySnapshot({ configFor: agentConfig, dialectFor: paneDialectName }),
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
-    promptTransportState, codexVocabularyDrift,
+    promptTransportState, codexVocabularyDrift, settleClaudePaste: claudeGuards.settlePaste,
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho, probeIngest,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession, paneProcessState: tuiRecovery.paneProcessState,
