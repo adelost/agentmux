@@ -120,7 +120,30 @@ feature("source-bound topic retrieval", () => {
   });
 
   unit("original evidence keeps a slot beside topic orientation", {
-    when: ["merging three topics and original results into three slots", () => mergeTopicHits([{ path: "source" }], [{ path: "a" }, { path: "b" }, { path: "c" }], 3)],
+    when: ["merging three topics that cover the question and original results into three slots", () =>
+      mergeTopicHits([{ path: "source" }], ["a", "b", "c"].map(path => ({ path, coversQuery: true })), 3)],
     then: ["the original is not crowded out", hits => expect(hits.map(hit => hit.path)).toEqual(["a", "b", "source"])],
+  });
+
+  unit("a topic matching only part of the question does not push the answer down", {
+    given: ["three originals and two topics, one matching every query word", () => ({
+      original: [{ path: "answer" }, { path: "second" }, { path: "third" }, { path: "fourth" }],
+      topics: [{ path: "partial", coversQuery: false }, { path: "complete", coversQuery: true }],
+    })],
+    when: ["merging into the overview", ({ original, topics }) => mergeTopicHits(original, topics, 12)],
+    then: ["the complete topic leads, the partial one waits behind the first three originals", hits =>
+      expect(hits.map(hit => hit.path)).toEqual(["complete", "answer", "second", "third", "partial", "fourth"])],
+  });
+
+  component("search marks whether a topic covers the whole question", {
+    given: ["a published topic about browser profiles", () => { const f = fixture(); publishMemoryTopic(f.root, f.candidate); return f; }],
+    when: ["asking a covered and a partly covered question", f => ({
+      covered: searchMemoryTopics("browser profiles", f.root).hits[0],
+      partial: searchMemoryTopics("browser profiles kayak", f.root).hits[0],
+    })],
+    then: ["only the covered question may lead with the topic", ({ covered, partial }) => {
+      expect(covered.coversQuery).toBe(true);
+      expect(partial.coversQuery).toBe(false);
+    }],
   });
 });

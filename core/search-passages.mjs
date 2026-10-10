@@ -3,15 +3,22 @@ import { createHash } from "node:crypto";
 import { dateFromPath, execRg } from "./search.mjs";
 import { chunkMarkdown } from "./search-semantic.mjs";
 import { readTopicFile } from "./memory-topics.mjs";
+import { swedishStem } from "./swedish-stem.mjs";
 
 const SOURCE_MAX_BYTES = 1024 * 1024;
 const STOP = new Set("a an and are as att av blev blir de den det do du då eller en ett får för från ha hade han har hela hur i in inte jag kan man med mig min mina mitt och of om on på sig ska som the till to vad var vi vilken vilket vilka varför är efter before is it does have when where why who när bara skulle".split(" "));
-const ENDINGS = ["arna", "erna", "orna", "ande", "ens", "ets", "ing", "en", "et", "ar", "er", "or", "na", "as", "s"];
+const PASSAGES_PER_FILE = 2;
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
+const stemCache = new Map();
 
 function stem(word) {
-  const ending = ENDINGS.find(value => word.endsWith(value) && word.length - value.length >= 5);
-  return ending ? word.slice(0, -ending.length) : word;
+  let value = stemCache.get(word);
+  if (value === undefined) {
+    value = swedishStem(word);
+    if (stemCache.size > 200_000) stemCache.clear();
+    stemCache.set(word, value);
+  }
+  return value;
 }
 
 function terms(text) {
@@ -19,23 +26,23 @@ function terms(text) {
     .filter(word => word.length > 1 && !STOP.has(word)).map(stem);
 }
 
-function queryForms(tokens) {
-  const forms = new Map();
-  tokens.forEach((token, index) => {
-    for (const word of [token, ...ENDINGS.map(ending => token + ending)]) {
-      if (stem(word) === token) forms.set(word, index);
-    }
-  });
-  return forms;
+// Snowball only strips suffixes, so a word can share a query stem only when it
+// starts with that stem. Checking the prefix first keeps stemming off the hot
+// path for the millions of words that cannot match.
+function stemIndex(word, stems) {
+  for (const [value, index] of stems) {
+    if (word.startsWith(value) && stem(word) === value) return index;
+  }
+  return undefined;
 }
 
-function observeWords(text, forms, count) {
+function observeWords(text, stems, count) {
   const counts = Array(count).fill(0);
   let length = 0;
   for (const word of text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []) {
     if (word.length < 2 || STOP.has(word)) continue;
     length++;
-    const index = forms.get(word);
+    const index = stemIndex(word, stems);
     if (index !== undefined) counts[index]++;
   }
   return { counts, length };
@@ -48,7 +55,7 @@ function sourceFiles(root) {
   return execRg(args).split("\n").filter(path => path.endsWith(".md"));
 }
 
-function documentPassages(path, root, tokens, forms) {
+function documentPassages(path, root, tokens, stems) {
   const bytes = readTopicFile(path, SOURCE_MAX_BYTES);
   const text = bytes.toString("utf8");
   const title = text.match(/^# .+$/mu)?.[0] || basename(path);
@@ -63,8 +70,8 @@ function documentPassages(path, root, tokens, forms) {
     section = [...prior.matchAll(/^#{1,4} .+$/gmu)].at(-1)?.[0] || section;
     section = chunk.text.match(/^#{1,4} .+$/mu)?.[0] || section;
     offset = start + chunk.text.length;
-    const labels = observeWords(`${basename(path, ".md").replace(/-/gu, " ")} ${title} ${section}`, forms, tokens.length);
-    const { counts, length } = observeWords(chunk.text, forms, tokens.length);
+    const labels = observeWords(`${basename(path, ".md").replace(/-/gu, " ")} ${title} ${section}`, stems, tokens.length);
+    const { counts, length } = observeWords(chunk.text, stems, tokens.length);
     return { path, line: chunk.line, root: root.name, weight: root.weight, date: dateFromPath(path),
       text: chunk.text, counts, labelMatches: labels.counts.map(Boolean), length,
       passage: { sha256: digest, start, length: chunk.text.length } };
@@ -75,14 +82,14 @@ function documentPassages(path, root, tokens, forms) {
 export function searchPassages(query, roots, { max = 12, excludePath = () => false, onWarning = console.warn } = {}) {
   const tokens = [...new Set(terms(query))];
   if (!tokens.length) return [];
-  const forms = queryForms(tokens);
+  const stems = new Map(tokens.map((token, index) => [token, index]));
   const docs = [];
   const seen = new Set();
   for (const root of roots.filter(root => root.semantic)) {
     for (const path of sourceFiles(root)) {
       if (seen.has(path) || excludePath(path)) continue;
       seen.add(path);
-      try { docs.push(...documentPassages(path, root, tokens, forms)); }
+      try { docs.push(...documentPassages(path, root, tokens, stems)); }
       catch (error) { onWarning(`Passage source omitted: ${path} (${error.code || error.message}); original search remains available.`); }
     }
   }
@@ -102,7 +109,23 @@ export function searchPassages(query, roots, { max = 12, excludePath = () => fal
     return { path: doc.path, line: doc.line, root: doc.root, weight: doc.weight, date: doc.date,
       snippet: doc.text.replace(/\s+/gu, " ").slice(0, 160), passage: doc.passage, layer: "passage", score, matches };
   }).filter(hit => hit.matches >= Math.min(2, tokens.length) && hit.score > 0)
-    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.line - b.line).slice(0, max);
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.line - b.line)
+    .filter(topPassagesPerFile()).slice(0, max);
+}
+
+/**
+ * WHAT: Keeps the two best-ranked paragraphs of each file.
+ * WHY: Prevents one long note from filling the overview with its neighbours,
+ * while a daily file's second section can still be the answer (golden eval:
+ * one per file lost answers, two kept them).
+ */
+function topPassagesPerFile(limit = PASSAGES_PER_FILE) {
+  const seen = new Map();
+  return hit => {
+    const count = seen.get(hit.path) || 0;
+    seen.set(hit.path, count + 1);
+    return count < limit;
+  };
 }
 
 /** WHAT: Returns paragraphs alongside original search evidence. WHY: Keeps exact receipts ahead of approximate matches without discarding the remaining history. */

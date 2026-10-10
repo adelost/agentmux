@@ -17,6 +17,8 @@ import { defaultSearchStatePath, loadLastResults, saveLastResults } from "../cor
 import { defaultWorkspace } from "../core/runtime-defaults.mjs";
 import { expandMemoryTopic, isTopicPath, mergeTopicHits, searchMemoryTopics } from "../core/memory-topic-search.mjs";
 import { expandPassage, mergePassageHits, searchPassages } from "../core/search-passages.mjs";
+import { documentWindow, firstAnswerRank, formatEvalReport, parseGoldenCases, summarizeEval } from "../core/search-eval.mjs";
+import { readFileSync } from "node:fs";
 
 /** WHAT: Describes the search CLI contract. WHY: Keeps actual flags and user guidance in one place. */
 export const SEARCH_HELP = `Usage:
@@ -27,6 +29,8 @@ export const SEARCH_HELP = `Usage:
   amux search "term" --show N       Search, then expand result N
   amux search --show N [--context N] Expand the last search result
   amux search --reindex              Rebuild the optional semantic index
+  amux search --eval FILE [--split dev|heldout] [--semantic]
+                                     Score a golden JSONL set: hit@1, hit@3, MRR, latency
 
 Validated memory/topics pages provide compact orientation alongside original sources.
 Current Markdown paragraphs also match natural questions without embeddings.
@@ -73,39 +77,12 @@ function showResults(last, show, context) {
   }
 }
 
-/** WHAT: Routes search, expansion and reindex requests. WHY: Keeps search state and source selection out of the command router. */
-export async function cmdSearch(ctx, query, flags, dependencies = {}) {
-  const statePath = dependencies.statePath || defaultSearchStatePath();
-  if (flags.help || flags.h) {
-    console.log(SEARCH_HELP);
-    return;
-  }
-
-  const config = loadConfig(ctx.configPath);
-  const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE || defaultWorkspace(process.env.HOME);
-  let roots = withEventLedgerRoot(loadSearchRoots(config), eventsPath());
-
-  if (flags.reindex) {
-    const sem = await import("../core/search-semantic.mjs");
-    return sem.reindex(roots, { log: console.log });
-  }
-
-  if (!query && flags.show != null) {
-    showResults(loadLastResults(statePath), flags.show, flags.context);
-    return;
-  }
-  if (!query) {
-    console.error(SEARCH_HELP);
-    process.exitCode = 1;
-    return;
-  }
-  if (!roots.length) {
-    console.error("Inga sökrötter kunde läsas. Kontrollera agentmux.yaml och ~/.agentmux/events.jsonl.");
-    process.exitCode = 1;
-    return;
-  }
-  if (flags.source) roots = roots.filter((root) => root.name.includes(flags.source));
-
+/**
+ * WHAT: Returns the ranked overview from every search layer for one query.
+ * WHY: Keeps printing and the golden-set eval on exactly the same retrieval.
+ */
+export async function collectSearchHits(query, allRoots, workspace, flags = {}, { warn = console.warn } = {}) {
+  const roots = flags.source ? allRoots.filter((root) => root.name.includes(flags.source)) : allRoots;
   const startedAt = Date.now();
   const ledgerRoot = roots.find((root) => root.kind === "event-ledger");
   const ledgerHits = ledgerRoot ? searchEventLedger(query, ledgerRoot.path) : [];
@@ -124,9 +101,9 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
       const sem = await import("../core/search-semantic.mjs");
       const status = sem.semanticIndexStatus();
       if (!status.available) {
-        console.warn("⚠ semantic index missing; showing current lexical results. Run: amux search --reindex");
+        warn("⚠ semantic index missing; showing current lexical results. Run: amux search --reindex");
       } else {
-        console.warn(`${status.stale ? "⚠" : "ℹ"} semantic index ${formatAge(status.ageMs)} · built ${status.builtAt}`);
+        warn(`${status.stale ? "⚠" : "ℹ"} semantic index ${formatAge(status.ageMs)} · built ${status.builtAt}`);
       }
       const semanticHits = await sem.semanticSearch(query, { k: 8 });
       const allowedRoots = new Set(roots.map((root) => root.name));
@@ -150,17 +127,76 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
     try {
       const result = searchMemoryTopics(query, workspace);
       topicHits = result.hits;
-      if (result.excluded.length) console.warn(`Topics omitted: ${result.excluded.map(row => `${row.id}=${row.state}`).join(", ")}. Original-source search remains available.`);
-    } catch (error) { console.warn(`Topic lookup unavailable: ${error.message}. Showing original-source results.`); }
+      if (result.excluded.length) warn(`Topics omitted: ${result.excluded.map(row => `${row.id}=${row.state}`).join(", ")}. Original-source search remains available.`);
+    } catch (error) { warn(`Topic lookup unavailable: ${error.message}. Showing original-source results.`); }
   }
   const top = mergeTopicHits(hits, topicHits, flags.max ?? 12);
+  return { top, total: hits.length + topicHits.length, elapsedMs: Date.now() - startedAt };
+}
+
+/** WHAT: Renders what an agent sees after expanding a hit. WHY: Scores answers that are actually in view, per layer. */
+function expandedView(hit) {
+  if (hit.topic) return expandMemoryTopic(hit);
+  if (hit.passage) return expandPassage(hit);
+  if (hit.path.endsWith(".jsonl")) return expandHit(hit, { context: 0 });
+  return documentWindow(hit.path, hit.line);
+}
+
+/** WHAT: Scores search against a golden question set. WHY: Turns "search feels fine" into hit@k, MRR and latency per kind of question. */
+async function runSearchEval(file, roots, workspace, flags) {
+  const split = flags.split || "all";
+  const cases = parseGoldenCases(readFileSync(file, "utf8")).filter((row) => split === "all" || row.split === split);
+  const rows = [];
+  for (const row of cases) {
+    const { top, elapsedMs } = await collectSearchHits(row.query, roots, workspace, flags, { warn: () => {} });
+    const rank = firstAnswerRank(top, row.expect, { viewOf: expandedView });
+    rows.push({ ...row, rank, ms: elapsedMs, top: top.map((hit) => `${hit.layer} ${hit.path.replace(`${process.env.HOME}/`, "~/")}:${hit.line}`) });
+  }
+  const label = `golden ${split} · ${flags.semantic ? "semantic" : "default"} · ${cases.length} questions`;
+  console.log(formatEvalReport({ label, summary: summarizeEval(rows), rows }));
+  return rows;
+}
+
+/** WHAT: Routes search, expansion and reindex requests. WHY: Keeps search state and source selection out of the command router. */
+export async function cmdSearch(ctx, query, flags, dependencies = {}) {
+  const statePath = dependencies.statePath || defaultSearchStatePath();
+  if (flags.help || flags.h) {
+    console.log(SEARCH_HELP);
+    return;
+  }
+
+  const config = loadConfig(ctx.configPath);
+  const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE || defaultWorkspace(process.env.HOME);
+  const roots = withEventLedgerRoot(loadSearchRoots(config), eventsPath());
+
+  if (flags.reindex) {
+    const sem = await import("../core/search-semantic.mjs");
+    return sem.reindex(roots, { log: console.log });
+  }
+
+  if (flags.eval) return runSearchEval(flags.eval, roots, workspace, flags);
+  if (!query && flags.show != null) {
+    showResults(loadLastResults(statePath), flags.show, flags.context);
+    return;
+  }
+  if (!query) {
+    console.error(SEARCH_HELP);
+    process.exitCode = 1;
+    return;
+  }
+  if (!roots.length) {
+    console.error("Inga sökrötter kunde läsas. Kontrollera agentmux.yaml och ~/.agentmux/events.jsonl.");
+    process.exitCode = 1;
+    return;
+  }
+  const { top, total, elapsedMs } = await collectSearchHits(query, roots, workspace, flags);
   if (!top.length) {
-    console.log(`0 träffar för "${query}" (${Date.now() - startedAt}ms)`);
+    console.log(`0 träffar för "${query}" (${elapsedMs}ms)`);
     return;
   }
   const current = { query, ts: new Date().toISOString(), hits: top };
   saveLastResults(query, top, statePath);
   console.log(formatHits(top));
-  console.log(`\n${top.length}/${hits.length + topicHits.length} träffar, ${Date.now() - startedAt}ms  ·  expandera: amux search --show N`);
+  console.log(`\n${top.length}/${total} träffar, ${elapsedMs}ms  ·  expandera: amux search --show N`);
   if (flags.show != null) showResults(current, flags.show, flags.context);
 }

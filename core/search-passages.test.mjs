@@ -70,6 +70,37 @@ feature("fresh original passage retrieval", () => {
     }],
   });
 
+  component("a question in another inflection finds the answering paragraph", {
+    given: ["credits saying who directed the film", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-passages-"));
+      writeFileSync(join(dir, "credits.md"), "# Eftertexter\n\nHiromi har regisserat filmen tillsammans med Mattias.\n");
+      return { dir, roots: [{ name: "memory", path: dir, semantic: true, exclude: [] }] };
+    }],
+    when: ["asking who directed it", ({ roots }) => searchPassages("vem regisserade filmen", roots)],
+    then: ["regisserade and regisserat count as the same word", (hits, { dir }) => {
+      try {
+        expect(hits.map(hit => hit.snippet)).toEqual([expect.stringContaining("Hiromi har regisserat filmen")]);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }],
+  });
+
+  component("one long note cannot fill the overview with its own paragraphs", {
+    given: ["a daily note with three matching sections and a reference with one", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-passages-"));
+      const section = n => `## Ljudbok ${n}\n\nLjudboken och social kontakt, anteckning ${n}.\n`;
+      writeFileSync(join(dir, "daily.md"), `# Dag\n\n${[1, 2, 3].map(section).join("\n")}`);
+      writeFileSync(join(dir, "reference.md"), "# Referens\n\nLjudboken och social kontakt i korthet.\n");
+      return { dir, roots: [{ name: "memory", path: dir, semantic: true, exclude: [] }] };
+    }],
+    when: ["searching", ({ roots }) => searchPassages(query, roots)],
+    then: ["at most two paragraphs per file and the other file is listed", (hits, { dir }) => {
+      try {
+        expect(hits.filter(hit => hit.path.endsWith("daily.md"))).toHaveLength(2);
+        expect(hits.some(hit => hit.path.endsWith("reference.md"))).toBe(true);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }],
+  });
+
   unit("exact evidence remains first and history stays reachable", {
     given: ["an exact receipt, broad history and a relevant paragraph", () => ({
       original: [{ path: "/receipt.jsonl", line: 8, layer: "L1" }, { path: "/history.jsonl", line: 6, layer: "L2" }],

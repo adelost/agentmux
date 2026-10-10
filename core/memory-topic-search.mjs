@@ -37,7 +37,7 @@ export function searchMemoryTopics(query, workspace, { topics = inspectTopics(wo
   }).filter(doc => doc.matches >= Math.min(2, terms.length)).sort((a, b) => b.score - a.score || a.meta.id.localeCompare(b.meta.id));
   return {
     hits: candidates.filter(topic => topic.action === "SERVE").map(topic => ({
-      path: topic.path, line: 1, root: "memory-topics", layer: "topic", score: topic.score,
+      path: topic.path, line: 1, root: "memory-topics", layer: "topic", score: topic.score, coversQuery: topic.matches === terms.length,
       date: topic.meta.asOf, snippet: `${topic.meta.title}: ${topic.meta.summary}`,
       topic: { workspace: resolve(workspace), id: topic.meta.id, sha256: topic.sha256, state: topic.state, cell: topic.cell },
     })),
@@ -46,11 +46,16 @@ export function searchMemoryTopics(query, workspace, { topics = inspectTopics(wo
   };
 }
 
-/** WHAT: Returns topic orientation alongside original-source results. WHY: Keeps original evidence available beside derived context. */
+/**
+ * WHAT: Returns topic orientation alongside original-source results.
+ * WHY: Prevents a topic matching only part of the question from pushing the answering original down.
+ */
 export function mergeTopicHits(original, topics, max = 12) {
   const count = Math.max(1, Number(max) || 12);
-  const leading = topics.slice(0, original.length && count > 1 ? Math.min(2, count - 1) : Math.min(2, count));
-  return [...leading, ...original, ...topics.slice(leading.length)].slice(0, count);
+  const covering = topics.filter(topic => topic.coversQuery);
+  const leading = covering.slice(0, original.length && count > 1 ? Math.min(2, count - 1) : Math.min(2, count));
+  const remaining = topics.filter(topic => !leading.includes(topic));
+  return [...leading, ...original.slice(0, 3), ...remaining, ...original.slice(3)].slice(0, count);
 }
 
 /** WHAT: Checks and expands a saved topic. WHY: Prevents --show from replaying a summary after its source or page changes. */
