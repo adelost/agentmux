@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFileSync } from "node:fs";
-import { ensureCudaProvider, gpuEnv, gpuReady } from "./search-gpu.mjs";
+import { ensureCudaProvider, exitAfterGpu, gpuEnv, gpuReady } from "./search-gpu.mjs";
 
 feature("optional GPU libraries", () => {
   unit("CUDA paths are offered only when agentmux's own cuDNN exists, and can be switched off", {
@@ -56,6 +56,19 @@ feature("optional GPU libraries", () => {
         rmSync(binaryDir, { recursive: true, force: true });
         rmSync(cacheDir, { recursive: true, force: true });
       }
+    }],
+  });
+
+  unit("a process that loaded CUDA ends without native teardown; a CPU process exits normally", {
+    given: ["recorders for both ways out", () => ({ calls: [] })],
+    when: ["ending a GPU and a CPU process", ({ calls }) => {
+      const record = { kill: (signal) => calls.push(`kill ${signal}`), exit: (code) => calls.push(`exit ${code}`) };
+      exitAfterGpu(0, { ready: true, ...record });
+      exitAfterGpu(3, { ready: false, ...record });
+      return calls;
+    }],
+    then: ["SIGKILL skips ONNX Runtime's exit-time abort; the CPU path keeps its exit code", (calls) => {
+      expect(calls).toEqual(["kill SIGKILL", "exit 3"]);
     }],
   });
 });

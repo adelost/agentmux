@@ -52,10 +52,20 @@ function tokensOf(text) {
   return { words, extras: [...identifiers, ...joinedPairs(lower)] };
 }
 
-function terms(text) {
+// A proper name is matched as written (and in the genitive), never stemmed:
+// Snowball reduces "Elina" to "elin", which made Elina's entry lose to Elin's
+// file (golden s29). A name is a capitalised word in the question or a word
+// of a person's name in the people notes.
+const NAME = "=";
+const PEOPLE_FILE = /(?:^|\/)people(?:\/[^/]+|)\.md$|\/people\/[^/]+\.md$/u;
+const CAPITALISED = /^\p{Lu}\p{Ll}/u;
+
+function terms(text, names = new Set()) {
+  const original = String(text).match(WORD) || [];
+  const capitalised = new Set(original.filter(word => CAPITALISED.test(word)).map(word => word.toLowerCase()));
   const { words, extras } = tokensOf(text);
   return [...words, ...extras].filter(word => word.length > 1 && !STOP.has(word))
-    .map(word => (/[._-]/u.test(word) ? word : stem(word)));
+    .map(word => (/[._-]/u.test(word) ? word : capitalised.has(word) || names.has(word) ? NAME + word : stem(word)));
 }
 
 // Snowball only strips suffixes, so a word can share a query stem only when it
@@ -64,12 +74,17 @@ function terms(text) {
 function stemIndex(word, stems) {
   if (/[._-]/u.test(word)) return stems.get(word);
   for (const [value, index] of stems) {
+    if (value.startsWith(NAME)) {
+      const name = value.slice(1);
+      if (word === name || word === `${name}s` || `${word}s` === name) return index;
+      continue;
+    }
     if (word.startsWith(value) && stem(word) === value) return index;
   }
   // A Swedish compound starting with a long question word is about it:
   // "fallskärm" in the question, "fallskärmshoppning" in the note.
   for (const [value, index] of stems) {
-    if (value.length >= COMPOUND_HEAD && word.length >= value.length + 3 && word.startsWith(value)) return index;
+    if (!value.startsWith(NAME) && value.length >= COMPOUND_HEAD && word.length >= value.length + 3 && word.startsWith(value)) return index;
   }
   return undefined;
 }
@@ -118,9 +133,15 @@ function fileSegment(path) {
     for (const word of labels) vocabulary.add(word);
     totalLength += body.length;
     return { line: unit.line, start: unit.start, length: unit.length, section: unit.section, context,
-      snippet: unit.text.replace(/\s+/gu, " ").slice(0, 160), tf: body.tf, words: body.length, labels };
+      snippet: unit.text.replace(/\s+/gu, " ").slice(0, 160), tf: body.tf, words: body.length, labels, defines: unit.defines };
   });
-  return { sha256: hash(bytes), date: dateFromPath(path), units, vocabulary, totalLength };
+  const names = new Set();
+  if (PEOPLE_FILE.test(path)) {
+    for (const value of [basename(path, ".md"), ...units.map(unit => unit.defines)]) {
+      for (const word of String(value || "").toLowerCase().match(WORD) || []) if (word.length >= 3 && !/\d/u.test(word)) names.add(word);
+    }
+  }
+  return { sha256: hash(bytes), date: dateFromPath(path), units, vocabulary, totalLength, names };
 }
 
 /** WHAT: Returns a file's segment, rebuilt only when it changed. WHY: Keeps repeated queries in one process from re-reading the corpus. */
@@ -136,7 +157,26 @@ function cachedSegment(path, cache) {
 /** WHAT: Returns source-bound note items ranked for natural questions. WHY: Prevents file-level word-AND from hiding answers behind incidental question words. */
 export function searchPassages(query, roots, { max = 12, excludePath = () => false, onWarning = console.warn, cache = null, dates = [],
   perFile = PASSAGES_PER_FILE } = {}) {
-  const tokens = [...new Set(terms(query))];
+  const files = [];
+  const seen = new Set();
+  for (const root of roots.filter(root => root.semantic)) {
+    for (const path of sourceFiles(root)) {
+      if (seen.has(path) || excludePath(path)) continue;
+      seen.add(path);
+      files.push({ path, root });
+    }
+  }
+  const segments = new Map();
+  const segmentOf = (path) => {
+    if (!segments.has(path)) {
+      try { segments.set(path, cachedSegment(path, cache)); }
+      catch (error) { segments.set(path, null); onWarning(`Passage source omitted: ${path} (${error.code || error.message}); original search remains available.`); }
+    }
+    return segments.get(path);
+  };
+  const names = new Set();
+  for (const { path } of files) if (PEOPLE_FILE.test(path)) for (const name of segmentOf(path)?.names || []) names.add(name);
+  const tokens = [...new Set(terms(query, names))];
   if (!tokens.length) return [];
   const stems = new Map(tokens.map((token, index) => [token, index]));
   const matchOf = new Map();
@@ -149,32 +189,26 @@ export function searchPassages(query, roots, { max = 12, excludePath = () => fal
     return value;
   };
   const docs = [];
-  const seen = new Set();
   let unitCount = 0;
   let totalLength = 0;
-  for (const root of roots.filter(root => root.semantic)) {
-    for (const path of sourceFiles(root)) {
-      if (seen.has(path) || excludePath(path)) continue;
-      seen.add(path);
-      let segment;
-      try { segment = cachedSegment(path, cache); }
-      catch (error) { onWarning(`Passage source omitted: ${path} (${error.code || error.message}); original search remains available.`); continue; }
-      unitCount += segment.units.length;
-      totalLength += segment.totalLength;
-      const matching = [...segment.vocabulary].filter(word => termOf(word) >= 0);
-      if (!matching.length) continue;
-      for (const unit of segment.units) {
-        const counts = Array(tokens.length).fill(0);
-        const labelMatches = Array(tokens.length).fill(false);
-        let any = false;
-        for (const word of matching) {
-          const term = matchOf.get(word);
-          const count = unit.tf.get(word);
-          if (count) { counts[term] += count; any = true; }
-          if (unit.labels.has(word)) { labelMatches[term] = true; any = true; }
-        }
-        if (any) docs.push({ path, root, segment, unit, counts, labelMatches });
+  for (const { path, root } of files) {
+    const segment = segmentOf(path);
+    if (!segment) continue;
+    unitCount += segment.units.length;
+    totalLength += segment.totalLength;
+    const matching = [...segment.vocabulary].filter(word => termOf(word) >= 0);
+    if (!matching.length) continue;
+    for (const unit of segment.units) {
+      const counts = Array(tokens.length).fill(0);
+      const labelMatches = Array(tokens.length).fill(false);
+      let any = false;
+      for (const word of matching) {
+        const term = matchOf.get(word);
+        const count = unit.tf.get(word);
+        if (count) { counts[term] += count; any = true; }
+        if (unit.labels.has(word)) { labelMatches[term] = true; any = true; }
       }
+      if (any) docs.push({ path, root, segment, unit, counts, labelMatches });
     }
   }
   if (!docs.length) return [];

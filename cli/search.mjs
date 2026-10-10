@@ -16,13 +16,13 @@ import {
 } from "../core/search.mjs";
 import { defaultSearchStatePath, loadLastResults, saveLastResults } from "../core/search-state.mjs";
 import { defaultWorkspace } from "../core/runtime-defaults.mjs";
-import { expandMemoryTopic, isTopicPath, mergeTopicHits, searchMemoryTopics } from "../core/memory-topic-search.mjs";
+import { expandMemoryTopic, isTopicPath, mergeTopicHits, searchMemoryTopics, servedTopics } from "../core/memory-topic-search.mjs";
 import { expandPassage, mergePassageHits, phraseUnits, searchPassages, topPassagesPerFile } from "../core/search-passages.mjs";
 import { preferDates, temporalIntent } from "../core/search-time.mjs";
 import { documentWindow, firstAnswerRank, formatEvalReport, parseGoldenCases, summarizeEval } from "../core/search-eval.mjs";
 import { classifyQuery, fuseRankings, semanticSearchHits } from "../core/search-fusion.mjs";
 import { daemonAlive, daemonPassages, daemonRerank, semanticQuery } from "../core/search-embedder.mjs";
-import { gpuEnv, holdReindexLock } from "../core/search-gpu.mjs";
+import { exitAfterGpu, gpuEnv, holdReindexLock } from "../core/search-gpu.mjs";
 import { spawnSync } from "node:child_process";
 import { blendRerank, RERANK_CANDIDATES, rerankText } from "../core/search-rerank.mjs";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -173,8 +173,17 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   if (semanticHits.length && semantic.rerank && !flags.noRerank) {
     // Topic pages compete in the same reranking as original units instead
     // of taking fixed slots.
+    // Every served topic page is judged, matched or not: the question may
+    // share no word with the page that answers it (golden s42, s43).
+    let poolTopics = topicHits;
+    if (!flags.raw && (!flags.source || "memory-topics".includes(flags.source))) {
+      try {
+        const matched = new Set(topicHits.map(hit => hit.path));
+        poolTopics = [...topicHits, ...servedTopics(workspace).filter(hit => !matched.has(hit.path))];
+      } catch { /* matched topics stay */ }
+    }
     const budget = reranker?.candidates || RERANK_CANDIDATES;
-    const candidates = [...ranked.slice(0, Math.max(0, budget - topicHits.length)), ...topicHits];
+    const candidates = [...ranked.slice(0, Math.max(0, budget - poolTopics.length)), ...poolTopics];
     const files = new Map();
     const read = (path) => { if (!files.has(path)) files.set(path, readFileSync(path, "utf8")); return files.get(path); };
     const { scores, unavailable, weight, note } = await semantic.rerank(content, candidates.map((hit) => rerankText(hit, read)));
@@ -255,28 +264,26 @@ async function reindexOnBestDevice(roots) {
   const dir = sem.indexDir();
   if (process.env.AMUX_SEARCH_DEVICE === "cuda") {
     const release = holdReindexLock(dir);
+    let result;
     try {
-      const result = await sem.reindex(roots, { log: console.log, device: "cuda" });
+      result = await sem.reindex(roots, { log: console.log, device: "cuda" });
       if (process.env.AMUX_REINDEX_RESULT) writeFileSync(process.env.AMUX_REINDEX_RESULT, JSON.stringify(result));
-      return result;
     } finally { release(); }
+    return exitAfterGpu(0);
   }
   const env = gpuEnv(process.env);
   if (!env) console.log("ℹ no CUDA libraries (cuDNN or the ONNX Runtime CUDA provider in ~/.cache/agentmux); reindexing on CPU");
   else if (await daemonAlive()) console.log("ℹ the search daemon is running; reindexing changed units on CPU to stay within the VRAM budget");
   else {
-    // The child reports its result in a file: ONNX Runtime's CUDA provider can
-    // crash while the process tears down after a finished, written index.
+    // The child reports its result in a file and ends without native teardown
+    // (see exitAfterGpu), so its exit status says nothing about the index.
     const resultPath = join(dir, `reindex-result-${process.pid}.json`);
     rmSync(resultPath, { force: true });
     const child = spawnSync(process.execPath, [process.argv[1], "search", "--reindex"], {
       env: { ...env, AMUX_SEARCH_DEVICE: "cuda", AMUX_REINDEX_RESULT: resultPath }, stdio: "inherit" });
     const finished = existsSync(resultPath);
     rmSync(resultPath, { force: true });
-    if (finished) {
-      if (child.status !== 0) console.log(`ℹ GPU process exited with ${child.status ?? child.signal} after writing the index; the index is complete`);
-      return;
-    }
+    if (finished) return;
     console.log(`⚠ GPU reindex failed (exit ${child.status ?? child.signal}); continuing on CPU`);
   }
   return sem.reindex(roots, { log: console.log });

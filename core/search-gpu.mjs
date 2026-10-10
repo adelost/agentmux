@@ -59,6 +59,19 @@ export function gpuEnv(env = process.env, { provider = () => ensureCudaProvider(
 export const gpuReady = (env = process.env) => env.AMUX_SEARCH_GPU !== "0"
   && String(env.LD_LIBRARY_PATH || "").split(":").some((dir) => dir.startsWith(gpuLibraryRoot(env)) && dir.includes("cudnn"));
 
+// ONNX Runtime 1.24.3's CUDA provider aborts inside libonnxruntime's own
+// static destructors when the process exits ("corrupted double-linked list",
+// SIGABRT from free() under libc exit()). It reproduces with raw
+// onnxruntime-node, no transformers.js, after session.release(), and depends
+// on heap layout: identical binaries abort from the global install and exit
+// cleanly from a checkout. A process that used CUDA therefore ends without
+// running native teardown; the driver frees its VRAM.
+/** WHAT: Routes a CUDA process exit past native teardown. WHY: Keeps ONNX Runtime's exit-time abort and its crash dump out of normal shutdowns. */
+export function exitAfterGpu(code = 0, { ready = gpuReady(), kill = (signal) => process.kill(process.pid, signal), exit = process.exit } = {}) {
+  if (ready) kill("SIGKILL");
+  else exit(code);
+}
+
 /** WHAT: Names the file a GPU reindex holds while it runs. WHY: Keeps the daemon from loading a second GPU model next to it. */
 export const reindexLockPath = (dir) => join(dir, "reindex.lock");
 

@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { modelCacheDir } from "./search-semantic.mjs";
 
 const TEXT_CHARS = 1200;
+const NEIGHBOUR_CHARS = 240;
 
 /**
  * WHAT: Defines the GPU and CPU rerankers with their candidate budgets.
@@ -38,9 +39,11 @@ export async function loadReranker(kind = "cpu", { threads = Number(process.env.
   const { AutoTokenizer, AutoModelForSequenceClassification, env } = await import("@huggingface/transformers");
   env.cacheDir = modelCacheDir();
   const tokenizer = await AutoTokenizer.from_pretrained(spec.model);
+  // No CPU arena: in the long-lived daemon it keeps the largest batch's host
+  // buffers resident.
   const net = await AutoModelForSequenceClassification.from_pretrained(spec.model, spec.device === "cuda"
-    ? { device: "cuda", dtype: spec.dtype }
-    : { dtype: spec.dtype, session_options: { intraOpNumThreads: threads, interOpNumThreads: 1 } });
+    ? { device: "cuda", dtype: spec.dtype, session_options: { enableCpuMemArena: false } }
+    : { dtype: spec.dtype, session_options: { intraOpNumThreads: threads, interOpNumThreads: 1, enableCpuMemArena: false } });
   const score = async (query, texts) => {
     const scores = [];
     // Chunks bound the activation memory, which on the GPU is VRAM.
@@ -62,17 +65,35 @@ const RERANK_WEIGHT = RERANKERS.cpu.weight;
 /** WHAT: Returns the text the reranker reads for a hit: its headings and the unit. WHY: Keeps a bullet from losing the subject its heading names. */
 export function rerankText(hit, read = (path) => readFileSync(path, "utf8")) {
   if (hit.topic) {
-    // A topic page: its title and summary, then the body without metadata.
+    // A topic page: its title and summary, then the body after the
+    // frontmatter (sources, hashes and aliases are not content).
     let body = "";
-    try { body = read(hit.path).split("\n").filter((line) => !/^(?:[\w-]+:|---|>|<!--)/u.test(line)).join("\n"); } catch { /* summary stays */ }
+    try {
+      const text = read(hit.path);
+      const frontmatter = text.match(/^---\n[\s\S]*?\n---\n/u)?.[0] || "";
+      body = text.slice(frontmatter.length).split("\n").filter((line) => !/^(?:<!--|>)/u.test(line)).join("\n");
+    } catch { /* summary stays */ }
     return `${hit.snippet}\n${body}`.slice(0, TEXT_CHARS);
   }
   const context = (hit.passage?.context || []).join(" > ");
   let body = hit.snippet || "";
+  let around = "";
   if (hit.passage) {
-    try { body = read(hit.path).slice(hit.passage.start, hit.passage.start + hit.passage.length); } catch { /* snippet stays */ }
+    try {
+      const text = read(hit.path);
+      const { start, length, section } = hit.passage;
+      body = text.slice(start, start + length);
+      if (process.env.AMUX_RERANK_NEIGHBOURS !== "0" && section) {
+        // The bullets next to a unit often carry its subject ("**Smara** —"
+        // above "- Kommunicerar på engelska"); the unit comes first so it
+        // survives the token limit.
+        const before = text.slice(Math.max(section.start, start - NEIGHBOUR_CHARS), start).split("\n").slice(-3).join("\n").trim();
+        const after = text.slice(start + length, Math.min(section.end, start + length + NEIGHBOUR_CHARS)).split("\n").slice(0, 3).join("\n").trim();
+        around = [before, after].filter(Boolean).join("\n");
+      }
+    } catch { /* snippet stays */ }
   }
-  return `${context}\n${body}`.slice(0, TEXT_CHARS);
+  return `${context}\n${body}${around ? `\n${around}` : ""}`.slice(0, TEXT_CHARS);
 }
 
 /**

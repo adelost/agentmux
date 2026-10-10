@@ -16,8 +16,21 @@ feature("second-stage reranking", () => {
 
   unit("a topic page is read as its summary and body, without metadata", {
     given: ["a topic hit", () => ({ path: "/topics/memory.md", snippet: "Minne: hur minnet fungerar", topic: { id: "memory" } })],
-    when: ["building its text", (hit) => rerankText(hit, () => "summary: x\nsha256: abc\n---\nJanitor sköter journal-housekeeping.\n")],
+    when: ["building its text", (hit) => rerankText(hit, () => "---\nsummary: x\nsources:\n  - path: a.md\n    sha256: abc\n---\n<!-- template: ref -->\nJanitor sköter journal-housekeeping.\n")],
     then: ["summary first, then only the body", (text) => expect(text).toBe("Minne: hur minnet fungerar\nJanitor sköter journal-housekeeping.\n")],
+  });
+
+  unit("a bullet is read with the entry line and bullets around it", {
+    given: ["a bullet under a person entry", () => {
+      const text = "## Vänner\n**Smara** — långvarig vän\n- Kommunicerar på engelska\n- Bor i Stockholm\n";
+      const start = text.indexOf("- Kommunicerar");
+      return { text, hit: { path: "/people.md", snippet: "x", passage: { start, length: "- Kommunicerar på engelska".length,
+        context: ["Vänner", "Smara"], section: { start: 0, end: text.length } } } };
+    }],
+    when: ["building its text", ({ text, hit }) => rerankText(hit, () => text)],
+    then: ["the unit comes first, then the entry line and the next bullet", (result) => {
+      expect(result).toBe("Vänner > Smara\n- Kommunicerar på engelska\n## Vänner\n**Smara** — långvarig vän\n- Bor i Stockholm");
+    }],
   });
 
   unit("the reranker reads the unit under its headings", {

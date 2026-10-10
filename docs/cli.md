@@ -80,9 +80,14 @@ with `bge-m3` (multilingual, Swedish and English in one space), fused with the
 lexical ranking by normalised score. A cross-encoder then rereads the
 candidates together with the question: `bge-reranker-v2-m3` on the GPU (top
 100, up to six units per note so the answering bullet can beat its
-neighbours, topic pages included), or the smaller
+neighbours, and every served topic page whether or not it shares a word with
+the question), or the smaller
 `mmarco-mMiniLMv2-L12-H384-v1` on the CPU (top 30, blended with the first-stage
-order). Names written apart, joined or hyphenated ("Cut kit", "cutkit",
+order). The reranker reads each unit with its headings, its entry name and
+the lines just around it, so "- Kommunicerar på engelska" is judged as part
+of Smara's entry. Proper names (capitalised words, and names of people in the
+people notes) are matched as written or in the genitive, never stemmed:
+"Elina" does not match "Elin". Names written apart, joined or hyphenated ("Cut kit", "cutkit",
 "cut-kit") match each other, and a long question word matches compounds that
 start with it ("fallskärm" → "fallskärmshoppning"). Identifiers and one- or
 two-word names stay lexical; an exact Markdown hit opens the units most about
@@ -101,11 +106,15 @@ uv pip install --target ~/.cache/agentmux/cuda nvidia-cudnn-cu12==9.*
 (cd node_modules/onnxruntime-node && node script/install.js --onnxruntime-node-install=cuda12)
 ```
 
-With it, the daemon runs the reranker on the GPU (about 2.6 GB VRAM, released
+With it, the daemon runs the reranker on the GPU (about 2.3 GB VRAM, released
 when the daemon exits idle) and `--reindex` embeds in a short-lived GPU
 process (batch 4, about 3 GB VRAM while it runs; skipped in favour of the CPU
 while the daemon holds the GPU). Without it, or when CUDA fails, the CPU models
 answer and every result says so. `AMUX_SEARCH_GPU=0` turns the GPU off.
+ONNX Runtime 1.24.3's CUDA provider aborts in its own exit-time destructors
+(reproducible with raw onnxruntime-node and a released session), so a process
+that used CUDA ends with SIGKILL after its work is written; the driver frees
+its VRAM, and the reindex parent trusts the child's result file.
 Relative time in a question ("i går", "i förmiddags", "i natt", "förra
 veckan", "yesterday") is removed from matching and ranks that day's notes
 first. File-level word-AND runs only for `--raw` or when fewer than three items

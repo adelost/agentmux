@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { indexDir, loadEmbedder, semanticModel } from "./search-semantic.mjs";
 import { createLiveIndex } from "./search-live-index.mjs";
 import { loadReranker } from "./search-rerank.mjs";
-import { gpuEnv, gpuReady, reindexRunning } from "./search-gpu.mjs";
+import { exitAfterGpu, gpuEnv, gpuReady, reindexRunning } from "./search-gpu.mjs";
 import { searchPassages } from "./search-passages.mjs";
 import { isTopicPath } from "./memory-topic-search.mjs";
 import { createRequire } from "node:module";
@@ -22,6 +22,7 @@ const VERSION = createRequire(import.meta.url)("../package.json").version;
 
 const IDLE_MS = () => (Number(process.env.AMUX_EMBEDDER_IDLE_MIN) || 30) * 60_000;
 const CONNECT_MS = 150;
+const DAEMON_HEAP_MB = 1536;
 
 // A new release never talks to a daemon still running the previous code.
 /**
@@ -56,7 +57,10 @@ export async function daemonAlive({ dir = indexDir(), model = semanticModel().na
 /** WHAT: Schedules the daemon start in the background. WHY: Keeps the current query from waiting on a cold model load. */
 export function startEmbedder({ dir = indexDir(), model = semanticModel().name } = {}) {
   const script = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "search-embedder.mjs");
-  const child = spawn(process.execPath, [script], {
+  // A bounded V8 heap makes the long-lived daemon collect per-query garbage
+  // (rerank inputs, unit scores) instead of growing; golden dev reached 5.3 GB
+  // RSS without it against a 4.2 GB budget.
+  const child = spawn(process.execPath, [`--max-old-space-size=${DAEMON_HEAP_MB}`, script], {
     detached: true, stdio: "ignore",
     env: { ...(gpuEnv(process.env) || process.env), AMUX_SEARCH_INDEX_DIR: dir, AMUX_SEARCH_MODEL: model },
   });
@@ -192,5 +196,8 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
   });
   live.index();
   idleTimer = setTimeout(() => server.close(), idleMs);
-  server.on("close", () => rmSync(socketPath, { force: true }));
+  server.on("close", () => {
+    rmSync(socketPath, { force: true });
+    exitAfterGpu(0);
+  });
 }

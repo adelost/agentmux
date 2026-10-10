@@ -1,5 +1,5 @@
 import { component, expect, feature, unit } from "bdd-vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expandPassage, mergePassageHits, phraseUnits, searchPassages } from "./search-passages.mjs";
@@ -163,6 +163,28 @@ feature("fresh original passage retrieval", () => {
     then: ["the note about the tool ranks first", (hits, { dir }) => {
       try {
         expect(hits[0].snippet).toContain("Cut kit ska ha noll beroenden");
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }],
+  });
+
+  component("a person's name is matched as written, not stemmed into another name", {
+    given: ["notes about Elin and about Elina", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-passages-"));
+      mkdirSync(join(dir, "people"));
+      writeFileSync(join(dir, "people", "elin.md"), "# Elin\n- Elin var 26 år när de träffades.\n- Elin flyttade.\n");
+      writeFileSync(join(dir, "people.md"), "# People\n## Övriga\n**Elina** — ny kontakt, 20 år\n");
+      return { dir, roots: [{ name: "memory", path: dir, semantic: true, exclude: [] }] };
+    }],
+    when: ["asking about Elina, capitalised and not", ({ roots }) => ({
+      capitalised: searchPassages("hur gammal är Elina", roots),
+      lowercase: searchPassages("hur gammal är elina", roots),
+    })],
+    then: ["Elina's entry leads and Elin's notes do not match the name", ({ capitalised, lowercase }, { dir }) => {
+      try {
+        for (const hits of [capitalised, lowercase]) {
+          expect(hits[0].snippet).toBe("**Elina** — ny kontakt, 20 år");
+          expect(hits.some(hit => hit.path.endsWith("elin.md") && hit.matches > 1)).toBe(false);
+        }
       } finally { rmSync(dir, { recursive: true, force: true }); }
     }],
   });

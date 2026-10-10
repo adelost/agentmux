@@ -13,6 +13,20 @@ const sameWord = (a, b) => {
 /** WHAT: Checks whether a path belongs to the derived topic subtree. WHY: Prevents ordinary lexical or semantic paths from bypassing topic validation. */
 export const isTopicPath = (path, workspace) => resolve(path).startsWith(`${topicDirectory(workspace)}${sep}`);
 
+const topicHit = (topic, workspace, coversQuery) => ({
+  path: topic.path, line: 1, root: "memory-topics", layer: "topic", score: topic.score || 0, coversQuery,
+  date: topic.meta.asOf, snippet: `${topic.meta.title}: ${topic.meta.summary}`,
+  topic: { workspace: resolve(workspace), id: topic.meta.id, sha256: topic.sha256, state: topic.state, cell: topic.cell },
+});
+
+/**
+ * WHAT: Returns every validated, servable topic page as a hit, matched or not.
+ * WHY: Keeps a reranker able to judge a topic whose wording shares no word with the question.
+ */
+export function servedTopics(workspace, { topics = inspectTopics(workspace) } = {}) {
+  return topics.filter(topic => topic.meta && topic.action === "SERVE").map(topic => topicHit(topic, workspace, false));
+}
+
 /** WHAT: Returns eligible topics ranked for a real query. WHY: Keeps derived context separate from original decision authority. */
 export function searchMemoryTopics(query, workspace, { topics = inspectTopics(workspace) } = {}) {
   const terms = [...new Set(words(query))];
@@ -36,11 +50,7 @@ export function searchMemoryTopics(query, workspace, { topics = inspectTopics(wo
     return { ...doc.topic, score, matches };
   }).filter(doc => doc.matches >= Math.min(2, terms.length)).sort((a, b) => b.score - a.score || a.meta.id.localeCompare(b.meta.id));
   return {
-    hits: candidates.filter(topic => topic.action === "SERVE").map(topic => ({
-      path: topic.path, line: 1, root: "memory-topics", layer: "topic", score: topic.score, coversQuery: topic.matches === terms.length,
-      date: topic.meta.asOf, snippet: `${topic.meta.title}: ${topic.meta.summary}`,
-      topic: { workspace: resolve(workspace), id: topic.meta.id, sha256: topic.sha256, state: topic.state, cell: topic.cell },
-    })),
+    hits: candidates.filter(topic => topic.action === "SERVE").map(topic => topicHit(topic, workspace, topic.matches === terms.length)),
     excluded: [...candidates.filter(topic => topic.action !== "SERVE").map(topic => ({ id: topic.meta.id, state: topic.state, cell: topic.cell })),
       ...topics.filter(topic => !topic.meta).map(topic => ({ id: topic.path, state: topic.state, cell: topic.cell }))],
   };
