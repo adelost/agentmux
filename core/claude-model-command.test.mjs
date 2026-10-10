@@ -5,7 +5,11 @@ import { component, expect, feature } from "bdd-vitest";
 import { paneModelSelection } from "./pane-model-state.mjs";
 import { runLockedClaudeModelChange } from "./claude-model-command.mjs";
 
-function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5", running = true } = {}) {
+// api:2 on 2026-10-10: a fresh session's footer shows the model with no context bar.
+const FRESH_FOOTER = "❯ \n────\n  ⬆ /gsd-update │ Opus 5.5 │ 2\n  ⏵⏵ bypass permissions on";
+
+function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5", running = true,
+  screen = null, compactResult = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-claude-model-change-"));
   const path = join(root, "session.jsonl");
   writeFileSync(path, "");
@@ -18,6 +22,7 @@ function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5
     isBusy: async () => false,
     promptTransportState: async () => ({ state: "empty-idle" }),
     getContext: async () => ({ model, effort: "high" }),
+    ...(screen ? { captureScreen: async () => screen } : {}),
   };
   const queue = {
     acquireSessionLease: () => ({ release: () => calls.push("release") }),
@@ -26,6 +31,7 @@ function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5
   const identityFor = () => ({ sessionId: "11111111-1111-4111-8111-111111111111", path });
   const compact = async () => {
     calls.push("compact");
+    if (compactResult) return compactResult(identityFor());
     if (!compactOk) return { ok: false, reason: "compact-boundary-missing" };
     appendFileSync(path, `${JSON.stringify({ type: "system", subtype: "compact_boundary" })}\n`);
     return { ok: true, sessionId: identityFor().sessionId, cursor: { positions: { [path]: 0 } }, compactBoundary: true };
@@ -127,6 +133,30 @@ feature("Claude model changes are compact-first and pane-local", () => {
     then: ["no compact or model command is submitted", (result, fx) => {
       try { expect(result.ok).toBe(false); expect(fx.calls).toEqual(["release"]); }
       finally { fx.cleanup(); }
+    }],
+  });
+  component("a fresh pane whose footer already shows the target is not compacted", {
+    given: ["the journal still says Opus 5 but the bar-less footer says Opus 5.5", () =>
+      fixture({ liveModel: "claude-opus-5", screen: FRESH_FOOTER })],
+    when: ["requesting opus 5.5 as Mattias typed it", fx => fx.change("claude-opus-5-5")],
+    then: ["it answers already using the model, without compact or switch", (result, fx) => {
+      try {
+        expect(result).toMatchObject({ ok: true, unchanged: true, model: "claude-opus-5-5" });
+        expect(fx.calls).toEqual([]);
+      } finally { fx.cleanup(); }
+    }],
+  });
+  component("nothing to compact changes the model without a compact boundary", {
+    given: ["Claude answered the compact with Not enough messages to compact", () => fixture({
+      compactResult: (identity) => ({ ok: false, reason: "compact-nothing-to-compact", nothingToCompact: true,
+        sessionId: identity.sessionId, cursor: { positions: {} } }) })],
+    when: ["requesting Opus 5.5", fx => fx.change("claude-opus-5-5")],
+    then: ["the model command follows and the selection persists", (result, fx) => {
+      try {
+        expect(result.ok).toBe(true);
+        expect(fx.calls).toEqual(["compact", "/model claude-opus-5-5", "release"]);
+        expect(paneModelSelection(fx.state, "claw", 0)?.model).toBe("claude-opus-5-5");
+      } finally { fx.cleanup(); }
     }],
   });
 });

@@ -28,6 +28,25 @@ export function claudeCompactRefusalAfterSubmit(cursor, submittedAt) {
   return refused ? commandErrorText(refused.content) || "compact refused" : null;
 }
 
+const isEmptyCompact = (event, submittedAt) => event?.type === "system"
+  && event.subtype === "local_command" && event.commandRun?.command === "compact"
+  && /not enough messages to compact/iu.test(commandErrorText(event.content))
+  && Date.parse(String(event.timestamp || "")) >= Number(submittedAt);
+
+// Claude answers a session too short to summarize with plain stdout, not a failed
+// command, so the refusal check above never saw it; api:2 held its project's
+// delivery lease for twelve minutes on 2026-10-10 waiting for a boundary.
+/**
+ * WHAT: Returns whether Claude answered a /compact with "Not enough messages to compact" after one submit fence.
+ * WHY: Keeps a session with nothing to compact from waiting for a boundary Claude never writes.
+ */
+export function claudeCompactHadNothingAfterSubmit(cursor, submittedAt) {
+  if (cursor?.kind !== CLAUDE_PROMPT_CURSOR_KIND
+      || !Number.isFinite(Number(submittedAt))) return false;
+  return jsonlEventsAfterCursor(Object.keys(cursor.positions || {}), cursor)
+    .some((event) => isEmptyCompact(event, submittedAt));
+}
+
 /**
  * WHAT: Returns whether Claude committed a compact epoch after one durable submit fence.
  * WHY: Keeps an obsolete TUI epoch from holding a provably unconsumed prompt for an hour.

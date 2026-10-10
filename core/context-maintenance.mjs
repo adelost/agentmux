@@ -37,7 +37,8 @@ function write(state, key, record) {
 
 /** WHAT: Stores verified compact evidence from another maintenance path. WHY: Prevents model switching and cold-wake protection from compacting the same context twice. */
 export function rememberContextCompact(state, name, pane, receipt) {
-  if (!state || !receipt?.ok) return;
+  // "Nothing to compact" leaves the context as small as a compact would: no attempt is due before new work.
+  if (!state || !(receipt?.ok || receipt?.nothingToCompact)) return;
   write(state, paneKey(name, pane), { sessionId: receipt.sessionId, cursor: receipt.cursor, status: "VERIFIED" });
 }
 

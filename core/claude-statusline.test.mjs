@@ -6,9 +6,24 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   decorateClaudeStatusline,
   normalizeClaudeEffort,
+  readClaudeFooterModel,
   readClaudeScreenStatus,
   writeClaudeStatuslineBridge,
 } from "./claude-statusline.mjs";
+
+describe("Claude footer model before the first reply", () => {
+  // Without a context window the statusline drops its bar and percent.
+  const fresh = "old text\n────────────\n❯ \n────────────\n  ⬆ /gsd-update │ Opus 5.5 │ 2\n bypass permissions on";
+
+  it("reads the live model even when the footer has no percent", () => {
+    expect(readClaudeScreenStatus(fresh)).toBeNull();
+    expect(readClaudeFooterModel(fresh)).toMatchObject({ model: "Opus 5.5", effort: null });
+  });
+
+  it("ignores a model named in scrollback above the composer", () => {
+    expect(readClaudeFooterModel("│ Opus 5 │ x\n❯ \n────\n  bypass permissions on")).toBeNull();
+  });
+});
 
 describe("Claude footer effort on screen", () => {
   const screen = (effort) => `old text\n────────────\n❯ \n────────────\n`

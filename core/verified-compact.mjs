@@ -1,6 +1,8 @@
 // Exact Claude compact receipt shared by sleep and account rotation.
 
-import { claudeCompactRefusalAfterSubmit, hasClaudeCompactBoundaryAfterSubmit } from "./claude-submit-boundary.mjs";
+import {
+  claudeCompactHadNothingAfterSubmit, claudeCompactRefusalAfterSubmit, hasClaudeCompactBoundaryAfterSubmit,
+} from "./claude-submit-boundary.mjs";
 import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
 import { compactAccessBlocker } from "./nightly-compact.mjs";
@@ -41,6 +43,7 @@ export async function verifiedClaudeCompact({
   sendSlash = sendSlashVerified,
   hasBoundary = hasClaudeCompactBoundaryAfterSubmit,
   compactRefusal = claudeCompactRefusalAfterSubmit,
+  nothingToCompact = claudeCompactHadNothingAfterSubmit,
   pollAttempts = CLAUDE_COMPACT_POLLS,
   pollMs = 1_000,
   settleMs = 200,
@@ -77,14 +80,15 @@ export async function verifiedClaudeCompact({
   if (!sent.delivered || sent.via !== "command-receipt") {
     return { ok: false, reason: "compact-command-unverified" };
   }
-  let refusal = null;
+  let refusal = null, empty = false;
   const boundary = await waitFor(
     Math.max(1, Math.min(pollAttempts, Math.floor((deadline - now()) / pollMs) + 1)),
     pollMs,
     sleep,
     () => {
       refusal = compactRefusal(cursor, submittedAt);
-      return Boolean(refusal) || hasBoundary(cursor, submittedAt);
+      empty = !refusal && nothingToCompact(cursor, submittedAt);
+      return Boolean(refusal) || empty || hasBoundary(cursor, submittedAt);
     },
   );
   if (refusal) {
@@ -95,6 +99,12 @@ export async function verifiedClaudeCompact({
   if (!after?.sessionId) return { ok: false, reason: "post-compact-session-missing" };
   if (after.sessionId !== before.sessionId) {
     return { ok: false, reason: "compact-session-changed" };
+  }
+  // Not a compact: callers that only need a small context (model and account
+  // changes) may proceed; sleep and Dream keep refusing without a boundary.
+  if (empty && !hasBoundary(cursor, submittedAt)) {
+    return { ok: false, reason: "compact-nothing-to-compact", nothingToCompact: true,
+      cursor, submittedAt, sessionId: after.sessionId, commandReceipt: sent.via };
   }
   return {
     ok: true,

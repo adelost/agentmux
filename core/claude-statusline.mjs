@@ -12,17 +12,39 @@ export function normalizeClaudeEffort(value) {
   return EFFORT_TOKEN.test(effort) ? effort : null;
 }
 
-/** WHAT: Reads the current Claude footer. WHY: Keeps live context/model evidence out of earlier scrollback. */
-export function readClaudeScreenStatus(screen) {
+const FOOTER_MODEL = /(?:^|[│|]\s*)(claude-[\w.\[\]-]+|(?:Fable|Mythos|Opus|Sonnet|Haiku)\s+\d+(?:[.\-]\d+)*(?:\s*\(1M context\))?)(?=\s*[│|])/iu;
+// a label the terminal cut short ("thinking: m…") is no effort at all (E93)
+const footerEffort = (line) => normalizeClaudeEffort(line.match(/\b(?:thinking|effort)\s*:\s*([\w-]+)\b(?!…|\.\.\.)/iu)?.[1]);
+
+const footerLines = (screen) => {
   const lines = String(screen || "").trimEnd().split("\n");
   const prompt = lines.findLastIndex((line) => /^\s*❯/u.test(line));
-  if (prompt < 0) return null;
-  const footer = lines.slice(Math.max(prompt + 1, lines.length - 15));
+  return prompt < 0 ? null : lines.slice(Math.max(prompt + 1, lines.length - 15));
+};
+
+// Before a session's first reply Claude has no context window, so the statusline
+// drops its bar and percent ("│ Opus 5.5 │ 2") while the model it names is live.
+/**
+ * WHAT: Reads the model and effort the current Claude footer names, with or without a context percent.
+ * WHY: Keeps a fresh or just-compacted pane's live model ahead of an older journal entry.
+ */
+export function readClaudeFooterModel(screen) {
+  for (const line of footerLines(screen) || []) {
+    if (!/[│|]/u.test(line)) continue;
+    const model = line.match(FOOTER_MODEL)?.[1];
+    if (model) return { model, effort: footerEffort(line), source: "claude-live-statusline" };
+  }
+  return null;
+}
+
+/** WHAT: Reads the current Claude footer. WHY: Keeps live context/model evidence out of earlier scrollback. */
+export function readClaudeScreenStatus(screen) {
+  const footer = footerLines(screen);
+  if (!footer) return null;
   for (const line of footer) {
     if (!/[█▓▒░│|]/u.test(line) || !/\b\d{1,3}\s*%/u.test(line)) continue;
-    const model = line.match(/(?:^|[│|]\s*)(claude-[\w.\[\]-]+|(?:Fable|Mythos|Opus|Sonnet|Haiku)\s+\d+(?:[.\-]\d+)*(?:\s*\(1M context\))?)(?=\s*[│|])/iu)?.[1];
-    // a label the terminal cut short ("thinking: m…") is no effort at all (E93)
-    const effort = normalizeClaudeEffort(line.match(/\b(?:thinking|effort)\s*:\s*([\w-]+)\b(?!…|\.\.\.)/iu)?.[1]);
+    const model = line.match(FOOTER_MODEL)?.[1];
+    const effort = footerEffort(line);
     const percent = Number(line.match(/\b(\d{1,3})\s*%/u)?.[1]);
     if (model && Number.isFinite(percent) && percent <= 100) {
       const counter = footer.findLast((entry) => /^\s*\d+\s+tokens\s*$/u.test(entry));
