@@ -135,6 +135,19 @@ feature("context reading under session limit", () => {
       expect(ctx).toBeNull()],
   });
 
+  // api:2, 2026-10-10: amux ps said "last: opus-5" while its footer said Opus 5.5.
+  component("a fresh footer's live model beats the journal's older one", {
+    given: ["a journal last on claude-opus-5 and a bar-less footer naming Opus 5.5", () => ({
+      lines: [usageEntry("claude-opus-5", 60_000)],
+      pane: "  answer text\n                                  0 tokens\n────\n❯ \n────\n  ⬆ /gsd-update │ Opus 5.5 │ 2\n",
+    })],
+    when: ["reading context from the pane content", ({ lines, pane }) =>
+      withSessionJsonl(lines, (paneDir) => getContextFromPane(pane, paneDir))],
+    then: ["the model is the one on screen, not the stale journal one", (ctx) => {
+      expect(ctx.model).toBe("Opus 5.5");
+    }],
+  });
+
   component("idle-save hint + synthetic latest model no longer clamps to false 100%", {
     given: ["ai:1's exact shape: pane shows 'save 351.2k tokens', jsonl ends in synthetic spam", () => ({
       lines: [usageEntry("claude-fable-5", 351_000), syntheticEntry(), syntheticEntry()],

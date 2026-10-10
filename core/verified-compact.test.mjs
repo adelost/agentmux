@@ -4,8 +4,41 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "./verified-compact.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
+import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 
 feature("verified Claude compact", () => {
+  unit("Not enough messages to compact ends the wait within one poll", {
+    given: ["a journal where Claude answers the /compact with nothing to compact", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-empty-compact-"));
+      const path = join(root, "session.jsonl");
+      writeFileSync(path, `${JSON.stringify({ type: "user", timestamp: "2026-10-10T09:00:00.000Z" })}\n`);
+      return { root, path };
+    }],
+    when: ["compacting with the full ten-minute budget", async ({ root, path }) => {
+      let clock = Date.parse("2026-10-10T09:15:12.000Z"), sleeps = 0;
+      const result = await verifiedClaudeCompact({
+        agent: { capturePromptEchoCursor: async () => captureJsonlAppendCursor("claude-prompt-events-v1", [path]) },
+        agentName: "api", pane: 2, paneDir: root,
+        latestIdentity: () => ({ sessionId: "same-session" }), now: () => clock,
+        sendSlash: async () => {
+          appendFileSync(path, `${JSON.stringify({ type: "system", subtype: "local_command", commandRun: { command: "compact", args: "" },
+            content: "<local-command-stdout>Not enough messages to compact.</local-command-stdout>",
+            timestamp: new Date(clock + 14).toISOString() })}\n`);
+          return { delivered: true, via: "command-receipt" };
+        },
+        hasBoundary: () => false,
+        sleep: async (ms) => { sleeps += 1; clock += ms; },
+      });
+      rmSync(root, { recursive: true, force: true });
+      return { result, sleeps };
+    }],
+    then: ["it returns at once as nothing to compact, not a missing boundary", ({ result, sleeps }) => {
+      expect(result).toMatchObject({ ok: false, reason: "compact-nothing-to-compact", nothingToCompact: true,
+        sessionId: "same-session" });
+      expect(sleeps).toBeLessThanOrEqual(1);
+    }],
+  });
+
   unit("accepts the observed 145-second nightly receipt without another model call", {
     when: ["the command and boundary arrive later than the former two-minute wait", async () => {
       let clock = 1_000, submits = 0, rescues;

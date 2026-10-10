@@ -13,8 +13,9 @@ import { nightlyCompactDecision } from "../core/nightly-compact.mjs";
 import { contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
 
-// Statuses whose compact receipt is verified, whatever size the summary landed at.
-const VERIFIED_COMPACT = new Set(["within-budget", "compacted-above-budget", "compacted-unmeasured"]);
+// Statuses whose compact receipt is verified, whatever size the summary landed at, plus
+// Claude's "Not enough messages to compact": no context, so no cache for the switch to lose.
+const VERIFIED_COMPACT = new Set(["within-budget", "compacted-above-budget", "compacted-unmeasured", "nothing-to-compact"]);
 
 const compactPolicy = (policy) => ({ enabled: true, maxTokens: policy.maxTokens, idleMinutes: 0 });
 

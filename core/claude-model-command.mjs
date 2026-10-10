@@ -1,4 +1,5 @@
 import { normalizeClaudeModelName, resolveClaudeModel } from "./claude-model.mjs";
+import { readClaudeFooterModel } from "./claude-statusline.mjs";
 import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "./context-maintenance.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
@@ -8,7 +9,8 @@ import { verifiedClaudeCompact } from "./verified-compact.mjs";
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const observedModelId = raw => {
-  const normalized = normalizeClaudeModelName(raw);
+  // The footer's "Opus 5.5 (1M context)" is the 1M-context variant of the same model id.
+  const normalized = normalizeClaudeModelName(String(raw ?? "").replace(/\s*\(1M context\)\s*$/iu, "[1m]"));
   return normalized.ok ? resolveClaudeModel(normalized.model) : null;
 };
 
@@ -22,7 +24,14 @@ export async function runLockedClaudeModelChange({
 } = {}) {
   if (!state || !queue || !paneDir || !targetModel) return { ok: false, stage: "input", reason: "model-change-boundary-missing" };
   const model = resolveClaudeModel(targetModel);
-  const current = async () => agent.getContext?.(name, pane) ?? agent.getContextPercent?.(name, pane);
+  const reported = async () => agent.getContext?.(name, pane) ?? agent.getContextPercent?.(name, pane);
+  // A fresh or just-compacted pane's footer names its live model before its journal does.
+  const current = async () => {
+    const screen = typeof agent.captureScreen === "function" ? await agent.captureScreen(name, pane).catch(() => null) : null;
+    const live = readClaudeFooterModel(screen);
+    const context = await reported();
+    return live ? { ...context, model: live.model, effort: live.effort || context?.effort || null } : context;
+  };
   const process = await agent.paneProcessState?.(name, pane).catch(() => null);
   if (process?.running !== true) return { ok: false, stage: "stopped", reason: "pane-not-running" };
   const before = await current();
@@ -57,7 +66,9 @@ export async function runLockedClaudeModelChange({
       beginContextCompact(state, name, pane, identity);
       const receipt = await compact({ agent, agentName: name, pane, paneDir,
         latestIdentity: identityFor, sendSlash });
-      if (!receipt?.ok || !receipt.compactBoundary || receipt.sessionId !== identity.sessionId) {
+      // A session with nothing to compact has no context or cache to lose by changing model.
+      const compacted = (receipt?.ok && receipt.compactBoundary) || receipt?.nothingToCompact === true;
+      if (!compacted || receipt.sessionId !== identity.sessionId) {
         return { ok: false, stage: "compact", reason: receipt?.reason || "compact-boundary-unverified" };
       }
       rememberContextCompact(state, name, pane, receipt);

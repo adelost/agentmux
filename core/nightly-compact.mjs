@@ -42,6 +42,9 @@ export function nightlyCompactDecision(facts, policy, previous = null) {
 
 /** WHAT: Describes the verified result without retrying it. WHY: Prevents slash acknowledgement or unknown usage from becoming a budget-success claim. */
 export function nightlyCompactOutcome(receipt, before, after, maxTokens) {
+  if (receipt?.nothingToCompact === true && receipt.sessionId === before.sessionId && after.sessionId === before.sessionId) {
+    return { status: "nothing-to-compact", afterTokens: Number.isFinite(after.tokens) ? after.tokens : null };
+  }
   if (!receipt?.ok || !receipt.compactBoundary) return { status: "failed", reason: receipt?.reason || "compact-unverified" };
   if (receipt.sessionId !== before.sessionId || after.sessionId !== before.sessionId
       || after.sessionPath !== before.sessionPath) return { status: "failed", reason: "compact-session-changed" };

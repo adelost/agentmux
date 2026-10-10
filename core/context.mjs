@@ -13,7 +13,7 @@ import { tmpdir } from "os";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
 import { getContextFromKimiJsonl } from "./kimi-jsonl-reader.mjs";
-import { normalizeClaudeEffort, readClaudeScreenStatus } from "./claude-statusline.mjs";
+import { normalizeClaudeEffort, readClaudeFooterModel, readClaudeScreenStatus } from "./claude-statusline.mjs";
 /**
  * Read only the last `maxBytes` of a file and return its complete trailing
  * lines (the partial leading line is dropped). Claude session jsonl grows to
@@ -622,8 +622,8 @@ export function getContextFromPane(paneContent, paneDir = null) {
     percent = Math.min(100, Math.round((tokens / max) * 100));
   }
 
-  let model = null;
-  if (paneDir) {
+  let model = readClaudeFooterModel(paneContent)?.model ?? null; // live footer before journal history
+  if (!model && paneDir) {
     try { model = readLatestClaudeModel(paneDir); } catch { /* display-only */ }
   }
   return { percent, tokens, model };
