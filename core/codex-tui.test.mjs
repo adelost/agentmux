@@ -16,11 +16,16 @@ import {
   verifiedEmptyCodexComposer,
 } from "./codex-tui.mjs";
 
-function fakeAgent({ frames, busy = false, busyError = null }) {
+function fakeAgent({ frames, busy = false, busyError = null, menus = [] }) {
   let index = 0;
   const keys = [];
   return {
     keys,
+    dismissBlockingPrompt: async () => {
+      const menu = menus.shift() ?? null;
+      if (menu) keys.push(`<dismiss ${menu}>`);
+      return menu;
+    },
     isBusy: async () => {
       if (busyError) throw busyError;
       return busy;
@@ -722,6 +727,26 @@ q to quit   esc/← to edit prev
 });
 
 feature("prepareCodexIdle", () => {
+  unit("a menu painted over a visible empty composer is dismissed before typing", {
+    given: ["Codex 0.162's goal menu above an empty composer", () => ({
+      agent: fakeAgent({
+        frames: [
+          "\n      › 1. Resume goal\n  Work  2. Leave paused\n        enter select · esc back\n› Ask Codex to do anything\n",
+          "\n› Ask Codex to do anything\n",
+        ],
+        menus: ["codex-paused-goal"],
+      }),
+    })],
+    when: ["preparing to type", ({ agent }) => prepareCodexIdle({
+      agent, name: "lsrc", pane: 3, sleep: noSleep, requireVisibleComposer: true,
+    })],
+    then: ["the menu is closed and the fresh frame is the one trusted", (result, { agent }) => {
+      expect(agent.keys).toEqual(["<dismiss codex-paused-goal>"]);
+      expect(result.ok).toBe(true);
+      expect(result.snapshot).not.toContain("Resume goal");
+    }],
+  });
+
   unit("idle empty pane passes without keystrokes", {
     given: ["an empty composer", () => ({ agent: fakeAgent({ frames: ["\n›\n"] }) })],
     when: ["checking", ({ agent }) => prepareCodexIdle({ agent, name: "claw", pane: 9, sleep: noSleep })],

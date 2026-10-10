@@ -46,10 +46,13 @@ function activeWorkspaceTrustCursor(text) {
 // prompt or turn below it means the menu is history.
 const OVERLAY_HINT = /^enter select\s*·\s*esc back$/iu;
 const OVERLAY_MAX_LINES_BELOW = 4;
+// The overlay shows the whole goal text, which ran to eight lines on lsrc:3,
+// so its header can sit far above the options.
+const OVERLAY_MAX_LINES = 40;
 
 /** WHAT: Returns the lines of a live Codex menu, in either layout, or null. WHY: Never confirms a stale menu in scrollback. */
 function liveCodexMenuLines(text, footer) {
-  const lines = tailLines(text, 16);
+  const lines = tailLines(text, OVERLAY_MAX_LINES);
   if (footer.test(lines.at(-1)?.trim() || "")) return lines.slice(-10);
   const hint = lines.findLastIndex(line => OVERLAY_HINT.test(line.trim()));
   if (hint < 0 || lines.length - 1 - hint > OVERLAY_MAX_LINES_BELOW) return null;

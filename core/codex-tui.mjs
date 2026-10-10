@@ -471,6 +471,10 @@ export async function prepareCodexIdle({
   };
 
   let snapshot = await capture();
+  // Codex 0.162 paints menus such as "Resume paused goal?" over the transcript
+  // and keeps the empty composer visible below them, but the menu holds the
+  // keys: typed text would land in the menu.
+  if (await agent.dismissBlockingPrompt?.(`${name}:.${pane}`)) snapshot = await capture();
   if (isCodexFullscreenPager(snapshot)) {
     try { await agent.typeLiteral(name, "q", pane); }
     catch (err) { return fail("transcript", `could not close Codex full-screen pager: ${err.message}`); }

@@ -588,7 +588,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       ready: () => waitForCodexUiReady(target, name, pane), screen: () => captureScreen(name, pane),
       dismiss: blocker => t.sendKeys(target, blocker.keys),
       status: () => driveCodexStatus({ agent: { capturePane, captureScreen, isBusy, sendTab, sendEscape,
-        clearInputLine, typeLiteral, sendEnter, paneHistorySize, zoomPaneForPicker, restorePaneZoom }, name, pane }),
+        clearInputLine, typeLiteral, sendEnter, paneHistorySize, zoomPaneForPicker, restorePaneZoom, dismissBlockingPrompt }, name, pane }),
       remember: persistSession, pin: (actual) => state && setCodexModelOverride(state, name, pane, actual.model, actual.effort),
     });
   }
@@ -734,7 +734,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function dismissBlockingPrompt(target) {
     let paneText;
     try {
-      paneText = await t.capture(target, { lines: 20 });
+      // The whole screen: Codex 0.162 menus show the full goal text, which
+      // pushes their header past the last 20 lines.
+      paneText = await t.captureScreen(target);
     } catch (err) {
       console.warn(`dismiss: capture failed for ${target}: ${err.message}`);
       return null;

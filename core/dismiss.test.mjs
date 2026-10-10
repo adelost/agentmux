@@ -59,11 +59,14 @@ const pausedGoalOverlay = `
   Befo                                                                        ant
   sect  Resume paused goal?                                                   ive
   old   Goal: Finish the first sellable release within the agreed scope,
-        verify polish, performance and stability, and keep going until
-■ You’  every agreed criterion holds.                                         chase
-more c
-• Cont
-  Work
+        use the other panes where they help, write pseudocode before each
+        change, and verify polish, performance and stability until every
+■ You’  agreed criterion holds and the rating is at least nine out of ten.    chase
+more c  Finish the remaining safe work and the customer trial, verify the
+        rollout within the existing mandate, and keep real operator or key
+• Cont  blockers apart from finished work. No invented ratings, no wider
+        payment mandate, and no features outside the first release.
+  Work  This goal text runs as long as the real one did.
 
 • Cont
       › 1. Resume goal   Mark it active and continue when idle
