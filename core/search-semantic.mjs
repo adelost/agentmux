@@ -28,11 +28,12 @@ import { markdownUnits } from "./search-units.mjs";
 /** WHAT: Names the unit index layout version. WHY: Keeps old chunk indexes from being read as unit indexes. */
 export const SCHEMA_VERSION = 3;
 /** WHAT: Names the default embedding model. WHY: Keeps index and query on one model unless configured otherwise. */
-export const DEFAULT_MODEL = "Xenova/multilingual-e5-small";
+export const DEFAULT_MODEL = "Xenova/bge-m3";
 const MODELS = {
   "Xenova/multilingual-e5-small": { pooling: "mean", query: "query: ", passage: "passage: " },
   "Xenova/multilingual-e5-base": { pooling: "mean", query: "query: ", passage: "passage: " },
   "onnx-community/gte-multilingual-base": { pooling: "cls", query: "", passage: "" },
+  "Xenova/bge-m3": { pooling: "cls", query: "", passage: "" },
 };
 const EMBED_CHARS = 1200;
 const BATCH = 32;
@@ -53,11 +54,15 @@ export function semanticModel(name = process.env.AMUX_SEARCH_MODEL || DEFAULT_MO
 // (2 threads suffice); a full reindex used ~17 cores and 3 GB RSS unbounded,
 // so it defaults to 6 threads (AMUX_EMBED_THREADS) and takes longer instead.
 /** WHAT: Loads a feature-extraction pipeline once per process. WHY: Keeps model load out of every query; the daemon keeps one warm. */
-export async function loadEmbedder(model = semanticModel(), { threads = Number(process.env.AMUX_EMBED_THREADS) || 6 } = {}) {
+export async function loadEmbedder(model = semanticModel(), { threads = Number(process.env.AMUX_EMBED_THREADS) || 6, device = "cpu" } = {}) {
   const { pipeline, env } = await import("@huggingface/transformers");
   env.cacheDir = modelCacheDir();
-  const pipe = await pipeline("feature-extraction", model.name, { dtype: "q8",
-    session_options: { intraOpNumThreads: threads, interOpNumThreads: 1 } });
+  // GPU: fp16 weights. CPU: 8-bit weights; a query vector from either side
+  // ranks against the same index (bge-m3 golden dev, 2026-10-10).
+  const pipe = await pipeline("feature-extraction", model.name, device === "cuda" ? { device: "cuda", dtype: "fp16" }
+    // No CPU arena: the daemon lives for hours and an arena keeps the peak of
+    // its largest batch resident.
+    : { dtype: "q8", session_options: { intraOpNumThreads: threads, interOpNumThreads: 1, enableCpuMemArena: false } });
   return async (texts, kind) => {
     const prefix = kind === "query" ? model.query : model.passage;
     const out = await pipe(texts.map((text) => `${prefix}${text}`), { pooling: model.pooling, normalize: true });
@@ -167,7 +172,8 @@ export function semanticIndexStatus({ now = Date.now(), maxAgeMs = 36 * 60 * 60 
  * WHAT: Builds the unit index, reusing rows of files whose mtime and size match.
  * WHY: Keeps a model change or backlog from turning one night into hours of embedding.
  */
-export async function reindex(roots, { log = () => {}, maxUnits = Number(process.env.AMUX_REINDEX_MAX_UNITS) || 25_000,
+export async function reindex(roots, { log = () => {}, device = "cpu",
+  maxUnits = Number(process.env.AMUX_REINDEX_MAX_UNITS) || (device === "cuda" ? 200_000 : 25_000),
   dir = indexDir(), embed = null, model = semanticModel() } = {}) {
   const semRoots = roots.filter((root) => root.semantic);
   if (!semRoots.length) {
@@ -190,7 +196,9 @@ export async function reindex(roots, { log = () => {}, maxUnits = Number(process
       row += file.units.length;
     }
   }
-  const embedder = embed || await loadEmbedder(model);
+  const embedder = embed || await loadEmbedder(model, { device });
+  // Small GPU batches keep the activation memory, and so VRAM, bounded.
+  const batchSize = device === "cuda" ? 4 : BATCH;
   const meta = [];
   const rows = [];
   const pending = [];
@@ -234,11 +242,11 @@ export async function reindex(roots, { log = () => {}, maxUnits = Number(process
   // Similar lengths per batch: padding to the longest member wasted most of
   // the CPU time with mixed one-line and long units.
   pending.sort((a, b) => a.text.length - b.text.length);
-  for (let i = 0; i < pending.length; i += BATCH) {
-    const batch = pending.slice(i, i + BATCH);
+  for (let i = 0; i < pending.length; i += batchSize) {
+    const batch = pending.slice(i, i + batchSize);
     const vectors = await embedder(batch.map((item) => item.text), "passage");
     batch.forEach((item, k) => { rows[item.row] = vectors[k]; });
-    if (i && i % (BATCH * 100) === 0) log(`  ${i}/${pending.length} units embeddade...`);
+    if (i && i % (batchSize * 400) === 0) log(`  ${i}/${pending.length} units embeddade...`);
   }
   const dimension = rows[0]?.length || prev?.dimension || 0;
   mkdirSync(dir, { recursive: true });
@@ -254,7 +262,7 @@ export async function reindex(roots, { log = () => {}, maxUnits = Number(process
   renameSync(join(dir, "meta.json.tmp"), join(dir, "meta.json"));
   const seconds = Math.round((Date.now() - startedAt) / 1000);
   log(`Index klart: ${meta.length} filer, ${rows.length} units (${pending.length} nya, ${reused} återanvända`
-    + `${deferred ? `, ${deferred} filer väntar till nästa körning` : ""}), ${seconds}s, modell ${model.name}.`);
+    + `${deferred ? `, ${deferred} filer väntar till nästa körning` : ""}), ${seconds}s, modell ${model.name} på ${device === "cuda" ? "GPU" : "CPU"}.`);
   return { files: meta.length, chunks: rows.length, embedded: pending.length, reused, deferred, seconds };
 }
 

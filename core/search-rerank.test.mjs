@@ -14,6 +14,12 @@ feature("second-stage reranking", () => {
     }],
   });
 
+  unit("a topic page is read as its summary and body, without metadata", {
+    given: ["a topic hit", () => ({ path: "/topics/memory.md", snippet: "Minne: hur minnet fungerar", topic: { id: "memory" } })],
+    when: ["building its text", (hit) => rerankText(hit, () => "summary: x\nsha256: abc\n---\nJanitor sköter journal-housekeeping.\n")],
+    then: ["summary first, then only the body", (text) => expect(text).toBe("Minne: hur minnet fungerar\nJanitor sköter journal-housekeeping.\n")],
+  });
+
   unit("the reranker reads the unit under its headings", {
     given: ["a passage hit inside a people note", () => ({ path: "/people.md", snippet: "x",
       passage: { start: 9, length: 28, context: ["People", "Övriga"] } })],

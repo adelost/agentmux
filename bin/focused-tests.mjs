@@ -39,6 +39,7 @@ const TEST_ALIASES = {
   "core/search-semantic.mjs": ["core/search.test.mjs"],
   "core/search-embedder.mjs": ["core/search-fusion.test.mjs"],
   "core/search-live-index.mjs": ["core/search-semantic.test.mjs"],
+  "core/search-gpu.mjs": ["core/search-gpu.test.mjs"],
   "bin/search-embedder.mjs": ["core/search-fusion.test.mjs"],
   "attachments.mjs": ["test/attachments.test.mjs"],
   "core/delivery-assets.mjs": ["core/delivery-queue.test.mjs"],

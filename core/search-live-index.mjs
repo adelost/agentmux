@@ -10,7 +10,7 @@ import { fileUnits, indexDir, listMarkdownFiles, openIndex, rankUnits } from "./
 
 const SCAN_EVERY_MS = 30_000;
 const MAX_UNITS_PER_SCAN = 4_000;
-const BATCH = 16;
+const BATCH = 4;
 
 /**
  * WHAT: Builds a semantic index view that follows edits made after the nightly build.

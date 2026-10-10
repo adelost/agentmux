@@ -12,34 +12,61 @@
 import { readFileSync } from "node:fs";
 import { modelCacheDir } from "./search-semantic.mjs";
 
-/** WHAT: Names the cross-encoder model. WHY: Keeps the daemon and docs on one reranker. */
-export const RERANK_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1";
-/** WHAT: Defines how many first-stage candidates are reranked. WHY: Keeps rerank latency near 0.8 s on this CPU. */
-export const RERANK_CANDIDATES = 30;
-const MAX_TOKENS = 192;
 const TEXT_CHARS = 1200;
-// Weight of the cross-encoder against the first-stage order. The reranker
-// alone demoted answers both earlier layers agreed on (golden dev: 78 alone,
-// 83 blended at 0.3, 79 at 0.5).
-const RERANK_WEIGHT = 0.3;
 
-/** WHAT: Loads the cross-encoder once per process. WHY: Keeps model load out of each query; only the daemon calls it. */
-export async function loadReranker({ model = RERANK_MODEL, threads = Number(process.env.AMUX_RERANK_THREADS) || 6 } = {}) {
+/**
+ * WHAT: Defines the GPU and CPU rerankers with their candidate budgets.
+ * WHY: Keeps the strong model on the GPU and a fast fallback on the CPU on one contract.
+ */
+export const RERANKERS = {
+  // bge-reranker-v2-m3 on the RTX 3090: 100 pairs in about 0.6 s. Golden dev
+  // (147): alone it beat a 0.7 or 0.85 blend with the first stage (90 % vs
+  // 85-88 % hit@3), and 100 candidates with 60 semantic hits beat 60/30.
+  gpu: { model: "onnx-community/bge-reranker-v2-m3-ONNX", device: "cuda", dtype: "fp16", maxTokens: 256, chunk: 50,
+    candidates: 100, semanticK: 60, perFile: 6, weight: 1 },
+  cpu: { model: "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1", device: "cpu", dtype: "fp32", maxTokens: 192, chunk: 30,
+    candidates: 30, semanticK: 30, perFile: 2, weight: 0.3 },
+};
+/** WHAT: Names the CPU reranker model. WHY: Keeps docs and the fallback on one model id. */
+export const RERANK_MODEL = RERANKERS.cpu.model;
+/** WHAT: Defines how many candidates the CPU reranker reads. WHY: Keeps CPU rerank latency near 0.8 s. */
+export const RERANK_CANDIDATES = RERANKERS.cpu.candidates;
+
+/** WHAT: Loads one cross-encoder once per process. WHY: Keeps model load out of each query; only the daemon calls it. */
+export async function loadReranker(kind = "cpu", { threads = Number(process.env.AMUX_RERANK_THREADS) || 6 } = {}) {
+  const spec = RERANKERS[kind];
   const { AutoTokenizer, AutoModelForSequenceClassification, env } = await import("@huggingface/transformers");
   env.cacheDir = modelCacheDir();
-  const tokenizer = await AutoTokenizer.from_pretrained(model);
-  const net = await AutoModelForSequenceClassification.from_pretrained(model, { dtype: "fp32",
-    session_options: { intraOpNumThreads: threads, interOpNumThreads: 1 } });
-  return async (query, texts) => {
-    if (!texts.length) return [];
-    const inputs = tokenizer(texts.map(() => query), { text_pair: texts, padding: true, truncation: true, max_length: MAX_TOKENS });
-    const { logits } = await net(inputs);
-    return Array.from(logits.data);
+  const tokenizer = await AutoTokenizer.from_pretrained(spec.model);
+  const net = await AutoModelForSequenceClassification.from_pretrained(spec.model, spec.device === "cuda"
+    ? { device: "cuda", dtype: spec.dtype }
+    : { dtype: spec.dtype, session_options: { intraOpNumThreads: threads, interOpNumThreads: 1 } });
+  const score = async (query, texts) => {
+    const scores = [];
+    // Chunks bound the activation memory, which on the GPU is VRAM.
+    for (let i = 0; i < texts.length; i += spec.chunk) {
+      const part = texts.slice(i, i + spec.chunk);
+      const { logits } = await net(tokenizer(part.map(() => query), { text_pair: part, padding: true, truncation: true, max_length: spec.maxTokens }));
+      scores.push(...Array.from(logits.data));
+    }
+    return scores;
   };
+  return { kind, ...spec, score };
 }
+
+// Weight of the cross-encoder against the first-stage order. MiniLM alone
+// demoted answers both earlier layers agreed on (golden dev: 78 alone, 83
+// blended at 0.3, 79 at 0.5).
+const RERANK_WEIGHT = RERANKERS.cpu.weight;
 
 /** WHAT: Returns the text the reranker reads for a hit: its headings and the unit. WHY: Keeps a bullet from losing the subject its heading names. */
 export function rerankText(hit, read = (path) => readFileSync(path, "utf8")) {
+  if (hit.topic) {
+    // A topic page: its title and summary, then the body without metadata.
+    let body = "";
+    try { body = read(hit.path).split("\n").filter((line) => !/^(?:[\w-]+:|---|>|<!--)/u.test(line)).join("\n"); } catch { /* summary stays */ }
+    return `${hit.snippet}\n${body}`.slice(0, TEXT_CHARS);
+  }
   const context = (hit.passage?.context || []).join(" > ");
   let body = hit.snippet || "";
   if (hit.passage) {

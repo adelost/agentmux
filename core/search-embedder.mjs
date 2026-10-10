@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { indexDir, loadEmbedder, semanticModel } from "./search-semantic.mjs";
 import { createLiveIndex } from "./search-live-index.mjs";
 import { loadReranker } from "./search-rerank.mjs";
+import { gpuEnv, gpuReady, reindexRunning } from "./search-gpu.mjs";
 import { searchPassages } from "./search-passages.mjs";
 import { isTopicPath } from "./memory-topic-search.mjs";
 import { createRequire } from "node:module";
@@ -47,12 +48,17 @@ function request(socketPath, payload, timeoutMs) {
   });
 }
 
+/** WHAT: Checks whether the search daemon answers. WHY: Keeps a GPU reindex from loading a second model beside the daemon's. */
+export async function daemonAlive({ dir = indexDir(), model = semanticModel().name } = {}) {
+  return request(embedderSocketPath(dir, model), { ping: true }, CONNECT_MS).then(() => true, () => false);
+}
+
 /** WHAT: Schedules the daemon start in the background. WHY: Keeps the current query from waiting on a cold model load. */
 export function startEmbedder({ dir = indexDir(), model = semanticModel().name } = {}) {
   const script = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "search-embedder.mjs");
   const child = spawn(process.execPath, [script], {
     detached: true, stdio: "ignore",
-    env: { ...process.env, AMUX_SEARCH_INDEX_DIR: dir, AMUX_SEARCH_MODEL: model },
+    env: { ...(gpuEnv(process.env) || process.env), AMUX_SEARCH_INDEX_DIR: dir, AMUX_SEARCH_MODEL: model },
   });
   child.unref();
 }
@@ -102,7 +108,9 @@ export async function daemonPassages(query, roots, { max = 30, workspace, dates 
 export async function daemonRerank(query, texts, { dir = indexDir(), model = semanticModel().name } = {}) {
   try {
     const result = await request(embedderSocketPath(dir, model), { op: "rerank", query, texts }, 30_000);
-    if (Array.isArray(result.scores) && result.scores.length === texts.length) return { scores: result.scores };
+    if (Array.isArray(result.scores) && result.scores.length && result.scores.length <= texts.length) {
+      return { scores: result.scores, weight: result.weight, kind: result.kind, note: result.note };
+    }
     return { scores: null, unavailable: result.unavailable || "reranker returned no scores" };
   } catch (error) { return { scores: null, unavailable: `reranker unreachable: ${error.message}` }; }
 }
@@ -118,10 +126,25 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
   }
   const embed = await loadEmbedder(model, { threads: 2 });
   // The reranker loads in the background; until then queries keep the
-  // first-stage order instead of waiting.
-  let rerank = null;
-  let rerankState = "reranker still loading";
-  loadReranker().then((loaded) => { rerank = loaded; }, (error) => { rerankState = `reranker failed to load: ${error.message}`; });
+  // first-stage order instead of waiting. The GPU model is preferred; any
+  // reason it is not used is returned with every answer, never hidden.
+  let reranker = null;
+  let rerankNote = "reranker still loading";
+  const loadBestReranker = async () => {
+    let note = null;
+    if (process.env.AMUX_SEARCH_GPU === "0") note = "GPU disabled (AMUX_SEARCH_GPU=0); CPU reranker in use";
+    else if (!gpuReady()) note = "no CUDA libraries in ~/.cache/agentmux/cuda; CPU reranker in use";
+    else if (reindexRunning(dir)) note = "GPU busy with a reindex; CPU reranker in use";
+    else {
+      try { reranker = await loadReranker("gpu"); rerankNote = null; return; }
+      catch (error) { note = `GPU reranker unavailable (${String(error.message).split("\n")[0]}); CPU reranker in use`; }
+    }
+    reranker = await loadReranker("cpu");
+    rerankNote = note;
+  };
+  loadBestReranker().catch((error) => { rerankNote = `reranker failed to load: ${error.message}`; });
+  const rerankInfo = () => reranker ? { kind: reranker.kind, candidates: reranker.candidates, perFile: reranker.perFile, semanticK: reranker.semanticK,
+    weight: reranker.weight, note: rerankNote } : { note: rerankNote };
   const segments = new Map();
   const live = createLiveIndex({ dir, embed });
   let idleTimer;
@@ -136,8 +159,9 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
         const { query, k = 30, ping, op, roots, max, workspace, dates = [], texts, perFile } = JSON.parse(data);
         if (ping) { socket.end("{}"); return; }
         if (op === "rerank") {
-          socket.end(JSON.stringify(rerank && Array.isArray(texts) ? { scores: await rerank(String(query), texts.map(String)) }
-            : { scores: null, unavailable: rerankState }));
+          if (!reranker || !Array.isArray(texts)) { socket.end(JSON.stringify({ scores: null, unavailable: rerankNote })); return; }
+          const scores = await reranker.score(String(query), texts.slice(0, reranker.candidates).map(String));
+          socket.end(JSON.stringify({ scores, ...rerankInfo() }));
           return;
         }
         if (op === "passages") {
@@ -154,7 +178,7 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
         if (Array.isArray(roots)) live.refresh(roots);
         const [vector] = await embed([String(query)], "query");
         socket.end(JSON.stringify({ hits: live.rank(vector, k), builtAt: loaded.builtAt, complete: loaded.complete,
-          pendingFiles: live.pendingFiles() }));
+          pendingFiles: live.pendingFiles(), reranker: rerankInfo() }));
       } catch (error) {
         socket.end(JSON.stringify({ hits: [], unavailable: `semantic query failed: ${error.message}` }));
       } finally {

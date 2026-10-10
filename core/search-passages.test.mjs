@@ -153,6 +153,20 @@ feature("fresh original passage retrieval", () => {
     }],
   });
 
+  component("a name written apart, joined or hyphenated is one name, and a compound contains its head", {
+    given: ["a note that writes the tool as two words and the topic as a compound", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-passages-"));
+      writeFileSync(join(dir, "day.md"), "# Dag\n- Mattias: Cut kit ska ha noll beroenden på fallskärmshoppning.\n- Kit för kaffe köpt.\n- Cut och klistra i dokumentet.\n");
+      return { dir, roots: [{ name: "memory", path: dir, semantic: true, exclude: [] }] };
+    }],
+    when: ["asking with the joined name and the compound head", ({ roots }) => searchPassages("får cutkit bero på fallskärm", roots)],
+    then: ["the note about the tool ranks first", (hits, { dir }) => {
+      try {
+        expect(hits[0].snippet).toContain("Cut kit ska ha noll beroenden");
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }],
+  });
+
   unit("exact evidence remains first and history stays reachable", {
     given: ["an exact receipt, broad history and a relevant paragraph", () => ({
       original: [{ path: "/receipt.jsonl", line: 8, layer: "L1" }, { path: "/history.jsonl", line: 6, layer: "L2" }],

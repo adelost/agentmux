@@ -9,6 +9,7 @@ import { swedishStem } from "./swedish-stem.mjs";
 const SOURCE_MAX_BYTES = 1024 * 1024;
 const STOP = new Set("a an and are as att av blev blir de den det do du då eller en ett får för från ha hade han har hela hur i in inte jag kan man med mig min mina mitt och of om on på sig ska som the till to vad var vi vilken vilket vilka varför är efter before is it does have when where why who när bara skulle".split(" "));
 const PASSAGES_PER_FILE = 2;
+const COMPOUND_HEAD = 6;
 const DATED_PASSAGES_PER_FILE = 8;
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const stemCache = new Map();
@@ -28,15 +29,32 @@ function stem(word) {
 const IDENTIFIER = /[\p{L}\p{N}]+(?:[._-][\p{L}\p{N}]+)*/gu;
 const WORD = /[\p{L}\p{N}]+/gu;
 
+// "Cut kit", "cut-kit" and "cutkit" are one name in Swedish notes: two
+// adjacent words separated by one space or hyphen also yield their joined
+// form, on both the note and the question side.
+function joinedPairs(lower) {
+  const joined = [];
+  let previous = null;
+  for (const match of lower.matchAll(WORD)) {
+    const word = match[0];
+    if (previous && /^[ -]$/u.test(lower.slice(previous.end, match.index)) && /^\p{L}{2,}$/u.test(previous.word)
+      && /^\p{L}{2,}$/u.test(word) && previous.word.length + word.length <= 30) joined.push(previous.word + word);
+    previous = { word, end: match.index + word.length };
+  }
+  return joined;
+}
+
+/** Words count toward a unit's length; identifiers and joined pairs are extra spellings of the same words. */
 function tokensOf(text) {
   const lower = String(text).toLowerCase();
   const words = lower.match(WORD) || [];
   const identifiers = (lower.match(IDENTIFIER) || []).filter(token => /[._-]/u.test(token) && /[\p{N}_]/u.test(token));
-  return [...words, ...identifiers];
+  return { words, extras: [...identifiers, ...joinedPairs(lower)] };
 }
 
 function terms(text) {
-  return tokensOf(text).filter(word => word.length > 1 && !STOP.has(word))
+  const { words, extras } = tokensOf(text);
+  return [...words, ...extras].filter(word => word.length > 1 && !STOP.has(word))
     .map(word => (/[._-]/u.test(word) ? word : stem(word)));
 }
 
@@ -48,17 +66,24 @@ function stemIndex(word, stems) {
   for (const [value, index] of stems) {
     if (word.startsWith(value) && stem(word) === value) return index;
   }
+  // A Swedish compound starting with a long question word is about it:
+  // "fallskärm" in the question, "fallskärmshoppning" in the note.
+  for (const [value, index] of stems) {
+    if (value.length >= COMPOUND_HEAD && word.length >= value.length + 3 && word.startsWith(value)) return index;
+  }
   return undefined;
 }
 
 function wordsOf(text) {
   const tf = new Map();
   let length = 0;
-  for (const word of tokensOf(text)) {
+  const { words, extras } = tokensOf(text);
+  for (const word of words) {
     if (word.length < 2 || STOP.has(word)) continue;
-    if (!/[._-]/u.test(word)) length++;
+    length++;
     tf.set(word, (tf.get(word) || 0) + 1);
   }
+  for (const word of extras) if (!STOP.has(word)) tf.set(word, (tf.get(word) || 0) + 1);
   return { tf, length };
 }
 
@@ -187,6 +212,7 @@ export function searchPassages(query, roots, { max = 12, excludePath = () => fal
 }
 
 const PHRASE_UNITS_PER_FILE = 2;
+const DECISION_WORDS = /\b(?:BESLUT|[Bb]eslut|bestämt|bestämde|valde|decision|decided|ska vara|gäller)\b/u;
 
 /**
  * WHAT: Returns the units of one file that contain an exact phrase, densest first.
@@ -198,23 +224,28 @@ export function phraseUnits(hit, pattern, { limit = PHRASE_UNITS_PER_FILE } = {}
   const sha256 = hash(bytes);
   const units = markdownUnits(text).map(unit => {
     const occurrences = (unit.text.match(new RegExp(pattern.source, "giu")) || []).length;
-    return { unit, density: occurrences / Math.max(1, unit.text.length) };
+    // A unit that names the term in its heading or bold lead, or records a
+    // decision about it, defines it more than one that mentions it in passing.
+    const named = [...unit.headings, unit.entry, unit.defines].some(label => label && pattern.test(label));
+    const decides = DECISION_WORDS.test(unit.text);
+    const density = occurrences / Math.max(1, unit.text.length);
+    return { unit, density, about: density * (1 + Number(named) + Number(decides)) };
   }).filter(({ density }) => density > 0);
   // "Respiten är 600 s (GRACE_S)" is about the term; a 1600-character status
   // bullet that names it once in passing is not (golden dev n31).
-  units.sort((a, b) => b.density - a.density || a.unit.start - b.unit.start);
-  return units.slice(0, limit).map(({ unit }) => ({ ...hit, line: unit.line, dedupeKey: `${hit.path}#${unit.start}`,
+  units.sort((a, b) => b.about - a.about || a.unit.start - b.unit.start);
+  return units.slice(0, limit).map(({ unit, about }) => ({ ...hit, line: unit.line, dedupeKey: `${hit.path}#${unit.start}`, about,
     snippet: unit.text.replace(/\s+/gu, " ").slice(0, 160),
     passage: { sha256, start: unit.start, length: unit.length, context: [...unit.headings, ...(unit.entry ? [unit.entry] : [])], section: unit.section } }));
 }
 
+// A daily file's second section can still be the answer (golden eval: one
+// per file lost answers, two kept them).
 /**
- * WHAT: Keeps the two best-ranked paragraphs of each file.
- * WHY: Prevents one long note from filling the overview with its neighbours,
- * while a daily file's second section can still be the answer (golden eval:
- * one per file lost answers, two kept them).
+ * WHAT: Filters ranked items to the best few of each file.
+ * WHY: Prevents one long note from filling the overview with its neighbours.
  */
-function topPassagesPerFile(limit = PASSAGES_PER_FILE) {
+export function topPassagesPerFile(limit = PASSAGES_PER_FILE) {
   const seen = new Map();
   return hit => {
     const count = seen.get(hit.path) || 0;

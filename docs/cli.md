@@ -76,12 +76,31 @@ the file changed, search again. A relevant passage is evidence, not an
 automatic answer or proof that every later correction has been found.
 
 Natural questions also use the local semantic layer: the same units embedded
-by a small multilingual model on the CPU, fused with the lexical ranking by
-normalised score. A multilingual cross-encoder
-(`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`) then rereads the top 30
-candidates with the question and is blended with that order. Identifiers and
-one- or two-word names stay lexical; an exact Markdown hit opens the units
-that contain the phrase, densest first, instead of the file's first match.
+with `bge-m3` (multilingual, Swedish and English in one space), fused with the
+lexical ranking by normalised score. A cross-encoder then rereads the
+candidates together with the question: `bge-reranker-v2-m3` on the GPU (top
+100, up to six units per note so the answering bullet can beat its
+neighbours, topic pages included), or the smaller
+`mmarco-mMiniLMv2-L12-H384-v1` on the CPU (top 30, blended with the first-stage
+order). Names written apart, joined or hyphenated ("Cut kit", "cutkit",
+"cut-kit") match each other, and a long question word matches compounds that
+start with it ("fallskärm" → "fallskärmshoppning"). Identifiers and one- or
+two-word names stay lexical; an exact Markdown hit opens the units most about
+the phrase (density, a heading or bold lead naming it, decision words)
+across all matching notes, with recency only breaking ties.
+
+GPU: ONNX Runtime's CUDA provider ships with agentmux; it also needs cuDNN 9,
+kept in agentmux's own directory:
+
+```bash
+uv pip install --target ~/.cache/agentmux/cuda nvidia-cudnn-cu12==9.*
+```
+
+With it, the daemon runs the reranker on the GPU (about 2.6 GB VRAM, released
+when the daemon exits idle) and `--reindex` embeds in a short-lived GPU
+process (batch 4, about 3 GB VRAM while it runs; skipped in favour of the CPU
+while the daemon holds the GPU). Without it, or when CUDA fails, the CPU models
+answer and every result says so. `AMUX_SEARCH_GPU=0` turns the GPU off.
 Relative time in a question ("i går", "i förmiddags", "i natt", "förra
 veckan", "yesterday") is removed from matching and ranks that day's notes
 first. File-level word-AND runs only for `--raw` or when fewer than three items
@@ -97,8 +116,10 @@ nightly index in the background (at most 4 000 new units per 30 s scan),
 reusing vectors of unchanged units, so today's note is searchable before the
 next reindex. Models are cached in `~/.cache/agentmux/models`, outside the
 install. `--reindex` (also run nightly) re-embeds only units whose text
-changed, at most `AMUX_REINDEX_MAX_UNITS` (25 000) per run; a larger backlog
-continues on the next run and the output notes the incomplete index.
+changed, at most `AMUX_REINDEX_MAX_UNITS` (25 000 on the CPU, 200 000 on the
+GPU) per run; a larger backlog continues on the next run and the output notes
+the incomplete index. A full rebuild of about 39 000 units takes about six
+minutes on an RTX 3090.
 Reindexing is never an implicit side effect of a query.
 
 `--deep` adds the much larger raw session archives. Result state is isolated per

@@ -17,11 +17,13 @@ import {
 import { defaultSearchStatePath, loadLastResults, saveLastResults } from "../core/search-state.mjs";
 import { defaultWorkspace } from "../core/runtime-defaults.mjs";
 import { expandMemoryTopic, isTopicPath, mergeTopicHits, searchMemoryTopics } from "../core/memory-topic-search.mjs";
-import { expandPassage, mergePassageHits, phraseUnits, searchPassages } from "../core/search-passages.mjs";
+import { expandPassage, mergePassageHits, phraseUnits, searchPassages, topPassagesPerFile } from "../core/search-passages.mjs";
 import { preferDates, temporalIntent } from "../core/search-time.mjs";
 import { documentWindow, firstAnswerRank, formatEvalReport, parseGoldenCases, summarizeEval } from "../core/search-eval.mjs";
 import { classifyQuery, fuseRankings, semanticSearchHits } from "../core/search-fusion.mjs";
-import { daemonPassages, daemonRerank, semanticQuery } from "../core/search-embedder.mjs";
+import { daemonAlive, daemonPassages, daemonRerank, semanticQuery } from "../core/search-embedder.mjs";
+import { gpuEnv, holdReindexLock } from "../core/search-gpu.mjs";
+import { spawnSync } from "node:child_process";
 import { blendRerank, RERANK_CANDIDATES, rerankText } from "../core/search-rerank.mjs";
 import { readFileSync } from "node:fs";
 
@@ -39,7 +41,9 @@ export const SEARCH_HELP = `Usage:
                                      Score a golden JSONL set: hit@1, hit@3, MRR, latency
 
 Natural questions combine ranked note items (bullets, entries, table rows) with
-the local semantic layer, then a cross-encoder reorders the top 30; identifiers
+the local semantic layer (bge-m3), then a cross-encoder reorders the candidates
+(bge-reranker-v2-m3 on the GPU when ~/.cache/agentmux/cuda holds cuDNN, else a
+smaller CPU model, and the output says so); identifiers
 and one- or two-word names stay lexical, and an exact hit opens the units that
 hold the phrase. Relative time ("i går", "i förmiddags", "last week") prefers
 that day's notes. The semantic layer runs in a small background process that
@@ -89,6 +93,8 @@ function showResults(last, show, context) {
   }
 }
 
+const SEMANTIC_K_MAX = 100;
+
 /** WHAT: Names the warm-daemon semantic layer. WHY: Keeps tests and callers able to substitute it without a model. */
 export const SEMANTIC_LAYER = Object.freeze({ query: semanticQuery, passages: daemonPassages, rerank: daemonRerank });
 
@@ -118,45 +124,41 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   // An exact Markdown hit opens the units that hold the phrase, not only the
   // first matching line of the file.
   const phrase = new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegex(content)}(?![\\p{L}\\p{N}_])`, "iu");
-  hits = hits.flatMap(hit => {
-    if (hit.layer !== "L1" || hit.path.endsWith(".jsonl")) return [hit];
-    try {
-      const units = phraseUnits(hit, phrase);
-      return units.length ? units : [hit];
-    } catch { return [hit]; }
+  // Across files, the unit most about the phrase leads; the file's recency
+  // only breaks ties (an identifier named in many daily notes, golden r06).
+  const exactUnits = [];
+  const rest = [];
+  hits.forEach((hit, order) => {
+    if (hit.layer !== "L1" || hit.path.endsWith(".jsonl")) { rest.push(hit); return; }
+    let units = [];
+    try { units = phraseUnits(hit, phrase); } catch { /* the line hit stays */ }
+    if (units.length) exactUnits.push(...units.map(unit => ({ ...unit, order })));
+    else exactUnits.push({ ...hit, about: 0, order });
   });
+  exactUnits.sort((a, b) => b.about - a.about || a.order - b.order);
+  hits = [...exactUnits, ...rest];
 
   const exactDocument = hits.some(hit => hit.layer === "L1" && !hit.path.endsWith(".jsonl"));
-  const passageMax = Math.max(flags.max ?? 12, 30);
-  const passages = flags.raw || exactDocument ? []
-    : await semantic.passages(content, lexicalRoots, { max: passageMax, workspace, dates })
-      ?? searchPassages(content, lexicalRoots, { max: passageMax, dates, excludePath: path => isTopicPath(path, workspace) });
   let semanticHits = [];
+  let reranker = null;
   const useSemantic = !flags.raw && !flags.lexical && !flags.fast && (flags.semantic || classifyQuery(content) === "natural");
   if (useSemantic) {
     const allowedRoots = new Set(roots.map(root => root.name));
-    const result = await semantic.query(content, { k: 30, roots: lexicalRoots, waitMs: flags.semanticWaitMs ?? 0 });
+    const result = await semantic.query(content, { k: SEMANTIC_K_MAX, roots: lexicalRoots, waitMs: flags.semanticWaitMs ?? 0 });
     if (result.unavailable) warn(`⚠ ${result.unavailable}`);
     else if (result.complete === false) warn("ℹ semantic index is still being built; recent files may be missing from the semantic layer");
-    semanticHits = semanticSearchHits((result.hits || []).filter(hit => allowedRoots.has(hit.root) && !isTopicPath(hit.path, workspace)));
+    reranker = result.reranker || null;
+    semanticHits = semanticSearchHits((result.hits || []).slice(0, reranker?.semanticK || 30)
+      .filter(hit => allowedRoots.has(hit.root) && !isTopicPath(hit.path, workspace)));
   }
-  let ranked = semanticHits.length ? fuseRankings(passages, semanticHits) : passages;
-  if (semanticHits.length && semantic.rerank && !flags.noRerank) {
-    const candidates = ranked.slice(0, RERANK_CANDIDATES);
-    const files = new Map();
-    const read = (path) => { if (!files.has(path)) files.set(path, readFileSync(path, "utf8")); return files.get(path); };
-    const { scores, unavailable } = await semantic.rerank(content, candidates.map((hit) => rerankText(hit, read)));
-    if (scores) ranked = [...blendRerank(candidates, scores), ...ranked.slice(RERANK_CANDIDATES)];
-    else warn(`ℹ ${unavailable}; showing first-stage order`);
-  }
-  ranked = preferDates(ranked, dates);
-  if (fileAnd && !flags.raw && !exactDocument && ranked.length < 3) {
-    const fileLevel = lexicalSearch(content, lexicalRoots, { includeFileAnd: true }).filter(hit => hit.layer === "L2"
-      && !isTopicPath(hit.path, workspace));
-    hits = dedupeByFile([...hits, ...fileLevel]);
-  }
-  if (ranked.length) hits = mergePassageHits(hits, ranked.slice(0, flags.max ?? 12));
-  hits = preferDates(hits, dates);
+  // A strong reranker can judge several units of the same note, so the pool
+  // keeps more siblings per file: the answering bullet often sits next to a
+  // better-worded neighbour (golden r11, r28, r35).
+  const perFile = reranker?.perFile || 2;
+  const passageMax = Math.max(flags.max ?? 12, reranker?.candidates || 30);
+  const passages = flags.raw || exactDocument ? []
+    : await semantic.passages(content, lexicalRoots, { max: passageMax, workspace, dates, perFile })
+      ?? searchPassages(content, lexicalRoots, { max: passageMax, dates, perFile, excludePath: path => isTopicPath(path, workspace) });
   let topicHits = [];
   if (!flags.raw && (!flags.source || "memory-topics".includes(flags.source))) {
     try {
@@ -165,7 +167,36 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
       if (result.excluded.length) warn(`Topics omitted: ${result.excluded.map(row => `${row.id}=${row.state}`).join(", ")}. Original-source search remains available.`);
     } catch (error) { warn(`Topic lookup unavailable: ${error.message}. Showing original-source results.`); }
   }
-  const top = mergeTopicHits(hits, topicHits, flags.max ?? 12);
+  let ranked = semanticHits.length ? fuseRankings(passages, semanticHits) : passages;
+  let topicsRanked = false;
+  if (semanticHits.length && semantic.rerank && !flags.noRerank) {
+    // Topic pages compete in the same reranking as original units instead
+    // of taking fixed slots.
+    const budget = reranker?.candidates || RERANK_CANDIDATES;
+    const candidates = [...ranked.slice(0, Math.max(0, budget - topicHits.length)), ...topicHits];
+    const files = new Map();
+    const read = (path) => { if (!files.has(path)) files.set(path, readFileSync(path, "utf8")); return files.get(path); };
+    const { scores, unavailable, weight, note } = await semantic.rerank(content, candidates.map((hit) => rerankText(hit, read)));
+    if (note) warn(`⚠ ${note}`);
+    if (scores?.length === candidates.length) {
+      const inPool = new Set(candidates);
+      ranked = [...blendRerank(candidates, scores, { weight }), ...ranked.filter(hit => !inPool.has(hit))];
+      topicsRanked = true;
+    } else if (scores) {
+      const scored = candidates.slice(0, scores.length);
+      ranked = [...blendRerank(scored, scores, { weight }), ...ranked.slice(scores.length)];
+    } else warn(`ℹ ${unavailable}; showing first-stage order`);
+  }
+  if (perFile > 2) ranked = ranked.filter(topPassagesPerFile(3));
+  ranked = preferDates(ranked, dates);
+  if (fileAnd && !flags.raw && !exactDocument && ranked.length < 3) {
+    const fileLevel = lexicalSearch(content, lexicalRoots, { includeFileAnd: true }).filter(hit => hit.layer === "L2"
+      && !isTopicPath(hit.path, workspace));
+    hits = dedupeByFile([...hits, ...fileLevel]);
+  }
+  if (ranked.length) hits = mergePassageHits(hits, ranked.slice(0, flags.max ?? 12));
+  hits = preferDates(hits, dates);
+  const top = topicsRanked ? hits.slice(0, flags.max ?? 12) : mergeTopicHits(hits, topicHits, flags.max ?? 12);
   return { top, total: hits.length + topicHits.length, elapsedMs: Date.now() - startedAt };
 }
 
@@ -191,12 +222,15 @@ async function runSearchEval(file, roots, workspace, flags, semantic) {
     // The reranker loads after the embedder; wait for it too, so every row
     // measures the same warm pipeline.
     let reranker = Boolean(result.unavailable) || !semantic.rerank;
+    let warmupNote = "";
     for (let tries = 0; !reranker && tries < 240; tries++) {
-      reranker = Boolean((await semantic.rerank("warmup", ["warmup"])).scores);
+      const probe = await semantic.rerank("warmup", ["warmup"]);
+      reranker = Boolean(probe.scores);
+      if (reranker && probe.note) warmupNote = probe.note;
       if (!reranker) await new Promise((resolve) => setTimeout(resolve, 250));
     }
     warmup = result.unavailable ? `semantic unavailable: ${result.unavailable}`
-      : `semantic warm-up ${Date.now() - startedAt}ms${reranker && semantic.rerank ? "" : ", reranker unavailable"}`;
+      : `semantic warm-up ${Date.now() - startedAt}ms${reranker && semantic.rerank ? "" : ", reranker unavailable"}${warmupNote ? `, ${warmupNote}` : ""}`;
   }
   for (const row of cases) {
     // Relative time in a question ("i går") means the day it was written.
@@ -209,6 +243,29 @@ async function runSearchEval(file, roots, workspace, flags, semantic) {
   const label = `golden ${split} · ${mode} · ${cases.length} questions${warmup ? ` · ${warmup}` : ""}`;
   console.log(formatEvalReport({ label, summary: summarizeEval(rows), rows }));
   return rows;
+}
+
+/**
+ * WHAT: Runs the reindex on the GPU in a child process when possible, else on the CPU.
+ * WHY: Keeps the CUDA libraries, which load only at process start, out of every CLI call.
+ */
+async function reindexOnBestDevice(roots) {
+  const sem = await import("../core/search-semantic.mjs");
+  const dir = sem.indexDir();
+  if (process.env.AMUX_SEARCH_DEVICE === "cuda") {
+    const release = holdReindexLock(dir);
+    try { return await sem.reindex(roots, { log: console.log, device: "cuda" }); } finally { release(); }
+  }
+  const env = gpuEnv(process.env);
+  if (!env) console.log("ℹ no CUDA libraries in ~/.cache/agentmux/cuda; reindexing on CPU");
+  else if (await daemonAlive()) console.log("ℹ the search daemon is running; reindexing changed units on CPU to stay within the VRAM budget");
+  else {
+    const child = spawnSync(process.execPath, [process.argv[1], "search", "--reindex"], {
+      env: { ...env, AMUX_SEARCH_DEVICE: "cuda" }, stdio: "inherit" });
+    if (child.status === 0) return;
+    console.log(`⚠ GPU reindex failed (exit ${child.status ?? child.signal}); continuing on CPU`);
+  }
+  return sem.reindex(roots, { log: console.log });
 }
 
 /** WHAT: Routes search, expansion and reindex requests. WHY: Keeps search state and source selection out of the command router. */
@@ -224,10 +281,7 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
   const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE || defaultWorkspace(process.env.HOME);
   const roots = withEventLedgerRoot(loadSearchRoots(config), eventsPath());
 
-  if (flags.reindex) {
-    const sem = await import("../core/search-semantic.mjs");
-    return sem.reindex(roots, { log: console.log });
-  }
+  if (flags.reindex) return reindexOnBestDevice(roots);
 
   if (flags.eval) return runSearchEval(flags.eval, roots, workspace, flags, semantic);
   if (!query && flags.show != null) {
