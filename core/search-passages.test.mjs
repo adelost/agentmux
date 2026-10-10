@@ -2,7 +2,7 @@ import { component, expect, feature, unit } from "bdd-vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expandPassage, mergePassageHits, searchPassages } from "./search-passages.mjs";
+import { expandPassage, mergePassageHits, phraseUnits, searchPassages } from "./search-passages.mjs";
 
 const fixture = () => {
   const dir = mkdtempSync(join(tmpdir(), "amux-passages-"));
@@ -133,6 +133,22 @@ feature("fresh original passage retrieval", () => {
         expect(view).toContain("## Rotorsak för 191 commits");
         expect(view).toContain("git status jämför mot indexet");
         expect(view).not.toContain("Orelaterat");
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }],
+  });
+
+  component("an exact identifier opens the unit about it, not its first passing mention", {
+    given: ["a day where a long status bullet names the term before the decision defines it", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-passages-"));
+      const path = join(dir, "2026-10-08.md");
+      writeFileSync(path, `# Dag\n- ${"Status för prober och loggar. ".repeat(30)}Se GRACE_S.\n- BESLUT: Respiten är 600 s (GRACE_S), inte 60 s.\n- DEP_GRACE_S är något annat.\n`);
+      return { dir, path };
+    }],
+    when: ["expanding the exact hit", ({ path }) => phraseUnits({ path, line: 2, layer: "L1" }, /(?<![\p{L}\p{N}_])GRACE_S(?![\p{L}\p{N}_])/iu)],
+    then: ["the defining unit first, the passing mention second, the other identifier never", (units, { dir }) => {
+      try {
+        expect(units.map((unit) => unit.line)).toEqual([3, 2]);
+        expect(expandPassage(units[0])).toContain("Respiten är 600 s (GRACE_S)");
       } finally { rmSync(dir, { recursive: true, force: true }); }
     }],
   });

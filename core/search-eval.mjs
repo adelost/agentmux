@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 
 const ANSWER_WINDOW_LINES = 15;
-const KINDS_ORDER = ["exact", "paraphrase", "decision", "recent", "people", "tried"];
+const KINDS_ORDER = ["exact", "paraphrase", "decision", "recent", "people", "tried", "crosslingual"];
 
 const normalize = (text) => String(text ?? "").normalize("NFC").toLocaleLowerCase("sv-SE").replace(/\s+/gu, " ");
 
@@ -21,7 +21,8 @@ export function parseGoldenCases(text) {
       const expect = Array.isArray(row.expect) ? row.expect.filter((value) => typeof value === "string" && value.trim()) : [];
       if (!row.id || !row.query || !expect.length) throw new Error(`golden line ${index + 1}: needs id, query and expect[]`);
       return { id: String(row.id), query: String(row.query), expect, kind: String(row.kind || "other"),
-        split: row.split === "heldout" ? "heldout" : "dev" };
+        split: row.split === "heldout" ? "heldout" : "dev",
+        ...(/^\d{4}-\d{2}-\d{2}$/u.test(row.asOf || "") ? { asOf: row.asOf } : {}) };
     });
 }
 

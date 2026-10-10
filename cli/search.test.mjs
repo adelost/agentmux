@@ -7,7 +7,8 @@ import { cmdSearch } from "./search.mjs";
 
 // The semantic layer needs a model and a daemon; these tests pin the lexical
 // contract, so the layer reports itself unavailable instead of starting one.
-const noSemantic = { query: async () => ({ hits: [], unavailable: "semantic layer disabled in tests" }), passages: async () => null };
+const noSemantic = { query: async () => ({ hits: [], unavailable: "semantic layer disabled in tests" }), passages: async () => null,
+  rerank: async () => ({ scores: null, unavailable: "reranker disabled in tests" }) };
 
 feature("search CLI contract", () => {
   component("a natural question retrieves the original answer paragraph", {
@@ -41,6 +42,37 @@ feature("search CLI contract", () => {
         expect(text).toContain("ljudboken");
         expect(text).toContain("Social kontakt minskade ensamheten");
         expect(text).toContain(join(root, "notes.md"));
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+  });
+
+  component("a question about yesterday answers from yesterday's note", {
+    given: ["today's note matches the words better than yesterday's", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-search-time-"));
+      const configPath = join(root, "config.yaml");
+      writeFileSync(configPath, JSON.stringify({ search: { roots: [{ name: "memory", path: root, glob: "*.md", semantic: true }] } }));
+      writeFileSync(join(root, "2026-10-10.md"), "# 2026-10-10\n- WSL startade om, WSL startade om igen.\n");
+      writeFileSync(join(root, "2026-10-09.md"), "# 2026-10-09\n- Kvällen: WSL startade om efter uppdateringen och allt kom tillbaka.\n");
+      writeFileSync(join(root, "events.jsonl"), "");
+      return { root, configPath };
+    }],
+    when: ["asking about yesterday on 2026-10-10", async ({ root, configPath }) => {
+      const previous = process.env.AMUX_EVENTS_PATH;
+      process.env.AMUX_EVENTS_PATH = join(root, "events.jsonl");
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await cmdSearch({ configPath }, "när startade WSL om i går", { workspace: root, max: 2, now: "2026-10-10T12:00:00" },
+          { statePath: join(root, "result.json"), semantic: noSemantic });
+        return output.mock.calls.flat().join("\n");
+      } finally {
+        output.mockRestore();
+        if (previous === undefined) delete process.env.AMUX_EVENTS_PATH;
+        else process.env.AMUX_EVENTS_PATH = previous;
+      }
+    }],
+    then: ["yesterday's note is the first hit", (text, { root }) => {
+      try {
+        expect(text.split("\n").find((line) => line.startsWith("# 1"))).toContain("2026-10-09.md");
       } finally { rmSync(root, { recursive: true, force: true }); }
     }],
   });

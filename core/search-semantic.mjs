@@ -20,6 +20,7 @@
 //   vectors.bin  Float32 rows in meta order, normalized (dot = cosine).
 
 import { readFileSync, writeFileSync, statSync, mkdirSync, renameSync } from "fs";
+import { createHash } from "crypto";
 import { basename, join } from "path";
 import { dateFromPath, execRg } from "./search.mjs";
 import { markdownUnits } from "./search-units.mjs";
@@ -100,7 +101,19 @@ export function unitEmbeddingText(file, text, unit) {
   return `${context.join(" > ")}\n${unit.text}`.slice(0, EMBED_CHARS);
 }
 
-function listMarkdownFiles(root) {
+/** WHAT: Names an embedding input by content. WHY: Keeps an unchanged unit's vector reusable after its file was edited. */
+export const unitHash = (text) => createHash("sha256").update(text).digest("hex").slice(0, 16);
+
+/** WHAT: Returns a file's units with their embedding text and content hash. WHY: Keeps reindex and the live overlay on one definition of a unit. */
+export function fileUnits(file, text) {
+  return markdownUnits(text).map((unit) => {
+    const embedText = unitEmbeddingText(file, text, unit);
+    return { line: unit.line, start: unit.start, length: unit.length, section: unit.section, hash: unitHash(embedText), embedText };
+  });
+}
+
+/** WHAT: Returns the Markdown files a semantic root covers. WHY: Keeps reindex and the live overlay on the same file set. */
+export function listMarkdownFiles(root) {
   const args = ["--files", "--no-ignore", "--hidden", "-g", root.glob || "*.md"];
   for (const ex of root.exclude || []) args.push("-g", `!${ex}`);
   for (const ex of root.semanticExclude || []) args.push("-g", `!${ex}`);
@@ -165,10 +178,15 @@ export async function reindex(roots, { log = () => {}, maxUnits = Number(process
   const prev = loadIndex(dir);
   const compatible = prev && prev.schemaVersion === SCHEMA_VERSION && prev.model === model.name;
   const prevByFile = new Map();
+  // Edited files keep the vectors of their unchanged units: a daily note that
+  // grew by ten bullets re-embeds ten units, not the whole day.
+  const prevByHash = new Map();
+  const rowOf = (index) => prev.vectors.slice(index * prev.dimension, (index + 1) * prev.dimension);
   if (compatible) {
     let row = 0;
     for (const file of prev.meta) {
       prevByFile.set(file.file, { ...file, firstRow: row });
+      file.units.forEach((unit, i) => { if (unit.hash) prevByHash.set(unit.hash, row + i); });
       row += file.units.length;
     }
   }
@@ -183,25 +201,33 @@ export async function reindex(roots, { log = () => {}, maxUnits = Number(process
       let stat;
       try { stat = statSync(file); } catch { continue; }
       const old = prevByFile.get(file);
-      if (old && old.mtimeMs === stat.mtimeMs && old.size === stat.size) {
+      const unchanged = old && old.mtimeMs === stat.mtimeMs && old.size === stat.size;
+      if (unchanged && old.units.every((unit) => unit.hash)) {
         meta.push(old);
-        for (let i = 0; i < old.units.length; i++) {
-          rows.push(prev.vectors.slice((old.firstRow + i) * prev.dimension, (old.firstRow + i + 1) * prev.dimension));
-        }
+        for (let i = 0; i < old.units.length; i++) rows.push(rowOf(old.firstRow + i));
         reused += old.units.length;
         continue;
       }
       const text = readFileSync(file, "utf-8");
-      const units = markdownUnits(text);
+      const units = fileUnits(file, text);
       if (!units.length) continue;
-      if (pending.length + units.length > maxUnits) { deferred++; continue; }
-      const entry = { file, mtimeMs: stat.mtimeMs, size: stat.size, root: root.name, weight: root.weight,
-        units: units.map(({ line, start, length, section }) => ({ line, start, length, section })) };
-      meta.push(entry);
-      const firstRow = rows.length;
+      // Older indexes lack content hashes; an unchanged file gains them here
+      // without re-embedding, provided its units still line up.
+      const aligned = unchanged && old.units.length === units.length
+        && old.units.every((unit, i) => unit.start === units[i].start && unit.length === units[i].length);
+      const missing = aligned ? 0 : units.filter((unit) => !prevByHash.has(unit.hash)).length;
+      if (missing && pending.length + missing > maxUnits) { deferred++; continue; }
+      meta.push({ file, mtimeMs: stat.mtimeMs, size: stat.size, root: root.name, weight: root.weight,
+        units: units.map(({ line, start, length, section, hash }) => ({ line, start, length, section, hash })) });
       units.forEach((unit, i) => {
-        rows.push(null);
-        pending.push({ row: firstRow + i, text: unitEmbeddingText(file, text, unit) });
+        const known = aligned ? old.firstRow + i : prevByHash.get(unit.hash);
+        if (known !== undefined) {
+          rows.push(rowOf(known));
+          reused++;
+        } else {
+          pending.push({ row: rows.length, text: unit.embedText });
+          rows.push(null);
+        }
       });
     }
   }
@@ -244,22 +270,27 @@ export function openIndex(dir = indexDir()) {
 }
 
 /** WHAT: Returns the top-k units by cosine similarity. WHY: Keeps semantic hits in the same unit space as passages for fusion. */
-export function rankUnits(index, queryVector, { k = 30 } = {}) {
+export function rankUnits(index, queryVector, { k = 30, overlay = new Map() } = {}) {
   const dim = index.dimension;
   const top = [];
-  for (let row = 0; row < index.units.length; row++) {
+  const consider = (file, unit, vectors, offset) => {
     let dot = 0;
-    const offset = row * dim;
-    for (let i = 0; i < dim; i++) dot += queryVector[i] * index.vectors[offset + i];
+    for (let i = 0; i < dim; i++) dot += queryVector[i] * vectors[offset + i];
     if (top.length < k || dot > top[top.length - 1].sim) {
-      top.push({ row, sim: dot });
+      top.push({ file, unit, sim: dot });
       top.sort((a, b) => b.sim - a.sim);
       if (top.length > k) top.pop();
     }
-  }
-  return top.map(({ row, sim }) => {
+  };
+  // Files re-embedded since the index was built are scored from the overlay.
+  for (let row = 0; row < index.units.length; row++) {
     const { file, unit } = index.units[row];
-    return { path: file.file, line: unit.line, root: file.root, weight: file.weight, date: dateFromPath(file.file),
-      layer: "sem", sim: Number(sim.toFixed(4)), unit, indexedMtimeMs: file.mtimeMs, indexedSize: file.size };
-  });
+    if (!overlay.has(file.file)) consider(file, unit, index.vectors, row * dim);
+  }
+  for (const entry of overlay.values()) {
+    entry.units.forEach((unit, i) => consider(entry, unit, entry.vectors, i * dim));
+  }
+  return top.map(({ file, unit, sim }) => ({ path: file.file, line: unit.line, root: file.root, weight: file.weight,
+    date: dateFromPath(file.file), layer: "sem", sim: Number(sim.toFixed(4)), unit: { line: unit.line, start: unit.start,
+      length: unit.length, section: unit.section }, indexedMtimeMs: file.mtimeMs, indexedSize: file.size }));
 }

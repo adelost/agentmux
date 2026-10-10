@@ -77,17 +77,29 @@ automatic answer or proof that every later correction has been found.
 
 Natural questions also use the local semantic layer: the same units embedded
 by a small multilingual model on the CPU, fused with the lexical ranking by
-reciprocal rank. Identifiers and one- or two-word names stay lexical. The
-model and index stay loaded in a per-user background process
+normalised score. A multilingual cross-encoder
+(`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`) then rereads the top 30
+candidates with the question and is blended with that order. Identifiers and
+one- or two-word names stay lexical; an exact Markdown hit opens the units
+that contain the phrase, densest first, instead of the file's first match.
+Relative time in a question ("i går", "i förmiddags", "i natt", "förra
+veckan", "yesterday") is removed from matching and ranks that day's notes
+first. File-level word-AND runs only for `--raw` or when fewer than three items
+rank.
+
+The models and index stay loaded in a per-user background process
 (`bin/search-embedder.mjs`, Unix socket under `~/.agentmux/`) that starts on
 the first question and exits after 30 idle minutes
 (`AMUX_EMBEDDER_IDLE_MIN`). Until it is warm, that one question is answered
-lexically and the output says so. Models are cached in
-`~/.cache/agentmux/models`, outside the install. `--reindex` (also run
-nightly) embeds only changed files, at most `AMUX_REINDEX_MAX_UNITS` (25 000)
-units per run; a larger backlog continues on the next run and the output
-notes the incomplete index. Reindexing is never an implicit side effect of a
-query.
+lexically and the output says so; a reranker that is still loading or failed
+is reported the same way. While running, it re-embeds notes edited since the
+nightly index in the background (at most 4 000 new units per 30 s scan),
+reusing vectors of unchanged units, so today's note is searchable before the
+next reindex. Models are cached in `~/.cache/agentmux/models`, outside the
+install. `--reindex` (also run nightly) re-embeds only units whose text
+changed, at most `AMUX_REINDEX_MAX_UNITS` (25 000) per run; a larger backlog
+continues on the next run and the output notes the incomplete index.
+Reindexing is never an implicit side effect of a query.
 
 `--deep` adds the much larger raw session archives. Result state is isolated per
 terminal or tmux pane, so one agent cannot replace another agent's `--show N`

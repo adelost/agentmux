@@ -15,6 +15,10 @@ const MAX_UNIT_CHARS = 1600;
 const MIN_UNIT_CHARS = 8;
 
 const startsUnit = (line) => LIST_ITEM.test(line) || ENTRY.test(line) || TABLE_ROW.test(line);
+// "- **Eneas Hållsten** — ordförande": a bullet whose bold lead is followed by
+// a dash or colon defines that term, like a "**Name** — …" entry line does.
+const DEFINED_BULLET = /^(?:[-*+]|\d{1,3}[.)])\s+\*\*([^*\n]{1,80})\*\*\s*(?:[—–:-]|\()/u;
+const definedTerm = (line) => line.match(DEFINED_BULLET)?.[1].trim() || null;
 
 /**
  * WHAT: Parses Markdown into item units with offsets, headings and entry names.
@@ -36,7 +40,8 @@ export function markdownUnits(text, { maxChars = MAX_UNIT_CHARS } = {}) {
     if (body.replace(/\s+/gu, "").length >= MIN_UNIT_CHARS) {
       for (const piece of splitLong(body, current.start, current.line, maxChars)) {
         units.push({ ...piece, headings: [...current.headings], sectionStart: current.sectionStart,
-          ...(current.entry ? { entry: current.entry } : {}), ...(current.tableHeader ? { tableHeader: current.tableHeader } : {}) });
+          ...(current.entry ? { entry: current.entry } : {}), ...(current.defines ? { defines: current.defines } : {}),
+          ...(current.tableHeader ? { tableHeader: current.tableHeader } : {}) });
       }
     }
     current = null;
@@ -83,7 +88,7 @@ export function markdownUnits(text, { maxChars = MAX_UNIT_CHARS } = {}) {
       if (name) entry = name;
       const header = row && tableHeader && line.replace(/\|/gu, " ").replace(/\s+/gu, " ").trim() !== tableHeader ? tableHeader : null;
       current = { start, end, line: index + 1, item: startsUnit(line), open: true,
-        headings: headings.filter(Boolean), entry: name ? null : entry, sectionStart, tableHeader: header };
+        headings: headings.filter(Boolean), entry: name ? null : entry, defines: name || definedTerm(line), sectionStart, tableHeader: header };
       continue;
     }
     current.end = end;

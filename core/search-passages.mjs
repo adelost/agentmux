@@ -9,6 +9,7 @@ import { swedishStem } from "./swedish-stem.mjs";
 const SOURCE_MAX_BYTES = 1024 * 1024;
 const STOP = new Set("a an and are as att av blev blir de den det do du då eller en ett får för från ha hade han har hela hur i in inte jag kan man med mig min mina mitt och of om on på sig ska som the till to vad var vi vilken vilket vilka varför är efter before is it does have when where why who när bara skulle".split(" "));
 const PASSAGES_PER_FILE = 2;
+const DATED_PASSAGES_PER_FILE = 8;
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const stemCache = new Map();
 
@@ -22,15 +23,15 @@ function stem(word) {
   return value;
 }
 
-// Versions, hashes and dotted names ("1.25.131", "e5-small") are also kept
-// whole: their parts ("25", "131") match countless unrelated notes.
+// Versions and code identifiers ("1.25.131", "e5-small", "GRACE_S") are also
+// kept whole: their parts ("25", "131", "s") match countless unrelated notes.
 const IDENTIFIER = /[\p{L}\p{N}]+(?:[._-][\p{L}\p{N}]+)*/gu;
 const WORD = /[\p{L}\p{N}]+/gu;
 
 function tokensOf(text) {
   const lower = String(text).toLowerCase();
   const words = lower.match(WORD) || [];
-  const identifiers = (lower.match(IDENTIFIER) || []).filter(token => /[._-]/u.test(token) && /\p{N}/u.test(token));
+  const identifiers = (lower.match(IDENTIFIER) || []).filter(token => /[._-]/u.test(token) && /[\p{N}_]/u.test(token));
   return [...words, ...identifiers];
 }
 
@@ -84,7 +85,10 @@ function fileSegment(path) {
   const units = markdownUnits(text).map(unit => {
     const context = [...unit.headings, ...(unit.entry ? [unit.entry] : []), ...(unit.tableHeader ? [unit.tableHeader] : [])];
     const body = wordsOf(unit.text);
-    const labels = new Set(wordsOf(`${name} ${title} ${context.join(" ")}`).tf.keys());
+    // The term a unit defines ("**Julia** — bekant via Hinge") is its subject,
+    // so it counts like a heading: a note that merely mentions the name ranks
+    // below the entry that says who the person is.
+    const labels = new Set(wordsOf(`${name} ${title} ${context.join(" ")} ${unit.defines || ""}`).tf.keys());
     for (const word of body.tf.keys()) vocabulary.add(word);
     for (const word of labels) vocabulary.add(word);
     totalLength += body.length;
@@ -105,7 +109,8 @@ function cachedSegment(path, cache) {
 }
 
 /** WHAT: Returns source-bound note items ranked for natural questions. WHY: Prevents file-level word-AND from hiding answers behind incidental question words. */
-export function searchPassages(query, roots, { max = 12, excludePath = () => false, onWarning = console.warn, cache = null } = {}) {
+export function searchPassages(query, roots, { max = 12, excludePath = () => false, onWarning = console.warn, cache = null, dates = [],
+  perFile = PASSAGES_PER_FILE } = {}) {
   const tokens = [...new Set(terms(query))];
   if (!tokens.length) return [];
   const stems = new Map(tokens.map((token, index) => [token, index]));
@@ -152,7 +157,7 @@ export function searchPassages(query, roots, { max = 12, excludePath = () => fal
   const frequency = tokens.map((_, i) => docs.filter(doc => doc.counts[i] || doc.labelMatches[i]).length);
   const idfs = frequency.map(f => Math.log(1 + (unitCount - f + 0.5) / (f + 0.5)));
   const idfTotal = idfs.reduce((sum, value) => sum + value, 0) || 1;
-  return docs.map(({ path, root, segment, unit, counts, labelMatches }) => {
+  const ranked = docs.map(({ path, root, segment, unit, counts, labelMatches }) => {
     let score = 0, matches = 0, covered = 0;
     for (let i = 0; i < tokens.length; i++) {
       const count = counts[i];
@@ -171,8 +176,36 @@ export function searchPassages(query, roots, { max = 12, excludePath = () => fal
       passage: { sha256: segment.sha256, start: unit.start, length: unit.length, context: unit.context, section: unit.section },
       layer: "passage", score, matches };
   }).filter(hit => hit.score > 0)
-    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.line - b.line)
-    .filter(topPassagesPerFile()).slice(0, max);
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.line - b.line);
+  if (!dates.length) return ranked.filter(topPassagesPerFile(perFile)).slice(0, max);
+  // A question about "i går" is about that day's note, which holds dozens of
+  // units; the usual two-per-file cap would hide most of them.
+  const wanted = new Set(dates);
+  const dated = ranked.filter(hit => wanted.has(hit.date)).filter(topPassagesPerFile(DATED_PASSAGES_PER_FILE)).slice(0, max);
+  const rest = ranked.filter(hit => !wanted.has(hit.date)).filter(topPassagesPerFile(perFile)).slice(0, Math.max(0, max - dated.length));
+  return [...dated, ...rest];
+}
+
+const PHRASE_UNITS_PER_FILE = 2;
+
+/**
+ * WHAT: Returns the units of one file that contain an exact phrase, densest first.
+ * WHY: Keeps an exact hit from opening the first passing mention instead of the unit about the phrase.
+ */
+export function phraseUnits(hit, pattern, { limit = PHRASE_UNITS_PER_FILE } = {}) {
+  const bytes = readTopicFile(hit.path, SOURCE_MAX_BYTES);
+  const text = bytes.toString("utf8");
+  const sha256 = hash(bytes);
+  const units = markdownUnits(text).map(unit => {
+    const occurrences = (unit.text.match(new RegExp(pattern.source, "giu")) || []).length;
+    return { unit, density: occurrences / Math.max(1, unit.text.length) };
+  }).filter(({ density }) => density > 0);
+  // "Respiten är 600 s (GRACE_S)" is about the term; a 1600-character status
+  // bullet that names it once in passing is not (golden dev n31).
+  units.sort((a, b) => b.density - a.density || a.unit.start - b.unit.start);
+  return units.slice(0, limit).map(({ unit }) => ({ ...hit, line: unit.line, dedupeKey: `${hit.path}#${unit.start}`,
+    snippet: unit.text.replace(/\s+/gu, " ").slice(0, 160),
+    passage: { sha256, start: unit.start, length: unit.length, context: [...unit.headings, ...(unit.entry ? [unit.entry] : [])], section: unit.section } }));
 }
 
 /**

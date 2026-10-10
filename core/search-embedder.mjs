@@ -6,11 +6,13 @@
 
 import { createConnection, createServer } from "node:net";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { indexDir, loadEmbedder, openIndex, rankUnits, semanticModel } from "./search-semantic.mjs";
+import { indexDir, loadEmbedder, semanticModel } from "./search-semantic.mjs";
+import { createLiveIndex } from "./search-live-index.mjs";
+import { loadReranker } from "./search-rerank.mjs";
 import { searchPassages } from "./search-passages.mjs";
 import { isTopicPath } from "./memory-topic-search.mjs";
 import { createRequire } from "node:module";
@@ -59,14 +61,14 @@ export function startEmbedder({ dir = indexDir(), model = semanticModel().name }
  * WHAT: Returns semantic unit hits from the warm daemon, or why there are none.
  * WHY: Keeps a lexical-only answer from passing as a full search.
  */
-export async function semanticQuery(query, { k = 30, dir = indexDir(), model = semanticModel().name,
+export async function semanticQuery(query, { k = 30, roots = null, dir = indexDir(), model = semanticModel().name,
   waitMs = 0, start = startEmbedder } = {}) {
   const socketPath = embedderSocketPath(dir, model);
   const deadline = Date.now() + waitMs;
   let started = false;
   for (;;) {
     try {
-      return await request(socketPath, { query, k }, Math.max(CONNECT_MS, 30_000));
+      return await request(socketPath, { query, k, roots }, Math.max(CONNECT_MS, 30_000));
     } catch (error) {
       if (!["ENOENT", "ECONNREFUSED"].includes(error.code)) {
         return { hits: [], unavailable: `semantic daemon error: ${error.message}` };
@@ -86,11 +88,23 @@ export async function semanticQuery(query, { k = 30, dir = indexDir(), model = s
  * WHAT: Returns note items ranked by the warm daemon, or null when it is down.
  * WHY: Keeps repeated queries from re-parsing the whole corpus.
  */
-export async function daemonPassages(query, roots, { max = 30, workspace, dir = indexDir(), model = semanticModel().name } = {}) {
+export async function daemonPassages(query, roots, { max = 30, workspace, dates = [], perFile, dir = indexDir(), model = semanticModel().name } = {}) {
   try {
-    const result = await request(embedderSocketPath(dir, model), { op: "passages", query, roots, max, workspace }, 30_000);
+    const result = await request(embedderSocketPath(dir, model), { op: "passages", query, roots, max, workspace, dates, perFile }, 30_000);
     return Array.isArray(result.hits) ? result.hits : null;
   } catch { return null; }
+}
+
+/**
+ * WHAT: Returns cross-encoder scores for candidate texts, or null when the daemon is down.
+ * WHY: Keeps a cold query from waiting on a model load; it keeps first-stage order instead.
+ */
+export async function daemonRerank(query, texts, { dir = indexDir(), model = semanticModel().name } = {}) {
+  try {
+    const result = await request(embedderSocketPath(dir, model), { op: "rerank", query, texts }, 30_000);
+    if (Array.isArray(result.scores) && result.scores.length === texts.length) return { scores: result.scores };
+    return { scores: null, unavailable: result.unavailable || "reranker returned no scores" };
+  } catch (error) { return { scores: null, unavailable: `reranker unreachable: ${error.message}` }; }
 }
 
 /** WHAT: Routes semantic and passage queries on a socket until idle. WHY: Keeps model and vectors loaded across CLI calls without a permanent process. */
@@ -103,18 +117,13 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
     rmSync(socketPath, { force: true });
   }
   const embed = await loadEmbedder(model, { threads: 2 });
+  // The reranker loads in the background; until then queries keep the
+  // first-stage order instead of waiting.
+  let rerank = null;
+  let rerankState = "reranker still loading";
+  loadReranker().then((loaded) => { rerank = loaded; }, (error) => { rerankState = `reranker failed to load: ${error.message}`; });
   const segments = new Map();
-  const metaPath = join(dir, "meta.json");
-  let index = null;
-  let indexMtime = 0;
-  const currentIndex = () => {
-    const mtime = existsSync(metaPath) ? statSync(metaPath).mtimeMs : 0;
-    if (mtime !== indexMtime) {
-      index = openIndex(dir);
-      indexMtime = mtime;
-    }
-    return index;
-  };
+  const live = createLiveIndex({ dir, embed });
   let idleTimer;
   // allowHalfOpen: the client half-closes after its request; the answer
   // still has to go back on the same connection.
@@ -124,21 +133,28 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
     socket.on("data", (chunk) => { data += chunk; });
     socket.on("end", async () => {
       try {
-        const { query, k = 30, ping, op, roots, max, workspace } = JSON.parse(data);
+        const { query, k = 30, ping, op, roots, max, workspace, dates = [], texts, perFile } = JSON.parse(data);
         if (ping) { socket.end("{}"); return; }
+        if (op === "rerank") {
+          socket.end(JSON.stringify(rerank && Array.isArray(texts) ? { scores: await rerank(String(query), texts.map(String)) }
+            : { scores: null, unavailable: rerankState }));
+          return;
+        }
         if (op === "passages") {
-          const hits = searchPassages(String(query), roots, { max, cache: segments, onWarning: () => {},
+          const hits = searchPassages(String(query), roots, { max, dates, perFile, cache: segments, onWarning: () => {},
             excludePath: (path) => Boolean(workspace) && isTopicPath(path, workspace) });
           socket.end(JSON.stringify({ hits }));
           return;
         }
-        const loaded = currentIndex();
+        const loaded = live.index();
         if (!loaded || loaded.model !== model.name) {
           socket.end(JSON.stringify({ hits: [], unavailable: "semantic index missing or built for another model; run: amux search --reindex" }));
           return;
         }
+        if (Array.isArray(roots)) live.refresh(roots);
         const [vector] = await embed([String(query)], "query");
-        socket.end(JSON.stringify({ hits: rankUnits(loaded, vector, { k }), builtAt: loaded.builtAt, complete: loaded.complete }));
+        socket.end(JSON.stringify({ hits: live.rank(vector, k), builtAt: loaded.builtAt, complete: loaded.complete,
+          pendingFiles: live.pendingFiles() }));
       } catch (error) {
         socket.end(JSON.stringify({ hits: [], unavailable: `semantic query failed: ${error.message}` }));
       } finally {
@@ -150,7 +166,7 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
     server.once("error", reject);
     server.listen(socketPath, resolve);
   });
-  currentIndex();
+  live.index();
   idleTimer = setTimeout(() => server.close(), idleMs);
   server.on("close", () => rmSync(socketPath, { force: true }));
 }

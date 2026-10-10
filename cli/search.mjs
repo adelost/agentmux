@@ -12,14 +12,17 @@ import {
   expandHit,
   withScore,
   dedupeByFile,
+  escapeRegex,
 } from "../core/search.mjs";
 import { defaultSearchStatePath, loadLastResults, saveLastResults } from "../core/search-state.mjs";
 import { defaultWorkspace } from "../core/runtime-defaults.mjs";
 import { expandMemoryTopic, isTopicPath, mergeTopicHits, searchMemoryTopics } from "../core/memory-topic-search.mjs";
-import { expandPassage, mergePassageHits, searchPassages } from "../core/search-passages.mjs";
+import { expandPassage, mergePassageHits, phraseUnits, searchPassages } from "../core/search-passages.mjs";
+import { preferDates, temporalIntent } from "../core/search-time.mjs";
 import { documentWindow, firstAnswerRank, formatEvalReport, parseGoldenCases, summarizeEval } from "../core/search-eval.mjs";
 import { classifyQuery, fuseRankings, semanticSearchHits } from "../core/search-fusion.mjs";
-import { daemonPassages, semanticQuery } from "../core/search-embedder.mjs";
+import { daemonPassages, daemonRerank, semanticQuery } from "../core/search-embedder.mjs";
+import { blendRerank, RERANK_CANDIDATES, rerankText } from "../core/search-rerank.mjs";
 import { readFileSync } from "node:fs";
 
 /** WHAT: Describes the search CLI contract. WHY: Keeps actual flags and user guidance in one place. */
@@ -36,10 +39,13 @@ export const SEARCH_HELP = `Usage:
                                      Score a golden JSONL set: hit@1, hit@3, MRR, latency
 
 Natural questions combine ranked note items (bullets, entries, table rows) with
-the local semantic layer; identifiers and one- or two-word names stay lexical.
-The semantic layer runs in a small background process that loads on the first
-question and exits when idle; until it is warm a question is answered
-lexically and says so. A passage expands with its section around it.
+the local semantic layer, then a cross-encoder reorders the top 30; identifiers
+and one- or two-word names stay lexical, and an exact hit opens the units that
+hold the phrase. Relative time ("i går", "i förmiddags", "last week") prefers
+that day's notes. The semantic layer runs in a small background process that
+loads on the first question, follows notes edited since the nightly index and
+exits when idle; until it is warm a question is answered lexically and says
+so. A passage expands with its section around it.
 Validated memory/topics pages provide compact orientation alongside original sources.
 --raw disables these layers. Topic/paragraph expansion rechecks source hashes; use
 amux memory topics --json to inspect states and decision cells. Topic text is
@@ -84,7 +90,7 @@ function showResults(last, show, context) {
 }
 
 /** WHAT: Names the warm-daemon semantic layer. WHY: Keeps tests and callers able to substitute it without a model. */
-export const SEMANTIC_LAYER = Object.freeze({ query: semanticQuery, passages: daemonPassages });
+export const SEMANTIC_LAYER = Object.freeze({ query: semanticQuery, passages: daemonPassages, rerank: daemonRerank });
 
 /**
  * WHAT: Returns the ranked overview from every search layer for one query.
@@ -93,40 +99,68 @@ export const SEMANTIC_LAYER = Object.freeze({ query: semanticQuery, passages: da
 export async function collectSearchHits(query, allRoots, workspace, flags = {}, { warn = console.warn, semantic = SEMANTIC_LAYER } = {}) {
   const roots = flags.source ? allRoots.filter((root) => root.name.includes(flags.source)) : allRoots;
   const startedAt = Date.now();
+  const { query: content, dates } = temporalIntent(query, flags.now ? new Date(flags.now) : new Date());
   const ledgerRoot = roots.find((root) => root.kind === "event-ledger");
-  const ledgerHits = ledgerRoot ? searchEventLedger(query, ledgerRoot.path) : [];
+  const ledgerHits = ledgerRoot ? searchEventLedger(content, ledgerRoot.path) : [];
   // A relevant per-event receipt is higher-quality than file-level AND over
   // giant transcripts, and avoids a multi-second scan through unrelated
   // words in different turns. Exact phrase search still runs everywhere.
   const lexicalRoots = roots.filter((root) => root.kind !== "event-ledger"
     && !isTopicPath(root.path, workspace) && (flags.deep || root.semantic))
     .map(root => ({ ...root, exclude: [...root.exclude, `${workspace}/memory/topics/**`] }));
-  let hits = lexicalSearch(query, lexicalRoots, {
-    includeFileAnd: ledgerHits.length === 0,
-  });
+  // File-level word-AND (L2) runs one ripgrep pass per word, most of a
+  // query's lexical cost. Ranked note items answer the same questions better,
+  // so L2 is kept for --raw and for questions the item layers cannot rank.
+  const fileAnd = ledgerHits.length === 0;
+  let hits = lexicalSearch(content, lexicalRoots, { includeFileAnd: fileAnd && Boolean(flags.raw) });
   if (ledgerHits.length) hits = dedupeByFile([...hits, ...ledgerHits]);
   hits = hits.filter(hit => !isTopicPath(hit.path, workspace));
+  // An exact Markdown hit opens the units that hold the phrase, not only the
+  // first matching line of the file.
+  const phrase = new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegex(content)}(?![\\p{L}\\p{N}_])`, "iu");
+  hits = hits.flatMap(hit => {
+    if (hit.layer !== "L1" || hit.path.endsWith(".jsonl")) return [hit];
+    try {
+      const units = phraseUnits(hit, phrase);
+      return units.length ? units : [hit];
+    } catch { return [hit]; }
+  });
 
   const exactDocument = hits.some(hit => hit.layer === "L1" && !hit.path.endsWith(".jsonl"));
   const passageMax = Math.max(flags.max ?? 12, 30);
   const passages = flags.raw || exactDocument ? []
-    : await semantic.passages(query, lexicalRoots, { max: passageMax, workspace })
-      ?? searchPassages(query, lexicalRoots, { max: passageMax, excludePath: path => isTopicPath(path, workspace) });
+    : await semantic.passages(content, lexicalRoots, { max: passageMax, workspace, dates })
+      ?? searchPassages(content, lexicalRoots, { max: passageMax, dates, excludePath: path => isTopicPath(path, workspace) });
   let semanticHits = [];
-  const useSemantic = !flags.raw && !flags.lexical && !flags.fast && (flags.semantic || classifyQuery(query) === "natural");
+  const useSemantic = !flags.raw && !flags.lexical && !flags.fast && (flags.semantic || classifyQuery(content) === "natural");
   if (useSemantic) {
     const allowedRoots = new Set(roots.map(root => root.name));
-    const result = await semantic.query(query, { k: 30, waitMs: flags.semanticWaitMs ?? 0 });
+    const result = await semantic.query(content, { k: 30, roots: lexicalRoots, waitMs: flags.semanticWaitMs ?? 0 });
     if (result.unavailable) warn(`⚠ ${result.unavailable}`);
     else if (result.complete === false) warn("ℹ semantic index is still being built; recent files may be missing from the semantic layer");
     semanticHits = semanticSearchHits((result.hits || []).filter(hit => allowedRoots.has(hit.root) && !isTopicPath(hit.path, workspace)));
   }
-  const ranked = semanticHits.length ? fuseRankings(passages, semanticHits) : passages;
+  let ranked = semanticHits.length ? fuseRankings(passages, semanticHits) : passages;
+  if (semanticHits.length && semantic.rerank && !flags.noRerank) {
+    const candidates = ranked.slice(0, RERANK_CANDIDATES);
+    const files = new Map();
+    const read = (path) => { if (!files.has(path)) files.set(path, readFileSync(path, "utf8")); return files.get(path); };
+    const { scores, unavailable } = await semantic.rerank(content, candidates.map((hit) => rerankText(hit, read)));
+    if (scores) ranked = [...blendRerank(candidates, scores), ...ranked.slice(RERANK_CANDIDATES)];
+    else warn(`ℹ ${unavailable}; showing first-stage order`);
+  }
+  ranked = preferDates(ranked, dates);
+  if (fileAnd && !flags.raw && !exactDocument && ranked.length < 3) {
+    const fileLevel = lexicalSearch(content, lexicalRoots, { includeFileAnd: true }).filter(hit => hit.layer === "L2"
+      && !isTopicPath(hit.path, workspace));
+    hits = dedupeByFile([...hits, ...fileLevel]);
+  }
   if (ranked.length) hits = mergePassageHits(hits, ranked.slice(0, flags.max ?? 12));
+  hits = preferDates(hits, dates);
   let topicHits = [];
   if (!flags.raw && (!flags.source || "memory-topics".includes(flags.source))) {
     try {
-      const result = searchMemoryTopics(query, workspace);
+      const result = searchMemoryTopics(content, workspace);
       topicHits = result.hits;
       if (result.excluded.length) warn(`Topics omitted: ${result.excluded.map(row => `${row.id}=${row.state}`).join(", ")}. Original-source search remains available.`);
     } catch (error) { warn(`Topic lookup unavailable: ${error.message}. Showing original-source results.`); }
@@ -154,10 +188,20 @@ async function runSearchEval(file, roots, workspace, flags, semantic) {
     // start is reported once instead of inflating the first question.
     const startedAt = Date.now();
     const result = await semantic.query("warmup", { k: 1, waitMs: 180_000 });
-    warmup = result.unavailable ? `semantic unavailable: ${result.unavailable}` : `semantic warm-up ${Date.now() - startedAt}ms`;
+    // The reranker loads after the embedder; wait for it too, so every row
+    // measures the same warm pipeline.
+    let reranker = Boolean(result.unavailable) || !semantic.rerank;
+    for (let tries = 0; !reranker && tries < 240; tries++) {
+      reranker = Boolean((await semantic.rerank("warmup", ["warmup"])).scores);
+      if (!reranker) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    warmup = result.unavailable ? `semantic unavailable: ${result.unavailable}`
+      : `semantic warm-up ${Date.now() - startedAt}ms${reranker && semantic.rerank ? "" : ", reranker unavailable"}`;
   }
   for (const row of cases) {
-    const { top, elapsedMs } = await collectSearchHits(row.query, roots, workspace, flags, { warn: () => {}, semantic });
+    // Relative time in a question ("i går") means the day it was written.
+    const caseFlags = row.asOf ? { ...flags, now: `${row.asOf}T12:00:00` } : flags;
+    const { top, elapsedMs } = await collectSearchHits(row.query, roots, workspace, caseFlags, { warn: () => {}, semantic });
     const rank = firstAnswerRank(top, row.expect, { viewOf: expandedView });
     rows.push({ ...row, rank, ms: elapsedMs, top: top.map((hit) => `${hit.layer} ${hit.path.replace(`${process.env.HOME}/`, "~/")}:${hit.line}`) });
   }
