@@ -50,7 +50,52 @@ const pausedGoalMenu = `
   Press enter to confirm or esc to go back
 `;
 
+// Captured from lsrc:3 on 2026-10-11 (Codex 0.162.1), goal text replaced.
+// The menu is an overlay above the composer: transcript text bleeds into its
+// left margin, and the hint sits above the composer instead of at the bottom.
+// Every /model switch restarted into this menu and rolled back.
+const pausedGoalOverlay = `
+  [amux orientation, memory 34502aefdc64d878]
+  Befo                                                                        ant
+  sect  Resume paused goal?                                                   ive
+  old   Goal: Finish the first sellable release within the agreed scope,
+        verify polish, performance and stability, and keep going until
+■ You’  every agreed criterion holds.                                         chase
+more c
+• Cont
+  Work
+
+• Cont
+      › 1. Resume goal   Mark it active and continue when idle
+  Work  2. Leave paused  Keep it paused; use /goal resume later
+
+        enter select · esc back
+› Ask Codex to do anything
+
+  GPT-6-Astra xhigh · ~/lsrc/.agents/3 · Uppg… Goal hit usage limits (/goal resume)
+  ? for shortcuts                                           ⚠ 1 warning · f2 to view
+`;
+
 feature("blocking prompt recognition", () => {
+  component("Codex 0.162's overlay goal menu is left paused", {
+    when: ["the overlay menu sits above the composer", () => findBlockingPrompt(pausedGoalOverlay)],
+    then: ["Leave paused is selected", prompt =>
+      expect(prompt).toMatchObject({ name: "codex-paused-goal", keys: "Down Enter" })],
+  });
+  component("an overlay goal menu already on Leave paused is confirmed", {
+    when: ["the cursor is on option 2", () => findBlockingPrompt(pausedGoalOverlay
+      .replace("      › 1. Resume goal", "        1. Resume goal")
+      .replace("  Work  2. Leave paused", "  Work› 2. Leave paused"))],
+    then: ["only Enter is sent", prompt =>
+      expect(prompt).toMatchObject({ name: "codex-paused-goal", keys: "Enter" })],
+  });
+  component("an overlay goal menu with a newer turn below it gets no keys", {
+    when: ["a prompt and its work follow the old menu", () => findBlockingPrompt(pausedGoalOverlay.replace(
+      "› Ask Codex to do anything\n",
+      "› fix the build\n\n• Working (5s • esc to interrupt)\n\n• Ran npm test\n\n› Ask Codex to do anything\n",
+    ))],
+    then: ["no menu action is inferred", prompt => expect(prompt).toBeNull()],
+  });
   component("Codex startup skips an update without installing it", {
     when: ["the update menu is active", () => findBlockingPrompt(codexUpdateMenu)],
     then: ["Skip, not Update now, is selected", prompt =>

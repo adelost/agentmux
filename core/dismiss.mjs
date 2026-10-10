@@ -41,29 +41,47 @@ function activeWorkspaceTrustCursor(text) {
   return cursor === exit && trust === exit + 1 ? "exit-above-trust" : null;
 }
 
+// Codex 0.162 draws selection menus as an overlay above the composer with this
+// hint. Only the composer and the status bar may sit below a live one; a newer
+// prompt or turn below it means the menu is history.
+const OVERLAY_HINT = /^enter select\s*·\s*esc back$/iu;
+const OVERLAY_MAX_LINES_BELOW = 4;
+
+/** WHAT: Returns the lines of a live Codex menu, in either layout, or null. WHY: Never confirms a stale menu in scrollback. */
+function liveCodexMenuLines(text, footer) {
+  const lines = tailLines(text, 16);
+  if (footer.test(lines.at(-1)?.trim() || "")) return lines.slice(-10);
+  const hint = lines.findLastIndex(line => OVERLAY_HINT.test(line.trim()));
+  if (hint < 0 || lines.length - 1 - hint > OVERLAY_MAX_LINES_BELOW) return null;
+  if (!/^[›❯]\s/u.test(lines[hint + 1]?.trim() || "")) return null;
+  return lines.slice(0, hint);
+}
+
 /** WHAT: Identifies the selected option in a live two-choice Codex startup menu. WHY: Never confirms a stale menu in scrollback. */
 function activeCodexChoice(text, { header, first, second, footer }) {
-  const lines = tailLines(text, 10);
-  if (!footer.test(lines.at(-1)?.trim() || "")) return null;
+  const lines = liveCodexMenuLines(text, footer);
+  if (!lines) return null;
   if (!lines.some(line => header.test(line))
       || !lines.some(line => first.test(line))
       || !lines.some(line => second.test(line))) return null;
-  const selected = lines.find(line => /^\s*[›❯]\s*[12]\.\s/u.test(line)) || "";
+  const selected = lines.find(line => /[›❯]\s*[12]\.\s/u.test(line)) || "";
   if (first.test(selected)) return "first";
   if (second.test(selected)) return "second";
   return null;
 }
 
+// Options match inside the line: in the overlay layout, transcript text
+// behind the menu bleeds into its left margin ("  Work  2. Leave paused").
 const UPDATE_MENU = {
   header: /Update available!/u,
-  first: /^\s*[›❯]?\s*1\.\s*Update now\b/u,
-  second: /^\s*[›❯]?\s*2\.\s*Skip\s*$/u,
+  first: /(?:^|[\s›❯])\s*1\.\s*Update now\b/u,
+  second: /(?:^|[\s›❯])\s*2\.\s*Skip\s*$/u,
   footer: /^Press enter to continue$/iu,
 };
 const PAUSED_GOAL_MENU = {
   header: /Resume paused goal\?/u,
-  first: /^\s*[›❯]?\s*1\.\s*Resume goal\b/u,
-  second: /^\s*[›❯]?\s*2\.\s*Leave paused\b/u,
+  first: /(?:^|[\s›❯])\s*1\.\s*Resume goal\b/u,
+  second: /(?:^|[\s›❯])\s*2\.\s*Leave paused\b/u,
   footer: /^Press enter to confirm or esc to go back$/iu,
 };
 
