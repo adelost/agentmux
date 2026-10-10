@@ -1,6 +1,6 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { profileLoginInstruction, quotaAccountCatalog, quotaProfileCatalog } from "./quota-profiles.mjs";
-import { resolveRuntimeProfile, runtimeProfileCatalog, runtimeProfileLaunchHome } from "./runtime-account-profiles.mjs";
+import { resolveClaudeAccountTarget, resolveRuntimeProfile, runtimeProfileCatalog, runtimeProfileLaunchHome } from "./runtime-account-profiles.mjs";
 
 const ROOT = "/home/matt/.config/agent/account-profiles/claude";
 // Four login dirs: one is slot 2's home, one holds no Claude login.
@@ -37,13 +37,33 @@ feature("Claude logins outside the launch slots", () => {
     }],
   });
 
-  unit("launch slots and their homes do not change when more logins exist", {
+  // Mattias 2026-10-10 asked to switch panes to the other account, which lives in a login dir, not a slot.
+  unit("a login dir becomes a launch target by name while the slots keep their homes", {
     when: ["resolving the runtime catalog next to the same login dirs", () =>
       runtimeProfileCatalog("claude", { HOME: "/home/matt" }, loginDirsFs)],
-    then: ["only slots 1 and 2 can launch, with the same homes as before", (catalog) => {
-      expect(catalog.map((row) => row.id)).toEqual(["1", "2"]);
-      expect(catalog.map(runtimeProfileLaunchHome)).toEqual([null, `${ROOT}/adelost`]);
-      expect(resolveRuntimeProfile("claude", "wetterlind", catalog)).toBeNull();
+    then: ["slots 1 and 2 are unchanged and wetterlind launches in its own dir", (catalog) => {
+      expect(catalog.map((row) => row.id)).toEqual(["1", "2", "wetterlind"]);
+      expect(catalog.map(runtimeProfileLaunchHome)).toEqual([null, `${ROOT}/adelost`, `${ROOT}/wetterlind`]);
+      expect(resolveRuntimeProfile("claude", "2", catalog).home).toBe(`${ROOT}/adelost`);
+    }],
+  });
+
+  unit("a rotation target can be named by the account email shown in amux quota", {
+    given: ["slots 1 and 2 on adelost and wetterlind in a login dir", () =>
+      runtimeProfileCatalog("claude", { HOME: "/home/matt" }, loginDirsFs)],
+    when: ["resolving by email, case-insensitively", (catalog) => {
+      const identityOf = (profile) => ({ email: profile.id === "wetterlind"
+        ? "mattias.wetterlind@gmail.com" : "adelost@gmail.com" });
+      return {
+        wetterlind: resolveClaudeAccountTarget("Mattias.Wetterlind@gmail.com", catalog, { identityOf }),
+        adelost: resolveClaudeAccountTarget("adelost@gmail.com", catalog, { identityOf }),
+        unknown: resolveClaudeAccountTarget("attrois@gmail.com", catalog, { identityOf }),
+      };
+    }],
+    then: ["the email picks that login, a shared login picks its first slot, an absent one nothing", (found) => {
+      expect(found.wetterlind.id).toBe("wetterlind");
+      expect(found.adelost.id).toBe("1");
+      expect(found.unknown).toBeNull();
     }],
   });
 });

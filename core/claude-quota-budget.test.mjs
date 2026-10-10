@@ -7,6 +7,7 @@ import {
   CLAUDE_USAGE_MIN_INTERVAL_MS,
   claudeQuotaBudgetKey,
   readClaudeQuotaBudgeted,
+  readClaudeQuotaHistory,
 } from "./claude-quota-budget.mjs";
 
 const NOW = Date.parse("2026-10-10T08:00:00Z");
@@ -96,6 +97,25 @@ feature("one Claude usage call per account per five minutes", () => {
     then: ["the reader is untouched and the result says busy", (result, ctx) => {
       expect(ctx.read).not.toHaveBeenCalled();
       expect(result.error).toBe("quota_read_busy");
+    }],
+  });
+
+  unit("each paid reading adds one weekly point for the forecast, a reused one adds none", {
+    given: ["weekly readings of 40 % and then 42 % five minutes apart", () => {
+      const weekly = (usedPercent) => ({ ok: true, provider: "claude",
+        limits: [{ kind: "weekly_all", usedPercent, resetsAt: "2026-10-14T07:00:00Z" }] });
+      return budget({ read: vi.fn().mockResolvedValueOnce(weekly(40)).mockResolvedValueOnce(weekly(42)) });
+    }],
+    when: ["reading three times, the second inside the budget window", async (ctx) => {
+      await readClaudeQuotaBudgeted({ ...ctx, profile: slot("1"), now: () => NOW });
+      await readClaudeQuotaBudgeted({ ...ctx, profile: slot("2"), now: () => NOW + 60_000 });
+      await readClaudeQuotaBudgeted({ ...ctx, profile: slot("1"), now: () => NOW + CLAUDE_USAGE_MIN_INTERVAL_MS });
+      return readClaudeQuotaHistory(slot("2"), ctx);
+    }],
+    then: ["the account's history holds the two paid readings, in order", (history) => {
+      expect(history.map((point) => [point.at - NOW, point.usedPercent])).toEqual([
+        [0, 40], [CLAUDE_USAGE_MIN_INTERVAL_MS, 42],
+      ]);
     }],
   });
 });

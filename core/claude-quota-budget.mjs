@@ -56,6 +56,32 @@ const writeEntry = (path, entry) => {
   }
 };
 
+// Successive weekly readings let the quota warning forecast from pace without another usage call.
+const HISTORY_MAX_AGE_MS = 8 * 24 * 60 * 60_000;
+const HISTORY_MAX_POINTS = 400;
+
+const weeklyPoint = (result, at) => {
+  const weekly = result?.ok === true && Array.isArray(result.limits)
+    ? result.limits.find((limit) => limit?.kind === "weekly_all") : null;
+  return Number.isFinite(weekly?.usedPercent) ? { at, usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt } : null;
+};
+
+const withHistory = (previous, at, result) => {
+  const kept = (Array.isArray(previous?.history) ? previous.history : [])
+    .filter((point) => Number.isFinite(point?.at) && at - point.at < HISTORY_MAX_AGE_MS);
+  const point = weeklyPoint(result, at);
+  return (point ? [...kept, point] : kept).slice(-HISTORY_MAX_POINTS);
+};
+
+/** WHAT: Returns an account's stored weekly readings, oldest first. WHY: Lets a forecast use readings already paid for. */
+export function readClaudeQuotaHistory(profile, {
+  budgetDir = claudeQuotaBudgetDir(),
+  identityOf = readClaudeProfileIdentity,
+} = {}) {
+  const entry = readEntry(join(budgetDir, `${claudeQuotaBudgetKey(profile, identityOf(profile))}.json`));
+  return Array.isArray(entry?.history) ? entry.history : [];
+}
+
 // Recovery only resumes a pane whose own slot produced the reading.
 const asCallersProfile = (result, profile) => ({ ...result, profile: {
   id: profile.id, key: profile.key, label: profile.label, source: profile.source,
@@ -104,7 +130,9 @@ export async function readClaudeQuotaBudgeted({
     if (landed) return landed;
     const attemptedAt = now();
     const result = await read({ profile, now, ...readOptions });
-    if (!LOCAL_FAILURES.has(result?.error)) writeEntry(entryPath, { attemptedAt, result });
+    if (!LOCAL_FAILURES.has(result?.error)) {
+      writeEntry(entryPath, { attemptedAt, result, history: withHistory(readEntry(entryPath), attemptedAt, result) });
+    }
     return result;
   } finally {
     release();

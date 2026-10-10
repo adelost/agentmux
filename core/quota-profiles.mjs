@@ -107,13 +107,11 @@ const claudeLoginProfile = (name, home) => ({
   credentialsPath: join(home, ".credentials.json"), identityPath: join(home, ".claude.json"),
 });
 
-// Runtime selection still uses quotaProfileCatalog alone.
 /**
- * WHAT: Builds the launch slots plus every Claude login dir that is in no slot.
- * WHY: Keeps a subscription's usage visible without making it a launch target.
+ * WHAT: Returns every Claude login dir that no launch slot already uses.
+ * WHY: Keeps one login in one dir, whether it is read for quota or selected for a pane.
  */
-export function quotaAccountCatalog(env = process.env, options = {}) {
-  const slots = quotaProfileCatalog(env, options);
+export function claudeLoginProfiles(env = process.env, options = {}, slots = quotaProfileCatalog(env, options)) {
   const { readDir = readdirSync, readFile = readFileSync, realpath = realpathSync } = options;
   const canonical = (path) => { try { return realpath(path); } catch { return resolve(path); } };
   const slotHomes = new Set(slots.filter((profile) => profile.provider === "claude")
@@ -122,13 +120,21 @@ export function quotaAccountCatalog(env = process.env, options = {}) {
   let entries;
   try { entries = readDir(root, { withFileTypes: true }); }
   catch { entries = []; }
-  const logins = entries
+  return entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => ({ name: entry.name, home: join(root, entry.name) }))
     .filter(({ home }) => !slotHomes.has(canonical(home)) && holdsClaudeLogin(home, readFile))
     .sort((left, right) => left.name.localeCompare(right.name))
     .map(({ name, home }) => claudeLoginProfile(name, home));
-  return [...slots, ...logins];
+}
+
+/**
+ * WHAT: Builds the launch slots plus every Claude login dir that is in no slot.
+ * WHY: Keeps a subscription's usage visible whether or not a pane runs on it.
+ */
+export function quotaAccountCatalog(env = process.env, options = {}) {
+  const slots = quotaProfileCatalog(env, options);
+  return [...slots, ...claudeLoginProfiles(env, options, slots)];
 }
 
 /** WHAT: Resolves one profile key. WHY: Keeps operator input bound to declared accounts. */

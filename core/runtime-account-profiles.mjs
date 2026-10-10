@@ -21,7 +21,8 @@ import {
   prepareCodexProfile,
   setCodexProfile,
 } from "./codex-profiles.mjs";
-import { quotaProfileCatalog } from "./quota-profiles.mjs";
+import { claudeLoginProfiles, quotaProfileCatalog } from "./quota-profiles.mjs";
+import { readClaudeProfileIdentity } from "./claude-account-quota.mjs";
 
 /** WHAT: Names durable pane-to-profile state. WHY: Keeps runtime selection separate from provider credentials. */
 export const ACCOUNT_PROFILE_STATE_KEY = "account_profile_by_pane_v1";
@@ -37,9 +38,17 @@ export function accountEngineForCommand(command) {
   return null;
 }
 
-/** WHAT: Returns declared provider profiles. WHY: Keeps quota and runtime on one credential registry. */
+/**
+ * WHAT: Returns declared provider profiles, plus every Claude login dir outside the slots.
+ * WHY: Lets a pane run on any logged-in Claude account while slot ids keep their meaning.
+ */
 export function runtimeProfileCatalog(provider, env = process.env, options = {}) {
-  return quotaProfileCatalog(env, options).filter((profile) => profile.provider === provider);
+  const slots = quotaProfileCatalog(env, options);
+  const own = slots.filter((profile) => profile.provider === provider);
+  if (provider !== "claude") return own;
+  // A login dir named like a slot ("2") would shadow that slot, so it is no launch target.
+  const slotIds = new Set(own.map((profile) => profile.id));
+  return [...own, ...claudeLoginProfiles(env, options, slots).filter((login) => !slotIds.has(login.id))];
 }
 
 const selectedId = (state, agentName, pane, paneConfig, provider) => {
@@ -71,6 +80,21 @@ export function selectedRuntimeProfile({
 export function resolveRuntimeProfile(provider, requested, catalog = runtimeProfileCatalog(provider)) {
   const id = String(requested || "").trim();
   return catalog.find((profile) => profile.id === id) || null;
+}
+
+/**
+ * WHAT: Resolves a Claude rotation target by slot id, login dir name or account email.
+ * WHY: Lets the operator name the account `amux quota` shows instead of a slot number.
+ */
+export function resolveClaudeAccountTarget(requested, catalog = runtimeProfileCatalog("claude"), {
+  identityOf = readClaudeProfileIdentity,
+} = {}) {
+  const byId = resolveRuntimeProfile("claude", requested, catalog);
+  if (byId) return byId;
+  const email = String(requested || "").trim().toLowerCase();
+  if (!email.includes("@")) return null;
+  // Two slots can hold one login; the first in catalog order is that same account.
+  return catalog.find((profile) => identityOf(profile)?.email?.toLowerCase() === email) || null;
 }
 
 /**

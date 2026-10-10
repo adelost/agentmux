@@ -14,14 +14,17 @@ import {
   completeRuntimeProfileTransition,
   pendingRuntimeProfile,
   prepareRuntimeProfile,
-  resolveRuntimeProfile,
+  resolveClaudeAccountTarget,
   runtimeProfileAuthenticated,
   runtimeProfileCatalog,
   selectedRuntimeProfile,
   setRuntimeProfile,
 } from "../core/runtime-account-profiles.mjs";
-import { readClaudeQuota } from "../core/claude-account-quota.mjs";
+import { readClaudeQuotaBudgeted } from "../core/claude-quota-budget.mjs";
 import { assertRotationContinuity, readRotationContinuity } from "../core/rotation-continuity.mjs";
+import { accountSwitchPlan } from "../policies/account-switch-cost.mjs";
+import { readContextCostPolicy } from "../policies/context-cost.mjs";
+import { compactBeforeSwitch, observeSwitchContext } from "./account-switch-compact.mjs";
 
 const paneKey = (agentName, pane) => `${agentName}:${pane}`;
 
@@ -145,6 +148,173 @@ function report(output, status, target, rows, reason = null) {
   }
 }
 
+const planReason = ({ reason, tokens, idleMs }) => [reason,
+  [Number.isFinite(tokens) ? `${Math.round(tokens / 1000)}k` : null,
+    Number.isFinite(idleMs) ? `idle ${Math.round(idleMs / 60_000)}m` : null].filter(Boolean).join(", ")]
+  .filter(Boolean).join(" ");
+
+// Dormant and already-selected rows keep the wording they always had.
+const DRY_STATUS = { KEEP: () => "would-already-selected", SELECT: (pane) => `would-${pane.mode}`,
+  RESTART: (pane) => `would-${pane.mode}`, COMPACT_THEN_RESTART: () => "would-compact-then-restart" };
+
+function dryRow(pane) {
+  if (pane.plan.action === "HOLD") return { ...pane, status: "blocked", reason: planReason(pane.plan) };
+  const moving = pane.plan.action === "RESTART" || pane.plan.action === "COMPACT_THEN_RESTART";
+  return { ...pane, status: DRY_STATUS[pane.plan.action](pane), reason: moving ? planReason(pane.plan) : pane.reason };
+}
+
+/** WHAT: Attaches each allowed pane's cost-aware switch action. WHY: Keeps a warm large context from moving without its compact. */
+async function planPanes(ctx, observed, target, deps, compactedKeys = new Set()) {
+  const planned = [];
+  for (const pane of observed) {
+    const alreadySelected = pane.currentProfile?.id === target.id && !pane.pending;
+    const context = pane.mode === "running" && !alreadySelected ? await deps.observeContext(ctx, pane) : null;
+    const plan = accountSwitchPlan({ mode: pane.mode, alreadySelected, facts: context?.facts,
+      compactRefusal: context?.compactRefusal, compacted: context?.compacted || compactedKeys.has(pane.key) }, deps.policy);
+    planned.push({ ...pane, plan, compactTarget: context?.target || null });
+  }
+  return planned;
+}
+
+/** WHAT: Compacts the warm large panes on their source outside the project lease. WHY: Keeps the compact on its own pane lease and an unverified receipt from moving the pane. */
+async function compactMovers(ctx, movers, deps, rows) {
+  const compacted = new Set();
+  for (const pane of movers.filter((candidate) => candidate.plan.action === "COMPACT_THEN_RESTART")) {
+    const result = await deps.compactPane(ctx, pane.compactTarget).catch((error) => ({ ok: false, reason: error.message }));
+    if (result.ok) compacted.add(pane.key);
+    else rows.push({ ...pane, status: "blocked", reason: result.reason });
+  }
+  return compacted;
+}
+
+/** WHAT: Prepares, rechecks and restarts or selects one project's movers under its lease. WHY: Keeps every existing continuity, rollback and partial-outcome guard on the moving panes. */
+async function switchPanes(ctx, observed, target, deps, rows, prepareOnce) {
+  prepareOnce();
+  const recheckedProject = [];
+  for (const pane of observed) recheckedProject.push(await observePane(ctx, pane, deps.catalog, target, deps));
+  const changed = recheckedProject.map((pane, index) => ({
+    pane,
+    reason: paneChangeReason(observed[index], pane, deps),
+  })).find((entry) => entry.reason);
+  if (changed) {
+    rows.push(...blockedProjectRows(observed, changed.reason, changed.pane));
+    return;
+  }
+  for (const pane of observed) {
+    // A later pane can change while earlier panes restart under this lease.
+    const rechecked = await observePane(ctx, pane, deps.catalog, target, deps);
+    const reason = paneChangeReason(pane, rechecked, deps);
+    if (reason) {
+      rows.push({ ...pane, status: "failed", reason });
+      continue;
+    }
+    if (pane.currentProfile?.id === target.id && !pane.pending) {
+      rows.push({ ...pane, status: "already-selected", reason: null });
+      continue;
+    }
+    if (pane.mode === "dormant") {
+      setRuntimeProfile(ctx.state, pane.agentName, pane.pane, "claude", target.id);
+      rows.push({ ...pane, status: "selected-for-next-wake", reason: null });
+      continue;
+    }
+    rows.push(await restartOnTarget(ctx, pane, target, deps));
+  }
+}
+
+async function restartOnTarget(ctx, pane, target, deps) {
+  const sessionId = pane.pending?.sessionId || pane.identity.sessionId;
+  const transition = pane.pending || beginRuntimeProfileTransition(ctx.state, {
+    agentName: pane.agentName,
+    pane: pane.pane,
+    provider: "claude",
+    previousProfileId: pane.currentProfile.id,
+    targetProfileId: target.id,
+    sessionId,
+  });
+  try {
+    await ctx.agent.restartClaudeAccount(pane.agentName, pane.pane, {
+      profile: target,
+      resumeSessionId: sessionId,
+      continuity: pane.continuity,
+    });
+    completeRuntimeProfileTransition(ctx.state, transition, target.id);
+    return { ...pane, status: "switched", reason: pane.plan ? planReason(pane.plan) : null };
+  } catch (error) {
+    const previous = deps.catalog.find((profile) =>
+      profile.id === transition.previousProfileId) || pane.currentProfile;
+    if (!previous || previous.id === target.id) return { ...pane, status: "failed", reason: error.message };
+    setRuntimeProfile(ctx.state, pane.agentName, pane.pane, "claude", previous.id);
+    try {
+      deps.prepare(previous, deps.catalog);
+      await ctx.agent.restartClaudeAccount(pane.agentName, pane.pane, {
+        profile: previous,
+        resumeSessionId: sessionId,
+      });
+      completeRuntimeProfileTransition(ctx.state, transition, previous.id);
+      return { ...pane, status: "rolled-back", reason: error.message };
+    } catch (rollbackError) {
+      return { ...pane, status: "failed", reason: `${error.message}; rollback-failed:${rollbackError.message}` };
+    }
+  }
+}
+
+async function observeProject(ctx, panes, target, deps) {
+  const observed = [];
+  for (const pane of panes) observed.push(await observePane(ctx, pane, deps.catalog, target, deps));
+  return { observed, blocked: observed.find((pane) => !pane.allow) };
+}
+
+/**
+ * WHAT: Moves one project's Claude panes to the target account in the cheapest safe order.
+ * WHY: Keeps a switch from paying a full-context cache miss where a compact on the source is cheaper.
+ */
+async function rotateProject(ctx, agentName, panes, target, deps, { dry, rows, prepareOnce }) {
+  let lease = ctx.deliveryQueue.acquireSessionLease?.(agentName);
+  if (!lease) {
+    rows.push(...blockedProjectRows(panes, `delivery-lease-busy:${agentName}`));
+    return;
+  }
+  try {
+    let { observed, blocked } = await observeProject(ctx, panes, target, deps);
+    if (blocked) {
+      rows.push(...blockedProjectRows(observed, blocked.reason, blocked));
+      return;
+    }
+    let planned = await planPanes(ctx, observed, target, deps);
+    if (dry) {
+      rows.push(...planned.map(dryRow));
+      return;
+    }
+    rows.push(...planned.filter((pane) => pane.plan.action === "HOLD").map(dryRow));
+    let movers = planned.filter((pane) => pane.plan.action !== "HOLD");
+    if (movers.some((pane) => pane.plan.action === "COMPACT_THEN_RESTART")) {
+      lease.release();
+      lease = null;
+      const compacted = await compactMovers(ctx, movers, deps, rows);
+      movers = movers.filter((pane) => pane.plan.action !== "COMPACT_THEN_RESTART" || compacted.has(pane.key));
+      lease = ctx.deliveryQueue.acquireSessionLease?.(agentName);
+      if (!lease) {
+        rows.push(...blockedProjectRows(movers, `delivery-lease-busy-after-compact:${agentName}`));
+        return;
+      }
+      ({ observed, blocked } = await observeProject(ctx, movers, target, deps));
+      if (blocked) {
+        rows.push(...blockedProjectRows(observed, blocked.reason, blocked));
+        return;
+      }
+      // New work between the compact and this lease can make a context large again; it is not compacted twice.
+      planned = await planPanes(ctx, observed, target, deps, compacted);
+      const grown = planned.filter((pane) => pane.plan.action === "COMPACT_THEN_RESTART" || pane.plan.action === "HOLD");
+      rows.push(...grown.map((pane) => ({ ...pane, status: "blocked",
+        reason: `context-changed-before-switch:${planReason(pane.plan)}` })));
+      movers = planned.filter((pane) => !grown.includes(pane));
+    }
+    if (movers.length) await switchPanes(ctx, movers, target, deps, rows, prepareOnce);
+  } finally {
+    lease?.release();
+  }
+}
+
 /** WHAT: Routes Claude account changes through exact persisted sessions. WHY: Prevents exhausted source quota from blocking rotation while preserving drafts, queues and continuity. */
 export async function rotateClaudeFleet(ctx, requested, {
   dry = false,
@@ -155,13 +325,18 @@ export async function rotateClaudeFleet(ctx, requested, {
     latestIdentity: dependencies.latestIdentity || latestClaudeSessionIdentity,
     authenticated: dependencies.authenticated || runtimeProfileAuthenticated,
     prepare: dependencies.prepare || prepareRuntimeProfile,
-    access: dependencies.access || ((profile) => readClaudeQuota({ profile, refresh: !dry })),
+    access: dependencies.access || ((profile) => readClaudeQuotaBudgeted({ profile, refresh: !dry })),
     readContinuity: dependencies.readContinuity || readRotationContinuity,
     assertContinuity: dependencies.assertContinuity || assertRotationContinuity,
+    policy: dependencies.policy || readContextCostPolicy(),
+    observeContext: dependencies.observeContext || ((context, pane) => observeSwitchContext(context, pane)),
+    compactPane: dependencies.compactPane || ((context, compactTarget) => compactBeforeSwitch(context, compactTarget)),
+    identityOf: dependencies.identityOf,
     output: dependencies.output || console.log,
     setExitCode: dependencies.setExitCode || ((code) => { process.exitCode = code; }),
   };
-  const target = resolveRuntimeProfile("claude", requested, deps.catalog);
+  const target = resolveClaudeAccountTarget(requested, deps.catalog,
+    deps.identityOf ? { identityOf: deps.identityOf } : {});
   if (!target) throw new Error(`unknown Claude account profile: ${requested}`);
   if (!deps.authenticated(target)) {
     const reason = "target-login-required";
@@ -179,103 +354,13 @@ export async function rotateClaudeFleet(ctx, requested, {
 
   const rows = [];
   let prepared = false;
+  const prepareOnce = () => {
+    if (prepared) return;
+    deps.prepare(target, deps.catalog);
+    prepared = true;
+  };
   for (const [agentName, panes] of projectsFor(configuredClaudePanes(deps.agents))) {
-    const lease = ctx.deliveryQueue.acquireSessionLease?.(agentName);
-    if (!lease) {
-      rows.push(...blockedProjectRows(panes, `delivery-lease-busy:${agentName}`));
-      continue;
-    }
-    try {
-      const observed = [];
-      for (const pane of panes) observed.push(await observePane(ctx, pane, deps.catalog, target, deps));
-      const blocked = observed.find((pane) => !pane.allow);
-      if (blocked) {
-        rows.push(...blockedProjectRows(observed, blocked.reason, blocked));
-        continue;
-      }
-      if (dry) {
-        rows.push(...observed.map((pane) => ({
-          ...pane, status: pane.currentProfile?.id === target.id && !pane.pending
-            ? "would-already-selected" : `would-${pane.mode}`,
-        })));
-        continue;
-      }
-      if (!prepared) {
-        deps.prepare(target, deps.catalog);
-        prepared = true;
-      }
-      const recheckedProject = [];
-      for (const pane of panes) recheckedProject.push(await observePane(ctx, pane, deps.catalog, target, deps));
-      const changed = recheckedProject.map((pane, index) => ({
-        pane,
-        reason: paneChangeReason(observed[index], pane, deps),
-      })).find((entry) => entry.reason);
-      if (changed) {
-        rows.push(...blockedProjectRows(observed, changed.reason, changed.pane));
-        continue;
-      }
-      for (const pane of observed) {
-        // A later pane can change while earlier panes restart under this lease.
-        const rechecked = await observePane(ctx, pane, deps.catalog, target, deps);
-        const reason = paneChangeReason(pane, rechecked, deps);
-        if (reason) {
-          rows.push({ ...pane, status: "failed", reason });
-          continue;
-        }
-        if (pane.currentProfile?.id === target.id && !pane.pending) {
-          rows.push({ ...pane, status: "already-selected", reason: null });
-          continue;
-        }
-        if (pane.mode === "dormant") {
-          setRuntimeProfile(ctx.state, pane.agentName, pane.pane, "claude", target.id);
-          rows.push({ ...pane, status: "selected-for-next-wake", reason: null });
-          continue;
-        }
-        const sessionId = pane.pending?.sessionId || pane.identity.sessionId;
-        const transition = pane.pending || beginRuntimeProfileTransition(ctx.state, {
-          agentName: pane.agentName,
-          pane: pane.pane,
-          provider: "claude",
-          previousProfileId: pane.currentProfile.id,
-          targetProfileId: target.id,
-          sessionId,
-        });
-        try {
-          await ctx.agent.restartClaudeAccount(pane.agentName, pane.pane, {
-            profile: target,
-            resumeSessionId: sessionId,
-            continuity: pane.continuity,
-          });
-          completeRuntimeProfileTransition(ctx.state, transition, target.id);
-          rows.push({ ...pane, status: "switched", reason: null });
-        } catch (error) {
-          const previous = deps.catalog.find((profile) =>
-            profile.id === transition.previousProfileId) || pane.currentProfile;
-          if (!previous || previous.id === target.id) {
-            rows.push({ ...pane, status: "failed", reason: error.message });
-            continue;
-          }
-          setRuntimeProfile(ctx.state, pane.agentName, pane.pane, "claude", previous.id);
-          try {
-            deps.prepare(previous, deps.catalog);
-            await ctx.agent.restartClaudeAccount(pane.agentName, pane.pane, {
-              profile: previous,
-              resumeSessionId: sessionId,
-            });
-            completeRuntimeProfileTransition(ctx.state, transition, previous.id);
-            rows.push({ ...pane, status: "rolled-back", reason: error.message });
-          } catch (rollbackError) {
-            rows.push({
-              ...pane,
-              status: "failed",
-              reason: `${error.message}; rollback-failed:${rollbackError.message}`,
-            });
-          }
-        }
-      }
-    } finally {
-      lease.release();
-    }
+    await rotateProject(ctx, agentName, panes, target, deps, { dry, rows, prepareOnce });
   }
   const outcome = accountRotationOutcome(rows);
   const status = dry && outcome.status === "RECOVERED" ? "DRY-RUN" : outcome.status;
