@@ -116,6 +116,40 @@ feature("quota text render for bridge and CLI", () => {
   });
 });
 
+feature("one Claude line per account", () => {
+  const claudeAccount = (email, sharedBy, extra = {}) => ({
+    ok: true, provider: "claude", profile: { id: sharedBy[0].id, key: sharedBy[0].key },
+    account: { email, plan: "max" }, sharedBy,
+    limits: [{ kind: "session", usedPercent: 10, resetsAt: null }],
+    ...extra,
+  });
+
+  unit("an account on two slots is one line naming both; a login in no slot says so", {
+    when: ["rendering slot 1+2 on adelost, a free login and a dead login", () => formatQuotaSnapshot({
+      accounts: [
+        claudeAccount("adelost@example.com", [
+          { id: "1", key: "claude:1", source: "primary" },
+          { id: "2", key: "claude:2", source: "configured" },
+        ]),
+        claudeAccount("wetterlind@example.com", [
+          { id: "wetterlind", key: "claude:login:wetterlind", source: "login" },
+        ]),
+        claudeAccount("attrois@example.com", [{ id: "2", key: "claude:login:2", source: "login" }],
+          { ok: false, error: "login_expired", limits: undefined, account: { email: "attrois@example.com" } }),
+      ],
+    })],
+    then: ["three Claude lines and no duplicate warning", (text) => {
+      const lines = text.split("\n").filter((line) => line.startsWith("Claude"));
+      expect(lines).toEqual([
+        "Claude 1+2 · adelost@example.com · max  session 10%",
+        "Claude · wetterlind@example.com · max · ingen plats  session 10%",
+        "Claude · attrois@example.com · ingen plats  otillgänglig (login_expired)",
+      ]);
+      expect(text).not.toContain("samma inloggning");
+    }],
+  });
+});
+
 feature("stop notice for a pane that hit its plan limit", () => {
   const logCommand = "amux log lsrc -p 1 --tmux";
   unit("names the reset and the automatic resume", {

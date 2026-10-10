@@ -8,7 +8,7 @@ vi.mock("../core/delivery-queue.mjs", () => ({ createDeliveryQueue: () => ({}) }
 vi.mock("../core/claude-quota-lifecycle.mjs", () => ({ createClaudeQuotaLifecycle: () => ({
   profileFor: (_agentName, pane) => ({ id: String(pane + 1), key: `claude:${pane + 1}`, credentialsPath: `/synthetic/${pane}/credentials.json` }),
 }) }));
-vi.mock("../core/quota-usage.mjs", () => ({ readClaudeQuota: async options => {
+vi.mock("../core/claude-quota-budget.mjs", () => ({ readClaudeQuotaBudgeted: async options => {
   context.calls.push(options);
   return options?.profile?.credentialsPath
     ? { ok: true, profile: { key: options.profile.key }, limits: [{ kind: "weekly_all", usedPercent: options.profile.id === "1" ? 0 : 100 }] }
@@ -32,11 +32,12 @@ feature("the installed quota recovery preload", () => {
   component("passes the target profile instead of probing an undefined credential path", {
     when: ["the real bootstrap collects a target's quota", async () => {
       await import("./quota-recovery-bootstrap.mjs");
-      return context.options.readQuota({ agentName: "lsrc", pane: 0 });
+      return context.options.readQuota({ agentName: "lsrc", pane: 0, receipt: { observedAt: 1_000 } });
     }],
     then: ["the available subscription reaches readiness without a provider call", result => {
       expect(result).toMatchObject({ ok: true, profile: { key: "claude:1" } });
       expect(context.calls[0].profile.credentialsPath).toBe("/synthetic/0/credentials.json");
+      expect(context.calls[0].notBefore).toBe(1_000);
       expect(context.starts).toBe(1);
     }],
   });

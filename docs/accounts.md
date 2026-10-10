@@ -5,6 +5,21 @@
 command. Tokens stay in provider-owned files, never in memory or reports.
 Profile labels are routing names, not proof of distinct subscriptions.
 
+## Every Claude login
+
+`amux quota` shows each Claude account once, by the email Claude Code stored at
+login, with the launch slots that use it. A login dir under
+`~/.config/agent/account-profiles/claude/` that is in no slot is shown too,
+marked "ingen plats". It is visible only: launch selection and rotation still
+use slots 1 and 2. A dead login shows its reason instead of failing the view.
+
+The CLI, Discord `/quota` and quota recovery share one usage call per account
+per five minutes (`~/.agentmux/quota-budget/claude/`). A pane parked on its
+limit never resumes on a reading taken before the limit. amux refreshes a
+Claude token only while it holds Claude Code's own refresh locks
+(`<config>/.oauth_refresh.lock` and `<config>.lock`). While a pane holds them,
+the read reports `refresh_busy` and writes nothing.
+
 ## Claude rotation
 
 `amux accounts rotate claude:2 --dry` reads target access and inspects the

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "../lib.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { createState } from "../core/state.mjs";
-import { readClaudeQuota } from "../core/quota-usage.mjs";
+import { readClaudeQuotaBudgeted } from "../core/claude-quota-budget.mjs";
 import { createClaudeQuotaLifecycle } from "../core/claude-quota-lifecycle.mjs";
 import { createClaudeQuotaCoordinator } from "../core/claude-quota-coordinator.mjs";
 import { createQuotaRecoveryLoop, parseQuotaRecoveryConfig } from "../channels/quota-recovery.mjs";
@@ -42,7 +42,12 @@ if (!config.enabled) {
     queue,
     lifecycle,
     configPath,
-    readQuota: ({ agentName, pane }) => readClaudeQuota({ profile: lifecycle.profileFor(agentName, pane) }),
+    // A parked pane polls every 30 s; the shared budget keeps that to one usage call per
+    // account per five minutes, and never answers with a reading older than the limit.
+    readQuota: ({ agentName, pane, receipt }) => readClaudeQuotaBudgeted({
+      profile: lifecycle.profileFor(agentName, pane),
+      notBefore: Number.isFinite(receipt?.observedAt) ? receipt.observedAt : 0,
+    }),
     resetGraceMs: config.resetGraceMs,
   });
   const loop = createQuotaRecoveryLoop({ coordinator, config });

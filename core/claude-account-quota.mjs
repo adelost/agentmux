@@ -2,16 +2,20 @@
 //
 // Access/refresh tokens never leave the profile. Expired OAuth credentials are
 // refreshed once through Claude Code's public OAuth client and written back
-// atomically to the same credential file.
+// atomically to the same credential file, under the same locks Claude Code
+// takes: refresh tokens rotate, and a reused one gets invalid_grant, after
+// which Claude Code wipes the login of every pane on that config dir.
 
 import {
   chmodSync,
   readFileSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { tryLockDir } from "./dir-lock.mjs";
 import { clampQuotaPercent, quotaObservation } from "./quota-observation.mjs";
 
 /** WHAT: Names Claude's usage endpoint. WHY: Keeps collection separate from API billing. */
@@ -24,6 +28,8 @@ export const CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 export const CLAUDE_OAUTH_BETA = "oauth-2025-04-20";
 /** WHAT: Defines Claude observation provenance. WHY: Keeps source provenance visible in clients. */
 export const CLAUDE_QUOTA_SOURCE = "anthropic.oauth.usage";
+/** WHAT: Defines Claude Code 2.1's refresh-lock stale window. WHY: Keeps a dead holder's lock from blocking refresh forever. */
+export const CLAUDE_REFRESH_LOCK_STALE_MS = 60_000;
 
 const typedFailure = (error, profile = null) => ({
   ok: false,
@@ -34,7 +40,8 @@ const typedFailure = (error, profile = null) => ({
   error,
 });
 
-const profileIdentity = (profile) => {
+/** WHAT: Reads a profile's login identity from Claude Code's own file. WHY: Names the account without a network call. */
+export const readClaudeProfileIdentity = (profile) => {
   if (!profile?.identityPath) return { email: null, organization: null };
   try {
     const account = JSON.parse(readFileSync(profile.identityPath, "utf8"))?.oauthAccount;
@@ -74,7 +81,7 @@ export function normalizeClaudeUsage(payload, fetchedAt, profile = null, credent
     && limit.scopeName === "Fable")
     ?? limits.find((limit) => limit.kind === "weekly_all")
     ?? limits[0];
-  const identity = profileIdentity(profile);
+  const identity = readClaudeProfileIdentity(profile);
   return {
     ok: true,
     engine: "claude",
@@ -154,6 +161,46 @@ export async function refreshClaudeCredentials(document, {
   return { ok: true, document: refreshed };
 }
 
+const realHome = (configHome) => {
+  try { return realpathSync(configHome); }
+  catch { return configHome; }
+};
+
+// Claude Code 2.1 locks `<config>/.oauth_refresh.lock` and the legacy `<config>.lock`.
+/**
+ * WHAT: Wraps one action in both locks Claude Code takes before a token refresh.
+ * WHY: Keeps amux from spending a refresh token a running pane is rotating.
+ */
+export async function withClaudeRefreshLock(configHome, action) {
+  const paths = [join(configHome, ".oauth_refresh.lock"), `${realHome(configHome)}.lock`];
+  const releases = [];
+  try {
+    for (const path of paths) {
+      const release = tryLockDir(path, { staleMs: CLAUDE_REFRESH_LOCK_STALE_MS });
+      if (!release) return { ok: false, error: "refresh_busy" };
+      releases.unshift(release);
+    }
+    return await action();
+  } finally {
+    for (const release of releases) release();
+  }
+}
+
+const isExpired = (oauth, now) => Number.isFinite(oauth?.expiresAt) && oauth.expiresAt <= now();
+
+/** WHAT: Renews an expired login inside the refresh lock. WHY: Keeps a token another process just rotated from being refreshed twice. */
+const renewUnderLock = (credentialsPath, seenAccessToken, { lock, now, ...refreshOptions }) =>
+  lock(dirname(credentialsPath), async () => {
+    let current;
+    try { current = JSON.parse(readFileSync(credentialsPath, "utf8")); }
+    catch { return { ok: false, error: "credentials_unavailable" }; }
+    const oauth = current?.claudeAiOauth;
+    if (oauth?.accessToken && (oauth.accessToken !== seenAccessToken || !isExpired(oauth, now))) {
+      return { ok: true, document: current };
+    }
+    return refreshClaudeCredentials(current, { credentialsPath, now, ...refreshOptions });
+  });
+
 /** WHAT: Reads one Claude subscription profile. WHY: Keeps account identity attached to its limits. */
 export async function readClaudeQuota({
   profile = null,
@@ -163,16 +210,20 @@ export async function readClaudeQuota({
   now = Date.now,
   refresh = true,
   persist,
+  lock = withClaudeRefreshLock,
 } = {}) {
   let document;
   try { document = JSON.parse(readFileSync(credentialsPath, "utf8")); }
   catch { return typedFailure("credentials_unavailable", profile); }
   let credentials = document?.claudeAiOauth;
   if (!credentials?.accessToken) return typedFailure("credentials_unavailable", profile);
-  if (Number.isFinite(credentials.expiresAt) && credentials.expiresAt <= now()) {
+  if (isExpired(credentials, now)) {
     if (!refresh) return typedFailure("credentials_expired", profile);
-    const refreshed = await refreshClaudeCredentials(document, {
-      credentialsPath, fetchImpl, timeoutMs, now, ...(persist ? { persist } : {}),
+    if (Number.isFinite(credentials.refreshTokenExpiresAt) && credentials.refreshTokenExpiresAt <= now()) {
+      return typedFailure("login_expired", profile);
+    }
+    const refreshed = await renewUnderLock(credentialsPath, credentials.accessToken, {
+      lock, fetchImpl, timeoutMs, now, ...(persist ? { persist } : {}),
     });
     if (!refreshed.ok) return typedFailure(refreshed.error, profile);
     document = refreshed.document;

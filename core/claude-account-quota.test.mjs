@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { feature, unit, expect } from "bdd-vitest";
@@ -8,6 +8,7 @@ import {
   CLAUDE_USAGE_URL,
   normalizeClaudeUsage,
   readClaudeQuota,
+  withClaudeRefreshLock,
 } from "./claude-account-quota.mjs";
 
 const NOW = Date.parse("2026-07-27T01:00:00Z");
@@ -79,6 +80,74 @@ feature("Claude Code account quota", () => {
     then: ["the classified result asks for login after one request", (result, ctx) => {
       expect(result.error).toBe("login_required");
       expect(ctx.fetchImpl).toHaveBeenCalledTimes(1);
+    }],
+  });
+});
+
+feature("Claude token refresh shares Claude Code's lock", () => {
+  const expiredProfile = (prefix, oauth = {}) => {
+    const root = mkdtempSync(join(tmpdir(), prefix));
+    const credentialsPath = join(root, ".credentials.json");
+    writeFileSync(credentialsPath, JSON.stringify({ claudeAiOauth: {
+      accessToken: "expired", refreshToken: "refresh", expiresAt: NOW - 1,
+      subscriptionType: "max", ...oauth,
+    } }));
+    return { root, credentialsPath };
+  };
+
+  unit("a running pane holding the refresh lock blocks amux from rotating its token", {
+    given: ["an expired login whose config dir has a live Claude Code refresh lock", () => {
+      const profile = expiredProfile("amux-claude-locked-");
+      mkdirSync(join(profile.root, ".oauth_refresh.lock"));
+      return { ...profile, before: readFileSync(profile.credentialsPath, "utf8"), fetchImpl: vi.fn() };
+    }],
+    when: ["collecting", ({ credentialsPath, fetchImpl }) =>
+      readClaudeQuota({ profile: { ...PROFILE, credentialsPath }, credentialsPath,
+        fetchImpl, now: () => NOW })],
+    then: ["amux reports busy and neither calls OAuth nor writes the credential", (result, ctx) => {
+      expect(result.error).toBe("refresh_busy");
+      expect(ctx.fetchImpl).not.toHaveBeenCalled();
+      expect(readFileSync(ctx.credentialsPath, "utf8")).toBe(ctx.before);
+    }],
+  });
+
+  unit("a token another process rotated meanwhile is used instead of refreshed again", {
+    given: ["a login that Claude Code refreshes between amux's first read and the lock", () => {
+      const profile = expiredProfile("amux-claude-raced-");
+      const fetchImpl = vi.fn(async (url, request) => {
+        expect(url).toBe(CLAUDE_USAGE_URL);
+        expect(request.headers.Authorization).toBe("Bearer rotated-by-pane");
+        return { ok: true, json: async () => usage };
+      });
+      const rotateBeforeLock = (configHome, action) => {
+        writeFileSync(profile.credentialsPath, JSON.stringify({ claudeAiOauth: {
+          accessToken: "rotated-by-pane", refreshToken: "refresh-2", expiresAt: NOW + 3_600_000,
+        } }));
+        return withClaudeRefreshLock(configHome, action);
+      };
+      return { ...profile, fetchImpl, lock: rotateBeforeLock };
+    }],
+    when: ["collecting", ({ credentialsPath, fetchImpl, lock }) =>
+      readClaudeQuota({ profile: { ...PROFILE, credentialsPath }, credentialsPath,
+        fetchImpl, lock, now: () => NOW })],
+    then: ["the rotated token reads usage and the old refresh token is never sent", (result, ctx) => {
+      expect(result.ok).toBe(true);
+      expect(ctx.fetchImpl).toHaveBeenCalledTimes(1);
+      expect(existsSync(join(ctx.root, ".oauth_refresh.lock"))).toBe(false);
+    }],
+  });
+
+  unit("a login whose refresh token has expired is named without a network call", {
+    given: ["an idle login past its refresh-token lifetime", () => ({
+      ...expiredProfile("amux-claude-dead-", { refreshTokenExpiresAt: NOW - 1 }),
+      fetchImpl: vi.fn(),
+    })],
+    when: ["collecting", ({ credentialsPath, fetchImpl }) =>
+      readClaudeQuota({ profile: { ...PROFILE, credentialsPath }, credentialsPath,
+        fetchImpl, now: () => NOW })],
+    then: ["the reason is login_expired and nothing was requested", (result, ctx) => {
+      expect(result.error).toBe("login_expired");
+      expect(ctx.fetchImpl).not.toHaveBeenCalled();
     }],
   });
 });

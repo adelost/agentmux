@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { feature, unit, expect } from "bdd-vitest";
+import { vi } from "vitest";
 import {
   normalizeClaudeUsage,
   parseCodexRateLimitEvents,
@@ -171,6 +172,45 @@ feature("multi-account subscription snapshot", () => {
       expect(snapshot.codex.profile.id).toBe("2");
       expect(snapshot.claude.profile.id).toBe("2");
       expect(snapshot.kimi.profile.id).toBe("2");
+    }],
+  });
+});
+
+feature("every Claude login, once per account", () => {
+  const claude = (id, source, email) => ({ provider: "claude", id, key: source === "login"
+    ? `claude:login:${id}` : `claude:${id}`, label: id, source, email,
+    credentialsPath: `/profiles/${id}/.credentials.json` });
+  const PROFILES = [
+    claude("1", "primary", "adelost@example.com"),
+    claude("2", "configured", "adelost@example.com"),
+    claude("2", "login", "attrois@example.com"),
+    claude("wetterlind", "login", "wetterlind@example.com"),
+  ];
+
+  unit("two slots on one login read once; a login in no slot is still shown", {
+    given: ["two slots on one account, one live foreign login and one dead login", () => ({
+      profiles: PROFILES,
+      identityOf: (profile) => ({ email: profile.email, organization: null }),
+      readers: {
+        claude: vi.fn(async ({ profile }) => (profile.email === "attrois@example.com"
+          ? { ok: false, engine: "claude", provider: "claude", error: "login_expired",
+            profile: { id: profile.id, key: profile.key } }
+          : { ok: true, engine: "claude", provider: "claude", limits: [],
+            profile: { id: profile.id, key: profile.key },
+            account: { email: profile.email, plan: "max" } })),
+        codex: async () => ({ ok: false, provider: "codex", error: "x" }),
+        kimi: async () => ({ ok: false, provider: "kimi", error: "x" }),
+      },
+    })],
+    when: ["collecting the snapshot", (ctx) => readQuotaSnapshot({ ...ctx, now: () => NOW })],
+    then: ["three accounts, the shared one read once and naming both slots", (snapshot, ctx) => {
+      const accounts = snapshot.accounts.filter((row) => row.provider === "claude");
+      expect(accounts.map((row) => row.account.email)).toEqual([
+        "adelost@example.com", "attrois@example.com", "wetterlind@example.com",
+      ]);
+      expect(accounts[0].sharedBy.map((member) => member.key)).toEqual(["claude:1", "claude:2"]);
+      expect(accounts[1]).toMatchObject({ ok: false, error: "login_expired" });
+      expect(ctx.readers.claude).toHaveBeenCalledTimes(3);
     }],
   });
 });
