@@ -5,8 +5,11 @@
 // core/auto-compact.mjs; this file is the I/O integration layer.
 
 import {
+  compactHeldReason,
   decideAutoCompactAction,
+  formatCompactHeldMessage,
   formatWarningMessage,
+  refusalNeedsHeldNotice,
   formatCompactedMessage,
   formatCompactFailedMessage,
   formatCompactPostponedMessage,
@@ -65,6 +68,8 @@ export function createAutoCompact({
   // decision/state machine still runs every tick (so warn→grace→compact is
   // unaffected); we only rate-limit the Discord POST. Naturally expires.
   const lastWarnPostAt = new Map();
+  // paneKey → lastActivityMs of the quiet episode already reported as held.
+  const heldNotices = new Map();
   let intervalId = null;
 
   // Panes shorter than config.minPaneHeight (rows) can't render a coherent
@@ -279,6 +284,16 @@ export function createAutoCompact({
       .catch((err) => log(`compact-failed notice send failed for ${paneKey}: ${err.message}`));
   }
 
+  async function postCompactHeld(agentName, paneIdx, paneKey, reason, { lastActivityMs, contextTokens }) {
+    if (heldNotices.get(paneKey) === lastActivityMs) return;
+    heldNotices.set(paneKey, lastActivityMs);
+    log(`${paneKey}: compact held (${reason})`);
+    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
+    if (!channelId || !discord) return;
+    await discord.send(channelId, formatCompactHeldMessage(paneKey, reason, contextTokens, lastActivityMs + config.warmCacheMs))
+      .catch((err) => log(`compact-held notice send failed for ${paneKey}: ${err.message}`));
+  }
+
   async function postCompactPostponed(agentName, paneIdx, paneKey, reason) {
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
     if (!channelId || !discord) return;
@@ -380,6 +395,8 @@ export function createAutoCompact({
           config,
           now,
         });
+        const held = compactHeldReason({ status, paneInMode, contextTokens, lastActivityMs, config, now });
+        if (held) await postCompactHeld(a.name, i, paneKey, held, { lastActivityMs, contextTokens });
 
         if (decision.action === "warn") {
           warnings.set(paneKey, { warned_at: now, sessionId: contextSession });
@@ -403,6 +420,9 @@ export function createAutoCompact({
           attemptedActivity.set(paneKey, lastActivityMs);
           const refusal = await fireCompact(a.name, i, paneKey, contextPercent, paneDialect(a, i));
           if (refusal) keepWarningForRetry(paneKey, warning, refusal);
+          if (refusal && refusalNeedsHeldNotice(lastActivityMs, now, config)) {
+            await postCompactHeld(a.name, i, paneKey, `the compact was refused: ${refusal}`, { lastActivityMs, contextTokens });
+          }
         } else if (decision.action === "postpone") {
           warnings.delete(paneKey);
           // Quiet until new work or a lower context clears the floor; the next

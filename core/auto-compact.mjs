@@ -134,6 +134,41 @@ export function resolveActivityMs({ turnMs = null, fileMtimeMs = null, fileFully
 const promptCacheExpired = (lastActivityMs, now, config) =>
   Number.isFinite(lastActivityMs) && now - lastActivityMs >= config.warmCacheMs;
 
+// Mattias 2026-10-10: "det är caches som inte får vara kall.. men om de idlat innom sin tid. 40minuter eller 50 eller
+// vad vi har så ska ju amux compacta dem...". skyvw:0 kept 889 855 tokens from 22:06Z to 04:49Z; its compact could not
+// run and nothing said so before the cache was cold. A held compact is reported once per quiet episode.
+const HELD_ALERT_LEAD_MS = 5 * 60_000;
+
+/**
+ * WHAT: Names what holds an over-budget, quiet pane away from its compact, or returns null.
+ * WHY: Keeps a do-not-touch status from ending a quiet episode in silence while the prompt cache goes cold.
+ */
+export function compactHeldReason({ status, paneInMode, contextTokens, lastActivityMs, config, now }) {
+  if (!config.enabled || !Number.isFinite(contextTokens) || contextTokens <= config.maxTokens) return null;
+  if (!Number.isFinite(lastActivityMs) || now - lastActivityMs < config.minIdleMs) return null;
+  if (status === "limited") return null; // the limited alert already names that stop
+  const quietMinutes = Math.round((now - lastActivityMs) / 60_000);
+  if (isLiveStatus(status)) return `its screen shows a running turn, but its journal has been silent for ${quietMinutes} min`;
+  if (paneInMode === "1" || paneInMode === 1) return "it is in tmux copy-mode";
+  return isCompactUnsafe(status) ? `its status is ${status}` : null;
+}
+
+/**
+ * WHAT: Checks whether a refused compact is within five minutes of the prompt cache going cold.
+ * WHY: Keeps a refusal that clears on the next poll quiet, and a lasting one from ending in silence.
+ */
+export const refusalNeedsHeldNotice = (lastActivityMs, now, config) => Number.isFinite(lastActivityMs)
+  && !promptCacheExpired(lastActivityMs, now, config) && lastActivityMs + config.warmCacheMs - now <= HELD_ALERT_LEAD_MS;
+
+/**
+ * WHAT: Formats the one notice for a quiet pane whose compact cannot run.
+ * WHY: Keeps the operator told before the cache goes cold, not after.
+ */
+export function formatCompactHeldMessage(paneKey, reason, contextTokens, coldAtMs) {
+  const coldAt = new Date(coldAtMs).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+  return `⚠ Auto-compact of **${paneKey}** is held: ${reason}. It has ${contextTokens} context tokens and its prompt cache goes cold at ${coldAt}.`;
+}
+
 /**
  * Decide what the poll loop should do for one pane this tick.
  *

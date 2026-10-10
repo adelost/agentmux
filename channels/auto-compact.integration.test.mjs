@@ -430,3 +430,68 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     }],
   });
 });
+
+// Mattias 2026-10-10 to skyvw:0: "det är caches som inte får vara kall.. men om de idlat innom sin tid. 40minuter
+// eller 50 eller vad vi har så ska ju amux compacta dem...". skyvw:0 kept 889 855 tokens from 22:06Z to 04:49Z while
+// "Pasting…" held its composer; nothing said the compact could not run until after the cache was cold.
+const HELD_SCREENS = {
+  pasting: ["work output", "────", "❯ ", "────", "  Pasting…", "  ⬆ test │ Opus 4.7 │ 4 ██████████ 100%", "  1000000 tokens"].join("\n"),
+  frozenTurn: ["✻ Working… (52m 10s · ↓ 1.2k tokens)", "────", "❯ ", "────", "  ⬆ test │ Opus 4.7 │ 4 ██████████ 100%", "  1000000 tokens"].join("\n"),
+};
+
+function heldHarness({ screen, quietMinutes, refusal = "context-cost:not-idle:pasting" }) {
+  const oldHome = process.env.HOME;
+  const fakeHome = mkdtempSync(join(tmpdir(), "amux-ac-home-"));
+  process.env.HOME = fakeHome;
+  const { path, dir } = writeYaml();
+  writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000099\n  panes:\n    - name: claude\n      cmd: claude\n  discord:\n    "ch-test": 0\n`);
+  writeClaudeTurn(fakeHome, join(dir, ".agents", "0"), new Date(Date.now() - quietMinutes * 60_000).toISOString());
+  const state = { runs: 0, sends: [] };
+  const contextMaintenance = { canAttempt: () => true, run: async () => { state.runs++; return { ok: false, reason: refusal }; } };
+  const agent = { paneProcessState: async () => ({ running: true }), capturePane: async () => screen };
+  // Production thresholds: 50 quiet minutes, a 60-minute prompt cache.
+  const config = { ...DEFAULT_CONFIG, graceMs: 0, compactLockMs: 0 };
+  const ac = createAutoCompact({
+    agent, agentsYamlPath: path, discord: { send: async (_channel, text) => { state.sends.push(text); } },
+    tmux: async () => ({ stdout: "0 50" }), config, contextMaintenance, log: () => {},
+  });
+  return { ac, state, restore: () => { process.env.HOME = oldHome; rmSync(fakeHome, { recursive: true, force: true }); } };
+}
+
+feature("a quiet pane the compact cannot reach is reported before its cache goes cold", () => {
+  component("a composer held by Pasting… is reported once with the minutes left", {
+    given: ["skyvw:0's night: 56 quiet minutes, 1M tokens, every compact refused because Claude is pasting", () =>
+      heldHarness({ screen: HELD_SCREENS.pasting, quietMinutes: 56 })],
+    when: ["four poll ticks", async ({ ac, state, restore }) => {
+      try { await ticks(ac, 4); return state; } finally { restore(); }
+    }],
+    then: ["one warning, then one held notice that names the paste, before the cache is cold", (state) => {
+      expect(state.sends).toHaveLength(2);
+      expect(state.sends[1]).toMatch(/^⚠ Auto-compact of \*\*test:0\*\* is held: the compact was refused: context-cost:not-idle:pasting\. It has 1000000 context tokens and its prompt cache goes cold at \d\d:\d\d\.$/u);
+    }],
+  });
+
+  component("a frozen turn with a silent journal is reported once and never compacted", {
+    given: ["a screen showing a 52-minute turn while the journal has been silent for 51 minutes", () =>
+      heldHarness({ screen: HELD_SCREENS.frozenTurn, quietMinutes: 51 })],
+    when: ["three poll ticks", async ({ ac, state, restore }) => {
+      try { await ticks(ac, 3); return state; } finally { restore(); }
+    }],
+    then: ["one held notice and no compact attempt", (state) => {
+      expect(state.runs).toBe(0);
+      expect(state.sends).toHaveLength(1);
+      expect(state.sends[0]).toMatch(/is held: its screen shows a running turn, but its journal has been silent for 51 min\./u);
+    }],
+  });
+
+  component("active work whose journal shows a recent turn is neither compacted nor reported", {
+    given: ["the same screen with a turn ten minutes ago", () => heldHarness({ screen: HELD_SCREENS.frozenTurn, quietMinutes: 10 })],
+    when: ["three poll ticks", async ({ ac, state, restore }) => {
+      try { await ticks(ac, 3); return state; } finally { restore(); }
+    }],
+    then: ["nothing is sent and nothing runs", (state) => {
+      expect(state.runs).toBe(0);
+      expect(state.sends).toEqual([]);
+    }],
+  });
+});
