@@ -168,7 +168,11 @@ file means stop; do not rebase the proof onto newer notes or overwrite them.
 
 ## Other memory maintenance
 
-Nightly `amux memory lint` remains read-only and reports the old-file backlog.
+Nightly `amux memory lint` remains read-only. Before it, `amux memory archive
+--apply` moves old oversized daily files byte-for-byte to `memory/archive/daily/`
+and leaves a five-line stub; after it, `amux memory bank` commits `memory/`
+locally (secret scan first, never push). Neither uses a model. See
+[memory](memory.md).
 Automatic `amux memory compact` is retired: it previously used a hidden
 one-shot model process. The command now supports `--dry` for inspection and
 fails closed before touching git or memory if asked to rewrite files.

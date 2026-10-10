@@ -81,7 +81,7 @@ describe("cron scripts never write logs to the HOME root", () => {
     expect(result.status).toBe(0);
     const invoked = readFileSync(calls, "utf8");
     expect(invoked).toContain("dream --quiet");
-    expect(invoked).not.toMatch(/search --reindex|memory lint|notifyuser/u);
+    expect(invoked).not.toMatch(/search --reindex|memory lint|notifyuser|memory archive|memory bank/u);
   });
 
   it("dream cron never invokes the retired hidden memory compactor", () => {
@@ -118,7 +118,31 @@ describe("cron scripts never write logs to the HOME root", () => {
     expect(result.status).toBe(0);
     const invoked = readFileSync(calls, "utf8");
     expect(invoked).not.toContain("memory compact");
-    expect(invoked).toContain("memory lint --json --report-daily --compacted 0");
+    // The archive is the old-band actor now; lint reports its count.
+    expect(invoked).toContain("memory lint --json --report-daily --archived 0");
+  });
+
+  it("a nightly run archives after Dream and banks memory before the reindex, never pushing", () => {
+    const calls = join(fx.home, "calls.log");
+    writeFileSync(fx.node, [
+      "#!/usr/bin/env bash",
+      'printf "%s\\n" "$*" >> "$CALLS"',
+      'case "$*" in *" dream "*) exit 1;; esac',
+      "exit 0",
+      "",
+    ].join("\n"));
+    const result = run("dream-cron.sh", {
+      CALLS: calls,
+      AGENTMUX_DREAM_LOG: join(fx.home, "dream.log"),
+      OPENCLAW_WORKSPACE: join(fx.home, "workspace"),
+    });
+    expect(result.status).not.toBe(0);
+    const invoked = readFileSync(calls, "utf8");
+    expect(invoked).toContain("memory archive --apply --json");
+    expect(invoked).toContain("memory bank");
+    expect(invoked.indexOf("memory archive")).toBeGreaterThan(invoked.indexOf("dream --quiet"));
+    expect(invoked.indexOf("memory bank")).toBeLessThan(invoked.indexOf("search --reindex"));
+    expect(invoked).not.toMatch(/\bpush\b/u);
   });
 
   it("morning-digest-cron logs under .cache", () => {

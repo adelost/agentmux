@@ -132,6 +132,8 @@ Usage:
                                   Request pre-submit cancellation; broker decides safely
   agent memory context            Dated memory references, no diary text (--json, -p agent:pane)
   agent memory lint               Structured memory lint (--json, exit 1 on warnings)
+  agent memory archive [--apply]  Move old daily files losslessly to memory/archive/daily (dry by default)
+  agent memory bank [--dry]       Commit memory/ locally after a secret scan; never pushes
   agent memory compact --dry      Preview old daily-file backlog (automatic model rewrite disabled)
   agent search "term"             Source-bound topics + memory/ledger; --show N expands, --raw omits topics
     --deep                        Include large raw session archives

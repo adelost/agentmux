@@ -14,19 +14,36 @@ export async function cmdMemory(ctx, subcommand, flags = {}) {
     console.log(flags.json ? JSON.stringify(result, null, 2) : result.text.trimEnd());
     return;
   }
+  if (subcommand === "archive") {
+    const { archiveMemory, formatMemoryArchive } = await import("../core/memory-archive.mjs");
+    const result = archiveMemory(workspace, {
+      dryRun: !flags.apply, max: Number.isFinite(flags.max) ? flags.max : undefined,
+    });
+    console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryArchive(result));
+    if (result.failed.length > 0) process.exitCode = 1;
+    return;
+  }
+  if (subcommand === "bank") {
+    const { bankMemory, formatMemoryBank } = await import("../core/memory-bank.mjs");
+    const result = bankMemory(workspace, { dryRun: !!flags.dry });
+    console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryBank(result));
+    if (result.skipped === "secret-pattern") process.exitCode = 1;
+    return;
+  }
   const {
-    lintMemory, formatMemoryLint, formatMemoryStatus, readLatestMemoryCompact,
+    lintMemory, formatMemoryLint, formatMemoryStatus, readLatestMemoryCommit,
     writeMemoryDailyReport,
   } = await import("../core/memory-lint.mjs");
   if (subcommand === "status") {
     const result = lintMemory(workspace, { dreamHealth: observeDreamHealth(workspace, { configPath: ctx.configPath }) });
-    result.compact = readLatestMemoryCompact(workspace);
+    result.compact = readLatestMemoryCommit(workspace, "compact");
+    result.bank = readLatestMemoryCommit(workspace, "bank");
     console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryStatus(result));
     return;
   }
   if (subcommand === "lint") {
     const result = lintMemory(workspace, { dreamHealth: observeDreamHealth(workspace, { configPath: ctx.configPath }) });
-    if (flags.reportDaily) writeMemoryDailyReport(workspace, result, { compacted: Number(flags.compacted) || 0 });
+    if (flags.reportDaily) writeMemoryDailyReport(workspace, result, { archived: Number(flags.archived ?? flags.compacted) || 0 });
     console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryLint(result));
     if (result.summary.warnings > 0) process.exitCode = 1;
     return;
@@ -46,7 +63,9 @@ export async function cmdMemory(ctx, subcommand, flags = {}) {
   amux memory topics [--json] [--workspace PATH]
   amux memory topics --publish FILE [--json] [--workspace PATH]
   amux memory status [--json] [--workspace PATH]
-  amux memory lint [--json] [--report-daily] [--compacted N] [--workspace PATH]
+  amux memory lint [--json] [--report-daily] [--archived N] [--workspace PATH]
+  amux memory archive [--dry|--apply] [--json] [--max N] [--workspace PATH]
+  amux memory bank [--dry] [--json] [--workspace PATH]
   amux memory compact --dry [--json] [--max N] [--workspace PATH]`);
   process.exitCode = 1;
 }

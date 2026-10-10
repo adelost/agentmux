@@ -30,6 +30,11 @@ fi
 finalize() {
   local status=$?
   trap - EXIT
+  # Durability is independent from Dream success: commit memory/ locally,
+  # never push. A secret-shaped line skips the commit and stays a lint warning.
+  "$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" memory bank --workspace "$AMUX_WORKSPACE" \
+    >> "$AGENTMUX_DREAM_LOG" 2>&1 \
+    || printf "%s WARN memory bank did not commit (see the line above)\n" "$(date -Is)" >> "$AGENTMUX_DREAM_LOG"
   # Search freshness is independent from Dream/compaction success. Keep the
   # incremental index moving even when today's summary or backlog fails.
   "$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" search --reindex \
@@ -59,6 +64,15 @@ fi
 date_key="${AMUX_SCHEDULED_DREAM_DATE:-$(TZ=Europe/Stockholm date +%F)}"
 daily_file="$AMUX_WORKSPACE/memory/$date_key.md"
 
+# The old-band size rule's actor: move old oversized daily files byte-for-byte
+# to memory/archive/daily and leave a five-line stub. No model, bounded per run.
+archived_count=0
+archive_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" memory archive --apply --json --workspace "$AMUX_WORKSPACE" 2>> "$AGENTMUX_DREAM_LOG")" \
+  || printf "%s WARN memory archive had failures\n" "$(date -Is)" >> "$AGENTMUX_DREAM_LOG"
+archived_count="$(printf "%s" "$archive_output" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const r=JSON.parse(s);console.log(r.archived.length);for(const f of r.failed)console.error(`WARN archive ${f.dateKey}: ${f.error}`)}catch{console.log(0)}})' 2>> "$AGENTMUX_DREAM_LOG")" || archived_count=0
+case "$archived_count" in ''|*[!0-9]*) archived_count=0 ;; esac
+printf "%s memory archive: %s daily file(s)\n" "$(date -Is)" "$archived_count" >> "$AGENTMUX_DREAM_LOG"
+
 # Judge the run by its own exit status BEFORE asserting on the daily file. The
 # assertions below describe a SUCCESSFUL run and include the run sentinel, which
 # a failed run never writes, so evaluating them first killed the script under
@@ -82,10 +96,10 @@ grep -q "^> why:" "$daily_file"
 grep -q "<!-- amux-dream-run:$date_key " "$daily_file"
 
 # Hidden one-shot model processes are forbidden from editing memory. Dream's
-# configured visible pane curates today's block; old-file backlog is linted
-# and reported without automatic rewrites.
+# configured visible pane curates today's block; old files are archived
+# losslessly above, never rewritten.
 lint_status=0
-lint_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" memory lint --json --report-daily --compacted 0 --workspace "$AMUX_WORKSPACE" 2>&1)" || lint_status=$?
+lint_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" memory lint --json --report-daily --archived "$archived_count" --workspace "$AMUX_WORKSPACE" 2>&1)" || lint_status=$?
 printf "%s\n" "$lint_output" >> "$AGENTMUX_DREAM_LOG"
 if ! printf "%s" "$lint_output" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{JSON.parse(s)}catch{process.exit(1)}})'; then
   echo "memory lint returned invalid JSON" >&2

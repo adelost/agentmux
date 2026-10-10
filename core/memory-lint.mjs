@@ -3,6 +3,9 @@ import {
 } from "fs";
 import { spawnSync } from "child_process";
 import { basename, join, relative } from "path";
+import { createHash } from "crypto";
+import { parseArchiveStub } from "./memory-archive.mjs";
+import { pendingMemoryPaths } from "./memory-bank.mjs";
 import { dailyPolicyFor, loadMemoryPolicy, localDateKey } from "./memory-policy.mjs";
 import { inspectTopics } from "./memory-topics.mjs";
 
@@ -73,6 +76,27 @@ function latestDreamSentinel(text) {
   return { date: m[1], time: m[2], ok: Number(m[3]), failed: Number(m[4]) };
 }
 
+function safePendingMemory(root) {
+  try { return pendingMemoryPaths(root); } catch { return null; }
+}
+
+/** WHAT: Collects daily sections longer than the writing rule. WHY: Keeps the finding on the one section its writer can still shorten. */
+export function longSections(text, maxLines) {
+  const out = [];
+  let current = null;
+  const finish = () => { if (current && current.lines > maxLines) out.push(current); };
+  for (const line of linesOf(text)) {
+    if (line.startsWith("## ")) {
+      finish();
+      current = { heading: line.slice(3).trim(), lines: 0 };
+    } else if (current && line.trim() && !line.startsWith("<!--")) {
+      current.lines += 1;
+    }
+  }
+  finish();
+  return out;
+}
+
 /** WHAT: Checks workspace memory against policy and optional Dream evidence. WHY: Keeps missing runs visible alongside existing content warnings. */
 export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy, home = process.env.HOME, dreamHealth = null } = {}) {
   const root = workspace;
@@ -121,12 +145,24 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
     }
   }
 
-  // Daily structure + age-aware compact policy. Today/yesterday stay visible
-  // but are never compact candidates.
+  // Daily files. Every warning here has an actor: the nightly archive moves
+  // old oversized days losslessly (memory-archive.mjs), and the writer of
+  // today's or yesterday's section can still shorten it. Recent totals are
+  // info only: twenty panes writing ~10-line sections exceed any fixed total,
+  // and nothing should rewrite those days before the archive takes them.
   const dailyRequired = requiredHeadings(join(memoryDir, "TEMPLATE.md"));
   for (const file of dailyFiles) {
     const text = readFileSync(file, "utf-8");
     const lineCount = linesOf(text).length;
+    const stub = parseArchiveStub(text);
+    if (stub) {
+      const archived = join(root, stub.archivePath);
+      if (!existsSync(archived)) add("warning", "archive_missing", file, `archived original missing: ${stub.archivePath}; restore it from git`);
+      else if (createHash("sha256").update(readFileSync(archived)).digest("hex") !== stub.sha256) {
+        add("warning", "archive_mismatch", file, `${stub.archivePath} no longer matches the archived sha256`);
+      }
+      continue;
+    }
     for (const heading of dailyRequired) {
       if (!text.split(/\r?\n/).some((line) => line.startsWith(heading))) {
         add("warning", "daily_structure", file, `missing required heading "${heading}"`);
@@ -138,10 +174,18 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
       if (lineCount > policy.recentDailyMaxLines) {
         add("info", "daily_protected_large", file, `${lineCount} lines; protected as today/yesterday`);
       }
+      for (const section of longSections(text, policy.dailySectionMaxLines)) {
+        add("info", "daily_section_long", file, `"${section.heading}": ${section.lines} lines (rule: about 10 per section)`);
+      }
+    } else if (rule.maxLines === policy.recentDailyMaxLines) {
+      if (lineCount > rule.maxLines) add("info", "daily_large", file, `${lineCount} lines (archived after ${policy.recentDailyDays} days)`);
     } else if (lineCount > rule.maxLines) {
+      const todos = linesOf(text).filter((line) => line.startsWith("- [ ] ")).length;
       const finding = {
         severity: "warning", code: "daily_compact", file: relative(root, file),
-        message: `${lineCount} lines in ${rule.ageBand} band; compact toward ${rule.targetLines}`,
+        message: todos
+          ? `${lineCount} lines in ${rule.ageBand} band; archive waits for ${todos} open todo(s)`
+          : `${lineCount} lines in ${rule.ageBand} band; next nightly archive moves it`,
         lines: lineCount, targetLines: rule.targetLines, dateKey,
       };
       findings.push(finding);
@@ -149,6 +193,17 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
     } else if (lineCount > Math.round(rule.maxLines * 0.7)) {
       add("info", "daily_large", file, `${lineCount} lines (limit ${rule.maxLines})`);
     }
+  }
+
+  // Durability: notes that only live in the working tree. The nightly bank
+  // commits them; a skipped bank (secret-shaped text) stays visible here.
+  const pending = safePendingMemory(root);
+  if (pending?.length) {
+    const oldestMs = Math.min(...pending.map((path) => {
+      try { return statSync(join(root, path)).mtimeMs; } catch { return now.getTime(); }
+    }));
+    const hours = Math.floor((now.getTime() - oldestMs) / 3_600_000);
+    if (hours >= 26) add("warning", "memory_unbanked", memoryDir, `${pending.length} memory path(s) uncommitted, oldest ${hours} h; amux memory bank`);
   }
 
   // Backtick links to concrete memory markdown files.
@@ -369,26 +424,29 @@ export function formatMemoryStatus(result) {
   else if (result.dream) rows.push(`Latest dream: ${result.dream.date} ${result.dream.time}, ${result.dream.ok} ok / ${result.dream.failed} failed`);
   else if (result.dreamGap) rows.push(`Latest dream: FAILED ${result.dreamGap.date} ${result.dreamGap.time}, no digest written (${result.dreamGap.reason})`);
   else rows.push("Latest dream: no sentinel in today's file");
+  if (result.bank) rows.push(`Latest bank: ${result.bank.date} ${result.bank.hash.slice(0, 12)} (${result.bank.subject})`);
+  else rows.push("Latest bank: none");
   if (result.compact) rows.push(`Latest compact: ${result.compact.date} ${result.compact.hash.slice(0, 12)} (${result.compact.subject})`);
-  else rows.push("Latest compact: none");
   return rows.join("\n");
 }
 
-export function readLatestMemoryCompact(workspace) {
+/** WHAT: Reads the newest memory commit of one kind. WHY: Shows when notes were last banked or compacted without parsing logs. */
+export function readLatestMemoryCommit(workspace, kind) {
   const result = spawnSync("git", [
-    "log", "-1", "--format=%H%x09%cI%x09%s", "--grep=^chore(memory): compact",
+    "log", "-1", "--format=%H%x09%cI%x09%s", `--grep=^chore(memory): ${kind}`,
   ], { cwd: workspace, encoding: "utf-8" });
   if (result.status !== 0 || !result.stdout.trim()) return null;
   const [hash, date, subject] = result.stdout.trim().split("\t");
-  return hash && date ? { hash, date, subject: subject || "memory compact" } : null;
+  return hash && date ? { hash, date, subject: subject || `memory ${kind}` } : null;
 }
 
-export function writeMemoryDailyReport(workspace, result, { compacted = 0, now = new Date() } = {}) {
+/** WHAT: Saves today's memory status line once. WHY: Keeps repeated nightly runs from stacking status lines in the daily file. */
+export function writeMemoryDailyReport(workspace, result, { archived = 0, now = new Date() } = {}) {
   const dateKey = localDateKey(now);
   const path = join(workspace, "memory", `${dateKey}.md`);
   if (!existsSync(path)) throw new Error(`${path}: daily file missing; run amux dream first`);
   const marker = `<!-- amux-memory-status:${dateKey} -->`;
-  const line = `- memory: ${result.summary.warnings} varning(ar), backlog ${result.summary.compactable} fil(er), komprimerade ${compacted} inatt.`;
+  const line = `- memory: ${result.summary.warnings} varning(ar), backlog ${result.summary.compactable} fil(er), arkiverade ${archived} inatt.`;
   const blockRe = new RegExp(`\\n?<!-- amux-memory-status:${dateKey} -->\\n[^\\n]*\\n?`, "g");
   const content = readFileSync(path, "utf-8").replace(blockRe, "\n").trimEnd();
   writeFileSync(path, `${content}\n\n${marker}\n${line}\n`);

@@ -3178,7 +3178,7 @@ export async function dispatch(argv, ctx) {
       const subcommand = rest[0] || "status";
       const { flags } = parseFlags(rest.slice(1), {
         dry: "boolean", json: "boolean", max: "number", workspace: "string",
-        reportDaily: "boolean", "report-daily": "boolean", compacted: "number",
+        reportDaily: "boolean", "report-daily": "boolean", compacted: "number", archived: "number", apply: "boolean",
         p: "string", pane: "string", publish: "string",
       });
       if (flags["report-daily"]) flags.reportDaily = true;

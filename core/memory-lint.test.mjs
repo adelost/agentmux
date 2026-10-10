@@ -2,6 +2,8 @@ import { feature, unit, expect } from "bdd-vitest";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { createHash } from "crypto";
+import { buildArchiveStub } from "./memory-archive.mjs";
 import { lintMemory, writeMemoryDailyReport } from "./memory-lint.mjs";
 
 const NOW = new Date("2026-07-11T10:00:00+02:00");
@@ -117,13 +119,67 @@ feature("memory lint", () => {
       return { root, path, result };
     }],
     when: ["writing two reports", ({ root, path, result }) => {
-      writeMemoryDailyReport(root, result, { compacted: 1, now: NOW });
-      writeMemoryDailyReport(root, result, { compacted: 2, now: NOW });
+      writeMemoryDailyReport(root, result, { archived: 1, now: NOW });
+      writeMemoryDailyReport(root, result, { archived: 2, now: NOW });
       return readFileSync(path, "utf-8");
     }],
     then: ["one marker remains with the latest count", (content) => {
       expect(content.match(/amux-memory-status:/g)).toHaveLength(1);
-      expect(content).toContain("komprimerade 2 inatt");
+      // The nightly old-band actor is the lossless archive now, so the line
+      // reports archived days (Mattias 2026-07-11: a warning needs an actor).
+      expect(content).toContain("arkiverade 2 inatt");
+    }],
+  });
+
+  unit("a recent oversized day is information, not a warning without an actor", {
+    given: ["a 150-line day from two weeks ago", () => {
+      const root = workspaceFixture();
+      writeFileSync(join(root, "memory", "2026-06-27.md"), daily(150));
+      return { root };
+    }],
+    when: ["linting", ({ root }) => lintMemory(root, { now: NOW, home: join(root, "home") })],
+    then: ["no compact warning and no backlog entry, only daily_large info", (result) => {
+      expect(result.compactable).toEqual([]);
+      expect(result.findings.some((row) => row.code === "daily_compact")).toBe(false);
+      expect(result.findings.find((row) => row.code === "daily_large")?.severity).toBe("info");
+    }],
+  });
+
+  unit("a long section in today's file is named for its writer", {
+    given: ["today with a 20-line section", () => {
+      const root = workspaceFixture();
+      writeFileSync(join(root, "memory", "2026-07-11.md"), [
+        daily(10).trimEnd(), "## Lång rapport (lsrc:2)",
+        ...Array.from({ length: 20 }, (_, i) => `- rad ${i}`), "## Kort", "- en rad", "",
+      ].join("\n"));
+      return { root };
+    }],
+    when: ["linting", ({ root }) => lintMemory(root, { now: NOW, home: join(root, "home") })],
+    then: ["one info names the long section only", (result) => {
+      const rows = result.findings.filter((row) => row.code === "daily_section_long");
+      expect(rows).toHaveLength(1);
+      expect(rows[0].severity).toBe("info");
+      expect(rows[0].message).toContain("Lång rapport (lsrc:2)");
+    }],
+  });
+
+  unit("an archive stub is compact while its original exists, and loud when it does not", {
+    given: ["two stubs, one with its archived original", () => {
+      const root = workspaceFixture();
+      const original = daily(60);
+      mkdirSync(join(root, "memory", "archive", "daily"), { recursive: true });
+      writeFileSync(join(root, "memory", "archive", "daily", "2026-05-01.md"), original);
+      writeFileSync(join(root, "memory", "2026-05-01.md"), buildArchiveStub({
+        dateKey: "2026-05-01", summary: "day", sha: createHash("sha256").update(original).digest("hex") }));
+      writeFileSync(join(root, "memory", "2026-05-02.md"), buildArchiveStub({
+        dateKey: "2026-05-02", summary: "day", sha: "0".repeat(64) }));
+      return { root };
+    }],
+    when: ["linting", ({ root }) => lintMemory(root, { now: NOW, home: join(root, "home") })],
+    then: ["no backlog, and only the stub without an original warns", (result) => {
+      expect(result.compactable).toEqual([]);
+      const archived = result.findings.filter((row) => row.code.startsWith("archive_"));
+      expect(archived.map((row) => [row.code, row.file])).toEqual([["archive_missing", "memory/2026-05-02.md"]]);
     }],
   });
 });

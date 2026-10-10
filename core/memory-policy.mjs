@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import yaml from "js-yaml";
 
+// WHAT: Defines the default memory size, section and archive limits.
+// WHY: Keeps workspaces without a policy file on one shared rule set.
 export const DEFAULT_MEMORY_POLICY = Object.freeze({
   memoryMaxBytes: 4 * 1024,
   peopleIndexMaxLines: 300,
@@ -14,6 +16,10 @@ export const DEFAULT_MEMORY_POLICY = Object.freeze({
   peopleDetailMaxLines: 500,
   maxCompactions: 3,
   dreamBlockMaxLines: 10,
+  // Writers are told "about 10 lines per section"; lint names longer ones.
+  dailySectionMaxLines: 15,
+  // Old daily files the nightly archive moves per run (lossless, no model).
+  archiveMaxPerRun: 30,
 });
 
 const POSITIVE_KEYS = new Set(Object.keys(DEFAULT_MEMORY_POLICY));

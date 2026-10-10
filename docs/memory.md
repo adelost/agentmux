@@ -27,13 +27,40 @@ amux memory context -p project:3 --json # exact pane commands + file versions
 amux memory topics --json  # source freshness, states and deciding DSL cells
 amux memory topics --publish /path/topic-id.md # validate and atomically publish one reviewed note
 amux memory lint [--json]   # read-only policy findings
+amux memory archive --dry   # old daily files the nightly archive would move
+amux memory archive --apply # move them losslessly now (bounded, no model)
+amux memory bank [--dry]    # commit memory/ locally after a secret scan, never push
 amux memory compact --dry   # inspect old daily-file compaction candidates
 ```
 
 Non-dry `amux memory compact` is deliberately disabled. Its former default
 spawned a separate model process that could rewrite memory without a visible
-AMUX prompt. Old files remain intact and searchable; lint keeps the backlog
-visible until a similarly transparent, operator-owned curation flow exists.
+AMUX prompt.
+
+Every lint warning needs an actor (Mattias 2026-07-11: "Rotorsak = varning
+utan aktör"). For old daily files that actor is the archive. A day older than
+`recentDailyDays` (30) and longer than `oldDailyMaxLines` moves byte-for-byte
+to `memory/archive/daily/DATE.md`. The old path keeps a five-line stub: its
+`> summary:` (the original's own, else that night's Dream digest headings, else
+its own `## ` headings), the archive path with its sha256 and the Dream digest
+links. Nothing is paraphrased, links to the old path still resolve and
+`amux search` still finds the full text under `memory/archive/daily/`. A day
+with an unchecked `- [ ]` todo stays in place until the todo is resolved, so
+the todo never disappears from lint. Lint warns `archive_missing` or
+`archive_mismatch` if a stub's original is gone or changed.
+
+Recent days (2–30 days) report their total size as info only. Twenty panes
+writing the ~10-line sections the agent policy asks for exceed any fixed daily
+total, and nothing should rewrite those days before the archive takes them.
+The writer can still act on today and yesterday: lint names each `## ` section
+longer than `dailySectionMaxLines` (15) as `daily_section_long` info.
+
+Durability is the nightly bank: it commits `memory/` paths only (other staged
+work in the shared index stays staged), scans the added lines for secret-shaped
+tokens first and never pushes (Mattias 2026-08-04 refused automatic publishing).
+A secret-shaped line skips the commit and is logged with file and line, without
+the value. Lint warns `memory_unbanked` when memory changes stay uncommitted for
+more than 26 hours.
 
 ## Nightly chain
 
@@ -42,9 +69,14 @@ configured owner exact /compact
   -> visible Dream prompt
   -> isolated validated summary
   -> immutable Markdown snapshot + atomic daily reference
+  -> lossless archive of old daily files (archiveMaxPerRun, 30)
   -> read-only memory lint
+  -> local memory commit (no push)
   -> incremental search reindex
 ```
+
+The archive, bank and reindex run whether or not Dream succeeded; their
+failures are logged as WARN and never change Dream's exit status.
 
 The cron wrapper remains a thin heartbeat entrypoint. It alerts on failure and
 never changes the chosen pane, model or effort.
@@ -197,6 +229,7 @@ preserves unrelated hooks and cannot silently remove their private configuration
 
 - `MEMORY.md`: short curated index, never automatically compacted.
 - Today's and yesterday's daily files: never old-file compact candidates.
+- Daily files older than 30 days: archived losslessly, never rewritten.
 - `references/*` and `people/*`: warnings only, never automatic rewrites.
 - Session JSONL housekeeping is separate and preserves every record; it only
   shortens oversized string fields in sufficiently old inactive journals.
