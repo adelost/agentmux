@@ -177,6 +177,12 @@ function parseJsonlTail(filePath, maxBytes) {
 const TERMINAL_STOP_REASONS = new Set(["end_turn", "stop_sequence", "refusal"]);
 
 /**
+ * WHAT: Recognises an assistant record Claude Code wrote without a model call.
+ * WHY: Keeps "No response requested." on resume and limit notices from counting as model work.
+ */
+export const isSyntheticClaudeReply = (record) => record?.message?.model === "<synthetic>";
+
+/**
  * Check if a given prompt has been written to Claude's jsonl for this pane.
  * Reliable echo-confirmation signal. No pane width or wordwrap involved.
  * Matches user events, queue-operations, and attachment queue-acks.
@@ -590,6 +596,7 @@ export function groupIntoTurns(events, { headless = false } = {}) {
       headless: true,
       items: [],
       endTimestamp: null,
+      replyTimestamp: null,
       isComplete: false,
     };
   };
@@ -603,6 +610,8 @@ export function groupIntoTurns(events, { headless = false } = {}) {
         // Watcher uses these to know when a turn is safe to post:
         // endTimestamp = ISO of latest assistant event, isComplete = terminal stop_reason seen.
         endTimestamp: null,
+        // replyTimestamp = ISO of latest assistant event that came from a model call.
+        replyTimestamp: null,
         isComplete: false,
       };
       continue;
@@ -628,6 +637,7 @@ export function groupIntoTurns(events, { headless = false } = {}) {
         }
       });
       if (e.timestamp) current.endTimestamp = e.timestamp;
+      if (e.timestamp && !isSyntheticClaudeReply(e)) current.replyTimestamp = e.timestamp;
       const reason = e.message?.stop_reason;
       if (reason && TERMINAL_STOP_REASONS.has(reason)) current.isComplete = true;
     }

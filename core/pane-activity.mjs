@@ -3,7 +3,7 @@
 // while idle, so only a real turn may refresh an established session.
 
 import { statSync } from "node:fs";
-import { readLastTurns, readTailWindow, parseJsonlText } from "./jsonl-reader.mjs";
+import { isSyntheticClaudeReply, readLastTurns, readTailWindow, parseJsonlText } from "./jsonl-reader.mjs";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
 import { readLastTurnsQwen } from "./qwen-jsonl-reader.mjs";
@@ -29,11 +29,16 @@ const DEFAULT_READERS = Object.freeze({
 // Without this, skydive:1 (411k tokens) and lsrc:0 (141k) sat idle for hours
 // on 2026-09-26 and nightly compact skipped them as "activity-unknown".
 const CONVERSATION_RECORD_TYPES = new Set(["user", "assistant"]);
+// api:1, 2026-10-10: on resume after the host restart Claude Code wrote "No
+// response requested." from model "<synthetic>". No model call refreshed the
+// prompt cache, yet it reset the idle clock, so the cold compact read skyvw:2
+// (378k tokens) as 0.0 min idle instead of 61.8 and skipped it.
+const isConversationRecord = (record) => CONVERSATION_RECORD_TYPES.has(record?.type) && !isSyntheticClaudeReply(record);
 
 function latestClaudeRecordMs(readTail, path, tailBytes) {
   if (!path) return NaN;
   const records = parseJsonlText(readTail(path, tailBytes).text);
-  const times = records.filter((record) => CONVERSATION_RECORD_TYPES.has(record?.type))
+  const times = records.filter(isConversationRecord)
     .map((record) => Date.parse(record.timestamp)).filter(Number.isFinite);
   return times.length ? Math.max(...times) : NaN;
 }
@@ -81,7 +86,9 @@ export function latestConversationActivityMs(paneDir, dialect, {
     if (!newest) return null;
   }
 
-  const times = [newest?.timestamp, newest?.endTimestamp].map(Date.parse).filter(Number.isFinite);
+  // A reader that tells model replies from placeholders (Claude's) supplies replyTimestamp.
+  const replyEnd = newest && "replyTimestamp" in newest ? newest.replyTimestamp : newest?.endTimestamp;
+  const times = [newest?.timestamp, replyEnd].map(Date.parse).filter(Number.isFinite);
   const turnMs = times.length ? Math.max(...times)
     : dialect === "claude" ? latestClaudeRecordMs(readTail, result.jsonlFile, tailBytes) : NaN;
   let fileMtimeMs = NaN;

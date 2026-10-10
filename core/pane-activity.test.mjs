@@ -1,5 +1,9 @@
 import { expect, feature, unit } from "bdd-vitest";
 import { it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { claudeProjectDir } from "./claude-paths.mjs";
 import { latestConversationActivityMs } from "./pane-activity.mjs";
 
 feature("pane conversation activity", () => {
@@ -104,5 +108,46 @@ feature("cold nightly activity recovery", () => {
       turns: options.dreamHistory ? [{ timestamp: "2026-09-09T18:08:07.083Z" }] : [] }));
     expect(latestConversationActivityMs("/pane", "codex", { ...f, recoverCodexHistory: true }))
       .toBe(Date.parse("2026-09-09T18:08:07.083Z"));
+  });
+});
+
+// api:1, 2026-10-10: the host restarted 10:10-10:15. On resume Claude Code wrote
+// "No response requested." from model "<synthetic>". It made no model call, yet
+// it restarted the idle clock: skyvw:2 (378k tokens) read 0.0 min idle instead of
+// 61.8, the cold compact was skipped, and its first message rewrote the whole
+// context to the prompt cache.
+feature("a resumed Claude session", () => {
+  const lastReply = "2026-10-10T08:09:55.000Z";
+  const journal = [
+    { type: "user", timestamp: "2026-10-10T08:05:00.000Z", message: { role: "user", content: "ship E255" } },
+    { type: "assistant", timestamp: lastReply, message: { model: "claude-opus-5-5", stop_reason: "end_turn",
+      content: [{ type: "text", text: "E255 is on master." }] } },
+    { type: "assistant", timestamp: "2026-10-10T09:11:49.000Z", message: { model: "<synthetic>", stop_reason: "stop_sequence",
+      content: [{ type: "text", text: "No response requested." }] } },
+    { type: "attachment", timestamp: "2026-10-10T09:11:50.000Z" },
+  ].map((record) => JSON.stringify(record)).join("\n") + "\n";
+
+  unit("the resume placeholder does not restart the idle clock", {
+    given: ["a journal whose last record is Claude's resume placeholder", () => {
+      const home = mkdtempSync(join(tmpdir(), "amux-resume-idle-"));
+      const paneDir = join(home, "repo", ".agents", "2");
+      mkdirSync(claudeProjectDir(paneDir, home), { recursive: true });
+      writeFileSync(join(claudeProjectDir(paneDir, home), "80d2a76a-f245-4e99-ad70-b5571be7a82a.jsonl"), journal);
+      vi.stubEnv("HOME", home);
+      return { home, paneDir };
+    }],
+    when: ["reading activity through the production reader", ({ paneDir }) => latestConversationActivityMs(paneDir, "claude")],
+    then: ["idle time counts from the last real reply", (value, { home }) => {
+      try { expect(value).toBe(Date.parse(lastReply)); } finally { vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); }
+    }],
+  });
+
+  unit("a turn too large for the tail still ignores the placeholder", {
+    when: ["reading activity from records only", () => latestConversationActivityMs("/pane", "claude", {
+      readers: { claude: () => ({ turns: [], jsonlFile: "/session.jsonl" }) },
+      stat: () => ({ size: 336 * 1024 * 1024, mtimeMs: Date.parse("2026-10-10T09:11:50.000Z") }),
+      readTail: () => ({ text: journal.split("\n").slice(1).join("\n"), reachedStart: false }),
+    })],
+    then: ["idle time counts from the last real reply", (value) => expect(value).toBe(Date.parse(lastReply))],
   });
 });
