@@ -37,7 +37,7 @@ const TEST_ALIASES = {
   "core/codex-jsonl-reader.mjs": ["test/codex-jsonl-reader.test.mjs"],
   "core/jsonl-reader.mjs": ["core/dream-summarizer.test.mjs", "test/jsonl-reader.test.mjs"],
   "core/search-semantic.mjs": ["core/search.test.mjs"],
-  "core/search-embedder.mjs": ["core/search-fusion.test.mjs"],
+  "core/search-embedder.mjs": ["core/search-fusion.test.mjs", "core/search-embedder.test.mjs"],
   "core/search-live-index.mjs": ["core/search-semantic.test.mjs"],
   "core/search-gpu.mjs": ["core/search-gpu.test.mjs"],
   "bin/search-embedder.mjs": ["core/search-fusion.test.mjs"],

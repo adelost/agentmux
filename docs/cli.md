@@ -122,6 +122,10 @@ veckan", "yesterday") is removed from matching and ranks that day's notes
 first. File-level word-AND runs only for `--raw` or when fewer than three items
 rank.
 
+The daemon parses every note and scans for edited files right after it
+starts, using the roots of the query that started it, so the first questions
+after an idle exit do not pay for that work (8-9 s before, about 1.5 s after).
+
 The models and index stay loaded in a per-user background process
 (`bin/search-embedder.mjs`, Unix socket under `~/.agentmux/`) that starts on
 the first question and exits after 30 idle minutes

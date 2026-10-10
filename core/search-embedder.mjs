@@ -55,14 +55,15 @@ export async function daemonAlive({ dir = indexDir(), model = semanticModel().na
 }
 
 /** WHAT: Schedules the daemon start in the background. WHY: Keeps the current query from waiting on a cold model load. */
-export function startEmbedder({ dir = indexDir(), model = semanticModel().name } = {}) {
+export function startEmbedder({ dir = indexDir(), model = semanticModel().name, roots = null } = {}) {
   const script = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "search-embedder.mjs");
   // A bounded V8 heap makes the long-lived daemon collect per-query garbage
   // (rerank inputs, unit scores) instead of growing; golden dev reached 5.3 GB
   // RSS without it against a 4.2 GB budget.
   const child = spawn(process.execPath, [`--max-old-space-size=${DAEMON_HEAP_MB}`, script], {
     detached: true, stdio: "ignore",
-    env: { ...(gpuEnv(process.env) || process.env), AMUX_SEARCH_INDEX_DIR: dir, AMUX_SEARCH_MODEL: model },
+    env: { ...(gpuEnv(process.env) || process.env), AMUX_SEARCH_INDEX_DIR: dir, AMUX_SEARCH_MODEL: model,
+      ...(Array.isArray(roots) ? { AMUX_SEARCH_WARM_ROOTS: JSON.stringify(roots) } : {}) },
   });
   child.unref();
 }
@@ -83,7 +84,7 @@ export async function semanticQuery(query, { k = 30, roots = null, dir = indexDi
       if (!["ENOENT", "ECONNREFUSED"].includes(error.code)) {
         return { hits: [], unavailable: `semantic daemon error: ${error.message}` };
       }
-      if (!started) { start({ dir, model }); started = true; }
+      if (!started) { start({ dir, model, roots }); started = true; }
       if (Date.now() >= deadline) {
         return { hits: [], unavailable: "semantic layer warming up (first query after idle); lexical only this time" };
       }
@@ -119,6 +120,18 @@ export async function daemonRerank(query, texts, { dir = indexDir(), model = sem
     }
     return { scores: null, unavailable: result.unavailable || "reranker returned no scores" };
   } catch (error) { return { scores: null, unavailable: `reranker unreachable: ${error.message}` }; }
+}
+
+/** WHAT: Builds the passage cache and overlay scan for the roots that started the daemon. WHY: Keeps first-query parsing out of the first answered question. */
+export function warmStart(rootsJson, { segments, live, search = searchPassages }) {
+  let roots;
+  try { roots = JSON.parse(rootsJson || "null"); } catch { return false; }
+  if (!Array.isArray(roots) || !roots.length) return false;
+  try {
+    search("warmup", roots, { max: 1, cache: segments, onWarning: () => {} });
+    live.refresh(roots);
+    return true;
+  } catch { return false; }
 }
 
 /** WHAT: Routes semantic and passage queries on a socket until idle. WHY: Keeps model and vectors loaded across CLI calls without a permanent process. */
@@ -207,6 +220,10 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
   });
   live.index();
   idleTimer = setTimeout(() => server.close(), idleMs);
+  // Warm start: parse every note and scan for edited files while the
+  // reranker loads, so the first real question after an idle exit does not
+  // pay for it (it took 9.4 s instead of ~1.5 s).
+  setImmediate(() => warmStart(process.env.AMUX_SEARCH_WARM_ROOTS, { segments, live }));
   server.on("close", () => {
     rmSync(socketPath, { force: true });
     exitAfterGpu(0);
