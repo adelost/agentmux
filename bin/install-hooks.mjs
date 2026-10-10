@@ -34,6 +34,10 @@ const SUGGESTIONS_GUARD_CMD = `exec node "${INSTALLED_GUARD}"`;
 export const HOTSPOT_GUARD_CMD = `p=$(cat); case "$p" in *commit*) printf '%s' "$p" | exec node "${join(__dir, "hotspot-commit-guard.mjs")}";; esac`;
 // rm targets Claude Code stops for a person are refused before the call; only payloads naming rm start node.
 const RM_GUARD_CMD = `p=$(cat); case "$p" in *rm*) printf '%s' "$p" | exec node "${join(__dir, "rm-target-guard.mjs")}";; esac`;
+// WHAT: Defines the PostToolUse command for the daily memory section rule.
+// WHY: Keeps every other tool call free of a node start; only payloads naming a daily note reach it.
+export const MEMORY_SECTION_REMINDER_CMD = `p=$(cat); case "$p" in *memory/20*) printf '%s' "$p" | exec node "${join(__dir, "memory-section-reminder.mjs")}";; esac`;
+const MEMORY_SECTION_MATCHER = "Write|Edit|MultiEdit|Bash";
 const SETTINGS = join(homedir(), ".claude", "settings.json");
 
 const isAmuxHook = (h) => h?.type === "command" && /amux-hook\.mjs/.test(h?.command || "");
@@ -43,6 +47,8 @@ const isHotspotGuard = (h) => h?.type === "command"
   && /hotspot-commit-guard\.mjs/.test(h?.command || "");
 const isRmGuard = (h) => h?.type === "command"
   && /rm-target-guard\.mjs/.test(h?.command || "");
+const isMemorySectionReminder = (h) => h?.type === "command"
+  && /memory-section-reminder\.mjs/.test(h?.command || "");
 
 function without(entries, predicate) {
   return (entries || [])
@@ -153,6 +159,14 @@ function main() {
   }
   if (preToolUse.length) hooks.PreToolUse = preToolUse;
   else delete hooks.PreToolUse;
+  const postToolUse = without(hooks.PostToolUse, isMemorySectionReminder);
+  if (!remove) {
+    postToolUse.push({ matcher: MEMORY_SECTION_MATCHER, hooks: [{
+      type: "command", command: MEMORY_SECTION_REMINDER_CMD, timeout: 10,
+    }] });
+  }
+  if (postToolUse.length) hooks.PostToolUse = postToolUse;
+  else delete hooks.PostToolUse;
   settings.hooks = hooks;
   if (!Object.keys(hooks).length) delete settings.hooks;
 
@@ -173,6 +187,7 @@ function main() {
   console.log(`Suggestions mutations: PreToolUse/Bash -> ${SUGGESTIONS_GUARD_CMD}`);
   console.log(`Hotspot reflection on git commit: PreToolUse/Bash -> ${HOTSPOT_GUARD_CMD}`);
   console.log(`rm targets Claude Code stops for a person: PreToolUse/Bash -> ${RM_GUARD_CMD}`);
+  console.log(`Daily memory section rule: PostToolUse/${MEMORY_SECTION_MATCHER} -> ${MEMORY_SECTION_REMINDER_CMD}`);
 }
 
 // Only run when executed, never on import. This file now exports a helper, and

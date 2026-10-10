@@ -55,6 +55,15 @@ total, and nothing should rewrite those days before the archive takes them.
 The writer can still act on today and yesterday: lint names each `## ` section
 longer than `dailySectionMaxLines` (15) as `daily_section_long` info.
 
+The writer also hears it while writing. A Claude PostToolUse hook
+(`bin/memory-section-reminder.mjs`, installed by `bin/install-hooks.mjs`) reads
+the section a Write, Edit, MultiEdit or shell append touched in today's or
+yesterday's note. If it is over the rule, the hook adds one Swedish line to the
+turn: keep about 10 lines and move details to `memory/references/<topic>.md`.
+It names each section once per session, never blocks, and only payloads that
+mention `memory/20…` start node. Codex has no hooks; a bridge reminder would
+wake the pane and spend quota, so Codex writers rely on the policy and lint.
+
 Durability is the nightly bank: it commits `memory/` paths only (other staged
 work in the shared index stays staged), scans the added lines for secret-shaped
 tokens first and never pushes (Mattias 2026-08-04 refused automatic publishing).

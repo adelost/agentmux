@@ -4,6 +4,7 @@ import {
 import { spawnSync } from "child_process";
 import { basename, join, relative } from "path";
 import { createHash } from "crypto";
+import { dailySections } from "./daily-sections.mjs";
 import { parseArchiveStub } from "./memory-archive.mjs";
 import { pendingMemoryPaths } from "./memory-bank.mjs";
 import { dailyPolicyFor, loadMemoryPolicy, localDateKey } from "./memory-policy.mjs";
@@ -85,19 +86,9 @@ function safePendingMemory(root) {
 
 /** WHAT: Collects daily sections longer than the writing rule. WHY: Keeps the finding on the one section its writer can still shorten. */
 export function longSections(text, maxLines) {
-  const out = [];
-  let current = null;
-  const finish = () => { if (current && current.lines > maxLines) out.push(current); };
-  for (const line of linesOf(text)) {
-    if (line.startsWith("## ")) {
-      finish();
-      current = { heading: line.slice(3).trim(), lines: 0 };
-    } else if (current && line.trim() && !line.startsWith("<!--")) {
-      current.lines += 1;
-    }
-  }
-  finish();
-  return out;
+  return dailySections(text)
+    .filter((section) => section.lines > maxLines)
+    .map(({ heading, lines }) => ({ heading, lines }));
 }
 
 /** WHAT: Checks workspace memory against policy and optional Dream evidence. WHY: Keeps missing runs visible alongside existing content warnings. */
