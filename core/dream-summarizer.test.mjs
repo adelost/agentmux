@@ -85,6 +85,34 @@ feature("bounded fleet dream input", () => {
     }],
   });
 
+  unit("a fleet larger than the budget keeps every busy pane, each readable", {
+    given: ["thirteen panes with twenty-four long reports each, as on 2026-10-11", () => {
+      const start = Date.parse("2026-10-10T04:00:00Z");
+      return Array.from({ length: 13 }, (_, index) => {
+        const entries = Array.from({ length: 24 }, (_, row) => turn(
+          new Date(start + (index * 24 + row) * 60_000).toISOString(),
+          row === 0 ? `pane ${index}: Mattias decision` : `[from skyvw:0] row ${row}`,
+          `SUMMARY: row ${row} released. ${"evidence ".repeat(300)}`));
+        return { ...source("fleet", index, Date.parse(entries.at(-1).timestamp)), turns: 24, omittedTurns: 0, entries };
+      });
+    }],
+    when: ["building the batch", (sources) => ({ sources, batch: buildDreamBatch(sources, "2026-10-11") })],
+    then: ["no pane falls out, the total stays under 96 KB, each keeps its decision and its receipt turn", ({ sources, batch }) => {
+      expect(batch.omitted).toEqual([]);
+      expect(batch.payload.panes).toHaveLength(13);
+      expect(Buffer.byteLength(batch.sourceText)).toBeLessThanOrEqual(96 * 1024);
+      for (const [index, pane] of batch.payload.panes.entries()) {
+        const original = sources.find((item) => `${item.agent}:${item.pane}` === pane.pane);
+        const included = batch.included[index];
+        expect(pane.turns.map((item) => item.user)).toContain(`pane ${original.pane}: Mattias decision`);
+        expect(pane.turns.at(-1).at).toBe(original.activityCursor);
+        for (const item of pane.turns) expect(Buffer.byteLength(item.assistant)).toBeGreaterThanOrEqual(300);
+        expect(included.turns).toBe(pane.turns.length);
+        expect(pane.omittedTurns).toBe(24 - pane.turns.length);
+      }
+    }],
+  });
+
   unit("invalid model products cannot enter memory", {
     when: ["checking output boundaries", () => ({
       valid: validateDreamSummary("- beslut\n- nästa steg"),
@@ -143,6 +171,32 @@ feature("Dream receipts never pass work the digest did not show", () => {
       expect(asked).toEqual(["2026-09-14T01:00:00.000Z"]);
       expect(result.sources[0].entries.map((item) => item.userPrompt))
         .toEqual(["work during the failed night", "work after it"]);
+    }],
+  });
+
+  unit("a pane that missed the last digest comes first", {
+    given: ["lsrc:1 waiting since before the window, lsrc:0 active later", () => ({
+      agents: [{ name: "lsrc", dir: "/work", panes: [{ cmd: "claude" }, { cmd: "claude" }] }],
+      receipts: { schemaVersion: 1, panes: {
+        "lsrc:0": { activityCursor: "2026-09-15T01:00:00Z", dreamedAt: "2026-09-15T02:00:00Z" },
+        "lsrc:1": { activityCursor: "2026-09-14T01:00:00Z", dreamedAt: "2026-09-14T02:00:00Z" },
+      } },
+      histories: {
+        "/work/.agents/0": [complete("2026-09-15T20:00:00Z", "lsrc 0 work")],
+        "/work/.agents/1": [complete("2026-09-14T22:00:00Z", "lsrc 1 work left out last night"),
+          complete("2026-09-15T09:00:00Z", "lsrc 1 work today")],
+      },
+    })],
+    when: ["collecting and packing one pane", ({ agents, receipts, histories }) => {
+      const { sources } = collectDreamSources(agents, sinceMs, {
+        receipts, now: Date.parse("2026-09-16T04:10:00Z"),
+        readHistory: (_engine, dir) => ({ turns: histories[dir] || [] }),
+      });
+      return { sources, batch: buildDreamBatch(sources, "2026-09-16", { maxPanes: 1 }) };
+    }],
+    then: ["the waiting pane is first in line", ({ sources, batch }) => {
+      expect(sources.map((item) => `${item.agent}:${item.pane}`)).toEqual(["lsrc:1", "lsrc:0"]);
+      expect(batch.included.map((item) => `${item.agent}:${item.pane}`)).toEqual(["lsrc:1"]);
     }],
   });
 

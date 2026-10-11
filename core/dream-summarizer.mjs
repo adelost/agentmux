@@ -2,7 +2,7 @@
 
 import { panePathFor } from "./jsonl-reader.mjs";
 import { readDreamPaneHistory } from "./dream-history.mjs";
-import { dreamWindowStartMs, selectDreamTurns } from "./dream-turn-selection.mjs";
+import { dreamWindowStartMs, keepDreamTurns, selectDreamTurns } from "./dream-turn-selection.mjs";
 
 /** WHAT: Defines how many turns one pane may show. WHY: Keeps one busy pane from crowding the others out of a batch. */
 export const DREAM_SOURCE_TURNS = 24;
@@ -56,7 +56,7 @@ export function collectDreamSources(agents, sinceMs, options = {}) {
         unreadable.push({ agent: agent.name, pane, engine, reason: error.message });
         continue;
       }
-      const { entries, omittedTurns, deferredTurns, activityCursor } = selectDreamTurns(result?.turns || [], {
+      const { entries, omittedTurns, deferredTurns, activityCursor, waitingSince } = selectDreamTurns(result?.turns || [], {
         cursorMs: cutoffMs, limit, lastWriteMs: result?.lastWriteMs, nowMs,
       });
       if (!entries.length) continue;
@@ -70,13 +70,16 @@ export function collectDreamSources(agents, sinceMs, options = {}) {
         historyComplete: result?.reachedSince !== false,
         activityCursor,
         latestMs: Date.parse(activityCursor),
+        // Work from before the window missed an earlier digest: the night failed
+        // or the pane was left out of a full batch.
+        carriedOver: Date.parse(waitingSince) < sinceMs,
         filesOmitted: result?.filesOmitted || 0,
         entries,
       });
     }
   }
-  sources.sort((left, right) => right.latestMs - left.latestMs
-    || left.agent.localeCompare(right.agent) || left.pane - right.pane);
+  sources.sort((left, right) => Number(right.carriedOver) - Number(left.carriedOver)
+    || right.latestMs - left.latestMs || left.agent.localeCompare(right.agent) || left.pane - right.pane);
   return { sources, unreadable, skipped };
 }
 
@@ -125,33 +128,62 @@ export function dreamSourceBytes(source) {
   return Math.min(DREAM_SOURCE_MAX_BYTES, Math.max(DREAM_SOURCE_BYTES, wanted));
 }
 
+function packedPane(source, maxBytes) {
+  const pane = sourcePayload(source, maxBytes);
+  const raw = JSON.stringify(pane);
+  if (Buffer.byteLength(raw) <= maxBytes) return { source, pane };
+  return { source, pane: { ...pane, turns: [{ at: source.activityCursor, user: clipUtf8(raw, maxBytes - 200), assistant: "" }] } };
+}
+
+/** WHAT: Splits the prompt budget so small panes get all they need and busy panes share the rest. WHY: Keeps every active pane in the digest; 2026-10-11 dropped 3 of 13 whole. */
+function fairShares(needs, budget) {
+  const shares = [];
+  let left = budget;
+  needs.map((need, index) => ({ need, index })).sort((a, b) => a.need - b.need)
+    .forEach(({ need, index }, position, order) => {
+      shares[index] = Math.min(need, Math.floor(left / (order.length - position)));
+      left -= shares[index];
+    });
+  return shares;
+}
+
+/** WHAT: Shows as many of a pane's most important turns as fit its share, each at least a readable turn share. WHY: Keeps outcomes readable instead of clipping every turn to its first words. */
+function fittedPane(source, maxBytes) {
+  const keepTurns = (keep) => {
+    const entries = keepDreamTurns(source.entries, keep);
+    return { ...source, entries, turns: entries.length,
+      omittedTurns: (source.omittedTurns || 0) + source.entries.length - entries.length };
+  };
+  for (let keep = source.entries.length; keep > 1; keep--) {
+    const fitted = keepTurns(keep);
+    const pane = sourcePayload(fitted, Math.max(maxBytes, 512 + keep * DREAM_TURN_BYTES));
+    if (Buffer.byteLength(JSON.stringify(pane)) <= maxBytes) return { source: fitted, pane };
+  }
+  return packedPane(keepTurns(1), maxBytes);
+}
+
 /** WHAT: Builds a batch within fixed source budgets. WHY: Prevents fleet growth from flooding the curator pane. */
 export function buildDreamBatch(sources, dateKey, options = {}) {
   const maxPanes = options.maxPanes || DREAM_MAX_PANES;
   const maxPromptBytes = options.maxPromptBytes || DREAM_PROMPT_BYTES;
+  const candidates = sources.slice(0, maxPanes);
+  const omitted = sources.slice(maxPanes).map((source) => ({ ...source, omitReason: "pane-limit" }));
+  const wanted = candidates.map((source) => packedPane(source, options.maxSourceBytes || dreamSourceBytes(source)));
+  const needs = wanted.map(({ pane }) => Buffer.byteLength(JSON.stringify(pane)));
+  const envelope = Buffer.byteLength(JSON.stringify({ dateKey, panes: [] })) + Math.max(0, candidates.length - 1);
+  const shares = fairShares(needs, maxPromptBytes - envelope);
   const included = [];
-  const omitted = [];
   const panes = [];
-  for (const source of sources) {
-    if (included.length >= maxPanes) {
-      omitted.push({ ...source, omitReason: "pane-limit" });
-      continue;
-    }
-    const maxSourceBytes = options.maxSourceBytes || dreamSourceBytes(source);
-    let pane = sourcePayload(source, maxSourceBytes);
-    const raw = JSON.stringify(pane);
-    if (Buffer.byteLength(raw) > maxSourceBytes) {
-      pane = { ...pane, turns: [{ at: source.activityCursor, user: clipUtf8(raw, maxSourceBytes - 200), assistant: "" }] };
-    }
-    const candidate = [...panes, pane];
-    const sourceText = JSON.stringify({ dateKey, panes: candidate });
+  candidates.forEach((source, index) => {
+    const packed = shares[index] < needs[index] ? fittedPane(source, shares[index]) : wanted[index];
+    const sourceText = JSON.stringify({ dateKey, panes: [...panes, packed.pane] });
     if (Buffer.byteLength(sourceText) > maxPromptBytes) {
       omitted.push({ ...source, omitReason: "total-byte-limit" });
-      continue;
+      return;
     }
-    panes.push(pane);
-    included.push(source);
-  }
+    panes.push(packed.pane);
+    included.push(packed.source);
+  });
   return {
     included,
     omitted,

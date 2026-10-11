@@ -23,6 +23,8 @@ function turnWeight(turn) {
   return REPORT_LINE.test(finalText(turn)) ? 1 : 0;
 }
 
+const byImportance = (left, right) => turnWeight(right) - turnWeight(left) || timeMs(right) - timeMs(left);
+
 function isStillRunning(turn, lastWriteMs, nowMs) {
   return turn.isComplete !== true && Number.isFinite(lastWriteMs) && nowMs - lastWriteMs < DREAM_SETTLE_MS;
 }
@@ -42,12 +44,22 @@ export function selectDreamTurns(turns, { cursorMs, limit, lastWriteMs = null, n
     .sort((left, right) => timeMs(left) - timeMs(right));
   const running = eligible.length > 0 && isStillRunning(eligible.at(-1), lastWriteMs, nowMs);
   const settled = running ? eligible.slice(0, -1) : eligible;
-  const shown = new Set([...settled].sort((left, right) => turnWeight(right) - turnWeight(left)
-    || timeMs(right) - timeMs(left)).slice(0, limit));
+  const shown = new Set([...settled].sort(byImportance).slice(0, limit));
   return {
     entries: settled.filter((turn) => shown.has(turn)),
     omittedTurns: settled.length - shown.size,
     deferredTurns: running ? 1 : 0,
     activityCursor: settled.at(-1)?.timestamp ?? null,
+    waitingSince: settled[0]?.timestamp ?? null,
   };
+}
+
+/**
+ * WHAT: Keeps a pane's most important shown turns, always with its latest one.
+ * WHY: Keeps a busy pane in a full batch with readable outcomes, and its receipt turn shown.
+ */
+export function keepDreamTurns(entries, keep) {
+  const latest = entries.at(-1);
+  const kept = new Set([latest, ...entries.slice(0, -1).sort(byImportance).slice(0, Math.max(0, keep - 1))]);
+  return entries.filter((turn) => kept.has(turn));
 }
