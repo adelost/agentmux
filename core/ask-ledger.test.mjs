@@ -6,11 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   appendAskLedger,
+  appendPostLedger,
   askLedgerFiles,
   capturePaneHookAsk,
   coalesceAskLedger,
   persistAskCompletionEvidence,
   readAskLedger,
+  readPostLedger,
 } from "./ask-ledger.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 
@@ -206,6 +208,46 @@ feature("durable ask ledger", () => {
       } finally {
         rmSync(ctx.root, { recursive: true, force: true });
       }
+    }],
+  });
+
+  unit("a post keeps its whole text, kind, pane and files beside the asks", {
+    given: ["an ask and the 1900-character reply posted to its channel with a screenshot", () => {
+      const root = freshRoot();
+      const path = join(root, "ask-ledger.jsonl");
+      appendAskLedger(delivered("d-1", 0), { path });
+      const reply = `SUMMARY: klart. ${"bevis ".repeat(310)}`.slice(0, 1900);
+      return { root, path, reply };
+    }],
+    when: ["the bridge records the post", (ctx) => {
+      appendPostLedger({ agent: "lsrc", pane: 1, channelId: "c-1", via: "bridge", kind: "reply",
+        payload: { content: ctx.reply, files: ["/tmp/shot.png"] }, messageId: "m-1", ts: minutesAfter(3) }, { path: ctx.path });
+      return { posts: readPostLedger({ path: ctx.path }), asks: readAskLedger({ path: ctx.path }) };
+    }],
+    then: ["the post row holds exactly what was posted and asks stay asks", ({ posts, asks }, ctx) => {
+      try {
+        expect(posts).toHaveLength(1);
+        expect(posts[0]).toMatchObject({ event: "post", agent: "lsrc", pane: 1, kind: "reply", via: "bridge",
+          text: ctx.reply, files: ["/tmp/shot.png"], messageId: "m-1" });
+        expect(posts[0].truncated).toBeUndefined();
+        expect(asks.map((row) => row.id)).toEqual(["d-1"]);
+      } finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
+
+  unit("only a pathological post is clipped, and the row says so", {
+    given: ["a 200 KB payload", () => ({ root: freshRoot(), text: "x".repeat(200 * 1024) })],
+    when: ["recording it", (ctx) => {
+      const path = join(ctx.root, "ask-ledger.jsonl");
+      appendPostLedger({ channelId: "c-1", via: "cli", payload: ctx.text }, { path });
+      return readPostLedger({ path })[0];
+    }],
+    then: ["the text stops at 64 KB and the original size is kept", (post, ctx) => {
+      try {
+        expect(Buffer.byteLength(post.text)).toBe(64 * 1024);
+        expect(post).toMatchObject({ truncated: true, textBytes: 200 * 1024 });
+        expect(post).toMatchObject({ agent: null, pane: null, kind: "notice" });
+      } finally { rmSync(ctx.root, { recursive: true, force: true }); }
     }],
   });
 

@@ -58,6 +58,7 @@ import { observeLinkTargetModels } from "./channels/link-target-models.mjs";
 import { createPaneSleepWakeLifecycle } from "./core/pane-sleep-wake.mjs";
 import { createPaneSleepRepair } from "./core/pane-sleep-repair.mjs";
 import { findChannelForPane, listAgents, validateAgentPane } from "./cli/config.mjs";
+import { recordDiscordPost } from "./channels/post-ledger.mjs";
 import { createNativeRuntimeClient } from "./core/native-runtime-client.mjs";
 import { createAgentRouter } from "./core/agent-router.mjs";
 import { pinRuntimeExecutable } from "./core/runtime-helper.mjs";
@@ -204,7 +205,11 @@ function stampChannelMirror(channelId) {
   appState.set("channel_last_mirror_ts", prev);
 }
 
-const discord = TOKEN ? createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror }) : null;
+// Every bridge post is also recorded in the conversation log (docs/CONVERSATION-LOG.md).
+const discord = TOKEN ? createDiscordChannel({ token: TOKEN, onSent: (channelId, post) => {
+  stampChannelMirror(channelId);
+  if (post) recordDiscordPost({ ...post, channelId, via: "bridge" }, { configPath: AGENTS_YAML });
+} }) : null;
 
 // Memory admission guard: classifies pressure, alarms on transitions, and
 // frees IDLE Gradle daemons while blocked (core/memory-relief.mjs).

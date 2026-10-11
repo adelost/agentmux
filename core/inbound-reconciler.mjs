@@ -36,12 +36,14 @@ function transcriptSender(record, store, channel, baseMessage) {
           && await channel.findMessageByNonce(record.channelId, payload.nonce, record.messageId)) {
         continue;
       }
+      // A transcript mirrors the person's own words; the ask row holds them too.
+      const post = { kind: "mirror" };
       if (index === 0 && typeof baseMessage?.reply === "function") {
-        await baseMessage.reply(payload);
+        await baseMessage.reply(payload, post);
       } else if (index === 0 && typeof channel.replyTo === "function") {
-        await channel.replyTo(record.channelId, record.messageId, payload);
+        await channel.replyTo(record.channelId, record.messageId, payload, post);
       } else {
-        await channel.send(record.channelId, payload);
+        await channel.send(record.channelId, payload, post);
       }
     }
     store.completeEffect(record, effect);

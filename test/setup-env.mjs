@@ -13,3 +13,9 @@ process.env.AMUX_EVENTS_PATH = join(
   mkdtempSync(join(tmpdir(), "amux-test-ledger-")),
   "events.jsonl",
 );
+
+// Same for the conversation (ask) ledger: Discord sends record post rows there.
+process.env.AMUX_ASK_LEDGER_PATH = join(
+  mkdtempSync(join(tmpdir(), "amux-test-asks-")),
+  "ask-ledger.jsonl",
+);

@@ -6,21 +6,20 @@ import { normalizeDiscordMessage } from "./normalize.mjs";
 import { collectDiscordHistory, findDiscordNonce } from "./discord-history.mjs";
 
 /**
- * @param {{ token: string, onSent?: (channelId: string) => void }} config
+ * @param {{ token: string, onSent?: (channelId: string, post: object) => void, client?: Client }} config
  *   onSent fires after any successful outbound message (both from normalized
- *   msg.reply/send and from direct send(channelId, text)). The bridge uses
- *   this to stamp channel_last_mirror_ts in state, enabling the catch-up
- *   notice for stale channels.
+ *   msg.reply/send and from direct send(channelId, text)) with
+ *   { payload, message, kind }. The bridge stamps channel_last_mirror_ts for
+ *   the catch-up notice and records the post in the conversation log.
  * @returns {import('./channel.mjs').Channel}
  * WHAT: Wraps discord.js events and REST operations in the channel contract.
  * WHY: Keeps transport objects out of delivery and reconciliation logic.
  */
-export function createDiscordChannel({ token, onSent }) {
+export function createDiscordChannel({ token, onSent, client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+}) }) {
   let handler = null;
-  const stamp = (channelId) => { if (onSent) { try { onSent(channelId); } catch {} } };
-  const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-  });
+  const stamp = (channelId, post) => { if (onSent) { try { onSent(channelId, post); } catch {} } };
 
   return {
     name: "discord",
@@ -44,7 +43,7 @@ export function createDiscordChannel({ token, onSent }) {
       });
     },
 
-    async send(channelId, text) {
+    async send(channelId, text, { kind } = {}) {
       const ch = await client.channels.fetch(channelId);
       if (!ch) {
         // Deleted/unbound channel must FAIL, not no-op: a silent drop here
@@ -53,7 +52,7 @@ export function createDiscordChannel({ token, onSent }) {
         throw new Error(`channel ${channelId} not found (deleted or not visible to the bot)`);
       }
       const message = await ch.send(text);
-      stamp(channelId);
+      stamp(channelId, { payload: text, message, kind });
       return message;
     },
 
@@ -91,13 +90,13 @@ export function createDiscordChannel({ token, onSent }) {
     },
 
     /** WHAT: Replies to one persisted Discord message. WHY: Restarted transcript work needs reply semantics without retaining a live Gateway object. */
-    async replyTo(channelId, messageId, content) {
+    async replyTo(channelId, messageId, content, { kind } = {}) {
       const ch = await client.channels.fetch(channelId);
       if (!ch?.messages) throw new Error(`channel ${channelId} cannot fetch messages`);
       const msg = await ch.messages.fetch(messageId);
       if (!msg) throw new Error(`message ${channelId}:${messageId} not found`);
       const result = await msg.reply(content);
-      stamp(channelId);
+      stamp(channelId, { payload: content, message: result, kind });
       return result;
     },
 

@@ -17,7 +17,7 @@ const TYPING_INTERVAL_MS = 8000;
  */
 export function normalizeDiscordMessage(msg, opts = {}) {
   const onSent = opts.onSent;
-  const stamp = () => { if (onSent) { try { onSent(msg.channelId); } catch {} } };
+  const stamp = (post) => { if (onSent) { try { onSent(msg.channelId, post); } catch {} } };
 
   return {
     channelId: msg.channelId,
@@ -34,15 +34,15 @@ export function normalizeDiscordMessage(msg, opts = {}) {
       contentType: att.contentType,
     })),
 
-    async reply(content) {
+    async reply(content, { kind } = {}) {
       const r = await msg.reply(content);
-      stamp();
+      stamp({ payload: content, message: r, kind });
       return r;
     },
 
-    async send(content) {
+    async send(content, { kind } = {}) {
       const r = await msg.channel.send(content);
-      stamp();
+      stamp({ payload: content, message: r, kind });
       return r;
     },
 

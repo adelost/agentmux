@@ -515,7 +515,7 @@ export function createJsonlWatcher({
         ? { content: chunks[i], files: fileGroups[0] }
         : chunks[i];
       try {
-        await discord.send(channelId, payload);
+        await discord.send(channelId, payload, { kind: "reply" });
       } catch (err) {
         ok = false;
         log(`chunk ${i + 1}/${chunks.length} failed for ${name}:${idx}: ${err.message}`);
@@ -525,7 +525,7 @@ export function createJsonlWatcher({
     for (let g = 1; g < fileGroups.length; g++) {
       await pace();
       try {
-        await discord.send(channelId, { files: fileGroups[g] });
+        await discord.send(channelId, { files: fileGroups[g] }, { kind: "file" });
       } catch (err) {
         ok = false;
         log(`file group ${g + 1}/${fileGroups.length} failed for ${name}:${idx}: ${err.message}`);

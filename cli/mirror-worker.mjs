@@ -23,7 +23,7 @@ function readOpts() {
 const { channelId, content } = readOpts();
 
 try {
-  if (channelId && content) await sendToChannelId(channelId, content);
+  if (channelId && content) await sendToChannelId(channelId, content, { kind: "mirror" });
 } catch (err) {
   // stdio is normally ignored. Keep stderr useful when run manually.
   console.warn(`mirror-worker: ${err.message}`);

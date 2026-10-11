@@ -128,7 +128,7 @@ feature("normalizeDiscordMessage", () => {
       return { msg, onSent };
     }],
     then: ["onSent called with the channelId", ({ onSent }) => {
-      expect(onSent).toHaveBeenCalledWith("ch-123");
+      expect(onSent).toHaveBeenCalledWith("ch-123", expect.objectContaining({ payload: "hi" }));
       expect(onSent).toHaveBeenCalledTimes(1);
     }],
   });
@@ -142,8 +142,8 @@ feature("normalizeDiscordMessage", () => {
       await normalizeDiscordMessage(msg, { onSent }).send("progress");
       return onSent;
     }],
-    then: ["onSent called with the channelId", (onSent) => {
-      expect(onSent).toHaveBeenCalledWith("ch-123");
+    then: ["onSent called with the channelId and the posted text", (onSent) => {
+      expect(onSent).toHaveBeenCalledWith("ch-123", expect.objectContaining({ payload: "progress" }));
     }],
   });
 

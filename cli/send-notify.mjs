@@ -11,6 +11,7 @@ import {
 } from "fs";
 import { dirname, join } from "path";
 import { splitMessage } from "../lib.mjs";
+import { recordDiscordPost } from "../channels/post-ledger.mjs";
 
 const GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || (() => {
@@ -128,7 +129,7 @@ export function discordMessagePayload(content, nonce = null) {
 }
 
 /** Post to a Discord channel directly via REST API using agentmux's bot token. */
-async function discordPost(channelId, content, nonce = null) {
+async function discordPost(channelId, content, nonce = null, kind = "notice") {
   const token = getDiscordBotToken();
   if (!token) throw new Error("DISCORD_TOKEN not found — cannot mirror");
   const controller = new AbortController();
@@ -151,7 +152,9 @@ async function discordPost(channelId, content, nonce = null) {
     const body = await res.text().catch(() => "");
     throw new Error(`discord post ${res.status}: ${body}`);
   }
-  return res.json();
+  const message = await res.json();
+  recordDiscordPost({ channelId, payload: content, message, kind, via: "cli" });
+  return message;
 }
 
 /** Open or create a DM channel with a Discord user. */
@@ -178,7 +181,7 @@ async function discordCreateDm(userId) {
  * Uses multipart/form-data — JSON-only `discordPost` can't carry binaries.
  * `text` is an optional message body that lands alongside the attachment.
  */
-async function discordPostFile(channelId, filePath, text = "") {
+async function discordPostFile(channelId, filePath, text = "", kind = "file") {
   const token = getDiscordBotToken();
   if (!token) throw new Error("DISCORD_TOKEN not found — cannot post file");
   const fileBuffer = readFileSync(filePath);
@@ -197,7 +200,9 @@ async function discordPostFile(channelId, filePath, text = "") {
     const body = await res.text().catch(() => "");
     throw new Error(`discord file-post ${res.status}: ${body}`);
   }
-  return res.json();
+  const message = await res.json();
+  recordDiscordPost({ channelId, payload: { content: text.slice(0, 2000), files: [filePath] }, message, kind, via: "cli" });
+  return message;
 }
 
 /** PATCH a Discord channel (used for topic updates). */
@@ -272,10 +277,10 @@ export async function sendToChannel(channelName, message) {
 }
 
 /** Send a message directly to a Discord channel by raw channel ID. */
-export async function sendToChannelId(channelId, message) {
+export async function sendToChannelId(channelId, message, { kind = "notice" } = {}) {
   const chunks = splitMessage(String(message || ""));
   const results = [];
-  for (const chunk of chunks) results.push(await discordPost(channelId, chunk));
+  for (const chunk of chunks) results.push(await discordPost(channelId, chunk, null, kind));
   return results;
 }
 
@@ -466,8 +471,8 @@ export async function notifyUser(message, opts = {}) {
 }
 
 /** Send a file (e.g. tts mp3) to a Discord channel by raw ID, with optional text body. */
-export async function sendFileToChannelId(channelId, filePath, text = "") {
-  return discordPostFile(channelId, filePath, text);
+export async function sendFileToChannelId(channelId, filePath, text = "", { kind = "file" } = {}) {
+  return discordPostFile(channelId, filePath, text, kind);
 }
 
 /** Send a message to an OpenClaw session. */

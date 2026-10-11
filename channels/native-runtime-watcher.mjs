@@ -384,10 +384,10 @@ export function createNativeRuntimeWatcher({
       const payload = index === 0 && groups.length
         ? { content: chunks[index], files: groups[0] }
         : chunks[index];
-      await discord.send(channelId, payload);
+      await discord.send(channelId, payload, { kind: "reply" });
     }
     for (let index = 1; index < groups.length; index += 1) {
-      await discord.send(channelId, { files: groups[index] });
+      await discord.send(channelId, { files: groups[index] }, { kind: "file" });
     }
     const context = agent.context;
     if (Number.isFinite(context?.percent)) {

@@ -73,6 +73,13 @@ function rotateBeforeAppend(path, { nowMs, maxBytes }) {
   }
 }
 
+function appendLedgerRow(row, { path, nowMs, maxBytes }) {
+  ensurePrivateDirectory(dirname(path));
+  rotateBeforeAppend(path, { nowMs, maxBytes });
+  appendFileSync(path, `${JSON.stringify(row)}\n`, { encoding: "utf8", mode: 0o600 });
+  try { chmodSync(path, 0o600); } catch {}
+}
+
 // Failure remains visible to the caller so transport cannot outrun memory.
 /** WHAT: Stores one exact prompt observation. WHY: Keeps delivery from proceeding after a failed memory write. */
 export function appendAskLedger(entry, {
@@ -89,7 +96,6 @@ export function appendAskLedger(entry, {
   }
 
   const nowMs = Number(now());
-  ensurePrivateDirectory(dirname(path));
   const normalized = {
     version: ASK_LEDGER_VERSION,
     event: "ask",
@@ -116,11 +122,63 @@ export function appendAskLedger(entry, {
       : null,
   };
   normalized.id = String(entry.id || entryId(normalized));
-
-  rotateBeforeAppend(path, { nowMs, maxBytes });
-  appendFileSync(path, `${JSON.stringify(normalized)}\n`, { encoding: "utf8", mode: 0o600 });
-  try { chmodSync(path, 0o600); } catch {}
+  appendLedgerRow(normalized, { path, nowMs, maxBytes });
   return { ...normalized, ledgerPath: path };
+}
+
+/** WHAT: Names what one Discord post was. WHY: Keeps notices and mirrored prompts from reading as an agent's answer. */
+export const POST_KINDS = Object.freeze(["reply", "mirror", "file", "voice", "notice"]);
+/** WHAT: Defines the largest stored post text. WHY: A Discord message holds at most 2000 characters; only a pathological payload reaches this. */
+export const POST_TEXT_MAX_BYTES = 64 * 1024;
+
+/** WHAT: Reduces a Discord payload to its text and attached files. WHY: Keeps the string and {content, files} transport shapes in one row form. */
+export function discordPostContent(payload) {
+  if (typeof payload === "string") return { text: payload, files: [] };
+  const files = (Array.isArray(payload?.files) ? payload.files : []).map((file) => {
+    if (typeof file === "string") return file;
+    if (typeof file?.attachment === "string") return file.attachment;
+    return String(file?.name || "attachment");
+  });
+  return { text: typeof payload?.content === "string" ? payload.content : "", files };
+}
+
+function clipPostText(text, maxBytes) {
+  const bytes = Buffer.byteLength(text);
+  if (bytes <= maxBytes) return { text };
+  return { text: Buffer.from(text).subarray(0, maxBytes).toString("utf8"), truncated: true, textBytes: bytes };
+}
+
+/** WHAT: Stores one message amux posted to Discord. WHY: Keeps replies, mirrored sends and posted files readable without provider journals. */
+export function appendPostLedger(entry, {
+  path = defaultAskLedgerPath(),
+  now = () => Date.now(),
+  maxBytes = Number(process.env.AMUX_ASK_LEDGER_MAX_BYTES) || DEFAULT_ASK_LEDGER_MAX_BYTES,
+  maxTextBytes = POST_TEXT_MAX_BYTES,
+} = {}) {
+  if (!String(entry?.channelId || "").trim()) throw new Error("post ledger requires a channel");
+  if (!["bridge", "cli"].includes(entry?.via)) throw new Error("post ledger requires via bridge or cli");
+  const { text, files } = discordPostContent(entry.payload);
+  if (!text.trim() && !files.length) return null;
+  const kind = entry.kind ?? (files.length && !text.trim() ? "file" : "notice");
+  if (!POST_KINDS.includes(kind)) throw new Error(`unknown post kind '${kind}'`);
+  const nowMs = Number(now());
+  const pane = Number(entry.pane);
+  const row = {
+    version: ASK_LEDGER_VERSION,
+    event: "post",
+    ts: iso(entry.ts ?? nowMs),
+    agent: entry.agent ? String(entry.agent) : null,
+    pane: entry.agent && Number.isSafeInteger(pane) && pane >= 0 ? pane : null,
+    channelId: String(entry.channelId),
+    via: entry.via,
+    kind,
+    ...clipPostText(text, maxTextBytes),
+    files,
+    messageId: entry.messageId ? String(entry.messageId) : null,
+  };
+  row.id = createHash("sha256").update([row.ts, row.channelId, row.messageId || "", row.text, ...files].join("\u0000")).digest("hex");
+  appendLedgerRow(row, { path, nowMs, maxBytes });
+  return row;
 }
 
 /** WHAT: Stores a provider's exact submitted prompt. WHY: Keeps event classification from discarding ask identity. */
@@ -186,6 +244,21 @@ export function readAskLedger({ path = defaultAskLedgerPath(), readFile = null }
     }
   }
   return coalesceAskLedger(rows);
+}
+
+/** WHAT: Reads current and archived post rows in time order. WHY: Keeps asks, Dream and search on one record of what was actually posted. */
+export function readPostLedger({ path = defaultAskLedgerPath(), readFile = null } = {}) {
+  const load = readFile || ((file) => readFileSync(file, "utf8"));
+  const rows = [];
+  for (const file of askLedgerFiles(path)) {
+    let text = "";
+    try { text = load(file); } catch { continue; }
+    for (const row of parseJsonlText(String(text || ""))) {
+      if (row?.event !== "post" || row?.version !== ASK_LEDGER_VERSION || typeof row.text !== "string") continue;
+      rows.push(row);
+    }
+  }
+  return rows.sort((left, right) => Date.parse(left.ts) - Date.parse(right.ts));
 }
 
 const PERSISTABLE_COMPLETION_STATUSES = new Set(["done", "answered"]);

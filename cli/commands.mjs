@@ -2537,7 +2537,7 @@ async function cmdSay(args, ctx) {
   try {
     const audioEvent = publishSpeechEvent(text, channelId);
     speech = synthesizeSpeech(text, { voice });
-    await sendFileToChannelId(channelId, speech.mediaPath, speech.clean);
+    await sendFileToChannelId(channelId, speech.mediaPath, speech.clean, { kind: "voice" });
     console.log(`spoken (${speech.clean.length} chars) → ${channelId} · audio event ${audioEvent.eventId}`);
   } catch (err) {
     console.error(`amux say failed: ${err.message}`);
