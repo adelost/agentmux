@@ -18,6 +18,9 @@ import { detectPaneAddress } from "../core/sender-detect.mjs";
 import { buildResumeHint, shouldEmitResumeHint } from "../core/resume-hint.mjs";
 import { capturePaneHookAsk } from "../core/ask-ledger.mjs";
 import { emitMemoryContext } from "../core/memory-context.mjs";
+import { createLeaderReview, leaderFromConfig } from "../core/leader-review.mjs";
+import { listAgents } from "../cli/config.mjs";
+import { runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 
 try {
   const exec = (cmd) => execSync(cmd, { timeout: 3000, encoding: "utf-8" });
@@ -53,6 +56,15 @@ try {
       emitMemoryContext(payload, pane.key);
     } catch (err) {
       console.error(`[amux-hook] memory-context skipped: ${err.message}`);
+    }
+    // A leader's hourly review rides on the prompt it was already given.
+    try {
+      if (payload?.hook_event_name === "UserPromptSubmit") {
+        const review = createLeaderReview({ isLeader: leaderFromConfig(listAgents, runtimeAgentsPath()) }).take(pane.key, "claude-hook");
+        if (review) process.stdout.write(`${review}\n`);
+      }
+    } catch (err) {
+      console.error(`[amux-hook] leader-review skipped: ${err.message}`);
     }
   }
 } catch (err) {

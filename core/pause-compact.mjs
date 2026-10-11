@@ -12,11 +12,20 @@ import { parseJsonlText, readTailWindow } from "./jsonl-reader.mjs";
 
 export const PAUSE_COMPACT_MODES = Object.freeze(["off", "dry", "on"]);
 
-/** WHAT: Reads whether pause compaction is off, logging only, or live. WHY: Keeps the first rollout a dry run unless the operator turns it on. */
-export function readPauseCompactMode(env = process.env) {
-  const mode = env.AUTO_COMPACT_PAUSE || "dry";
-  if (!PAUSE_COMPACT_MODES.includes(mode)) throw new Error(`AUTO_COMPACT_PAUSE must be one of ${PAUSE_COMPACT_MODES.join(", ")}, got ${mode}`);
+const readMode = (name, value) => {
+  const mode = value || "dry";
+  if (!PAUSE_COMPACT_MODES.includes(mode)) throw new Error(`${name} must be one of ${PAUSE_COMPACT_MODES.join(", ")}, got ${mode}`);
   return mode;
+};
+
+/**
+ * WHAT: Reads, per engine, whether pause compaction is off, logging only, or live.
+ * WHY: Keeps the first rollout a dry run, and Codex dry until its own switch is turned on.
+ * The Codex measurements of 2026-10-11 found its cache warm at a pause (85% cached within 5 minutes).
+ */
+export function readPauseCompactModes(env = process.env) {
+  return { claude: readMode("AUTO_COMPACT_PAUSE", env.AUTO_COMPACT_PAUSE),
+    codex: readMode("AUTO_COMPACT_PAUSE_CODEX", env.AUTO_COMPACT_PAUSE_CODEX) };
 }
 
 /** WHAT: Lists the panes that lead an agent. WHY: Keeps the orchestrator and named leaders on one role definition. */
@@ -36,8 +45,7 @@ const hold = (cell, detail) => ({ action: "hold", cell, detail });
  */
 export function pauseCompactDecision({ engine, tokens, limit, status, inCopyMode = false, quietMs, background = null, lastCompactAt = null, now },
   policy = PAUSE_COMPACT_POLICY) {
-  // Codex is left out until its cache and compaction costs are measured.
-  if (engine !== "claude") return { action: "none", cell: "not-claude" };
+  if (!["claude", "codex"].includes(engine)) return { action: "none", cell: "no-compact-receipt" };
   if (!Number.isFinite(tokens) || tokens <= limit) return { action: "none", cell: "within-budget" };
   if (isLiveStatus(status)) return { action: "none", cell: "turn-running" };
   if (!Number.isFinite(quietMs) || quietMs < policy.settleMs) return { action: "none", cell: "settling" };

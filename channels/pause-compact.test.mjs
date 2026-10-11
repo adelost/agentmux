@@ -4,10 +4,10 @@ import { createPauseCompact } from "./pause-compact.mjs";
 const NOW = Date.parse("2026-10-11T03:36:00Z");
 const lsrc = { name: "lsrc", orchestrator: 3, leaders: [0] };
 
-function controller(mode, { compacted = true } = {}) {
+function controller(mode, { compacted = true, codexMode = "dry" } = {}) {
   let now = NOW;
   const runs = [], lines = [];
-  const pause = createPauseCompact({ mode, now: () => now, state: { get: () => ({}) },
+  const pause = createPauseCompact({ modes: { claude: mode, codex: codexMode }, now: () => now, state: { get: () => ({}) },
     contextMaintenance: { run: async (name, pane, options) => {
       runs.push({ pane: `${name}:${pane}`, ...options });
       return options.dry ? { ok: true, dry: true, cell: "compact-once", tokens: 710_858 } : { ok: compacted, compacted, cell: "compact-once" };
@@ -54,6 +54,15 @@ feature("pause compaction in the bridge poll", () => {
       expect(sent).toBe(true);
       expect(ctx.runs).toEqual([{ pane: "lsrc:2", pauseTokens: 400_000, dry: false }]);
       expect(ctx.lines.map(line => line.outcome)).toEqual(["compacted"]);
+    }],
+  });
+  component("Codex stays dry while Claude is live", {
+    given: ["Claude live, Codex at its default", () => controller("on")],
+    when: ["polling Codex lsrc:4 over budget at a pause", ctx => ctx.poll({ pane: 4, engine: "codex" })],
+    then: ["only a dry admission, logged as dry", (sent, ctx) => {
+      expect(sent).toBe(false);
+      expect(ctx.runs).toEqual([{ pane: "lsrc:4", pauseTokens: 400_000, dry: true }]);
+      expect(ctx.lines[0]).toMatchObject({ outcome: "would-compact", mode: "dry" });
     }],
   });
   component("off mode does nothing", {

@@ -98,7 +98,7 @@ function readState(path) {
 
 /** WHAT: Builds a bounded pointer for the next real queued prompt. WHY: Keeps retry bytes, original asks and receipt authority intact without waking dormant engines. */
 export function createDeliveryMemoryContext({
-  agent, queue, now = Date.now, log = () => {},
+  agent, queue, now = Date.now, log = () => {}, leaderReview = null,
   stateDir = join(homedir(), ".agentmux", "memory-context", "delivery"),
 } = {}) {
   const statePath = (key) => join(stateDir, `${key}.json`);
@@ -117,13 +117,17 @@ export function createDeliveryMemoryContext({
       const previous = readState(statePath(key));
       // A compact marker can age out of the bounded tail; that is not a new epoch.
       const compactEpoch = snapshot.compactEpoch || previous?.compactEpoch || null;
-      const hinted = !previous || previous.version !== context.version
+      const memoryDue = !previous || previous.version !== context.version
         || previous.compactEpoch !== compactEpoch
         || now() - Number(previous.lastDeliveryAt || 0) >= IDLE_MS;
-      const hint = `[amux orientation, memory ${context.version.slice(0, 16)}]\n`
+      const pointer = `[amux orientation, memory ${context.version.slice(0, 16)}]\n`
         + `Before resuming old work, run amux memory context -p ${job.agentName}:${job.pane}. `
         + "Read only relevant sections and current repo instructions. The current request wins; do not revive old tasks or other panes.";
-      if (Buffer.byteLength(hint) > 512) throw new Error("memory pointer exceeds 512 bytes");
+      if (Buffer.byteLength(pointer) > 512) throw new Error("memory pointer exceeds 512 bytes");
+      // Claude leaders get their review from the UserPromptSubmit hook; this path never sees Claude.
+      const review = leaderReview?.take(`${job.agentName}:${job.pane}`, "delivery") || null;
+      const hinted = memoryDue || Boolean(review);
+      const hint = [memoryDue ? pointer : null, review].filter(Boolean).join("\n");
       const memoryContext = {
         key, version: context.version, engine: snapshot.engine,
         sessionId: snapshot.sessionId, sessionPath: snapshot.sessionPath,

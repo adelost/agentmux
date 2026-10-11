@@ -30,7 +30,8 @@ import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
 import { createPauseCompact } from "./channels/pause-compact.mjs";
-import { readPauseCompactMode } from "./core/pause-compact.mjs";
+import { readPauseCompactModes } from "./core/pause-compact.mjs";
+import { createLeaderReview, leaderFromConfig } from "./core/leader-review.mjs";
 import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
 import { createDriftGuard } from "./channels/drift-guard.mjs";
 import { parseReminderConfig } from "./core/reminder-state.mjs";
@@ -264,6 +265,7 @@ const deliveryBroker = createDeliveryBroker({
     resolveChannel: (job) => findChannelForPane(AGENTS_YAML, job.agentName, job.pane),
   }),
   log: (message) => console.warn(`[delivery-broker] ${message}`),
+  memoryContextOptions: { leaderReview: createLeaderReview({ isLeader: leaderFromConfig(listAgents, AGENTS_YAML) }) },
 });
 
 // Discord is an adapter, not the queue owner. Headless mode still drains CLI jobs.
@@ -340,7 +342,7 @@ const autoCompact = createAutoCompact({
   tmux: (cmd) => tmuxExec(`tmux -S '${TMUX_SOCKET}' ${cmd}`),
   config: autoCompactConfig,
   contextMaintenance,
-  pauseCompact: createPauseCompact({ contextMaintenance, state: appState, mode: readPauseCompactMode(),
+  pauseCompact: createPauseCompact({ contextMaintenance, state: appState, modes: readPauseCompactModes(),
     log: message => console.log(`pause-compact | ${message}`) }),
 });
 autoCompact.start();

@@ -19,7 +19,7 @@ const appendJsonLine = (path, record) => {
 };
 
 /** WHAT: Builds the pause-compaction step of the auto-compact poll. WHY: Keeps the new rule beside the 50-minute rule without changing it. */
-export function createPauseCompact({ contextMaintenance, state, mode, policy = PAUSE_COMPACT_POLICY, now = Date.now,
+export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, now = Date.now,
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
   identityFor = latestPaneSessionIdentity, backgroundFor = sessionBackgroundActivity, journalCompactFor = latestJournalCompactMs }) {
   const lastLogged = new Map();
@@ -44,6 +44,7 @@ export function createPauseCompact({ contextMaintenance, state, mode, policy = P
    * WHY: Keeps the evidence reads (journal tail, /proc) to panes that are over budget at a pause.
    */
   async function consider({ agentConfig, pane, engine, paneDir, status, inCopyMode, contextTokens, lastActivityMs }) {
+    const mode = modes[engine] || "off";
     if (mode === "off") return false;
     const name = agentConfig.name;
     const paneKey = `${name}:${pane}`;

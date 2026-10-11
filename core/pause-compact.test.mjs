@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PAUSE_COMPACT_POLICY } from "../policies/context-cost.mjs";
 import { latestJournalCompactMs, leaderPanes, openFileHolderStarts, pauseCompactDecision, pauseCompactLimit,
-  readPauseCompactMode, sessionBackgroundActivity } from "./pause-compact.mjs";
+  readPauseCompactModes, sessionBackgroundActivity } from "./pause-compact.mjs";
 
 const NOW = Date.parse("2026-10-11T03:36:00Z");
 const MIN = 60_000;
@@ -42,9 +42,9 @@ feature("compaction at a natural pause: one guard per condition", () => {
     when: ["the last compact was 31 minutes ago", () => decide({ lastCompactAt: NOW - 31 * MIN })],
     then: ["it compacts", result => expect(result.action).toBe("compact")],
   });
-  unit("Codex panes are left out", {
-    when: ["a Codex pane is over budget at a pause", () => decide({ engine: "codex" })],
-    then: ["nothing happens", result => expect(result).toMatchObject({ action: "none", cell: "not-claude" })],
+  unit("an engine without a compact receipt is left out", {
+    when: ["a Kimi pane is over budget at a pause", () => decide({ engine: "kimi" })],
+    then: ["nothing happens", result => expect(result).toMatchObject({ action: "none", cell: "no-compact-receipt" })],
   });
   unit("a leader keeps 700k", {
     given: ["skyvw orchestrated by pane 0, lsrc led by Codex pane 3 and Claude pane 0", () => ({
@@ -54,9 +54,14 @@ feature("compaction at a natural pause: one guard per condition", () => {
     then: ["leaders get 700k, builders 400k", budgets => expect(budgets).toEqual({ skyvw0: 700_000, skyvw1: 400_000,
       lsrc0: 700_000, lsrc2: 400_000, lsrcLeaders: [3, 0] })],
   });
-  unit("an unknown rollout mode fails loudly and the default is dry", {
-    when: ["reading modes", () => ({ unset: readPauseCompactMode({}), bad: () => readPauseCompactMode({ AUTO_COMPACT_PAUSE: "yes" }) })],
-    then: ["dry by default, a typo is refused", ({ unset, bad }) => { expect(unset).toBe("dry"); expect(bad).toThrow("AUTO_COMPACT_PAUSE"); }],
+  unit("an unknown rollout mode fails loudly and both engines start dry", {
+    when: ["reading modes", () => ({ unset: readPauseCompactModes({}), claudeOn: readPauseCompactModes({ AUTO_COMPACT_PAUSE: "on" }),
+      bad: () => readPauseCompactModes({ AUTO_COMPACT_PAUSE_CODEX: "yes" }) })],
+    then: ["dry by default, Codex only by its own switch, a typo is refused", ({ unset, claudeOn, bad }) => {
+      expect(unset).toEqual({ claude: "dry", codex: "dry" });
+      expect(claudeOn).toEqual({ claude: "on", codex: "dry" });
+      expect(bad).toThrow("AUTO_COMPACT_PAUSE_CODEX");
+    }],
   });
 });
 
