@@ -1,9 +1,10 @@
 import { feature, component, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
-import { mkdirSync, rmSync, writeFileSync, unlinkSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createHandlers, renderCatchupLine, formatCatchupTime } from "../handlers.mjs";
+import { codexModelCatalog } from "../core/codex-profiles.mjs";
 
 // --- Test helpers ---
 
@@ -26,7 +27,7 @@ function mockMsg({ content = "hello", channelId = "ch1", id = "msg-1", isBot = f
 const CODEX_ACCOUNT = { ok: true, models: ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol"]
   .map(id => ({ id, listed: true })) };
 
-function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatusDriver, queueFleetRestartRequest, scheduleBridgeRestart, modelChangeOptions, claudeModelChanger } = {}) {
+function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatusDriver, queueFleetRestartRequest, scheduleBridgeRestart, modelChangeOptions, claudeModelChanger, codexModels = () => CODEX_ACCOUNT } = {}) {
   const defaultMapping = { name: "_ai", dir: "/home/user/project", pane: 0 };
   const mapping = mappingOverride ?? defaultMapping;
   const channelMapData = channelMapEntries ?? new Map([["ch1", defaultMapping]]);
@@ -109,7 +110,7 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatus
     agentsYamlPath,
     pollInterval: 1,
     codexStatusDriver,
-    codexModels: () => CODEX_ACCOUNT,
+    codexModels,
     claudeModelChanger,
     modelChangeOptions: modelChangeOptions || {
       now: () => modelClock,
@@ -282,6 +283,40 @@ feature("/model dialect routing", () => {
       try {
         expect(msg.reply.mock.calls[0][0]).toMatch(/^🔄 Switching _ai:0 to gpt-6\.1-sol \(the only gpt-6\.1 model\)\./);
       } finally { unlinkSync(path); }
+    }],
+  });
+
+  // 2026-10-11 16:16Z: `npm install --global` had replaced the package directory the
+  // bridge started in, and Discord's /model answered "could not list the Codex models
+  // ... (Error: No such file or directory (os error 2))" while the CLI switched fine.
+  component("/model reads the Codex catalog after a release install deleted the bridge's working directory", {
+    given: ["a bridge whose package directory was replaced, and a Codex that reads its working directory first", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-model-cwd-"));
+      const bin = join(root, "bin");
+      mkdirSync(bin);
+      // Like `codex debug models`: it reads the working directory and stops when it is gone.
+      writeFileSync(join(bin, "codex"), [
+        "#!/bin/sh",
+        "/bin/pwd -P >/dev/null 2>&1 || { echo 'Error: No such file or directory (os error 2)' >&2; exit 1; }",
+        `echo '{"models":[{"slug":"gpt-6.1-sol","visibility":"list"}]}'`,
+      ].join("\n"), { mode: 0o755 });
+      const packageDir = join(root, "agentmux");
+      mkdirSync(packageDir);
+      const restore = { cwd: process.cwd(), path: process.env.PATH };
+      process.env.PATH = `${bin}:${restore.path}`;
+      process.chdir(packageDir);
+      rmSync(packageDir, { recursive: true });
+      const path = writeCodexYaml();
+      return { ...setup({ agentsYamlPath: path, codexModels: codexModelCatalog }), path, root, restore,
+        msg: mockMsg({ content: "/model gpt-6.1-sol xhigh" }) };
+    }],
+    when: ["the /model message reaches the bridge", async ({ onMessage, msg, restore }) => {
+      try { await onMessage(msg); } finally { process.chdir(restore.cwd); process.env.PATH = restore.path; }
+    }],
+    then: ["the switch starts instead of refusing", (_, { msg, path, root }) => {
+      try {
+        expect(msg.reply.mock.calls[0][0]).toMatch(/^🔄 Switching _ai:0 to gpt-6\.1-sol\./);
+      } finally { unlinkSync(path); rmSync(root, { recursive: true, force: true }); }
     }],
   });
 

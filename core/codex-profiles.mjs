@@ -15,6 +15,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "fs";
+import { homedir } from "os";
 import { join, resolve } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -44,11 +45,14 @@ const execFileAsync = promisify(execFile);
 // rewrites models_cache.json: at 19:15 on 2026-10-02 a 0.155.1 client left a
 // cache without gpt-6.1-sol while the panes ran 0.159.2. So ask the same
 // `codex` the panes are launched with, for this profile's home.
+// It runs in the home directory: Codex stops when its working directory is gone,
+// and the bridge's own is the package directory every `npm install --global`
+// replaces (2026-10-11: Discord's /model refused every Codex pane after that install).
 /** WHAT: Reads the models the installed Codex offers for a profile. WHY: Keeps model checks on what the pane's own Codex can run. */
 export async function codexModelCatalog(profile, { run = execFileAsync } = {}) {
   try {
     const { stdout } = await run("codex", ["debug", "models"], {
-      env: { ...process.env, CODEX_HOME: profile.home }, timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+      cwd: homedir(), env: { ...process.env, CODEX_HOME: profile.home }, timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
     const models = JSON.parse(stdout).models;
     if (!Array.isArray(models)) throw new Error("no models list");
     return { ok: true, models: models.filter(model => typeof model?.slug === "string")
