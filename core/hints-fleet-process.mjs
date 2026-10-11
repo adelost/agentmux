@@ -18,10 +18,10 @@ Keep each rule in one layer. Fix duplicate rules instead of obeying stale copies
    logging. Edit the shared source in agentmux, never its per-project copies.
 2. **An optional work-board integration:** repository workflow/API docs own
    ticket states and wire mechanics. Without a configured board, board rules
-   are inapplicable; AMUX does not require one.
+   do not apply.
 3. **Each code repo:** \`AGENTS.md\` and linked docs own data, gates, commands
    and deploy contracts. Current user instructions and repo/workspace checkout
-   restrictions remain authoritative; this template does not override them.
+   restrictions stay authoritative.
 
 ## Always lead with a recommendation
 
@@ -98,6 +98,7 @@ short written brief. Cache facts: see below.
 - Idle Claude panes compact before their prompt cache expires.
 - Idle Codex panes compact sooner: their cache expires sooner.
 - A pane idle past its cache's life compacts before its next delivery, when that pays back.
+- A pane's own recurring check waits less than its idle compaction after its last call: Claude under 50 minutes, through Claude Code's self-paced /loop, never an hourly cron; Codex under 25.
 - Orchestrators compact at a stage boundary (after a release), not mid-conversation.
 - Bounded tasks go to a fresh subagent with a brief; continue your own work after a compact.
 - Write what a compact loses to files as you work: quotes, exact numbers, decisions.
@@ -108,20 +109,20 @@ avsnittet "Kompaktering: valen och varför". Ändra en regel bara med nya mätni
 ## Hotspot reflection
 
 A function with 6+ trunk commits among its lines in 60 days is a hotspot.
-Before committing a change to one, read it and its fix diffs and record
+Before changing one, read it and its fix diffs and record
 \`amux churn verdict '<path>::<name>' REWRITE|SPLIT|KEEP "<why>"\`.
 Claude panes are held at \`git commit\` until the verdict exists; other
-engines run \`amux churn check\` before committing. The verdict demands
-reflection, not a rewrite: KEEP when the fixes came from constants, copy,
+engines run \`amux churn check\` before committing. The verdict is
+reflection, not a rewrite: KEEP when fixes came from constants, copy,
 upstream values or features; SPLIT or REWRITE when they came from the
 function's own branching or state. Do a small split in the same change.
 
 ## Kommunikationsdisciplin
 
-1. **Prata bara när (a) en STÖRRE uppgift är KLAR, (b) du genuint behöver
+1. **Prata bara när (a) en STÖRRE uppgift är KLAR, (b) du behöver
    feedback/beslut, eller (c) något blockerar mottagaren.** Inga "klar med X,
-   fortsätter med Y"-status, inga kvittenser, inga artighetsfraser ("tack för
-   bra jobb"). Commits + ledger ÄR statuskommunikationen.
+   fortsätter med Y"-status, inga kvittenser, inga artighetsfraser.
+   Commits + ledger ÄR statuskommunikationen.
 2. **Review och verifiering:** följ staffing-reglerna 6 och 7 nedan.
 3. **Delade träd fryses i KORTA koordinerade gate-fönster** (en utsedd
    koordinator äger fönstret), aldrig dagar-långa blanket-fences av en
@@ -134,20 +135,19 @@ function's own branching or state. Do a small split in the same change.
    capable idle agent may also self-claim one READY or explicitly claimable
    ticket, with no broker relay or peer approval. The owner plans, implements, runs targeted checks,
    rebases, self-merges, deploys when applicable, verifies live, records the
-   completion commit and cleans up. Scope follows the full data-to-consumer
-   seam when a real root fix needs it, not one pre-listed file.
-2. **Managers are sidecars, not gateways.** A project manager watches capacity,
+   completion commit and cleans up. Scope follows the data-to-consumer seam a
+   root fix needs, not one pre-listed file.
+2. **Managers are sidecars, not gateways.** A manager watches capacity,
    blockers, dropped work and duplicate effort. It may nudge or reassign only
    after a concrete stall, collision, delivery failure, or idle-capacity gap.
-   Normal tasks, decisions, reviews, merges and deploys do not flow through the
-   manager.
+   Tasks, decisions, reviews, merges and deploys bypass the manager.
 3. **Do not wake a fleet to look busy.** A durable task wakes its exact owner;
    dormant panes stay dormant. "Sync/check all panels" authorizes reading
    status and evidence, not prompting them. Even FYI or "no action needed"
    messages run a model and spend quota: store shared criteria for the next
-   natural turn and contact only an owner who needs a concrete action or
+   natural turn and contact only an owner who needs an action or
    handoff. An idle panel or unused provider is not permission to activate it.
-   A pane back after seven or more days first re-anchors with
+   A pane back after 7+ days first re-anchors with
    \`amux done --week\`, \`amux asks --open\`, this policy and the repository's
    instructions. \`amux reconcile\` repairs service/shell panes; it is not a
    staffing command and never wakes coding agents. Delivery is proven by the recipient's durable
