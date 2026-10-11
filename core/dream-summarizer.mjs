@@ -2,6 +2,7 @@
 
 import { panePathFor } from "./jsonl-reader.mjs";
 import { readDreamPaneHistory } from "./dream-history.mjs";
+import { conversationForPane } from "./dream-conversation.mjs";
 import { dreamWindowStartMs, keepDreamTurns, selectDreamTurns } from "./dream-turn-selection.mjs";
 
 /** WHAT: Defines how many turns one pane may show. WHY: Keeps one busy pane from crowding the others out of a batch. */
@@ -29,6 +30,21 @@ export function dreamPaneEngine(pane = {}) {
   return match[1].startsWith("kimi") ? "kimi" : match[1];
 }
 
+/**
+ * WHAT: Reads one pane's window from the conversation log when it posted an answer there.
+ * WHY: Keeps the provider journal, with its engine formats and tool output, a fallback only.
+ */
+function conversationHistory(conversation, agent, pane, cutoffMs) {
+  if (!conversation) return null;
+  const { log, partialWindow = false } = conversation;
+  // A window that began before logging started would lose its earlier answers.
+  if (!partialWindow && log.coverageStartMs > cutoffMs) return null;
+  const windowStartMs = Math.max(cutoffMs, log.coverageStartMs);
+  const found = conversationForPane(log, agent, pane, windowStartMs);
+  if (!found.answered) return null;
+  return { turns: found.turns, lastWriteMs: found.lastWriteMs, reachedSince: windowStartMs <= cutoffMs, fromLog: true };
+}
+
 /** WHAT: Collects journal-backed work without touching runtimes. WHY: Prevents Dream from waking or interrupting panes. */
 export function collectDreamSources(agents, sinceMs, options = {}) {
   const receipts = options.receipts || { panes: {} };
@@ -49,12 +65,14 @@ export function collectDreamSources(agents, sinceMs, options = {}) {
       const engine = dreamPaneEngine(agent.panes[pane]);
       if (!engine) continue;
       const cutoffMs = dreamWindowStartMs(receipts.panes[`${agent.name}:${pane}`], sinceMs);
-      let result;
-      try {
-        result = readHistory(engine, panePathFor(agent, pane), { since: new Date(cutoffMs) });
-      } catch (error) {
-        unreadable.push({ agent: agent.name, pane, engine, reason: error.message });
-        continue;
+      let result = conversationHistory(options.conversation, agent.name, pane, cutoffMs);
+      if (!result) {
+        try {
+          result = readHistory(engine, panePathFor(agent, pane), { since: new Date(cutoffMs) });
+        } catch (error) {
+          unreadable.push({ agent: agent.name, pane, engine, reason: error.message });
+          continue;
+        }
       }
       const { entries, omittedTurns, deferredTurns, activityCursor, waitingSince } = selectDreamTurns(result?.turns || [], {
         cursorMs: cutoffMs, limit, lastWriteMs: result?.lastWriteMs, nowMs,
@@ -64,6 +82,7 @@ export function collectDreamSources(agents, sinceMs, options = {}) {
         agent: agent.name,
         pane,
         engine,
+        source: result?.fromLog ? "conversation-log" : "journal",
         turns: entries.length,
         omittedTurns,
         deferredTurns,

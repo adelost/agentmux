@@ -30,6 +30,8 @@ import { acquireDreamLock } from "../core/dream-lock.mjs";
 import { claimScheduledDream } from "../core/dream-schedule.mjs";
 import { commitDreamProduct, writeDreamAtomic } from "../core/dream-commit.mjs";
 import { concurrentNotesJudge } from "../core/dream-memory-race.mjs";
+import { readDreamPaneHistory } from "../core/dream-history.mjs";
+import { dreamShadow, formatDreamShadow, memoizeHistory, writeDreamShadow } from "../core/dream-shadow.mjs";
 export { commitDreamProduct } from "../core/dream-commit.mjs";
 export { isPidAlive } from "../core/dream-lock.mjs";
 export { waitForDreamOwnerResult } from "../core/dream-result.mjs";
@@ -120,7 +122,7 @@ export async function mirrorDreamOwnerPrompt(ctx, owner, prompt, {
 } = {}) {
   const channelId = findChannel(ctx.configPath, owner.agent, owner.pane);
   if (!channelId) throw new Error(`dream-owner-channel-missing:${owner.agent}:${owner.pane}`);
-  const receipts = await send(channelId, `[dream] ${prompt}`);
+  const receipts = await send(channelId, `[dream] ${prompt}`, { kind: "mirror" });
   if (!Array.isArray(receipts) || receipts.length === 0) {
     throw new Error(`dream-owner-prompt-mirror-unverified:${owner.agent}:${owner.pane}`);
   }
@@ -285,14 +287,28 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   const candidates = dependencies.candidates
     || (dependencies.owner ? [dependencies.owner] : resolveDreamCandidates(runtimeConfig));
   let owner = candidates[0];
+  // Production reads are cached so the shadow's journal fallback reuses them.
+  const readHistory = dependencies.collectSources ? null : memoizeHistory(readDreamPaneHistory);
   const collect = () => {
     const receipts = readReceipts(receiptPath);
-    const observed = collectSources(agents, since.getTime(), { receipts });
+    const observed = collectSources(agents, since.getTime(), { receipts, ...(readHistory ? { readHistory } : {}) });
     return { receipts, observed, batch: buildDreamBatch(observed.sources, dateKey, dependencies.batchOptions) };
+  };
+  // The conversation-log shadow only compares; a failure never stops Dream.
+  const shadow = ({ receipts, observed, batch }) => {
+    const run = dependencies.shadow || (readHistory && dreamShadow);
+    if (!run) return null;
+    try {
+      return run({ agents, sinceMs: since.getTime(), receipts, readHistory, current: { observed, batch }, dateKey, nowMs: now.getTime() });
+    } catch (error) {
+      console.warn(`Dream shadow on the conversation log failed: ${error.message}`);
+      return null;
+    }
   };
 
   if (flags.dry) {
-    const { observed, batch } = collect();
+    const { receipts, observed, batch } = collect();
+    const shadowReport = shadow({ receipts, observed, batch });
     await (dependencies.nightlyCompact || runNightlyCompact)(ctx, flags, { agents, runtimeConfig });
     console.log(`Dream owner: ${owner.agent}:${owner.pane} (${owner.engine}).`);
     if (candidates.length > 1) {
@@ -309,6 +325,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     for (const source of batch.omitted) console.log(`- OMIT ${source.agent}:${source.pane}: ${source.omitReason}`);
     for (const source of observed.unreadable) console.log(`- UNREADABLE ${source.agent}:${source.pane}: ${source.reason}`);
     for (const source of observed.skipped || []) console.log(`- SKIP ${source.agent}:${source.pane}: ${source.reason}`);
+    if (shadowReport) console.log(`\n${formatDreamShadow(shadowReport).join("\n")}`);
     console.log("\nVisible prompt template:\n");
     console.log(dreamOwnerPrompt({
       owner,
@@ -344,6 +361,11 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       }
     }
     const { receipts, observed, batch } = collect();
+    const shadowReport = shadow({ receipts, observed, batch });
+    if (shadowReport) {
+      try { console.log(`${formatDreamShadow(shadowReport).join("\n")}\nShadow report: ${writeDreamShadow(shadowReport)}`); }
+      catch (error) { console.warn(`Dream shadow report not saved: ${error.message}`); }
+    }
     if (!batch.included.length) {
       if (!flags.quiet && !flags.q) console.log("Dream: no new journal-backed work; owner pane untouched.");
       if (!flags.deferSentinel && !flags["defer-sentinel"]) {
