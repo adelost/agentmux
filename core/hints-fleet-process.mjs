@@ -58,7 +58,7 @@ Don't claim "done/exists/complete" until 2+ methods agree, e.g. \`ls | grep\`,
 
 Before claiming "bug/race/data-loss" on any shared-repo state anomaly, run
 \`git log --since="<timestamp>" --oneline\` FIRST and \`grep\` commit messages for
-keywords from the change. Intentional commits explain most anomalies; timing
+the change's keywords. Intentional commits explain most anomalies; timing
 plus magnitude does NOT prove causation.
 
 ## Multi-agent edit protocol
@@ -99,9 +99,9 @@ short written brief. Cache facts: see below.
 - Idle Codex panes compact sooner: their cache expires sooner.
 - A pane idle past its cache's life compacts before its next delivery, when that pays back.
 - A pane's own recurring check waits less than its idle compaction after its last call: Claude under 50 minutes, through Claude Code's self-paced /loop, never an hourly cron; Codex under 25.
-- Orchestrators compact at a stage boundary (after a release), not mid-conversation.
+- Orchestrators compact at a stage boundary (a release) with \`amux compact --self\`, never mid-conversation.
 - Bounded tasks go to a fresh subagent with a brief; continue your own work after a compact.
-- Write what a compact loses to files as you work: quotes, exact numbers, decisions.
+- Write what a compact loses to files as you work: quotes, numbers, decisions.
 
 Varför och belägg: \`~/.openclaw/workspace/memory/references/claude-subagent-cache-2026-10-10.md\`,
 avsnittet "Kompaktering: valen och varför". Ändra en regel bara med nya mätningar mot de där.
@@ -139,7 +139,7 @@ function's own branching or state. Do a small split in the same change.
    root fix needs, not one pre-listed file.
 2. **Managers are sidecars, not gateways.** A manager watches capacity,
    blockers, dropped work and duplicate effort. It may nudge or reassign only
-   after a concrete stall, collision, delivery failure, or idle-capacity gap.
+   after a stall, collision, delivery failure or idle-capacity gap.
    Tasks, decisions, reviews, merges and deploys bypass the manager.
 3. **Do not wake a fleet to look busy.** A durable task wakes its exact owner;
    dormant panes stay dormant. "Sync/check all panels" authorizes reading
