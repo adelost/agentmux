@@ -56,7 +56,7 @@ The conditions are skyvw:0's decision as orchestrator. They apply to Claude pane
 - Not with an open permission prompt, menu or a delivery in flight.
 - Above 400,000 tokens for builders, 700,000 for leader panes (the agent's `orchestrator` pane and its `leaders` list). Leaders carry the conversation with Mattias and the plan.
 - At most once per 30 minutes per pane, counted from the last compact amux recorded or the journal shows. The 50-minute idle rule stays.
-- Codex panes run only dry, under their own switch `AUTO_COMPACT_PAUSE_CODEX`, until it is turned on. Measured 2026-10-11 (memory/references/codex-cache-compact-2026-10-11.md): a Codex compact within 5 minutes of the last call was 85% cached and pays back in about 11 calls. Codex subagents and background terminals are not yet detected.
+- Codex panes run only dry, under their own switch `AUTO_COMPACT_PAUSE_CODEX`, until it is turned on. Measured 2026-10-11 (memory/references/codex-cache-compact-2026-10-11.md): a Codex compact within 5 minutes of the last call was 85% cached and pays back in about 11 calls. skyvw:0 decided 2026-10-11 to turn Codex on together with Claude once the dry log shows right decisions, with the same guards: Codex subagents are seen in their rollouts, background terminals in the pane's process tree (the journal has no exit record for a command the model never polls again).
 - `AUTO_COMPACT_PAUSE=dry` (Claude) logs what would happen to `~/.agentmux/pause-compact.jsonl` without compacting; `on` compacts; `off` disables.
 
 Cost: the compact reads the warm context once and writes a summary. A builder that keeps working at 500k afterwards reads about 100–200k per call instead of 500k.

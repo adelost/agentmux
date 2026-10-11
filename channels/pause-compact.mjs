@@ -9,7 +9,10 @@ import { dirname, join } from "node:path";
 import { PAUSE_COMPACT_POLICY } from "../policies/context-cost.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { lastContextCompactAt } from "../core/context-maintenance.mjs";
-import { latestJournalCompactMs, leaderPanes, pauseCompactDecision, pauseCompactLimit, sessionBackgroundActivity } from "../core/pause-compact.mjs";
+import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, pauseCompactDecision, pauseCompactLimit,
+  sessionBackgroundActivity } from "../core/pause-compact.mjs";
+
+const BACKGROUND_BY_ENGINE = Object.freeze({ claude: sessionBackgroundActivity, codex: codexBackgroundActivity });
 
 export const PAUSE_COMPACT_LOG = join(homedir(), ".agentmux", "pause-compact.jsonl");
 
@@ -21,7 +24,7 @@ const appendJsonLine = (path, record) => {
 /** WHAT: Builds the pause-compaction step of the auto-compact poll. WHY: Keeps the new rule beside the 50-minute rule without changing it. */
 export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, now = Date.now,
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
-  identityFor = latestPaneSessionIdentity, backgroundFor = sessionBackgroundActivity, journalCompactFor = latestJournalCompactMs }) {
+  identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs }) {
   const lastLogged = new Map();
   // A dry run compacts nothing, so it remembers its own would-be compacts to show the spacing rule.
   const dryCompacts = new Map();
@@ -56,7 +59,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const identity = identityFor(engine, paneDir);
     if (!identity?.path) return false;
     const decision = pauseCompactDecision({ ...facts,
-      background: backgroundFor({ sessionPath: identity.path, sessionId: identity.sessionId, now: facts.now, policy }),
+      background: backgroundFor[engine]({ sessionPath: identity.path, sessionId: identity.sessionId, paneDir, now: facts.now, policy }),
       lastCompactAt: lastCompactAt(name, pane, paneKey, identity.path) }, policy);
     const line = { at: new Date(facts.now).toISOString(), pane: paneKey, mode, tokens: contextTokens, limit,
       leader: leaderPanes(agentConfig).has(pane), quietSec: Math.round(quietMs / 1000), cell: decision.cell, detail: decision.detail };

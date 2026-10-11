@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PAUSE_COMPACT_POLICY } from "../policies/context-cost.mjs";
-import { latestJournalCompactMs, leaderPanes, openFileHolderStarts, pauseCompactDecision, pauseCompactLimit,
+import { codexBackgroundActivity, codexTerminalStarts, latestJournalCompactMs, leaderPanes, openFileHolderStarts, pauseCompactDecision, pauseCompactLimit,
   readPauseCompactModes, sessionBackgroundActivity } from "./pause-compact.mjs";
 
 const NOW = Date.parse("2026-10-11T03:36:00Z");
@@ -147,5 +147,80 @@ feature("what the session still has running", () => {
       { type: "system", subtype: "compact_boundary", timestamp: "2026-10-11T02:15:51Z" },
     ].map(JSON.stringify).join("\n") }) })],
     then: ["the later one", at => expect(at).toBe(Date.parse("2026-10-11T02:15:51Z"))],
+  });
+});
+
+// A fake /proc: field 22 of stat is the start in 1/100 s after boot (btime 1760000000).
+function fakeProc(root, procs) {
+  const proc = join(root, "proc");
+  mkdirSync(proc, { recursive: true });
+  writeFileSync(join(proc, "stat"), "cpu 1\nbtime 1760000000\n");
+  for (const { pid, ppid, startSec, args, cwd } of procs) {
+    mkdirSync(join(proc, String(pid)), { recursive: true });
+    writeFileSync(join(proc, String(pid), "stat"), `${pid} (x) S ${ppid} ${"0 ".repeat(17)}${startSec * 100} 0`);
+    writeFileSync(join(proc, String(pid), "cmdline"), args.join("\0"));
+    if (cwd) symlinkSync(cwd, join(proc, String(pid), "cwd"));
+  }
+  return proc;
+}
+const CODEX = "/usr/lib/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex";
+
+feature("what a Codex pane still has running", () => {
+  unit("a terminal process is found, the pane's helpers are not", {
+    given: ["lsrc:4's Codex with its MCP server, code-mode host and one build started later", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-codex-proc-"));
+      const proc = fakeProc(root, [
+        { pid: 10, ppid: 1, startSec: 1000, args: [CODEX, "resume", "s4"], cwd: "/lsrc/.agents/4" },
+        { pid: 11, ppid: 10, startSec: 1002, args: ["/init", "uvx.exe", "windows-mcp", "serve"] },
+        { pid: 12, ppid: 10, startSec: 5000, args: [`${CODEX}-code-mode-host`] },
+        { pid: 13, ppid: 10, startSec: 6000, args: ["/bin/bash", "-lc", "npm test"] },
+        { pid: 14, ppid: 13, startSec: 6001, args: ["node", "vitest"] },
+        { pid: 20, ppid: 1, startSec: 1000, args: [CODEX, "resume", "s5"], cwd: "/lsrc/.agents/5" },
+        { pid: 21, ppid: 20, startSec: 6000, args: ["/bin/bash", "-lc", "sleep 9"] },
+      ]);
+      return { root, proc };
+    }],
+    when: ["listing lsrc:4's terminals", ({ proc }) => codexTerminalStarts("/lsrc/.agents/4", proc)],
+    then: ["the build and its child, not lsrc:5's", (starts, { root }) => {
+      try { expect(starts).toEqual([1_760_006_000_000, 1_760_006_001_000]); } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+  });
+  unit("a running terminal holds the compact, a hung one does not", {
+    when: ["deciding with a 20-minute and a 17-hour terminal", () => ["fresh", "hung"].map(kind => codexBackgroundActivity({
+      sessionPath: "/nowhere/sessions/2026/10/11/rollout-s4.jsonl", sessionId: "s4", paneDir: "/lsrc/.agents/4", now: NOW,
+      terminalStarts: () => [NOW - (kind === "fresh" ? 20 : 17 * 60) * MIN] }))],
+    then: ["only the fresh one counts", ([fresh, hung]) => {
+      expect(fresh).toBe("1 Codex terminal process(es) running, the oldest for 20 min");
+      expect(hung).toBeNull();
+    }],
+  });
+  unit("a spawn_agent child that wrote recently holds the compact", {
+    given: ["lsrc:3's sessions dir with a fresh child and an unrelated rollout", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-codex-sub-"));
+      const day = join(root, "sessions", ...new Date(NOW).toISOString().slice(0, 10).split("-"));
+      mkdirSync(day, { recursive: true });
+      const parent = join(day, "rollout-parent.jsonl");
+      writeFileSync(parent, "");
+      const meta = (id, parentId) => JSON.stringify({ type: "session_meta", payload: { id,
+        source: { subagent: { thread_spawn: { parent_thread_id: parentId } } } } }) + "\n";
+      const child = join(day, "rollout-child.jsonl");
+      writeFileSync(child, meta("c1", "p3"));
+      writeFileSync(join(day, "rollout-other.jsonl"), meta("o1", "someone-else"));
+      const t = new Date(NOW - 30_000);
+      utimesSync(child, t, t); utimesSync(join(day, "rollout-other.jsonl"), t, t);
+      return { root, parent };
+    }],
+    when: ["reading lsrc:3's activity", ({ parent }) => codexBackgroundActivity({ sessionPath: parent, sessionId: "p3",
+      paneDir: "/lsrc/.agents/3", now: NOW, terminalStarts: () => [] })],
+    then: ["the child is named", (reason, { root }) => {
+      try { expect(reason).toBe("a Codex subagent wrote 30s ago"); } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+  });
+  unit("Codex's own compact counts for spacing", {
+    when: ["reading a Codex journal tail", () => latestJournalCompactMs("/r.jsonl", { readTail: () => ({ text: [
+      { type: "compacted", timestamp: "2026-10-11T02:00:00Z", payload: {} },
+      { type: "event_msg", timestamp: "2026-10-11T02:00:01Z", payload: { type: "context_compacted" } },
+    ].map(JSON.stringify).join("\n") }) })],
+    then: ["the latest marker", at => expect(at).toBe(Date.parse("2026-10-11T02:00:01Z"))],
   });
 });

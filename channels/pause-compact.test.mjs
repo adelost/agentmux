@@ -14,7 +14,7 @@ function controller(mode, { compacted = true, codexMode = "dry" } = {}) {
     } },
     record: line => lines.push(line),
     identityFor: () => ({ path: "/projects/lsrc-2/s1.jsonl", sessionId: "s1" }),
-    backgroundFor: () => null, journalCompactFor: () => null });
+    backgroundFor: { claude: () => null, codex: () => null }, journalCompactFor: () => null });
   // lsrc:2's turn ended at 03:34:38, 82 s before the poll, like the night's last case.
   const poll = (facts = {}) => pause.consider({ agentConfig: lsrc, pane: 2, engine: "claude", paneDir: "/lsrc/.agents/2", status: "idle",
     inCopyMode: false, contextTokens: 710_858, lastActivityMs: NOW - 82_000, ...facts });
