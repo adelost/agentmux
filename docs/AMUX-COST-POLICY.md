@@ -61,6 +61,10 @@ The conditions are skyvw:0's decision as orchestrator. They apply to Claude pane
 
 Idle compact time per engine (skyvw:0, 2026-10-11, on Mattias's "Borde autocompact bara vara tjugo minuter för Codex eller tjugofem minuter för Codex"): Claude keeps 50 minutes, since its prompt cache lives an hour. Codex compacts a pane above the daytime budget after 25 quiet minutes. OpenAI keeps a GPT-5.6+ prefix "for 30 minutes after its most recent write or reuse", and measured Codex compacts were 83% cached 5-30 minutes after the last call, 71% at 30-60 and 43% after 60. The Codex idle rule runs inside pause compaction, so it has the same guards, the same dry log and the same switch (`AUTO_COMPACT_PAUSE_CODEX`); until that is on, Codex keeps the 50-minute rule.
 
+Compact before a delivery to a pane idle past its cache's life (skyvw:0, 2026-10-11, on Mattias's "om de har varit lediga mer än 25 minuter är det viktigt att ni kör en compact på dem innan de används"): lsrc:4 (370k) and lsrc:5 (310k) got new work after about 50 idle minutes and started on a cold Codex cache, which the 60-minute, 210k cold rule let through. A delivery now first compacts a Claude pane idle 50 minutes above 80k, or a Codex pane idle 25 minutes above 150k, unless a subagent or terminal still works for it or a prompt is open; the work is then delivered either way. Same dry log and switches as pause compaction.
+
+Codex floor (api:0's call, 2026-10-11): a Codex compact leaves about 94k, so it pays back after 94k / (0.05 x (C - 94k)) calls: 313 at 100k, 72 at 120k, 34 at 150k, 7 at 370k. Sessions made about 90 calls per compact, so both Codex rules compact from 150k, not the daytime 80k.
+
 Cost: the compact reads the warm context once and writes a summary. A builder that keeps working at 500k afterwards reads about 100–200k per call instead of 500k.
 
 # Cost evidence

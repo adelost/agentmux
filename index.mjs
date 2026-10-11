@@ -29,7 +29,7 @@ import { startBot } from "./bot.mjs";
 import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
-import { createPauseCompact } from "./channels/pause-compact.mjs";
+import { createColdDeliveryRule, createPauseCompact } from "./channels/pause-compact.mjs";
 import { readPauseCompactModes } from "./core/pause-compact.mjs";
 import { createLeaderReview, leaderFromConfig } from "./core/leader-review.mjs";
 import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
@@ -250,6 +250,7 @@ const contextMaintenance = createContextMaintenance({
       dir: join(config.dir, ".agents", String(pane)) } : null;
   },
   log: message => console.log(`context-cost | ${message}`),
+  coldBeforeDelivery: createColdDeliveryRule({ modes: readPauseCompactModes() }),
 });
 const deliveryBroker = createDeliveryBroker({
   agent,

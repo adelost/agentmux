@@ -26,10 +26,13 @@ export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 80_000, coldMaxTok
 // after its most recent write or reuse", and our Codex compacts were 83% cached
 // 5-30 minutes after the last call against 43% after 60. Codex compacts an idle
 // pane after 25 minutes; Claude, whose cache lives an hour, keeps 50.
+// A Codex compact leaves about 94k (median of the next call), so it pays back
+// after 94k / (0.05 x (C - 94k)) calls: 313 at 100k, 34 at 150k, 7 at 370k.
+// Sessions made about 90 calls per compact, so Codex compacts from 150k.
 /** WHAT: Defines compaction at a natural pause. WHY: Keeps busy panes from growing past 700k between 50-minute rests that never come. */
 export const PAUSE_COMPACT_POLICY = Object.freeze({ builderTokens: 400_000, leaderTokens: 700_000,
   settleMs: 60_000, spacingMs: 30 * 60_000, backgroundQuietMs: 5 * 60_000, hungJobMs: 60 * 60_000,
-  codexIdleMs: 25 * 60_000 });
+  codexIdleMs: 25 * 60_000, codexMinTokens: 150_000 });
 
 /** WHAT: Reads operator cost-policy overrides. WHY: Keeps daytime and cold-wake thresholds consistent after restart. */
 export function readContextCostPolicy(env = process.env) {

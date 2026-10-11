@@ -72,8 +72,30 @@ export function beginContextCompact(state, name, pane, identity) {
 /** WHAT: Builds shared warm and cold context protection. WHY: Keeps paid compact attempts durable, serialized and bound to exact session evidence. */
 export function createContextMaintenance({ agent, state, queue, resolveTarget, now = Date.now, log = () => {}, policy = readContextCostPolicy(),
   identityFor = latestPaneSessionIdentity, activityFor = latestConversationActivityMs, journalFor = getContextPercent,
-  compactFor = engine => engine === "codex" ? verifiedCodexCompact : verifiedClaudeCompact }) {
+  compactFor = engine => engine === "codex" ? verifiedCodexCompact : verifiedClaudeCompact, coldBeforeDelivery = null }) {
   const existing = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity);
+
+  // skyvw:0 2026-10-11: lsrc:4 (370k) and lsrc:5 (310k) got new work after 50
+  // idle minutes and started on a cold Codex cache; the 60-minute, 210k cold
+  // rule let them through. A pane idle past its own cache's life is compacted
+  // before the delivery too, unless a subagent or terminal still works for it.
+  function coldPolicyFor(name, pane, target, identity, facts) {
+    const rule = coldBeforeDelivery?.limits(target.engine);
+    const mode = coldBeforeDelivery?.mode(target.engine) || "off";
+    if (!rule || mode === "off") return policy;
+    const early = { ...policy, coldMs: rule.idleMs, coldMaxTokens: rule.tokens };
+    const changed = contextCostDecision(facts, early);
+    if (changed.cell === "within-policy" || contextCostDecision(facts, policy).cell !== "within-policy") return policy;
+    const background = changed.values.action === "COMPACT" ? coldBeforeDelivery.background({ engine: target.engine,
+      sessionPath: identity.path, sessionId: identity.sessionId, paneDir: target.dir, now: now() }) : null;
+    const outcome = changed.values.action !== "COMPACT" ? "held" : background ? "held" : mode === "on" ? "compacting" : "would-compact";
+    try {
+      coldBeforeDelivery.record({ at: new Date(now()).toISOString(), pane: `${name}:${pane}`, mode, tokens: facts.tokens, limit: rule.tokens,
+        quietSec: Math.round(facts.idleMs / 1000), cell: "before-delivery", outcome,
+        detail: background || (changed.values.action === "COMPACT" ? `idle ${Math.round(facts.idleMs / 60_000)} min > ${rule.idleMs / 60_000}` : changed.cell) });
+    } catch { /* the log is evidence, not control */ }
+    return mode === "on" && outcome === "compacting" ? early : policy;
+  }
   const canAttempt = (name, pane, sessionId) => !existing(name, pane, sessionId ? { sessionId } : null);
 
   // pauseTokens: compact at a natural pause above this budget. dry: run every check, then stop before the paid compact.
@@ -98,7 +120,8 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const input = await agent.isBusy(name, pane) ? "busy"
       : (await agent.promptTransportState(name, pane, "").catch(() => null))?.state || "unreadable";
     const safe = input === "empty-idle";
-    const decision = contextCostDecision({ tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, pauseTokens, safe, attempt }, policy);
+    const facts = { tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, pauseTokens, safe, attempt };
+    const decision = contextCostDecision(facts, cold ? coldPolicyFor(name, pane, target, identity, facts) : policy);
     if (decision.values.action === "CONTINUE") return { ok: true, cell: decision.cell };
     if (cold && target.engine === "claude" && decision.cell === "unknown-evidence" && attempt === "NEW"
         && safe && !Number.isFinite(context?.tokens)

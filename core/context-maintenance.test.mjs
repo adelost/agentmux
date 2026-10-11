@@ -465,3 +465,96 @@ feature("a pause compact goes through the live admission", () => {
     }],
   });
 });
+
+// skyvw:0 2026-10-11: lsrc:4 (370k) and lsrc:5 (310k) got new work at 05:49Z
+// after about 50 idle minutes and started on a cold Codex cache.
+feature("a pane idle past its cache's life is compacted before a delivery", () => {
+  const MIN = 60_000;
+  function coldRule(mode, { background = null } = {}) {
+    const lines = [];
+    const limits = { claude: { idleMs: 50 * MIN, tokens: 80_000 }, codex: { idleMs: 25 * MIN, tokens: 150_000 } };
+    return { lines, mode: () => mode, limits: engine => limits[engine], background: () => background, record: line => lines.push(line) };
+  }
+  function pane({ engine = "claude", tokens = 473_000, idleMinutes, rule = null }) {
+    const ctx = fixture();
+    ctx.activityFor = () => ctx.now() - idleMinutes * MIN;
+    ctx.agent.getContext = async () => ({ tokens });
+    ctx.resolveTarget = () => ({ dir: "/lsrc/.agents/4", engine });
+    ctx.coldBeforeDelivery = rule;
+    ctx.maintenance = createContextMaintenance(ctx);
+    return ctx;
+  }
+  const deliver = ctx => ctx.maintenance.run("lsrc", 4, { cold: true });
+
+  component("the 60-minute cold rule lets a pane idle 55 minutes through uncompacted", {
+    given: ["a Claude pane at 473k, idle 55 minutes, no early rule", () => pane({ idleMinutes: 55 })],
+    when: ["a delivery arrives", deliver],
+    then: ["nothing is compacted", (result, ctx) => {
+      try { expect(result.cell).toBe("within-policy"); expect(ctx.calls).toEqual([]); } finally { ctx.cleanup(); }
+    }],
+  });
+  component("with the rule on, a Claude pane idle 55 minutes is compacted first", {
+    given: ["the same pane with the rule on", () => pane({ idleMinutes: 55, rule: coldRule("on") })],
+    when: ["a delivery arrives", deliver],
+    then: ["one compact, logged", (result, ctx) => {
+      try {
+        expect(result.compacted).toBe(true);
+        expect(ctx.calls).toEqual(["compact"]);
+        expect(ctx.coldBeforeDelivery.lines).toMatchObject([{ pane: "lsrc:4", cell: "before-delivery", outcome: "compacting", limit: 80_000 }]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a Claude pane idle 45 minutes still reads a warm cache", {
+    given: ["the rule on, idle 45 minutes", () => pane({ idleMinutes: 45, rule: coldRule("on") })],
+    when: ["a delivery arrives", deliver],
+    then: ["nothing is compacted or logged", (result, ctx) => {
+      try { expect(result.cell).toBe("within-policy"); expect(ctx.calls).toEqual([]); expect(ctx.coldBeforeDelivery.lines).toEqual([]); } finally { ctx.cleanup(); }
+    }],
+  });
+  component("lsrc:4 at 370k after 50 minutes is logged by the dry run, and delivered as before", {
+    given: ["Codex lsrc:4 with the rule dry", () => pane({ engine: "codex", tokens: 370_000, idleMinutes: 50, rule: coldRule("dry") })],
+    when: ["lsrc:0's new task arrives", deliver],
+    then: ["no compact, one would-compact line against 150k", (result, ctx) => {
+      try {
+        expect(result.cell).toBe("within-policy");
+        expect(ctx.calls).toEqual([]);
+        expect(ctx.coldBeforeDelivery.lines).toMatchObject([{ outcome: "would-compact", limit: 150_000, quietSec: 3000 }]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a Codex pane under 150k is not worth a compact", {
+    given: ["Codex at 120k, idle 50 minutes, rule on", () => pane({ engine: "codex", tokens: 120_000, idleMinutes: 50, rule: coldRule("on") })],
+    when: ["a delivery arrives", deliver],
+    then: ["nothing is compacted or logged", (result, ctx) => {
+      try { expect(result.cell).toBe("within-policy"); expect(ctx.calls).toEqual([]); expect(ctx.coldBeforeDelivery.lines).toEqual([]); } finally { ctx.cleanup(); }
+    }],
+  });
+  component("an active subagent holds the compact and the work is delivered", {
+    given: ["a Claude pane idle 55 minutes whose subagent wrote 40 s ago", () =>
+      pane({ idleMinutes: 55, rule: coldRule("on", { background: "a subagent or background job wrote 40s ago" }) })],
+    when: ["a delivery arrives", deliver],
+    then: ["no compact, logged as held", (result, ctx) => {
+      try {
+        expect(result.cell).toBe("within-policy");
+        expect(ctx.calls).toEqual([]);
+        expect(ctx.coldBeforeDelivery.lines).toMatchObject([{ outcome: "held", detail: "a subagent or background job wrote 40s ago" }]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("an open question holds the compact", {
+    given: ["a Claude pane idle 55 minutes with a permission prompt", () => {
+      const ctx = pane({ idleMinutes: 55, rule: coldRule("on") });
+      ctx.agent.promptTransportState = async () => ({ state: "permission" });
+      ctx.maintenance = createContextMaintenance(ctx);
+      return ctx;
+    }],
+    when: ["a delivery arrives", deliver],
+    then: ["the work is delivered uncompacted, logged as held", (result, ctx) => {
+      try {
+        expect(result.cell).toBe("within-policy");
+        expect(ctx.calls).toEqual([]);
+        expect(ctx.coldBeforeDelivery.lines).toMatchObject([{ outcome: "held", detail: "not-idle" }]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+});

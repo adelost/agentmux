@@ -65,14 +65,16 @@ feature("pause compaction in the bridge poll", () => {
       expect(ctx.lines[0]).toMatchObject({ outcome: "would-compact", mode: "dry" });
     }],
   });
-  component("a quiet Codex pane is logged at 25 minutes against the daytime budget", {
+  component("a quiet Codex pane is logged at 25 minutes against the 150k Codex floor", {
     given: ["dry mode", () => controller("dry")],
-    when: ["polling Codex lsrc:4 at 90k, 26 minutes after its turn", ctx => ctx.poll({ pane: 4, engine: "codex",
-      contextTokens: 90_000, lastActivityMs: NOW - 26 * 60_000 })],
-    then: ["a dry admission with the 80k budget, logged as codex-idle", (sent, ctx) => {
-      expect(sent).toBe(false);
-      expect(ctx.runs).toEqual([{ pane: "lsrc:4", pauseTokens: 80_000, dry: true }]);
-      expect(ctx.lines[0]).toMatchObject({ outcome: "would-compact", cell: "codex-idle", limit: 80_000, mode: "dry" });
+    when: ["polling Codex lsrc:4 at 200k and at 120k, 26 minutes after its turn", async ctx => {
+      const quiet = { pane: 4, engine: "codex", lastActivityMs: NOW - 26 * 60_000 };
+      return [await ctx.poll({ ...quiet, contextTokens: 120_000 }), await ctx.poll({ ...quiet, contextTokens: 200_000 })];
+    }],
+    then: ["120k is left alone, 200k gets a dry admission against 150k", (sent, ctx) => {
+      expect(sent).toEqual([false, false]);
+      expect(ctx.runs).toEqual([{ pane: "lsrc:4", pauseTokens: 150_000, dry: true }]);
+      expect(ctx.lines[0]).toMatchObject({ outcome: "would-compact", cell: "codex-idle", limit: 150_000, mode: "dry" });
     }],
   });
   component("off mode does nothing", {

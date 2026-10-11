@@ -6,7 +6,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { PAUSE_COMPACT_POLICY, readContextCostPolicy } from "../policies/context-cost.mjs";
+import { CONTEXT_COST_POLICY, PAUSE_COMPACT_POLICY } from "../policies/context-cost.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { lastContextCompactAt } from "../core/context-maintenance.mjs";
 import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, pauseCompactDecision, pauseCompactLimit,
@@ -22,7 +22,7 @@ const appendJsonLine = (path, record) => {
 };
 
 /** WHAT: Builds the pause-compaction step of the auto-compact poll. WHY: Keeps the new rule beside the 50-minute rule without changing it. */
-export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, idleTokens = readContextCostPolicy().maxTokens, now = Date.now,
+export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, now = Date.now,
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
   identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs }) {
   const lastLogged = new Map();
@@ -54,7 +54,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const limit = pauseCompactLimit(agentConfig, pane, policy);
     const quietMs = Number.isFinite(lastActivityMs) ? now() - lastActivityMs : NaN;
     // Codex's cache lives about 30 minutes, so its idle rule is 25 minutes instead of the shared 50.
-    const codexIdle = engine === "codex" ? { idleLimit: idleTokens, idleMs: policy.codexIdleMs } : {};
+    const codexIdle = engine === "codex" ? { idleLimit: policy.codexMinTokens, idleMs: policy.codexIdleMs } : {};
     const facts = { engine, tokens: contextTokens, limit, ...codexIdle, status, inCopyMode, quietMs, now: now() };
     if (pauseCompactDecision(facts, policy).action === "none") return false;
 
@@ -83,4 +83,21 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   }
 
   return { consider };
+}
+
+/**
+ * WHAT: Builds the compact-before-delivery rule context maintenance applies to a pane idle past its cache's life.
+ * WHY: Keeps its limits, switch, guards and log the same as pause compaction's.
+ * Claude's cache lives an hour, so 50 minutes and the daytime 80k; Codex's about 30, so 25 minutes and 150k.
+ */
+export function createColdDeliveryRule({ modes, policy = PAUSE_COMPACT_POLICY, backgroundFor = BACKGROUND_BY_ENGINE,
+  record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line) }) {
+  const limits = { claude: { idleMs: CONTEXT_COST_POLICY.idleMs, tokens: CONTEXT_COST_POLICY.maxTokens },
+    codex: { idleMs: policy.codexIdleMs, tokens: policy.codexMinTokens } };
+  return {
+    mode: (engine) => modes[engine] || "off",
+    limits: (engine) => limits[engine] || null,
+    background: ({ engine, ...facts }) => backgroundFor[engine]?.({ ...facts, policy }) ?? null,
+    record,
+  };
 }
