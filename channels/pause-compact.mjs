@@ -11,6 +11,7 @@ import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { lastContextCompactAt } from "../core/context-maintenance.mjs";
 import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, pauseCompactDecision, pauseCompactLimit,
   sessionBackgroundActivity } from "../core/pause-compact.mjs";
+import { SELF_COMPACT_POLICY, formatSelfCompactNotice } from "../core/self-compact.mjs";
 
 const BACKGROUND_BY_ENGINE = Object.freeze({ claude: sessionBackgroundActivity, codex: codexBackgroundActivity });
 
@@ -24,7 +25,8 @@ const appendJsonLine = (path, record) => {
 /** WHAT: Builds the pause-compaction step of the auto-compact poll. WHY: Keeps the new rule beside the 50-minute rule without changing it. */
 export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, now = Date.now,
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
-  identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs }) {
+  identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs,
+  selfRequests = null, notify = async () => {} }) {
   const lastLogged = new Map();
   // A dry run compacts nothing, so it remembers its own would-be compacts to show the spacing rule.
   const dryCompacts = new Map();
@@ -46,17 +48,37 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
    * WHAT: Considers one pane at this poll. Returns true when it sent a compact, so the 50-minute rule leaves the pane alone.
    * WHY: Keeps the evidence reads (journal tail, /proc) to panes that are over budget at a pause.
    */
+  // A self-request ends once it ran or no longer applies; the pane's channel hears how it ended.
+  function endRequest(paneKey, request, line) {
+    selfRequests.clear(request.agent, request.pane);
+    report(paneKey, request.requestedAt, line);
+    const text = formatSelfCompactNotice(paneKey, { ...line, focus: request.focus });
+    Promise.resolve().then(() => notify(request.agent, request.pane, text))
+      .catch((error) => log(`${paneKey} self-compact notice failed: ${error.message}`));
+  }
+
   async function consider({ agentConfig, pane, engine, paneDir, status, inCopyMode, contextTokens, lastActivityMs }) {
     const mode = modes[engine] || "off";
     if (mode === "off") return false;
     const name = agentConfig.name;
     const paneKey = `${name}:${pane}`;
-    const limit = pauseCompactLimit(agentConfig, pane, policy);
+    const base = { at: new Date(now()).toISOString(), pane: paneKey, mode, tokens: contextTokens, cell: "self-request" };
+    const request = selfRequests?.read(name, pane, {
+      onExpired: (expired) => report(paneKey, expired.requestedAt, { ...base, outcome: "dropped", detail: "self-request expired unrun after 2 h" }),
+    }) ?? null;
+    // A pane that asked at a stage boundary is compacted from about 80k, the size rule waits for 400k or 700k.
+    const limit = request ? SELF_COMPACT_POLICY.minTokens : pauseCompactLimit(agentConfig, pane, policy);
     const quietMs = Number.isFinite(lastActivityMs) ? now() - lastActivityMs : NaN;
     // Codex's cache lives about 30 minutes, so its idle rule is 25 minutes instead of the shared 50.
     const codexIdle = engine === "codex" ? { idleLimit: policy.codexMinTokens, idleMs: policy.codexIdleMs } : {};
     const facts = { engine, tokens: contextTokens, limit, ...codexIdle, status, inCopyMode, quietMs, now: now() };
-    if (pauseCompactDecision(facts, policy).action === "none") return false;
+    const first = pauseCompactDecision(facts, policy);
+    if (first.action === "none") {
+      if (request && first.cell === "within-budget" && mode === "on") {
+        endRequest(paneKey, request, { ...base, outcome: "satisfied", detail: `context is ${contextTokens} tokens, under ${limit}` });
+      }
+      return false;
+    }
 
     const identity = identityFor(engine, paneDir);
     if (!identity?.path) return false;
@@ -64,21 +86,31 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       background: backgroundFor[engine]({ sessionPath: identity.path, sessionId: identity.sessionId, paneDir, now: facts.now, policy }),
       lastCompactAt: lastCompactAt(name, pane, paneKey, identity.path) }, policy);
     const line = { at: new Date(facts.now).toISOString(), pane: paneKey, mode, tokens: contextTokens, limit: decision.budget ?? limit,
-      leader: leaderPanes(agentConfig).has(pane), quietSec: Math.round(quietMs / 1000), cell: decision.cell, detail: decision.detail };
+      leader: leaderPanes(agentConfig).has(pane), quietSec: Math.round(quietMs / 1000),
+      cell: request && decision.action === "compact" ? "self-request" : decision.cell, detail: decision.detail };
     if (decision.action === "hold") {
+      // A compact within the last 30 minutes already did what the request asked for.
+      if (request && decision.cell === "spacing" && mode === "on") {
+        endRequest(paneKey, request, { ...line, outcome: "satisfied", cell: "self-request", detail: decision.detail });
+        return false;
+      }
       report(paneKey, lastActivityMs, { ...line, outcome: "held" });
       return false;
     }
 
     // The same admission as a live compact: lease, fence, delivery in flight, session, busy screen, composer.
-    const result = await contextMaintenance.run(name, pane, { pauseTokens: decision.budget, dry: mode === "dry" });
+    const result = await contextMaintenance.run(name, pane, { pauseTokens: decision.budget, dry: mode === "dry",
+      ...(request ? { focus: request.focus } : {}) });
     if (result.dry) {
       dryCompacts.set(paneKey, facts.now);
       report(paneKey, lastActivityMs, { ...line, outcome: "would-compact", tokens: result.tokens ?? contextTokens });
       return false;
     }
     const outcome = result.compacted ? "compacted" : result.attempted ? "failed" : result.ok ? "skipped" : "refused";
-    report(paneKey, lastActivityMs, { ...line, outcome, cell: result.cell || line.cell, detail: result.reason || line.detail });
+    const ended = { ...line, outcome, cell: request ? "self-request" : result.cell || line.cell, detail: result.reason || line.detail };
+    // A refused request (a delivery waiting, the lease busy) stays for the delivery path or the next pause.
+    if (request && (result.compacted || result.attempted)) endRequest(paneKey, request, ended);
+    else report(paneKey, lastActivityMs, ended);
     return Boolean(result.compacted || result.attempted);
   }
 

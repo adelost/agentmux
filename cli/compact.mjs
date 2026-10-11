@@ -7,15 +7,21 @@ import { isCompactUnsafe } from "../core/pane-status.mjs";
 import { formatTokens } from "./format.mjs";
 import { runNightlyCompact } from "./nightly-compact.mjs";
 import { CONTEXT_COST_POLICY } from "../policies/context-cost.mjs";
+import { execSync } from "node:child_process";
+import { detectPaneAddress } from "../core/sender-detect.mjs";
+import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
+import { latestJournalCompactMs } from "../core/pause-compact.mjs";
+import { SELF_COMPACT_POLICY, createSelfCompactStore } from "../core/self-compact.mjs";
 
 const COMPACT_MIN_TOKENS = CONTEXT_COST_POLICY.maxTokens;
 
 /** WHAT: Routes manual and nightly compaction. WHY: Keeps explicit targeting separate from absolute-token admission. */
 export async function cmdCompact(ctx, flags = {}, positional = []) {
   if (flags.help || flags.h) {
-    console.log(`Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --nightly [AGENT -p N] [--dry]\nBulk default: over ${COMPACT_MIN_TOKENS} tokens. Percent thresholds are not supported.`);
+    console.log(`Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --self [-m FOCUS]\n       amux compact --nightly [AGENT -p N] [--dry]\nBulk default: over ${COMPACT_MIN_TOKENS} tokens. Percent thresholds are not supported.\n--self: this pane asks to be compacted when its turn ends (a stage boundary), from ${SELF_COMPACT_POLICY.minTokens} tokens,\nat most once per ${SELF_COMPACT_POLICY.spacingMs / 60_000} minutes, never while a subagent or job writes. A waiting delivery is compacted first.`);
     return { help: true };
   }
+  if (flags.self) return requestSelfCompact(ctx, flags);
   if (flags.nightly) {
     if (flags.force || flags["min-tokens"] != null || flags.m || flags.message || positional.length > 1) {
       throw new Error("Nightly compact uses dream.compact policy; no force or threshold overrides");
@@ -44,6 +50,7 @@ export async function cmdCompact(ctx, flags = {}, positional = []) {
   if (!Number.isSafeInteger(minTokens) || minTokens < 1) throw new Error("--min-tokens requires a positive integer");
   const dry = !!flags.dry;
   const force = !!flags.force;
+  if (dry) printSelfRequests(createSelfCompactStore().list());
 
   const agents = listAgents(ctx.configPath);
   const targets = [];
@@ -165,4 +172,52 @@ async function compactOnePane(ctx, name, flags, compactText) {
   }
   console.log(`✓ ${name} p${paneIdx}: ${compactText} sent  (was ${status}, ${ctxStr})`);
   console.log(`Note: /compact runs asynchronously. Run 'amux top' in a minute to see new values.`);
+}
+
+function printSelfRequests(requests) {
+  if (!requests.length) return;
+  console.log(`Self-compact requests, run when each pane's turn ends:`);
+  for (const request of requests) {
+    console.log(`  ${request.agent.padEnd(10)} p${request.pane}  asked ${request.requestedAt} at ${formatTokens(request.tokens)}`
+      + `${request.focus ? `  focus: ${request.focus}` : ""}`);
+  }
+  console.log("");
+}
+
+/**
+ * WHAT: Registers this pane's one-shot request to be compacted when its turn ends.
+ * WHY: Lets a pane follow the stage-boundary rule itself; the bridge runs it with the pause guards.
+ * Identity comes from the pane's own environment, never from an argument.
+ */
+export async function requestSelfCompact(ctx, flags, {
+  detect = () => detectPaneAddress(process.env, (command) => execSync(command, { encoding: "utf8", timeout: 2000 })),
+  store = createSelfCompactStore(),
+  readContext = async (agent, pane) => {
+    const panes = await listPanes(ctx, agent.name);
+    const found = panes.find((entry) => entry.index === pane);
+    return found ? (await inspectPane(ctx, agent, found)).context : null;
+  },
+  lastCompactAt = (engine, dir) => {
+    const identity = latestPaneSessionIdentity(engine, dir);
+    return identity?.path ? latestJournalCompactMs(identity.path) : null;
+  },
+} = {}) {
+  const address = detect();
+  if (!address) throw new Error("amux compact --self runs inside an amux pane: no pane identity in this environment");
+  const agent = listAgents(ctx.configPath).find((entry) => entry.name === address.session);
+  const engine = agent && dialectFor(agent, { index: address.pane });
+  if (!agent || !["claude", "codex"].includes(engine)) throw new Error(`${address.key} is not a configured Claude or Codex pane`);
+  const context = await readContext(agent, address.pane);
+  const focus = String(flags.m ?? flags.message ?? "");
+  const result = store.request({ agent: agent.name, pane: address.pane, focus, tokens: context?.tokens,
+    lastCompactAt: lastCompactAt(engine, `${agent.dir}/.agents/${address.pane}`) });
+  if (!result.ok) {
+    console.log(`Self-compact refused for ${address.key} (${result.cell}): ${result.detail}.`);
+    process.exitCode = 1;
+    return result;
+  }
+  console.log(`Self-compact requested for ${address.key} at ${formatTokens(context.tokens)}${focus ? `, focus: ${focus}` : ""}.`
+    + " It runs when this turn ends; it waits while a subagent or job writes; a waiting delivery is compacted first.");
+  if (engine === "codex" && focus) console.log("Codex's /compact takes no focus; the text is kept with the request only.");
+  return result;
 }

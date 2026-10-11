@@ -1,5 +1,9 @@
 import { component, expect, feature } from "bdd-vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createPauseCompact } from "./pause-compact.mjs";
+import { createSelfCompactStore } from "../core/self-compact.mjs";
 
 const NOW = Date.parse("2026-10-11T03:36:00Z");
 const lsrc = { name: "lsrc", orchestrator: 3, leaders: [0] };
@@ -81,5 +85,69 @@ feature("pause compaction in the bridge poll", () => {
     given: ["off mode", () => controller("off")],
     when: ["polling lsrc:2 at the pause", ctx => ctx.poll()],
     then: ["no admission, no line", (sent, ctx) => { expect(sent).toBe(false); expect(ctx.runs).toEqual([]); expect(ctx.lines).toEqual([]); }],
+  });
+});
+
+// lsrc:0, a leader at 150k: far under its 700k pause limit, so only its own request compacts it.
+function selfController({ background = null } = {}) {
+  let now = NOW;
+  const dir = mkdtempSync(join(tmpdir(), "amux-self-compact-"));
+  const requests = createSelfCompactStore({ dir, now: () => now });
+  const runs = [], lines = [], notices = [];
+  const pause = createPauseCompact({ modes: { claude: "on", codex: "on" }, now: () => now, state: { get: () => ({}) },
+    contextMaintenance: { run: async (name, pane, options) => { runs.push({ pane: `${name}:${pane}`, ...options }); return { ok: true, compacted: true }; } },
+    record: line => lines.push(line), identityFor: () => ({ path: "/projects/lsrc-0/s1.jsonl", sessionId: "s1" }),
+    backgroundFor: { claude: () => background, codex: () => background }, journalCompactFor: () => null,
+    selfRequests: requests, notify: async (agent, pane, text) => notices.push(`${agent}:${pane} ${text}`) });
+  const poll = (facts = {}) => pause.consider({ agentConfig: lsrc, pane: 0, engine: "claude", paneDir: "/lsrc/.agents/0",
+    status: "idle", inCopyMode: false, contextTokens: 150_000, lastActivityMs: now, ...facts });
+  return { requests, runs, lines, notices, poll, later: ms => { now += ms; }, at: () => now,
+    cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+feature("a pane's own request to be compacted", () => {
+  component("a request made mid-turn compacts when the turn ends, not during it", {
+    given: ["lsrc:0 at 150k asks at a stage boundary while its turn runs", () => {
+      const ctx = selfController();
+      ctx.requests.request({ agent: "lsrc", pane: 0, tokens: 150_000, focus: "behåll G4-siffrorna" });
+      return ctx;
+    }],
+    when: ["polling during the turn, then a minute after it ends", async ctx => {
+      const during = await ctx.poll({ status: "working", lastActivityMs: ctx.at() });
+      const turnEnded = ctx.at();
+      ctx.later(61_000);
+      const after = await ctx.poll({ lastActivityMs: turnEnded });
+      return { during, after };
+    }],
+    then: ["nothing during the turn, one focused compact after it, the request ended and mirrored", ({ during, after }, ctx) => {
+      try {
+        expect(during).toBe(false);
+        expect(after).toBe(true);
+        expect(ctx.runs).toEqual([{ pane: "lsrc:0", pauseTokens: 80_000, dry: false, focus: "behåll G4-siffrorna" }]);
+        expect(ctx.requests.list()).toEqual([]);
+        expect(ctx.lines.at(-1)).toMatchObject({ outcome: "compacted", cell: "self-request" });
+        expect(ctx.notices).toEqual(["lsrc:0 🗜 Self-compact **lsrc:0** at the end of its turn (150000 tokens), focus: behåll G4-siffrorna."]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a request waits while a subagent writes", {
+    given: ["lsrc:0 asked; its subagent wrote 20 s ago", () => {
+      const ctx = selfController({ background: "subagent wrote 20 s ago" });
+      ctx.requests.request({ agent: "lsrc", pane: 0, tokens: 150_000 });
+      return ctx;
+    }],
+    when: ["polling a minute after the turn ended", async ctx => {
+      const turnEnded = ctx.at();
+      ctx.later(61_000);
+      return ctx.poll({ lastActivityMs: turnEnded });
+    }],
+    then: ["held, no compact, the request kept", (sent, ctx) => {
+      try {
+        expect(sent).toBe(false);
+        expect(ctx.runs).toEqual([]);
+        expect(ctx.lines.at(-1)).toMatchObject({ outcome: "held", cell: "background-active" });
+        expect(ctx.requests.list()).toHaveLength(1);
+      } finally { ctx.cleanup(); }
+    }],
   });
 });

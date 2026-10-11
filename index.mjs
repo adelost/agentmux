@@ -59,6 +59,7 @@ import { createPaneSleepWakeLifecycle } from "./core/pane-sleep-wake.mjs";
 import { createPaneSleepRepair } from "./core/pane-sleep-repair.mjs";
 import { findChannelForPane, listAgents, validateAgentPane } from "./cli/config.mjs";
 import { recordDiscordPost } from "./channels/post-ledger.mjs";
+import { createSelfCompactStore } from "./core/self-compact.mjs";
 import { createNativeRuntimeClient } from "./core/native-runtime-client.mjs";
 import { createAgentRouter } from "./core/agent-router.mjs";
 import { pinRuntimeExecutable } from "./core/runtime-helper.mjs";
@@ -246,6 +247,12 @@ if (repairedSleeps.length) {
     `${result.state.agentName}:${result.state.pane} ${result.state.status} (${result.reason})`).join(", ")}`);
 }
 
+// `amux compact --self` requests, run at the end of the pane's turn or before its next delivery.
+const selfCompactRequests = createSelfCompactStore();
+const postSelfCompactNotice = async (agentName, pane, text) => {
+  const channelId = discord && findChannelForPane(AGENTS_YAML, agentName, pane);
+  if (channelId) await discord.send(channelId, text, { kind: "notice" });
+};
 const contextMaintenance = createContextMaintenance({
   agent, state: appState, queue: deliveryQueue,
   resolveTarget: (name, pane) => {
@@ -256,6 +263,8 @@ const contextMaintenance = createContextMaintenance({
   },
   log: message => console.log(`context-cost | ${message}`),
   coldBeforeDelivery: createColdDeliveryRule({ modes: readPauseCompactModes() }),
+  selfRequests: selfCompactRequests,
+  notify: postSelfCompactNotice,
 });
 const deliveryBroker = createDeliveryBroker({
   agent,
@@ -349,7 +358,7 @@ const autoCompact = createAutoCompact({
   config: autoCompactConfig,
   contextMaintenance,
   pauseCompact: createPauseCompact({ contextMaintenance, state: appState, modes: readPauseCompactModes(),
-    log: message => console.log(`pause-compact | ${message}`) }),
+    log: message => console.log(`pause-compact | ${message}`), selfRequests: selfCompactRequests, notify: postSelfCompactNotice }),
 });
 autoCompact.start();
 

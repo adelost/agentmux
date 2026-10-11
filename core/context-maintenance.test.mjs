@@ -6,6 +6,7 @@ import { contextMaintenanceAttempt, createContextMaintenance } from "./context-m
 import { wakeDeliveryTarget } from "./delivery-wake.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
+import { createSelfCompactStore } from "./self-compact.mjs";
 
 function fixture({ fail = false, jobs = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-cost-test-")), path = join(root, "session.jsonl");
@@ -566,6 +567,37 @@ feature("a pane idle past its cache's life is compacted before a delivery", () =
         expect(ctx.calls).toEqual([]);
         expect(ctx.coldBeforeDelivery.lines).toMatchObject([{ outcome: "held", detail: "not-idle" }]);
       } finally { ctx.cleanup(); }
+    }],
+  });
+});
+
+feature("a self-request before the next delivery", () => {
+  component("a pane that asked is compacted with its focus before a waiting prompt lands", {
+    given: ["claw:2 at 120k, its turn ended 5 s ago, a self-request and a delivery waiting", () => {
+      const ctx = fixture();
+      ctx.agent.getContext = async () => ({ tokens: 120_000 });
+      ctx.activityFor = () => ctx.now() - 5_000;
+      const dir = mkdtempSync(join(tmpdir(), "amux-self-compact-"));
+      const requests = createSelfCompactStore({ dir, now: ctx.now });
+      requests.request({ agent: "claw", pane: 2, tokens: 120_000, focus: "behåll G4-siffrorna" });
+      const commands = [], notices = [];
+      ctx.compactFor = () => async ({ command }) => {
+        commands.push(command ?? "/compact");
+        ctx.append({ type: "system", subtype: "compact_boundary" });
+        return { ok: true, compactBoundary: true, sessionId: "one" };
+      };
+      return { ...ctx, requests, commands, notices, dir };
+    }],
+    when: ["admitting the delivery", ctx => createContextMaintenance({ ...ctx, selfRequests: ctx.requests,
+      notify: async (agent, pane, text) => ctx.notices.push(text) }).beforeWork({ agentName: "claw", pane: 2, id: "next" })],
+    then: ["one focused compact first, the request ended, the prompt admitted", async (result, ctx) => {
+      try {
+        expect(result.ok).toBe(true);
+        expect(ctx.commands).toEqual(["/compact behåll G4-siffrorna"]);
+        expect(ctx.requests.list()).toEqual([]);
+        await Promise.resolve();
+        expect(ctx.notices).toEqual(["🗜 Self-compact **claw:2** at the end of its turn (120000 tokens), focus: behåll G4-siffrorna."]);
+      } finally { ctx.cleanup(); rmSync(ctx.dir, { recursive: true, force: true }); }
     }],
   });
 });

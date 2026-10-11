@@ -1,4 +1,5 @@
 import { contextCostDecision, readContextCostPolicy } from "../policies/context-cost.mjs";
+import { SELF_COMPACT_POLICY, formatSelfCompactNotice, selfCompactAdmission } from "./self-compact.mjs";
 import { latestConversationActivityMs } from "./pane-activity.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
@@ -72,7 +73,8 @@ export function beginContextCompact(state, name, pane, identity) {
 /** WHAT: Builds shared warm and cold context protection. WHY: Keeps paid compact attempts durable, serialized and bound to exact session evidence. */
 export function createContextMaintenance({ agent, state, queue, resolveTarget, now = Date.now, log = () => {}, policy = readContextCostPolicy(),
   identityFor = latestPaneSessionIdentity, activityFor = latestConversationActivityMs, journalFor = getContextPercent,
-  compactFor = engine => engine === "codex" ? verifiedCodexCompact : verifiedClaudeCompact, coldBeforeDelivery = null }) {
+  compactFor = engine => engine === "codex" ? verifiedCodexCompact : verifiedClaudeCompact, coldBeforeDelivery = null,
+  selfRequests = null, notify = async () => {} }) {
   const existing = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity);
 
   // skyvw:0 2026-10-11: lsrc:4 (370k) and lsrc:5 (310k) got new work after 50
@@ -98,8 +100,22 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   }
   const canAttempt = (name, pane, sessionId) => !existing(name, pane, sessionId ? { sessionId } : null);
 
+  // A Claude session right after a compact has no token reading yet. When its
+  // epoch is provably empty and the pane is still that session, idle and
+  // empty, there is nothing to compact before the delivery.
+  async function isEmptyEpochStillIdle(name, pane, target, identity) {
+    if (target.engine !== "claude" || !await hasEmptyClaudeEpoch(identity)) return false;
+    const current = identityFor(target.engine, target.dir);
+    const transport = await agent.promptTransportState(name, pane, "").catch(() => null);
+    return current?.sessionId === identity.sessionId && current.path === identity.path
+      && !await agent.isBusy(name, pane) && transport?.state === "empty-idle";
+  }
+
   // pauseTokens: compact at a natural pause above this budget. dry: run every check, then stop before the paid compact.
-  async function run(name, pane, { cold = false, pauseTokens = null, dry = false, leaseHeld = false, heldLease = null, jobId = null } = {}) {
+  // focus: what a self-requested Claude compact should keep (Codex's /compact takes no focus).
+  // beforeDelivery: the broker holds the pane for a waiting job, so queued jobs do not count as in flight.
+  async function run(name, pane, { cold = false, pauseTokens = null, pauseSettleMs, dry = false, leaseHeld = false, heldLease = null,
+    jobId = null, focus = "", beforeDelivery = cold } = {}) {
     const target = resolveTarget(name, pane);
     if (!target || !["claude", "codex"].includes(target.engine)) return { ok: true, skipped: "unsupported-engine" };
     if (typeof agent.paneProcessState !== "function" || (await agent.paneProcessState(name, pane).catch(() => null))?.running !== true) {
@@ -120,21 +136,16 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const input = await agent.isBusy(name, pane) ? "busy"
       : (await agent.promptTransportState(name, pane, "").catch(() => null))?.state || "unreadable";
     const safe = input === "empty-idle";
-    const facts = { tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, pauseTokens, safe, attempt };
+    const facts = { tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, pauseTokens,
+      ...(pauseSettleMs != null ? { pauseSettleMs } : {}), safe, attempt };
     let coldPolicy = policy;
     try { if (cold) coldPolicy = coldPolicyFor(name, pane, target, identity, facts); }
     catch (error) { log(`${name}:${pane} compact-before-delivery check failed, delivering by the 60-minute rule: ${error.message}`); }
     const decision = contextCostDecision(facts, coldPolicy);
     if (decision.values.action === "CONTINUE") return { ok: true, cell: decision.cell };
-    if (cold && target.engine === "claude" && decision.cell === "unknown-evidence" && attempt === "NEW"
-        && safe && !Number.isFinite(context?.tokens)
-        && await hasEmptyClaudeEpoch(identity)) {
-      const current = identityFor(target.engine, target.dir);
-      const transport = await agent.promptTransportState(name, pane, "").catch(() => null);
-      if (current?.sessionId === identity.sessionId && current.path === identity.path
-          && !await agent.isBusy(name, pane) && transport?.state === "empty-idle") {
-        return { ok: true, cell: "empty-after-compact" };
-      }
+    if (cold && decision.cell === "unknown-evidence" && attempt === "NEW" && safe && !Number.isFinite(context?.tokens)
+        && await isEmptyEpochStillIdle(name, pane, target, identity)) {
+      return { ok: true, cell: "empty-after-compact" };
     }
     const holder = decision.cell === "not-idle" ? `:${input}` : "";
     if (decision.values.action === "HOLD") return { ok: false, reason: `context-cost:${decision.cell}${holder}${prior?.reason ? `:${prior.reason}` : ""}` };
@@ -143,7 +154,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     // Once the command is sent only this pane stays fenced, so its siblings
     // are served during a compact that can take minutes.
     const writer = lease ?? heldLease;
-    const pending = () => queue.list(name, pane).some(j => j.id !== jobId && !TERMINAL_DELIVERY_STATES.has(j.status) && (!cold || j.status !== "pending"));
+    const pending = () => queue.list(name, pane).some(j => j.id !== jobId && !TERMINAL_DELIVERY_STATES.has(j.status) && (!beforeDelivery || j.status !== "pending"));
     let submitted = false, intent = null;
     try {
       const currentAttempt = existing(name, pane, identity);
@@ -178,6 +189,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       } };
       const result = await compact({ agent: guardedAgent, agentName: name, pane, paneDir: target.dir,
         latestIdentity: dir => identityFor(target.engine, dir), maxRescues: 0,
+        ...(focus && target.engine === "claude" ? { command: `/compact ${focus}` } : {}),
         onCommandAccepted: () => writer?.releaseSession?.() });
       write(state, paneKey(name, pane), { ...record, status: result.ok ? "VERIFIED" : "FAILED", reason: result.reason || null });
       log(`${name}:${pane} ${decision.cell}: ${result.ok ? "compact verified" : result.reason}`);
@@ -194,12 +206,40 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   // cannot run (unknown evidence, a failed attempt), the work is delivered
   // anyway. 518 deliveries were held on context-cost:unknown-evidence before.
   async function beforeWork({ agentName, pane, id }, { lease = null } = {}) {
-    const result = await run(agentName, pane, { cold: true, leaseHeld: true, heldLease: lease, jobId: id });
+    const result = await selfBeforeWork({ agentName, pane, id }, lease)
+      ?? await run(agentName, pane, { cold: true, leaseHeld: true, heldLease: lease, jobId: id });
     // The broker types the message next, which needs the session again.
     if (!await regainSessionLease(lease)) return { ok: false, reason: "delivery-lease-busy" };
     if (result.ok) return result;
     log(`${agentName}:${pane} delivered without compact: ${result.reason}`);
     return { ok: true, cell: "delivered-uncompacted", reason: result.reason };
+  }
+  // A pane that asked to be compacted at its stage boundary gets it before the next
+  // prompt lands, under the same guards: no subagent or job still writing, 80k, 30 minutes.
+  const noticeSelf = (request, ending) => Promise.resolve()
+    .then(() => notify(request.agent, request.pane, formatSelfCompactNotice(`${request.agent}:${request.pane}`, { ...ending, focus: request.focus })))
+    .catch((error) => log(`${request.agent}:${request.pane} self-compact notice failed: ${error.message}`));
+  async function selfBeforeWork({ agentName, pane, id }, lease) {
+    const request = selfRequests?.read(agentName, pane);
+    if (!request) return null;
+    const target = resolveTarget(agentName, pane);
+    const identity = target && identityFor(target.engine, target.dir);
+    const background = identity ? coldBeforeDelivery?.background({ engine: target.engine, sessionPath: identity.path,
+      sessionId: identity.sessionId, paneDir: target.dir, now: now() }) : null;
+    if (background) { log(`${agentName}:${pane} self-compact held before delivery: ${background}`); return null; }
+    const context = await (agent.getContext?.(agentName, pane) ?? agent.getContextPercent(agentName, pane));
+    const admission = selfCompactAdmission({ tokens: context?.tokens, lastCompactAt: lastContextCompactAt(state, agentName, pane), now: now() });
+    if (!admission.ok) {
+      selfRequests.clear(agentName, pane);
+      noticeSelf(request, { outcome: "satisfied", detail: admission.detail });
+      return null;
+    }
+    const result = await run(agentName, pane, { pauseTokens: SELF_COMPACT_POLICY.minTokens, pauseSettleMs: 0, beforeDelivery: true,
+      focus: request.focus, leaseHeld: true, heldLease: lease, jobId: id });
+    if (!result.compacted && !result.attempted) return null;
+    selfRequests.clear(agentName, pane);
+    noticeSelf(request, result.compacted ? { outcome: "compacted", tokens: context?.tokens } : { outcome: "failed", detail: result.reason });
+    return result;
   }
   return { canAttempt, run, beforeWork };
 }
