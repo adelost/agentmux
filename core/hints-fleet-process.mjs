@@ -90,7 +90,8 @@ does not replace the scoped verification in staffing rule 6.
 Never fork or copy a session into a subagent (Mattias 2026-10-10: "vi borde
 väl förbjuda det helt"). AMUX blocks Claude forks; in Codex call
 \`spawn_agent\` only with \`fork_turns="none"\`. Start a fresh subagent with a
-short written brief of exactly what it needs.
+short written brief.
+Cache facts: \`~/.openclaw/workspace/memory/references/claude-subagent-cache-2026-10-10.md\`.
 
 ## Hotspot reflection
 
@@ -144,18 +145,18 @@ function's own branching or state. Do a small split in the same change.
    Delivery is proven by the recipient's durable receipt, not by enqueue time;
    the owner-response clock starts only after that receipt.
 
-   Codex cost policy (Mattias, 2026-09-20): the current fleet default is
-   \`gpt-5.6-sol\`. Claude and Kimi keep their providers and selections.
-   A later explicit pane model choice survives AMUX restart; do not reset it
-   to the fleet default or treat an intentional Sol selection as a fallback.
+   Codex cost policy (Mattias, 2026-09-20; model 2026-10-11): the fleet
+   default is \`gpt-6.1-sol\`, never Astra. Claude and Kimi keep theirs.
+   A later explicit pane model choice survives AMUX restart; never reset it
+   to the fleet default.
    Every Codex model change requires a successful compact of that exact
    session before switching, followed by live model verification. A failed
    compact blocks the change and new work; never silently continue on another
    model or repeatedly retry a paid compact. Dormant panels migrate when next
    needed, before their work prompt, not through a fleet wake-up. Read model,
    tokens and compact receipts from the exact pane, never an ancestor session.
-   Use Discord \`/model sol\` or \`amux model PROJECT -p N sol\` for changes;
-   raw \`amux PROJECT -p N "/model ..."\` is refused because it bypasses compact.
+   Change models with Discord \`/model sol\` or \`amux model PROJECT -p N sol\`;
+   a raw \`/model\` is refused because it bypasses compact.
    Subscription quota is paid capacity. The operator can revise this policy.
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, in a modal, or between tool calls.

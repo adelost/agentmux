@@ -123,7 +123,7 @@ feature("pane-local model overrides", () => {
   unit("the Sol shortcut resolves back to the fleet default", {
     given: ["the short Sol name", () => "sol"],
     when: ["resolving it", resolveCodexModelName],
-    then: ["it selects GPT-5.6 Sol", (model) => expect(model).toBe("gpt-5.6-sol")],
+    then: ["it selects GPT-6.1 Sol, the fleet default since 2026-10-11", (model) => expect(model).toBe("gpt-6.1-sol")],
   });
 
   unit("model and effort persist without affecting a neighbour", {
@@ -166,7 +166,7 @@ feature("model requests resolve against the account's Codex catalog", () => {
 
   unit("exact ids and the documented shortcuts pass unchanged", {
     when: ["resolving each", () => ["gpt-6.1-sol", "sol", "gpt-6"].map(name => resolveCatalogCodexModel(name, ACCOUNT).model)],
-    then: ["each selects its own model", (models) => expect(models).toEqual(["gpt-6.1-sol", "gpt-5.6-sol", "gpt-6-astra"])],
+    then: ["each selects its own model", (models) => expect(models).toEqual(["gpt-6.1-sol", "gpt-6.1-sol", "gpt-6-astra"])],
   });
 
   unit("an unknown name is refused with the models to choose from", {

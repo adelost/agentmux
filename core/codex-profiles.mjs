@@ -23,10 +23,12 @@ import { CODEX_EXTERNAL_NAVIGATION_RULES } from "./execution-safety.mjs";
 export const CODEX_PROFILE_STATE_KEY = "codex_profile_by_pane";
 export const CODEX_MODEL_STATE_KEY = "codex_model_by_pane";
 
+// Mattias 2026-10-11: "viktigt att ingen utav de där använder Astra just nu,
+// utan att det är GPT 6.1 Sol". "sol" names the fleet's Sol.
 const CODEX_MODEL_ALIASES = Object.freeze({
   astra: "gpt-6-astra",
   "gpt-6": "gpt-6-astra",
-  sol: "gpt-5.6-sol",
+  sol: "gpt-6.1-sol",
   "gpt-5.6": "gpt-5.6-sol",
 });
 
