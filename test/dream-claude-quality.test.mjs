@@ -83,7 +83,9 @@ describe("Dream reads idle Claude quality without trusting stale cache", () => {
             sessionId: variant === "different-compact-session" ? "other" : ID }; },
           mirrorPrompt: async () => { calls.push("mirror"); return { channelId: "visible", messages: 1 }; },
           send: async () => { calls.push("send"); return { delivered: true }; },
-          waitForResult: async () => ({ ok: true, content: "- Merged fix; publication still blocked." }),
+          // A curator product opens with the run identity Dream checks before writing memory.
+          waitForResult: async ({ runId, sourceSha256 }) => ({ ok: true,
+            content: `> Kuraterad av claw:0 · run \`${runId}\` · source \`${sourceSha256}\`.\n- Merged fix; publication still blocked.` }),
           recordReceipts: () => { calls.push("receipt"); },
         });
       } catch (caught) { error = caught; }

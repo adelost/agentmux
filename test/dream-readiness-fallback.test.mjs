@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { cmdDream } from '../cli/dream.mjs';
@@ -41,11 +41,18 @@ describe('Dream candidate preparation', () => {
               : { ok: true, sessionId: `session-${pane}`, compactBoundary: true };
           },
           notifyUser: async (text) => notices.push(text),
-          writeInput: () => ({ path: '/input', outputPath: '/output', sha256: 'a'.repeat(64), bytes: 1, runId: 'run-1' }),
           mirrorPrompt: async (_ctx, selected) => { calls.push(`mirror:${selected.pane}`); return { channelId: 'visible', messages: 1 }; },
           send: async (_ctx, _a, p) => { calls.push(`send:${p}`); return { delivered: true }; },
-          waitForResult: async () => ({ ok: true, content: '- A genuine source-backed digest.' }),
-          recordReceipts: () => { calls.push('receipt'); expect(readFileSync(join(root, 'memory/2026-09-05.md'), 'utf8')).toContain('source-backed digest'); },
+          // A curator product opens with the run identity Dream checks before writing memory.
+          waitForResult: async ({ runId, sourceSha256 }) => ({ ok: true,
+            content: `> Kuraterad av claw:2 · run \`${runId}\` · source \`${sourceSha256}\`.\n- A genuine source-backed digest.` }),
+          // The daily block links the verified snapshot, which holds the digest (#340).
+          recordReceipts: () => {
+            calls.push('receipt');
+            expect(readFileSync(join(root, 'memory/2026-09-05.md'), 'utf8')).toContain('<!-- amux-dream-snapshot:2026-09-05 ');
+            const [snapshot] = readdirSync(join(root, 'memory/dream'));
+            expect(readFileSync(join(root, 'memory/dream', snapshot), 'utf8')).toContain('source-backed digest');
+          },
         });
         expect(result.owner.pane).toBe(2);
         expect(calls.filter((c) => c.startsWith('send:'))).toEqual(['send:2']);
