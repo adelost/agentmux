@@ -71,12 +71,12 @@ feature("compaction at a natural pause: one guard per condition", () => {
     then: ["leaders get 700k, builders 400k", budgets => expect(budgets).toEqual({ skyvw0: 700_000, skyvw1: 400_000,
       lsrc0: 700_000, lsrc2: 400_000, lsrcLeaders: [3, 0] })],
   });
-  unit("an unknown rollout mode fails loudly and both engines start dry", {
-    when: ["reading modes", () => ({ unset: readPauseCompactModes({}), claudeOn: readPauseCompactModes({ AUTO_COMPACT_PAUSE: "on" }),
+  unit("both engines are on after the dry run, each switchable back, and a typo fails loudly", {
+    when: ["reading modes", () => ({ unset: readPauseCompactModes({}), codexDry: readPauseCompactModes({ AUTO_COMPACT_PAUSE_CODEX: "dry" }),
       bad: () => readPauseCompactModes({ AUTO_COMPACT_PAUSE_CODEX: "yes" }) })],
-    then: ["dry by default, Codex only by its own switch, a typo is refused", ({ unset, claudeOn, bad }) => {
-      expect(unset).toEqual({ claude: "dry", codex: "dry" });
-      expect(claudeOn).toEqual({ claude: "on", codex: "dry" });
+    then: ["on by default, Codex dry only by its own switch, a typo is refused", ({ unset, codexDry, bad }) => {
+      expect(unset).toEqual({ claude: "on", codex: "on" });
+      expect(codexDry).toEqual({ claude: "on", codex: "dry" });
       expect(bad).toThrow("AUTO_COMPACT_PAUSE_CODEX");
     }],
   });

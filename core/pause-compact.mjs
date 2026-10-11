@@ -12,15 +12,16 @@ import { parseJsonlText, readTailWindow } from "./jsonl-reader.mjs";
 
 export const PAUSE_COMPACT_MODES = Object.freeze(["off", "dry", "on"]);
 
+// skyvw:0 2026-10-11 switched both engines on after the dry log showed right decisions.
 const readMode = (name, value) => {
-  const mode = value || "dry";
+  const mode = value || "on";
   if (!PAUSE_COMPACT_MODES.includes(mode)) throw new Error(`${name} must be one of ${PAUSE_COMPACT_MODES.join(", ")}, got ${mode}`);
   return mode;
 };
 
 /**
  * WHAT: Reads, per engine, whether pause compaction is off, logging only, or live.
- * WHY: Keeps the first rollout a dry run, and Codex dry until its own switch is turned on.
+ * WHY: Keeps each engine switchable to dry or off on its own, without a release.
  * The Codex measurements of 2026-10-11 found its cache warm at a pause (85% cached within 5 minutes).
  */
 export function readPauseCompactModes(env = process.env) {

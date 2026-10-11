@@ -65,6 +65,8 @@ Compact before a delivery to a pane idle past its cache's life (skyvw:0, 2026-10
 
 Codex floor (api:0's call, 2026-10-11): a Codex compact leaves about 94k, so it pays back after 94k / (0.05 x (C - 94k)) calls: 313 at 100k, 72 at 120k, 34 at 150k, 7 at 370k. Sessions made about 90 calls per compact, so both Codex rules compact from 150k, not the daytime 80k.
 
+Switched on 2026-10-11 ~06:25Z (1.25.162), as skyvw:0 decided, after the dry log showed right decisions: lsrc:4 and lsrc:5 (Codex, 370k and 310k) compacted after 38 idle minutes, eight minutes before their new work; lsrc:2 (577k) and skyvw:1 (473k) at a turn's end; holds for working subagents, a running job and a person's unsent draft. `AUTO_COMPACT_PAUSE` and `AUTO_COMPACT_PAUSE_CODEX` take `dry` or `off` to step back without a release. A failing compact-before-delivery check is logged and the work is delivered by the 60-minute rule.
+
 Cost: the compact reads the warm context once and writes a summary. A builder that keeps working at 500k afterwards reads about 100–200k per call instead of 500k.
 
 # Cost evidence

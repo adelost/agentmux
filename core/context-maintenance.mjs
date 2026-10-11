@@ -121,7 +121,10 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       : (await agent.promptTransportState(name, pane, "").catch(() => null))?.state || "unreadable";
     const safe = input === "empty-idle";
     const facts = { tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, pauseTokens, safe, attempt };
-    const decision = contextCostDecision(facts, cold ? coldPolicyFor(name, pane, target, identity, facts) : policy);
+    let coldPolicy = policy;
+    try { if (cold) coldPolicy = coldPolicyFor(name, pane, target, identity, facts); }
+    catch (error) { log(`${name}:${pane} compact-before-delivery check failed, delivering by the 60-minute rule: ${error.message}`); }
+    const decision = contextCostDecision(facts, coldPolicy);
     if (decision.values.action === "CONTINUE") return { ok: true, cell: decision.cell };
     if (cold && target.engine === "claude" && decision.cell === "unknown-evidence" && attempt === "NEW"
         && safe && !Number.isFinite(context?.tokens)

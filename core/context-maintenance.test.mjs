@@ -541,6 +541,17 @@ feature("a pane idle past its cache's life is compacted before a delivery", () =
       } finally { ctx.cleanup(); }
     }],
   });
+  component("a failing check never stops the delivery", {
+    given: ["a Claude pane idle 55 minutes whose background check throws", () => {
+      const rule = coldRule("on");
+      rule.background = () => { throw new Error("proc unreadable"); };
+      return pane({ idleMinutes: 55, rule });
+    }],
+    when: ["a delivery arrives", deliver],
+    then: ["the 60-minute rule decides and the work goes through", (result, ctx) => {
+      try { expect(result.cell).toBe("within-policy"); expect(ctx.calls).toEqual([]); } finally { ctx.cleanup(); }
+    }],
+  });
   component("an open question holds the compact", {
     given: ["a Claude pane idle 55 minutes with a permission prompt", () => {
       const ctx = pane({ idleMinutes: 55, rule: coldRule("on") });

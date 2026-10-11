@@ -20,7 +20,7 @@ export const LEADER_REVIEW_TEXT = "[amux leader review] About an hour since your
   + "five lines: what was delivered since then, with numbers and start and end points; what stands still and why; "
   + "at most one or two concrete improvements, made now. No new rewrite without a measured problem.";
 // "dry" logs when a review would be added and adds nothing; "on" adds it.
-export const LEADER_REVIEW_MODE = "dry";
+export const LEADER_REVIEW_MODE = "on";
 
 const STATE_PATH = join(homedir(), ".agentmux", "leader-review.json");
 const LOG_PATH = join(homedir(), ".agentmux", "leader-review.jsonl");
