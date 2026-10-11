@@ -13,7 +13,6 @@ import {
   SUGGESTIONS_BRIDGE_STALE_MS,
   FAIL, OK, WARN,
   checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors,
-  rescueBridgePidFromHeartbeat,
   checkLedger, overallStatus, checkPaneModals, checkCodexVocabulary,
 } from "./doctor.mjs";
 import {
@@ -811,39 +810,6 @@ feature("durable delivery queue health", () => {
   });
 });
 
-
-feature("heartbeat pid rescue after release swap", () => {
-  const alive = new Set([6231]);
-  const cmdlines = { 6231: "node --import ./bin/quota-recovery-bootstrap.mjs index.mjs" };
-  const probe = {
-    pidAlive: (pid) => alive.has(pid),
-    cmdline: (pid) => cmdlines[pid] || "",
-  };
-  unit("rescues the live bridge the cwd filter dropped", {
-    when: ["filtering found nothing but the heartbeat names a live bridge", () =>
-      rescueBridgePidFromHeartbeat({ pids: [], beat: { pid: 6231 }, ...probe })],
-    then: ["the heartbeat pid is counted as the bridge", (pids) => {
-      expect(pids).toEqual([6231]);
-    }],
-  });
-  unit("never resurrects a dead or recycled pid", {
-    when: ["the heartbeat pid is dead or runs something else", () => [
-      rescueBridgePidFromHeartbeat({ pids: [], beat: { pid: 9999 }, ...probe }),
-      rescueBridgePidFromHeartbeat({ pids: [], beat: { pid: 6231 }, pidAlive: () => true, cmdline: () => "vim notes.txt" }),
-      rescueBridgePidFromHeartbeat({ pids: [], beat: null, ...probe }),
-    ]],
-    then: ["no pid is invented", (results) => {
-      for (const pids of results) expect(pids).toEqual([]);
-    }],
-  });
-  unit("does not duplicate an already-discovered pid", {
-    when: ["the cwd filter already found the same bridge", () =>
-      rescueBridgePidFromHeartbeat({ pids: [6231], beat: { pid: 6231 }, ...probe })],
-    then: ["the list is unchanged", (pids) => {
-      expect(pids).toEqual([6231]);
-    }],
-  });
-});
 
 feature("pane modals (kimi dialog watch)", () => {
   unit("skips the row when no sweep ran", {

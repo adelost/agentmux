@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Out-of-band bridge recovery used by the Windows Discord restarter.
 # It never trusts a pidfile alone: every signal is bound to the expected
-# uid, command shape, cwd, and (for the supervisor) process group.
+# uid and command shape, and for the supervisor its package directory,
+# process group and service id. Identity follows core/bridge-identity.mjs:
+# the bridge moves to the home directory when it starts, and an install
+# renames start.sh's package directory to .agentmux-XXXX and deletes it.
 
 set -u
 
@@ -35,17 +38,17 @@ same_uid() {
   [ "$process_uid" = "$(id -u)" ]
 }
 
+same_home() {
+  tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null | grep -Fqx "HOME=$HOME"
+}
+
 bridge_owned() {
-  local pid="$1" cwd command
+  local pid="$1" command
   numeric_pid "$pid" || return 1
   kill -0 "$pid" 2>/dev/null || return 1
   same_uid "$pid" || return 1
-  cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+  same_home "$pid" || return 1
   command="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-  case "$cwd" in
-    */agentmux|*/agentmux\ \(deleted\)|*/node_modules/.agentmux-*\ \(deleted\)) ;;
-    *) return 1 ;;
-  esac
   case "$command" in
     *node*index.mjs*) return 0 ;;
     *) return 1 ;;
@@ -93,7 +96,7 @@ supervisor_owned() {
   pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
   environment="$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null || true)"
   case "$cwd" in
-    */agentmux|*/agentmux\ \(deleted\)) ;;
+    */agentmux|*/agentmux\ \(deleted\)|*/.agentmux-*\ \(deleted\)) ;;
     *) return 1 ;;
   esac
   [ "$pgid" = "$pid" ] || return 1

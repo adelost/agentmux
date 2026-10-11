@@ -37,16 +37,26 @@ log() { echo "[$(date '+%F %T')] $*" >> "$LOG"; }
 
 [ -f "$STATE_DIR/watchdog-OFF" ] && exit 0
 
-# Only count bridges running from THIS repo (other projects have their own
-# node [preload flags] index.mjs). [n] bracket keeps pgrep from matching our own shell.
+# Identity follows core/bridge-identity.mjs, never a working directory: the
+# bridge moves to the home directory when it starts, and `npm install --global`
+# renames the package directory start.sh stands in to .agentmux-XXXX and
+# deletes it. This HOME's heartbeat names the bridge; only that pid is acted on.
 bridge_pids() {
-  for pid in $(pgrep -f '[n]ode( [^ ]+)* index\.mjs' 2>/dev/null); do
-    [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$DIR" ] && echo "$pid"
-  done
+  local pid
+  pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "$HEARTBEAT" 2>/dev/null | head -n 1)
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+  case "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" in
+    *node*index.mjs*) echo "$pid" ;;
+  esac
 }
+# A start.sh of this HOME standing in an agentmux package, as installed or replaced.
 supervisor_alive() {
-  for pid in $(pgrep -f '[s]tart.sh' 2>/dev/null); do
-    [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$DIR" ] && return 0
+  local pid
+  for pid in $(pgrep -u "$(id -u)" -f '[s]tart\.sh' 2>/dev/null); do
+    case "$(readlink "/proc/$pid/cwd" 2>/dev/null)" in
+      */agentmux|*/agentmux\ \(deleted\)|*/.agentmux-*\ \(deleted\))
+        tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -Fqx "HOME=$HOME" && return 0 ;;
+    esac
   done
   return 1
 }

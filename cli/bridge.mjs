@@ -25,6 +25,7 @@ import {
   writeBridgeMode,
 } from "../core/bridge-mode.mjs";
 import { formatStartupHousekeeping, runStartupHousekeeping } from "../core/startup-housekeeping.mjs";
+import { isAgentmuxPackageDir } from "../core/bridge-identity.mjs";
 
 const LEGACY_BRIDGE_SESSION = "amux";
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -75,8 +76,9 @@ export function createBridgeLifecycle({
     try {
       const processEnvironment = readFileSync(`/proc/${Number(record.pid)}/environ`, "utf8").split("\0");
       const cwd = readlinkSync(`/proc/${Number(record.pid)}/cwd`);
+      // An install renames start.sh's package directory away; the service id stays the proof.
       return processEnvironment.includes(`AMUX_BRIDGE_SUPERVISOR_ID=${record.serviceId}`)
-        && resolve(cwd) === resolvedBridgeDir
+        && (resolve(cwd) === resolvedBridgeDir || isAgentmuxPackageDir(cwd))
         && resolve(record.bridgeDir) === resolvedBridgeDir;
     } catch {
       return false;

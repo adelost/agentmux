@@ -4,14 +4,13 @@
 // observations, so this file owns I/O and nothing else.
 
 import { execSync } from "child_process";
-import { readFileSync, existsSync, statSync, readlinkSync } from "fs";
+import { readFileSync, existsSync, statSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { listAgents } from "./config.mjs";
-import { isPidAlive } from "./dream.mjs";
 import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors, checkLedger,
-  rescueBridgePidFromHeartbeat, checkBridgeMode, checkContextBridge, checkConfig, overallStatus, formatDoctorReport,
+  checkBridgeMode, checkContextBridge, checkConfig, overallStatus, formatDoctorReport,
   FAIL, WARN, checkDeliveryQueue, checkNativeRuntimeFleet, checkGuardCronHeartbeats, checkSuggestionsBoard,
   checkQuotaRecoveryHealth, quotaRecoveryHealthObservation, checkPaneModals, checkCodexVocabulary,
 } from "../core/doctor.mjs";
@@ -22,6 +21,7 @@ import {
 import { needsHumanStatus } from "../core/pane-status.mjs";
 import { getPaneStatus } from "./tmux.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
+import { findBridgeStack } from "../core/bridge-identity.mjs";
 import { readGuardHeartbeats } from "../core/guard-heartbeat.mjs";
 import { observeReleaseIdentity } from "../core/release-identity.mjs";
 import { eventsPath } from "../core/events.mjs";
@@ -59,9 +59,8 @@ export async function cmdDoctor(ctx, { workspaces = false } = {}) {
   // bridge process + supervision
   /**
    * WHAT: Reads whether this pid's parent is the start.sh supervisor.
-   * WHY: Supervision is a fact about the live process, so it must be asked of
-   *      whatever pid we finally believe in — not only of the one that survived
-   *      the cwd filter below.
+   * WHY: Supervision is a fact about the live process, so it is asked of
+   *      the bridge pid itself.
    */
   const isSupervisedPid = (pid) => {
     try {
@@ -71,37 +70,14 @@ export async function cmdDoctor(ctx, { workspaces = false } = {}) {
     } catch { return false; }
   };
 
-  let pids = [];
-  try {
-    // [n]ode: the bracket keeps pgrep from matching its own sh wrapper.
-    // cwd filter: only count bridges running from THIS repo (other projects
-    // legitimately have their own `node index.mjs`).
-    const out = execSync("pgrep -f '[n]ode( [^ ]+)* index\\.mjs' || true", { encoding: "utf-8" }).trim();
-    pids = (out ? out.split("\n").map((x) => parseInt(x, 10)).filter(Boolean) : [])
-      .filter((pid) => {
-        try { return readlinkSync(`/proc/${pid}/cwd`) === repoDir; }
-        catch { return false; }
-      });
-  } catch {}
   // repo version + heartbeat
   let repoVersion = null;
   try { repoVersion = JSON.parse(readFileSync(join(repoDir, "package.json"), "utf-8")).version; }
   catch {}
   const beat = readHeartbeat();
-  // A live bridge keeps the PREVIOUS install as cwd after a release swap
-  // (the staging dir is renamed away), so the cwd filter above goes blind
-  // right after every install. The heartbeat pid is the bridge's own
-  // testimony; trust it when the process is alive and runs the bridge entry.
-  pids = rescueBridgePidFromHeartbeat({
-    pids, beat,
-    pidAlive: isPidAlive,
-    cmdline: (pid) => { try { return readFileSync("/proc/" + pid + "/cmdline", "utf-8"); } catch { return ""; } },
-  });
-  // Ask supervision of the pid we ended up believing in. Deciding it before the
-  // rescue meant every release install reported a supervised bridge as
-  // UNSUPERVISED: the swap renames the staging dir, the cwd filter goes blind,
-  // and the flag stayed false even though start.sh was still its parent. That
-  // sent a reader to restart a healthy bridge.
+  // Not by working directory: the bridge moves home, and an install deletes start.sh's.
+  const stack = findBridgeStack({ beat });
+  const pids = stack.bridges;
   const supervised = pids.length > 0 && isSupervisedPid(pids[0]);
   const guardHeartbeats = readGuardHeartbeats();
   // hooks
@@ -194,17 +170,12 @@ export async function cmdDoctor(ctx, { workspaces = false } = {}) {
     });
   }
 
-  // supervisors: start.sh processes owning THIS repo. bridge.log only ever
+  // supervisors: this stack's start.sh processes. bridge.log only ever
   // receives watchdog-spawned (nohup) supervisors' output — a fresh crash
   // tail there means an orphan is looping right now.
-  let supervisorPids = [], crashLooping = false;
+  const supervisorPids = stack.supervisors;
+  let crashLooping = false;
   try {
-    const out = execSync("pgrep -f '[s]tart.sh' || true", { encoding: "utf-8" }).trim();
-    supervisorPids = (out ? out.split("\n").map((x) => parseInt(x, 10)).filter(Boolean) : [])
-      .filter((pid) => {
-        try { return readlinkSync(`/proc/${pid}/cwd`) === repoDir; }
-        catch { return false; }
-      });
     const logPath = join(home, ".agentmux", "bridge.log");
     const st = statSync(logPath);
     if (Date.now() - st.mtimeMs < 5 * 60 * 1000) {

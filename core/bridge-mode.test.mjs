@@ -2,6 +2,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { findBridgeStack } from "./bridge-identity.mjs";
 import {
   BRIDGE_MODE_MANAGED,
   BRIDGE_MODE_MANUAL,
@@ -128,19 +129,19 @@ feature("bridge ownership mode", () => {
     }],
     when: ["checking the shared argv boundary", (sources) => sources],
     then: ["legacy and preload launches stay observable", ({ launch, doctor, watchdog }) => {
-      const processPattern = "[n]ode( [^ ]+)* index\\.mjs";
-      const javascriptPattern = processPattern.replace("\\", "\\\\");
       expect(launch).toContain(
         "node --import ./bin/runtime-env-bootstrap.mjs --import ./bin/quota-recovery-bootstrap.mjs index.mjs",
       );
-      expect(doctor).toContain(`pgrep -f '${javascriptPattern}'`);
-      expect(watchdog).toContain(`pgrep -f '${processPattern}'`);
-      const observer = /node( [^ ]+)* index\.mjs/u;
-      expect(observer.test("node index.mjs")).toBe(true);
-      expect(observer.test("node --import ./bin/quota-recovery-bootstrap.mjs index.mjs")).toBe(true);
-      expect(observer.test(
+      expect(doctor).toContain("findBridgeStack({ beat })");
+      expect(watchdog).toContain('*node*index.mjs*) echo "$pid" ;;');
+      for (const command of [
+        "node index.mjs",
+        "node --import ./bin/quota-recovery-bootstrap.mjs index.mjs",
         "node --import ./bin/runtime-env-bootstrap.mjs --import ./bin/quota-recovery-bootstrap.mjs index.mjs",
-      )).toBe(true);
+      ]) {
+        const proc = { pids: () => [7], cmdline: () => command, cwd: () => "/h", ppid: () => 1, uid: () => 1000, home: () => "/h" };
+        expect(findBridgeStack({ beat: { pid: 7 }, proc, uid: 1000, home: "/h" }).bridges).toEqual([7]);
+      }
     }],
   });
 });
