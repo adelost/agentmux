@@ -16,7 +16,9 @@ function headerAt(fd, offset) {
 function ignorableOversized(header) {
   // Recognize only the writer's top-level prefix, never a quoted type inside
   // user text. An oversized unknown/authored record remains an explicit gap.
-  const prefix = /^\{\s*(?:"timestamp"\s*:\s*"[^"\\]*"\s*,\s*)?"type"\s*:\s*"(compacted|response_item)"\s*,\s*/u.exec(header);
+  // Codex 0.16x writes an integer ordinal between timestamp and type; without it
+  // a 5.7 MB tool output in skyvw:3 stopped Dream on 2026-10-11.
+  const prefix = /^\{\s*(?:"timestamp"\s*:\s*"[^"\\]*"\s*,\s*)?(?:"ordinal"\s*:\s*\d+\s*,\s*)?"type"\s*:\s*"(compacted|response_item)"\s*,\s*/u.exec(header);
   if (!prefix) return false;
   if (prefix[1] === "compacted") return true;
   return /^"payload"\s*:\s*\{\s*"type"\s*:\s*"(?:function_call_output|custom_tool_call_output)"\s*[,}]/u

@@ -20,6 +20,25 @@ describe("bounded cold-path Dream history", () => {
     });
   });
 
+  // skyvw:3, Dream 2026-10-11: Codex now writes an ordinal before the type, and a
+  // 5.7 MB tool output at byte 30433308 stopped the night's whole digest.
+  it("skips an oversized tool output written with Codex's ordinal field", () => {
+    withJournal([
+      { timestamp: "2026-09-25T08:50:28.860Z", ordinal: 51960, type: "response_item",
+        payload: { type: "custom_tool_call_output", call_id: "c1", output: [{ type: "input_text", text: "x".repeat(4 * 1024 * 1024) }] } },
+      { timestamp: "2026-09-25T08:51:00.000Z", ordinal: 51961, type: "event_msg", payload: { type: "user_message", message: "Kör nästa steg" } },
+    ], (file) => {
+      expect(readCodexDreamEvents(file).map(e => e.payload.message)).toEqual(["Kör nästa steg"]);
+    });
+  });
+
+  it("still refuses oversized authored text that follows an ordinal", () => {
+    withJournal([{ timestamp: "2026-09-25T08:50:28.860Z", ordinal: 7, type: "event_msg",
+      payload: { type: "user_message", message: '{"type":"compacted",' + "x".repeat(4 * 1024 * 1024) } }], (file) => {
+      expect(() => readCodexDreamEvents(file)).toThrow("dream-history-record-exhausted");
+    });
+  });
+
   it("bounds retained authored bytes rather than silently losing them", () => {
     withJournal([{ type: "event_msg", payload: { type: "user_message", message: "Preserve this" } }], (file) => {
       expect(() => readCodexDreamEvents(file, { maxKeptBytes: 10 })).toThrow("dream-history-content-exhausted");
