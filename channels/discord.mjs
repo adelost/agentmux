@@ -44,15 +44,21 @@ export function createDiscordChannel({ token, onSent, client = new Client({
     },
 
     async send(channelId, text, { kind } = {}) {
-      const ch = await client.channels.fetch(channelId);
-      if (!ch) {
-        // Deleted/unbound channel must FAIL, not no-op: a silent drop here
-        // looks like "agent never replied" with zero diagnostics. Callers
-        // (watcher/handlers) already catch and log send errors.
-        throw new Error(`channel ${channelId} not found (deleted or not visible to the bot)`);
+      let message;
+      try {
+        const ch = await client.channels.fetch(channelId);
+        if (!ch) {
+          // Deleted/unbound channel must FAIL, not no-op: a silent drop here
+          // looks like "agent never replied" with zero diagnostics. Callers
+          // (watcher/handlers) already catch and log send errors.
+          throw new Error(`channel ${channelId} not found (deleted or not visible to the bot)`);
+        }
+        message = await ch.send(text);
+      } catch (error) {
+        stamp(channelId, { payload: text, kind, status: "failed", error });
+        throw error;
       }
-      const message = await ch.send(text);
-      stamp(channelId, { payload: text, message, kind });
+      stamp(channelId, { payload: text, message, kind, status: "sent" });
       return message;
     },
 
@@ -91,12 +97,18 @@ export function createDiscordChannel({ token, onSent, client = new Client({
 
     /** WHAT: Replies to one persisted Discord message. WHY: Restarted transcript work needs reply semantics without retaining a live Gateway object. */
     async replyTo(channelId, messageId, content, { kind } = {}) {
-      const ch = await client.channels.fetch(channelId);
-      if (!ch?.messages) throw new Error(`channel ${channelId} cannot fetch messages`);
-      const msg = await ch.messages.fetch(messageId);
-      if (!msg) throw new Error(`message ${channelId}:${messageId} not found`);
-      const result = await msg.reply(content);
-      stamp(channelId, { payload: content, message: result, kind });
+      let result;
+      try {
+        const ch = await client.channels.fetch(channelId);
+        if (!ch?.messages) throw new Error(`channel ${channelId} cannot fetch messages`);
+        const msg = await ch.messages.fetch(messageId);
+        if (!msg) throw new Error(`message ${channelId}:${messageId} not found`);
+        result = await msg.reply(content);
+      } catch (error) {
+        stamp(channelId, { payload: content, kind, status: "failed", error });
+        throw error;
+      }
+      stamp(channelId, { payload: content, message: result, kind, status: "sent" });
       return result;
     },
 

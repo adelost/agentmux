@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
-import { appendPostLedger, readPostLedger } from "../core/ask-ledger.mjs";
+import { appendPost, readWindow } from "../core/ask-ledger.mjs";
 import { createDiscordChannel } from "./discord.mjs";
 import { normalizeDiscordMessage } from "./normalize.mjs";
 import { recordDiscordPost } from "./post-ledger.mjs";
@@ -24,9 +24,10 @@ feature("every Discord send point records what it posted", () => {
       const ws = workspace();
       const sent = { id: "m-1" };
       const channel = { send: async () => sent, messages: { fetch: async () => ({ reply: async () => ({ id: "m-2" }) }) } };
-      const client = { channels: { fetch: async () => channel } };
+      const refused = { send: async () => { throw Object.assign(new Error("Missing Permissions"), { code: 50013 }); } };
+      const client = { channels: { fetch: async (id) => (id === "c-refused" ? refused : channel) } };
       const onSent = (channelId, post) => recordDiscordPost({ ...post, channelId, via: "bridge" },
-        { configPath: ws.configPath, record: (entry) => appendPostLedger(entry, { path: ws.path }) });
+        { configPath: ws.configPath, record: (entry) => appendPost(entry, { path: ws.path }) });
       const discord = createDiscordChannel({ token: "test", onSent, client });
       const person = normalizeDiscordMessage({ channelId: "c-0", content: "hej", author: { id: "u", bot: false },
         attachments: new Map(), reply: async () => ({ id: "m-3" }), channel: { send: async () => ({ id: "m-4" }) } }, { onSent });
@@ -36,16 +37,21 @@ feature("every Discord send point records what it posted", () => {
       await discord.send("c-1", { content: REPLY, files: ["/tmp/shot.png"] }, { kind: "reply" });
       await discord.replyTo("c-0", "origin", "levererat till lsrc:0");
       await person.reply("kvot: 40 %");
-      return readPostLedger({ path: ws.path });
+      const refused = await discord.send("c-refused", "SUMMARY: nådde aldrig fram", { kind: "reply" }).catch((error) => error.message);
+      return { rows: readWindow({ path: ws.path }).posts, refused };
     }],
-    then: ["three rows, each with its pane, kind and whole text", (rows, { ws }) => {
+    then: ["four rows, each with its pane, kind, whole text and outcome; the refused send still throws", ({ rows, refused }, { ws }) => {
       try {
-        expect(rows.map(({ agent, pane, kind, via, text, files, messageId }) => ({ agent, pane, kind, via, text, files, messageId })))
-          .toEqual([
-            { agent: "lsrc", pane: 1, kind: "reply", via: "bridge", text: REPLY, files: ["/tmp/shot.png"], messageId: "m-1" },
-            { agent: "lsrc", pane: 0, kind: "notice", via: "bridge", text: "levererat till lsrc:0", files: [], messageId: "m-2" },
-            { agent: "lsrc", pane: 0, kind: "notice", via: "bridge", text: "kvot: 40 %", files: [], messageId: "m-3" },
-          ]);
+        expect(refused).toBe("Missing Permissions");
+        // Rows in the same millisecond order by id, so compare without order.
+        expect(rows).toHaveLength(4);
+        expect(rows.map(({ agent, pane, kind, via, text, files, messageId, status, error }) =>
+          ({ agent, pane, kind, via, text, files, messageId, status, error }))).toEqual(expect.arrayContaining([
+          { agent: "lsrc", pane: 1, kind: "reply", via: "bridge", text: REPLY, files: ["/tmp/shot.png"], messageId: "m-1", status: "sent", error: undefined },
+          { agent: "lsrc", pane: 0, kind: "notice", via: "bridge", text: "levererat till lsrc:0", files: [], messageId: "m-2", status: "sent", error: undefined },
+          { agent: "lsrc", pane: 0, kind: "notice", via: "bridge", text: "kvot: 40 %", files: [], messageId: "m-3", status: "sent", error: undefined },
+          { agent: null, pane: null, kind: "reply", via: "bridge", text: "SUMMARY: nådde aldrig fram", files: [], messageId: null, status: "failed", error: "50013: Missing Permissions" },
+        ]));
       } finally { ws.cleanup(); }
     }],
   });
@@ -56,7 +62,9 @@ feature("every Discord send point records what it posted", () => {
       const audio = join(ws.root, "svar.mp3");
       writeFileSync(audio, "mp3");
       let next = 0;
-      const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ id: `r-${++next}` }) }));
+      const fetch = vi.fn(async (url, init) => (String(init?.body || "").includes("avvisad")
+        ? { ok: false, status: 403, text: async () => "Missing Access" }
+        : { ok: true, json: async () => ({ id: `r-${++next}` }) }));
       const restore = { token: process.env.DISCORD_TOKEN, config: process.env.AGENTS_YAML, ledger: process.env.AMUX_ASK_LEDGER_PATH };
       vi.stubGlobal("fetch", fetch);
       Object.assign(process.env, { DISCORD_TOKEN: "test", AGENTS_YAML: ws.configPath, AMUX_ASK_LEDGER_PATH: ws.path });
@@ -66,15 +74,19 @@ feature("every Discord send point records what it posted", () => {
       await sendToChannelId("c-1", REPLY, { kind: "mirror" });
       await sendFileToChannelId("c-0", audio, "skärmbild");
       await sendFileToChannelId("c-0", audio, "uppläst svar", { kind: "voice" });
-      return readPostLedger({ path: ws.path });
+      const rejected = await sendToChannelId("c-1", "avvisad brief", { kind: "mirror" }).catch((error) => error.message);
+      return { rows: readWindow({ path: ws.path }).posts, rejected };
     }],
-    then: ["three rows with the whole text and the file paths", (rows, { ws, audio, restore }) => {
+    then: ["four rows with the whole text, file paths and outcome; the rejected post still throws", ({ rows, rejected }, { ws, audio, restore }) => {
       try {
-        expect(rows.map(({ agent, pane, kind, via, text, files }) => ({ agent, pane, kind, via, text, files }))).toEqual([
-          { agent: "lsrc", pane: 1, kind: "mirror", via: "cli", text: REPLY, files: [] },
-          { agent: "lsrc", pane: 0, kind: "file", via: "cli", text: "skärmbild", files: [audio] },
-          { agent: "lsrc", pane: 0, kind: "voice", via: "cli", text: "uppläst svar", files: [audio] },
-        ]);
+        expect(rejected).toBe("discord post 403: Missing Access");
+        expect(rows).toHaveLength(4);
+        expect(rows.map(({ agent, pane, kind, via, text, files, status }) => ({ agent, pane, kind, via, text, files, status }))).toEqual(expect.arrayContaining([
+          { agent: "lsrc", pane: 1, kind: "mirror", via: "cli", text: REPLY, files: [], status: "sent" },
+          { agent: "lsrc", pane: 0, kind: "file", via: "cli", text: "skärmbild", files: [audio], status: "sent" },
+          { agent: "lsrc", pane: 0, kind: "voice", via: "cli", text: "uppläst svar", files: [audio], status: "sent" },
+          { agent: "lsrc", pane: 1, kind: "mirror", via: "cli", text: "avvisad brief", files: [], status: "failed" },
+        ]));
       } finally {
         vi.unstubAllGlobals();
         for (const [key, name] of [["token", "DISCORD_TOKEN"], ["config", "AGENTS_YAML"], ["ledger", "AMUX_ASK_LEDGER_PATH"]]) {

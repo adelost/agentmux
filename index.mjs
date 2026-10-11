@@ -207,7 +207,7 @@ function stampChannelMirror(channelId) {
 
 // Every bridge post is also recorded in the conversation log (docs/CONVERSATION-LOG.md).
 const discord = TOKEN ? createDiscordChannel({ token: TOKEN, onSent: (channelId, post) => {
-  stampChannelMirror(channelId);
+  if (post?.status !== "failed") stampChannelMirror(channelId);
   if (post) recordDiscordPost({ ...post, channelId, via: "bridge" }, { configPath: AGENTS_YAML });
 } }) : null;
 

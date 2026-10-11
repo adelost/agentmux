@@ -5,7 +5,18 @@ for every engine: what was asked of a pane (`ask`) and what amux posted to
 Discord (`post`). It lives in the existing ask ledger,
 `~/.agentmux/ask-ledger.jsonl` (override: `AMUX_ASK_LEDGER_PATH`), mode 0600,
 rotated beside itself at 32 MiB. Archives are kept: they are the record of
-what was said.
+what was said. The log stays on this machine: it is raw conversation, so the
+nightly backup of distilled memory skips it (0600 files are not copied).
+
+Three stores, one role each:
+
+| Store | Role | Retention |
+|---|---|---|
+| delivery queue (`~/.agentmux/delivery-queue/`) | transport state: pending, submitted, receipt, at-most-once fences | acknowledged jobs pruned after 7 days |
+| conversation log | what was said, in and out | never pruned, rotated at 32 MiB |
+| event log (`~/.agentmux/events.jsonl`) | loss-tolerant hints: prompt/stop, permissions, session start | rotated at 8 MiB |
+
+A row points at a delivery by `deliveryId`; it never copies transport state.
 
 ## Rows
 
@@ -23,7 +34,7 @@ Every row is one JSON line with `version: 1`, `event`, `ts` (ISO time) and `id`.
 | `completionStatus`, `completionAt` | terminal evidence once known |
 | `completionReply` | legacy 100-character preview; read, to be retired |
 
-`event: "post"`, outbound, one row per message amux posted:
+`event: "post"`, outbound, one row per send attempt:
 
 | Field | Meaning |
 |---|---|
@@ -31,7 +42,9 @@ Every row is one JSON line with `version: 1`, `event`, `ts` (ISO time) and `id`.
 | `channelId`, `messageId` | the Discord ids |
 | `via` | `bridge` or `cli`, the send point that posted it |
 | `kind` | `reply` (an agent's turn), `mirror` (a prompt or brief shown in the channel, a voice transcript), `file` (an image or file), `voice` (`amux say`), `notice` (status, receipts, warnings) |
-| `text` | the text exactly as posted |
+| `text` | the text exactly as posted, or as attempted |
+| `status`, `error` | `sent`, or `failed` with the error code and message |
+| `deliveryId` | the delivery the post belongs to, when known |
 | `files` | posted file paths, never their contents |
 | `truncated`, `textBytes` | set only when `text` passed 64 KB; a Discord message is at most 2000 characters, so this marks a pathological payload |
 | `askId` | the ask it answers, when known (not yet written) |
@@ -47,12 +60,22 @@ Every row is one JSON line with `version: 1`, `event`, `ts` (ISO time) and `id`.
   `discordPostFile` record through the same `recordDiscordPost`. Mirrored sends
   are `mirror`, `amux image` is `file`, `amux say` is `voice`, the rest `notice`.
 
-A post is recorded after Discord accepted it. A failed record is printed as a
-warning and never turns into a second post.
+A post is recorded after the send attempt: `sent` with the Discord ids, or
+`failed` with the error, and the caller still sees the failure. A failed
+record is printed as a warning and never turns into a second post.
+
+Only `core/ask-ledger.mjs` reads or writes the file: `appendAskLedger`,
+`appendPost` and `readWindow({ since, until, agents })`. A test fails if any
+other module names the file. `readWindow` opens only the files whose first and
+last rows overlap the window, read from a 64 KB probe at each end, and returns
+rows ordered by (`ts`, `id`). Rows are appended in about time order, so a
+window edge can be off by the few seconds a delivery waits in the queue.
 
 ## Readers
 
 - `amux asks`, revive and the ask backfill read `ask` rows and skip `post` rows.
+- `amux memory status` shows the file sizes, the last day's posts and posting
+  panes, failed sends, and the share of settled human asks answered by a post.
 - `amux dream` runs a shadow on the log beside its current journal source.
   Panes that posted an answer in their window are built from asks and the
   `reply`/`file`/`voice` posts after each ask; Dream's own prompt and the

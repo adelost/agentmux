@@ -1,3 +1,4 @@
+import { formatConversationLogHealth } from "./conversation-log-health.mjs";
 import {
   existsSync, readFileSync, readdirSync, statSync, writeFileSync,
 } from "fs";
@@ -423,6 +424,8 @@ export function formatMemoryStatus(result) {
   if (result.bank) rows.push(`Latest bank: ${result.bank.date} ${result.bank.hash.slice(0, 12)} (${result.bank.subject})`);
   else rows.push("Latest bank: none");
   if (result.compact) rows.push(`Latest compact: ${result.compact.date} ${result.compact.hash.slice(0, 12)} (${result.compact.subject})`);
+  if (result.conversationLog?.error) rows.push(`Conversation log: unreadable (${result.conversationLog.error})`);
+  else if (result.conversationLog) rows.push(formatConversationLogHealth(result.conversationLog));
   return rows.join("\n");
 }
 

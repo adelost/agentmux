@@ -1,12 +1,9 @@
 // Dream's conversation-log source: asks in, posts out, one format for every
-// engine (docs/CONVERSATION-LOG.md). Until the switch it only runs as a shadow
-// beside the journal source; the journal stays the fallback for a pane that
+// engine (docs/CONVERSATION-LOG.md). It works on rows from readWindow in
+// core/ask-ledger.mjs, the only module that parses the file. Until the switch
+// it only runs as a shadow; the journal stays the fallback for a pane that
 // posted nothing in its window.
 
-import { readFileSync } from "node:fs";
-import { basename } from "node:path";
-import { ASK_LEDGER_VERSION, askLedgerFiles, coalesceAskLedger, defaultAskLedgerPath } from "./ask-ledger.mjs";
-import { parseJsonlText } from "./jsonl-reader.mjs";
 import { DREAM_SETTLE_MS } from "./dream-turn-selection.mjs";
 
 /** WHAT: Names the post kinds that carry a pane's own output. WHY: Mirrors and notices repeat an ask or report status; they are not the answer. */
@@ -17,33 +14,6 @@ const HUMAN_ASK_SOURCES = new Set(["discord", "pane-hook"]);
 const tsMs = (row) => Date.parse(row?.ts || "");
 const paneKey = (row) => `${row.agent}:${row.pane}`;
 const byTime = (left, right) => tsMs(left) - tsMs(right);
-
-function rotatedAtMs(file) {
-  const match = basename(file).match(/\.(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\./u);
-  return match ? Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`) : NaN;
-}
-
-/**
- * WHAT: Reads asks and posts newer than one time, newest file first.
- * WHY: Keeps a window read from scanning every archive; an archive rotated before the window holds nothing newer.
- */
-export function readConversationLog({ path = defaultAskLedgerPath(), sinceMs = -Infinity, readFile = null } = {}) {
-  const load = readFile || ((file) => readFileSync(file, "utf8"));
-  const asks = [];
-  const posts = [];
-  for (const file of askLedgerFiles(path).reverse()) {
-    if (rotatedAtMs(file) < sinceMs) break;
-    let text = "";
-    try { text = load(file); } catch { continue; }
-    for (const row of parseJsonlText(String(text || ""))) {
-      if (row?.version !== ASK_LEDGER_VERSION || !(tsMs(row) > sinceMs)) continue;
-      if (row.event === "ask" && typeof row.verbatim === "string") asks.push(row);
-      else if (row.event === "post" && typeof row.text === "string") posts.push(row);
-    }
-  }
-  posts.sort(byTime);
-  return { asks: coalesceAskLedger(asks), posts, coverageStartMs: posts.length ? tsMs(posts[0]) : Infinity };
-}
 
 const postedText = (post) => [post.text, ...(post.files || []).map((file) => `[file: ${file}]`)]
   .filter(Boolean).join("\n");
@@ -97,7 +67,8 @@ export function answeredShare(log, { sinceMs = log.coverageStartMs, nowMs = Date
   let answered = 0;
   const unanswered = {};
   for (const [key, asks] of byPane) {
-    const posts = log.posts.filter((post) => paneKey(post) === key);
+    // A failed send never reached the person, so it answers nothing.
+    const posts = log.posts.filter((post) => paneKey(post) === key && post.status !== "failed");
     for (const turn of conversationPaneTurns(asks, posts)) {
       const ask = asks.find((row) => row.id === turn.logId);
       const atMs = tsMs(ask);

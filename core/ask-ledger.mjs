@@ -8,8 +8,11 @@
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -17,7 +20,7 @@ import {
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { parseJsonlText } from "./jsonl-reader.mjs";
 
 /** WHAT: Defines the on-disk ask row schema. WHY: Keeps future readers from guessing incompatible records. */
@@ -148,8 +151,11 @@ function clipPostText(text, maxBytes) {
   return { text: Buffer.from(text).subarray(0, maxBytes).toString("utf8"), truncated: true, textBytes: bytes };
 }
 
-/** WHAT: Stores one message amux posted to Discord. WHY: Keeps replies, mirrored sends and posted files readable without provider journals. */
-export function appendPostLedger(entry, {
+/** WHAT: Names the outcomes of a send attempt. WHY: A failed send is a row, not a silence. */
+export const POST_STATUSES = Object.freeze(["sent", "failed"]);
+
+/** WHAT: Stores one send attempt to Discord. WHY: Keeps replies, mirrored sends, posted files and failed sends readable without provider journals. */
+export function appendPost(entry, {
   path = defaultAskLedgerPath(),
   now = () => Date.now(),
   maxBytes = Number(process.env.AMUX_ASK_LEDGER_MAX_BYTES) || DEFAULT_ASK_LEDGER_MAX_BYTES,
@@ -161,6 +167,8 @@ export function appendPostLedger(entry, {
   if (!text.trim() && !files.length) return null;
   const kind = entry.kind ?? (files.length && !text.trim() ? "file" : "notice");
   if (!POST_KINDS.includes(kind)) throw new Error(`unknown post kind '${kind}'`);
+  const status = entry.status ?? "sent";
+  if (!POST_STATUSES.includes(status)) throw new Error(`unknown post status '${status}'`);
   const nowMs = Number(now());
   const pane = Number(entry.pane);
   const row = {
@@ -174,9 +182,13 @@ export function appendPostLedger(entry, {
     kind,
     ...clipPostText(text, maxTextBytes),
     files,
+    status,
+    ...(status === "failed" ? { error: String(entry.error || "unknown").slice(0, 500) } : {}),
     messageId: entry.messageId ? String(entry.messageId) : null,
+    deliveryId: entry.deliveryId ? String(entry.deliveryId) : null,
   };
-  row.id = createHash("sha256").update([row.ts, row.channelId, row.messageId || "", row.text, ...files].join("\u0000")).digest("hex");
+  row.id = createHash("sha256").update([row.ts, row.channelId, row.messageId || "", status, row.text, ...files, randomUUID()]
+    .join("\u0000")).digest("hex");
   appendLedgerRow(row, { path, nowMs, maxBytes });
   return row;
 }
@@ -218,7 +230,7 @@ export function captureDeliveryAsk({
 }
 
 /** WHAT: Resolves current and renamed ask journals. WHY: Keeps rotation from hiding old directives. */
-export function askLedgerFiles(path = defaultAskLedgerPath()) {
+function askLedgerFiles(path = defaultAskLedgerPath()) {
   const dir = dirname(path);
   const current = basename(path);
   const prefix = `${basename(path, ".jsonl")}.`;
@@ -246,19 +258,95 @@ export function readAskLedger({ path = defaultAskLedgerPath(), readFile = null }
   return coalesceAskLedger(rows);
 }
 
-/** WHAT: Reads current and archived post rows in time order. WHY: Keeps asks, Dream and search on one record of what was actually posted. */
-export function readPostLedger({ path = defaultAskLedgerPath(), readFile = null } = {}) {
+function rotatedAtMs(file) {
+  const match = basename(file).match(/\.(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\./u);
+  return match ? Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`) : NaN;
+}
+
+// Every row is written as {"version":N,"event":"...","ts":"..."...}, so a row's time sits at its start.
+const ROW_TIME = /^\{"version":\d+,"event":"[a-z]+","ts":"([^"]+)"/u;
+const SPAN_PROBE_BYTES = 64 * 1024;
+
+function readSlice(file, fromEnd) {
+  let fd;
+  try {
+    fd = openSync(file, "r");
+    const size = statSync(file).size;
+    const length = Math.min(size, SPAN_PROBE_BYTES);
+    const buffer = Buffer.alloc(length);
+    const read = readSync(fd, buffer, 0, length, fromEnd ? size - length : 0);
+    return { text: buffer.toString("utf8", 0, read), whole: length === size };
+  } catch { return { text: "", whole: false }; }
+  finally { if (fd !== undefined) closeSync(fd); }
+}
+
+function rowTimes(text, { skipFirst }) {
+  return text.split("\n").slice(skipFirst ? 1 : 0)
+    .map((line) => Date.parse(line.match(ROW_TIME)?.[1] || "")).filter(Number.isFinite);
+}
+
+/**
+ * WHAT: Lists the ledger files with the time span each holds, from their first and last rows.
+ * WHY: Lets a window read open only the archives it overlaps. Rows are appended in about time order;
+ * an unreadable edge widens the span instead of hiding the file.
+ */
+function ledgerSpans(path) {
+  const current = resolve(path);
+  return askLedgerFiles(path).map((file) => {
+    const head = readSlice(file, false);
+    const tail = readSlice(file, true);
+    const firstMs = rowTimes(head.text, { skipFirst: false })[0] ?? -Infinity;
+    // A renamed archive's rows predate its rotation stamp; the current file still grows.
+    const lastMs = resolve(file) === current ? Infinity
+      : rowTimes(tail.text, { skipFirst: !tail.whole }).at(-1) ?? (rotatedAtMs(file) || Infinity);
+    return { file, firstMs, lastMs };
+  });
+}
+
+/** WHAT: Reports the size of the current file and each archive. WHY: Shows how fast the log grows without handing out its files. */
+export function ledgerFileSizes(path = defaultAskLedgerPath()) {
+  const current = resolve(path);
+  return askLedgerFiles(path).map((file) => {
+    let bytes = 0;
+    try { bytes = statSync(file).size; } catch {}
+    return { current: resolve(file) === current, bytes };
+  });
+}
+
+const toMs = (value, fallback) => (value == null ? fallback : value instanceof Date ? value.getTime()
+  : typeof value === "number" ? value : Date.parse(value));
+const byTimeThenId = (left, right) => Date.parse(left.ts) - Date.parse(right.ts) || String(left.id).localeCompare(String(right.id));
+
+/**
+ * WHAT: Reads the asks and posts in one time window, opening only the files that overlap it.
+ * WHY: Gives Dream, asks, revive and timelines one reader of the conversation log; no other module parses the file.
+ * coverageStartMs is the first post seen in the opened files: posts are trusted only from there on.
+ */
+export function readWindow({ path = defaultAskLedgerPath(), since = null, until = null, agents = null, readFile = null } = {}) {
+  const sinceMs = toMs(since, -Infinity);
+  const untilMs = toMs(until, Infinity);
+  const wanted = agents ? new Set(agents) : null;
   const load = readFile || ((file) => readFileSync(file, "utf8"));
-  const rows = [];
-  for (const file of askLedgerFiles(path)) {
+  const asks = [];
+  const posts = [];
+  const files = [];
+  let coverageStartMs = Infinity;
+  for (const span of ledgerSpans(path)) {
+    if (span.lastMs < sinceMs || span.firstMs > untilMs) continue;
     let text = "";
-    try { text = load(file); } catch { continue; }
+    try { text = load(span.file); } catch { continue; }
+    files.push(span.file);
     for (const row of parseJsonlText(String(text || ""))) {
-      if (row?.event !== "post" || row?.version !== ASK_LEDGER_VERSION || typeof row.text !== "string") continue;
-      rows.push(row);
+      if (row?.version !== ASK_LEDGER_VERSION) continue;
+      const ms = Date.parse(row.ts);
+      const isPost = row.event === "post" && typeof row.text === "string";
+      if (isPost) coverageStartMs = Math.min(coverageStartMs, ms);
+      if (!(ms > sinceMs && ms <= untilMs) || (wanted && !wanted.has(row.agent))) continue;
+      if (row.event === "ask" && typeof row.verbatim === "string") asks.push({ ...row, ledgerPath: span.file });
+      else if (isPost) posts.push(row);
     }
   }
-  return rows.sort((left, right) => Date.parse(left.ts) - Date.parse(right.ts));
+  return { asks: coalesceAskLedger(asks), posts: posts.sort(byTimeThenId), coverageStartMs, files };
 }
 
 const PERSISTABLE_COMPLETION_STATUSES = new Set(["done", "answered"]);

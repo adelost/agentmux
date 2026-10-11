@@ -5,7 +5,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { answeredShare, readConversationLog } from "./dream-conversation.mjs";
+import { readWindow } from "./ask-ledger.mjs";
+import { answeredShare } from "./dream-conversation.mjs";
 import { buildDreamBatch, collectDreamSources } from "./dream-summarizer.mjs";
 import { DREAM_CATCH_UP_MS } from "./dream-turn-selection.mjs";
 
@@ -40,7 +41,7 @@ function packetFacts(batch, observed) {
  * WHY: The source switch waits for evidence: bytes, panes, and how many human asks the log answers.
  */
 export function dreamShadow({ agents, sinceMs, receipts, readHistory, current, dateKey, nowMs = Date.now(), logPath }) {
-  const log = readConversationLog({ path: logPath, sinceMs: sinceMs - DREAM_CATCH_UP_MS });
+  const log = readWindow({ path: logPath, since: sinceMs - DREAM_CATCH_UP_MS });
   const observed = collectDreamSources(agents, sinceMs, {
     receipts, readHistory, now: nowMs, conversation: { log, partialWindow: true },
   });

@@ -128,8 +128,27 @@ export function discordMessagePayload(content, nonce = null) {
     ...(nonce ? { nonce, enforce_nonce: true } : {}) };
 }
 
+/**
+ * WHAT: Runs one REST send and records its outcome, sent or failed, in the conversation log.
+ * WHY: Every CLI post leaves a row; a failed send is a row, not a silence.
+ */
+async function recordedPost(channelId, payload, kind, post) {
+  let message;
+  try { message = await post(); }
+  catch (error) {
+    recordDiscordPost({ channelId, payload, kind, via: "cli", status: "failed", error });
+    throw error;
+  }
+  recordDiscordPost({ channelId, payload, kind, via: "cli", status: "sent", message });
+  return message;
+}
+
 /** Post to a Discord channel directly via REST API using agentmux's bot token. */
 async function discordPost(channelId, content, nonce = null, kind = "notice") {
+  return recordedPost(channelId, content, kind, () => postMessage(channelId, content, nonce));
+}
+
+async function postMessage(channelId, content, nonce) {
   const token = getDiscordBotToken();
   if (!token) throw new Error("DISCORD_TOKEN not found — cannot mirror");
   const controller = new AbortController();
@@ -152,9 +171,7 @@ async function discordPost(channelId, content, nonce = null, kind = "notice") {
     const body = await res.text().catch(() => "");
     throw new Error(`discord post ${res.status}: ${body}`);
   }
-  const message = await res.json();
-  recordDiscordPost({ channelId, payload: content, message, kind, via: "cli" });
-  return message;
+  return res.json();
 }
 
 /** Open or create a DM channel with a Discord user. */
@@ -182,6 +199,11 @@ async function discordCreateDm(userId) {
  * `text` is an optional message body that lands alongside the attachment.
  */
 async function discordPostFile(channelId, filePath, text = "", kind = "file") {
+  return recordedPost(channelId, { content: text.slice(0, 2000), files: [filePath] }, kind,
+    () => postFile(channelId, filePath, text));
+}
+
+async function postFile(channelId, filePath, text) {
   const token = getDiscordBotToken();
   if (!token) throw new Error("DISCORD_TOKEN not found — cannot post file");
   const fileBuffer = readFileSync(filePath);
@@ -200,9 +222,7 @@ async function discordPostFile(channelId, filePath, text = "", kind = "file") {
     const body = await res.text().catch(() => "");
     throw new Error(`discord file-post ${res.status}: ${body}`);
   }
-  const message = await res.json();
-  recordDiscordPost({ channelId, payload: { content: text.slice(0, 2000), files: [filePath] }, message, kind, via: "cli" });
-  return message;
+  return res.json();
 }
 
 /** PATCH a Discord channel (used for topic updates). */

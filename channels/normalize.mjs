@@ -35,14 +35,18 @@ export function normalizeDiscordMessage(msg, opts = {}) {
     })),
 
     async reply(content, { kind } = {}) {
-      const r = await msg.reply(content);
-      stamp({ payload: content, message: r, kind });
+      let r;
+      try { r = await msg.reply(content); }
+      catch (error) { stamp({ payload: content, kind, status: "failed", error }); throw error; }
+      stamp({ payload: content, message: r, kind, status: "sent" });
       return r;
     },
 
     async send(content, { kind } = {}) {
-      const r = await msg.channel.send(content);
-      stamp({ payload: content, message: r, kind });
+      let r;
+      try { r = await msg.channel.send(content); }
+      catch (error) { stamp({ payload: content, kind, status: "failed", error }); throw error; }
+      stamp({ payload: content, message: r, kind, status: "sent" });
       return r;
     },
 

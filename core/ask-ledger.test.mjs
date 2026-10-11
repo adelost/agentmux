@@ -6,13 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   appendAskLedger,
-  appendPostLedger,
-  askLedgerFiles,
+  appendPost,
   capturePaneHookAsk,
   coalesceAskLedger,
   persistAskCompletionEvidence,
   readAskLedger,
-  readPostLedger,
+  readWindow,
 } from "./ask-ledger.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 
@@ -95,7 +94,7 @@ feature("durable ask ledger", () => {
       return { root, path };
     }],
     when: ["archives and current rows are read together", ({ path }) => ({
-      files: askLedgerFiles(path), rows: readAskLedger({ path }),
+      files: readWindow({ path }).files, rows: readAskLedger({ path }),
     })],
     then: ["both asks remain in chronological order", ({ files, rows }, ctx) => {
       expect(files).toHaveLength(2);
@@ -220,15 +219,15 @@ feature("durable ask ledger", () => {
       return { root, path, reply };
     }],
     when: ["the bridge records the post", (ctx) => {
-      appendPostLedger({ agent: "lsrc", pane: 1, channelId: "c-1", via: "bridge", kind: "reply",
+      appendPost({ agent: "lsrc", pane: 1, channelId: "c-1", via: "bridge", kind: "reply",
         payload: { content: ctx.reply, files: ["/tmp/shot.png"] }, messageId: "m-1", ts: minutesAfter(3) }, { path: ctx.path });
-      return { posts: readPostLedger({ path: ctx.path }), asks: readAskLedger({ path: ctx.path }) };
+      return { posts: readWindow({ path: ctx.path }).posts, asks: readAskLedger({ path: ctx.path }) };
     }],
     then: ["the post row holds exactly what was posted and asks stay asks", ({ posts, asks }, ctx) => {
       try {
         expect(posts).toHaveLength(1);
         expect(posts[0]).toMatchObject({ event: "post", agent: "lsrc", pane: 1, kind: "reply", via: "bridge",
-          text: ctx.reply, files: ["/tmp/shot.png"], messageId: "m-1" });
+          text: ctx.reply, files: ["/tmp/shot.png"], messageId: "m-1", status: "sent" });
         expect(posts[0].truncated).toBeUndefined();
         expect(asks.map((row) => row.id)).toEqual(["d-1"]);
       } finally { rmSync(ctx.root, { recursive: true, force: true }); }
@@ -239,14 +238,54 @@ feature("durable ask ledger", () => {
     given: ["a 200 KB payload", () => ({ root: freshRoot(), text: "x".repeat(200 * 1024) })],
     when: ["recording it", (ctx) => {
       const path = join(ctx.root, "ask-ledger.jsonl");
-      appendPostLedger({ channelId: "c-1", via: "cli", payload: ctx.text }, { path });
-      return readPostLedger({ path })[0];
+      appendPost({ channelId: "c-1", via: "cli", payload: ctx.text }, { path });
+      return readWindow({ path }).posts[0];
     }],
     then: ["the text stops at 64 KB and the original size is kept", (post, ctx) => {
       try {
         expect(Buffer.byteLength(post.text)).toBe(64 * 1024);
         expect(post).toMatchObject({ truncated: true, textBytes: 200 * 1024 });
         expect(post).toMatchObject({ agent: null, pane: null, kind: "notice" });
+      } finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
+
+  unit("a failed send is a row with its error", {
+    given: ["a reply Discord refused", () => ({ root: freshRoot() })],
+    when: ["recording the attempt", (ctx) => {
+      const path = join(ctx.root, "ask-ledger.jsonl");
+      appendPost({ agent: "lsrc", pane: 0, channelId: "c-0", via: "bridge", kind: "reply", payload: "SUMMARY: klart",
+        status: "failed", error: "DiscordAPIError[50013]: Missing Permissions" }, { path });
+      return readWindow({ path }).posts[0];
+    }],
+    then: ["the row says failed and why, with no message id", (post, ctx) => {
+      try {
+        expect(post).toMatchObject({ status: "failed", error: "DiscordAPIError[50013]: Missing Permissions",
+          messageId: null, text: "SUMMARY: klart" });
+      } finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
+
+  unit("a window read opens only the archives it overlaps", {
+    given: ["three archives, 1, 2 and 3 October, and the current file from 4 October", () => {
+      const root = freshRoot();
+      const path = join(root, "ask-ledger.jsonl");
+      for (const day of [1, 2, 3, 4]) {
+        appendAskLedger({ ts: `2026-10-0${day}T12:00:00Z`, agent: "lsrc", pane: 0, source: "discord", verbatim: `ask ${day}` },
+          { path, maxBytes: 1, now: () => Date.parse(`2026-10-0${day}T23:00:00Z`) });
+      }
+      return { root, path };
+    }],
+    when: ["reading 2 October 06:00 to 3 October 18:00", ({ path }) => {
+      const opened = [];
+      const window = readWindow({ path, since: "2026-10-02T06:00:00Z", until: "2026-10-03T18:00:00Z",
+        readFile: (file) => { opened.push(file); return readFileSync(file, "utf8"); } });
+      return { window, opened };
+    }],
+    then: ["two archives are opened and only their asks are returned", ({ window, opened }, ctx) => {
+      try {
+        expect(opened).toHaveLength(2);
+        expect(window.asks.map((row) => row.verbatim)).toEqual(["ask 2", "ask 3"]);
       } finally { rmSync(ctx.root, { recursive: true, force: true }); }
     }],
   });

@@ -38,6 +38,9 @@ export async function cmdMemory(ctx, subcommand, flags = {}) {
     const result = lintMemory(workspace, { dreamHealth: observeDreamHealth(workspace, { configPath: ctx.configPath }) });
     result.compact = readLatestMemoryCommit(workspace, "compact");
     result.bank = readLatestMemoryCommit(workspace, "bank");
+    const { conversationLogHealth } = await import("../core/conversation-log-health.mjs");
+    try { result.conversationLog = conversationLogHealth(); }
+    catch (error) { result.conversationLog = { error: error.message }; }
     console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryStatus(result));
     return;
   }
