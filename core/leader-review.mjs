@@ -15,9 +15,12 @@ import { dirname, join } from "node:path";
 import { leaderPanes } from "./pause-compact.mjs";
 
 export const LEADER_REVIEW_INTERVAL_MS = 60 * 60_000;
-// The one place the review text lives.
+// The one place the review text lives. It opens with the last change's effect:
+// of skyvw:0's 14 reviews on 2026-10-10/11, 3 of 9 improvements were checked
+// afterwards (Mattias: "metagranskar vad de metagranskar").
 export const LEADER_REVIEW_TEXT = "[amux leader review] About an hour since your last review. Before this request, in at most "
-  + "five lines: what was delivered since then, with numbers and start and end points; what stands still and why; "
+  + "five lines: whether the last review's change helped: keep, adjust or drop, with its evidence; "
+  + "what was delivered since then, with numbers and start and end points; what stands still and why; "
   + "at most one or two concrete improvements, made now. No new rewrite without a measured problem.";
 // "dry" logs when a review would be added and adds nothing; "on" adds it.
 export const LEADER_REVIEW_MODE = "on";

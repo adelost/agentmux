@@ -20,6 +20,11 @@ function review(mode = "on") {
 }
 
 feature("the leader's hourly review", () => {
+  unit("the review closes the loop on the last review's change", {
+    when: ["reading the review text", () => LEADER_REVIEW_TEXT],
+    then: ["it asks whether that change helped, with a verdict and its evidence", text =>
+      expect(text).toContain("whether the last review's change helped: keep, adjust or drop, with its evidence")],
+  });
   unit("a builder never gets it", {
     when: ["deciding for lsrc:1 two hours after anything", () => leaderReviewDue({ leader: false, lastAtMs: T0, nowMs: T0 + 120 * MIN })],
     then: ["not due", decision => expect(decision.due).toBe(false)],
