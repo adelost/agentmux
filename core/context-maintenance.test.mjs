@@ -407,3 +407,61 @@ feature("a held Claude paste never buys or fakes a compact", () => {
     }],
   });
 });
+
+// skyvw:0 2026-10-11: builders never rest 50 minutes, so a pause compact runs
+// one quiet minute after the turn, through the same admission as any compact.
+feature("a pause compact goes through the live admission", () => {
+  const turnEndedSecondsAgo = (ctx, seconds) => { ctx.activityFor = () => ctx.now() - seconds * 1000; };
+  const lastWrite = ctx => ctx.state.get("context_maintenance_by_pane_v1", {})["lsrc:2"];
+
+  component("the 50-minute rule leaves a builder at 473k alone 90 seconds after its turn", {
+    given: ["lsrc:2 at 473k, its turn ended 90 s ago", () => { const ctx = fixture(); turnEndedSecondsAgo(ctx, 90); ctx.maintenance = createContextMaintenance(ctx); return ctx; }],
+    when: ["running warm maintenance without a pause budget", ctx => ctx.maintenance.run("lsrc", 2)],
+    then: ["nothing is compacted", (result, ctx) => {
+      try { expect(result.cell).toBe("within-policy"); expect(ctx.calls).toEqual([]); } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a pause budget compacts the same builder", {
+    given: ["lsrc:2 at 473k, its turn ended 90 s ago", () => { const ctx = fixture(); turnEndedSecondsAgo(ctx, 90); ctx.maintenance = createContextMaintenance(ctx); return ctx; }],
+    when: ["running with the 400k builder budget", ctx => ctx.maintenance.run("lsrc", 2, { pauseTokens: 400_000 })],
+    then: ["one compact is sent and its time is kept for the spacing rule", (result, ctx) => {
+      try {
+        expect(result.compacted).toBe(true);
+        expect(ctx.calls).toEqual(["compact"]);
+        expect(lastWrite(ctx)).toMatchObject({ status: "VERIFIED", at: ctx.now() });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a dry run checks everything and sends nothing", {
+    given: ["lsrc:2 at 473k, its turn ended 90 s ago", () => { const ctx = fixture(); turnEndedSecondsAgo(ctx, 90); ctx.maintenance = createContextMaintenance(ctx); return ctx; }],
+    when: ["running dry with the builder budget", ctx => ctx.maintenance.run("lsrc", 2, { pauseTokens: 400_000, dry: true })],
+    then: ["it reports a would-be compact, sends nothing and writes no attempt", (result, ctx) => {
+      try {
+        expect(result).toMatchObject({ ok: true, dry: true, cell: "compact-once", tokens: 473_000 });
+        expect(ctx.calls).toEqual([]);
+        expect(lastWrite(ctx)).toBeUndefined();
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a delivery on its way holds the pause compact", {
+    given: ["a queued prompt for lsrc:2", () => {
+      const ctx = fixture({ jobs: [{ id: "next-step", status: "pending" }] });
+      turnEndedSecondsAgo(ctx, 90); ctx.maintenance = createContextMaintenance(ctx); return ctx;
+    }],
+    when: ["running with the builder budget", ctx => ctx.maintenance.run("lsrc", 2, { pauseTokens: 400_000 })],
+    then: ["the prompt goes first", (result, ctx) => {
+      try { expect(result.reason).toBe("context-cost:delivery-pending"); expect(ctx.calls).toEqual([]); } finally { ctx.cleanup(); }
+    }],
+  });
+  component("text in the composer holds the pause compact", {
+    given: ["Mattias is typing in lsrc:2", () => {
+      const ctx = fixture(); turnEndedSecondsAgo(ctx, 90);
+      ctx.agent.promptTransportState = async () => ({ state: "drafted" });
+      ctx.maintenance = createContextMaintenance(ctx); return ctx;
+    }],
+    when: ["running with the builder budget", ctx => ctx.maintenance.run("lsrc", 2, { pauseTokens: 400_000 })],
+    then: ["his draft is left alone", (result, ctx) => {
+      try { expect(result.reason).toBe("context-cost:not-idle:drafted"); expect(ctx.calls).toEqual([]); } finally { ctx.cleanup(); }
+    }],
+  });
+});

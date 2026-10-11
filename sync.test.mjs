@@ -1056,6 +1056,38 @@ agents:
     when: ["parsing", (source) => () => parseConfig(source)],
     then: ["fails loudly", (action) => expect(action).toThrow("orchestrator")],
   });
+
+  component("carries leaders beside a Codex orchestrator into runtime config", {
+    given: ["lsrc, where Codex lsrc:3 orchestrates and Claude lsrc:0 also leads", () => `
+guild: guild-1
+agents:
+  lsrc:
+    dir: /tmp/lsrc
+    claude: 3
+    codex: 1
+    orchestrator: 3
+    leaders: [0]
+`],
+    when: ["parsing and regenerating", (source) =>
+      yaml.load(generateAgentsYaml(parseConfig(source).agents, new Map(), new Map())).lsrc],
+    then: ["both leading panes survive regeneration", (generated) => {
+      expect(generated.orchestrator).toBe(3);
+      expect(generated.leaders).toEqual([0]);
+    }],
+  });
+
+  component("rejects a leader outside the coding panes", {
+    given: ["a leader index past the configured panes", () => `
+guild: guild-1
+agents:
+  lsrc:
+    dir: /tmp/lsrc
+    claude: 1
+    leaders: [5]
+`],
+    when: ["parsing", (source) => () => parseConfig(source)],
+    then: ["fails loudly", (action) => expect(action).toThrow("leaders")],
+  });
 });
 
 feature("parseConfig: inter-agent send policy", () => {

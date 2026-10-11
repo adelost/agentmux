@@ -119,6 +119,7 @@ export function listAgents(configPath) {
       claudeModel: conf.claudeModel || null,
       codexModel: conf.codexModel || null,
       orchestrator: Number.isSafeInteger(conf.orchestrator) ? conf.orchestrator : null,
+      leaders: Array.isArray(conf.leaders) ? conf.leaders.filter(Number.isSafeInteger) : [],
     }));
 }
 

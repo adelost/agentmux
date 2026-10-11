@@ -43,6 +43,24 @@ The nighttime job retries a busy shared lease twice, two seconds apart. Explicit
 
 Warm/cold automatic compact admission supports Claude and Codex. Kimi engine/model choices remain unchanged; no automatic paid compact is issued without an implemented exact-receipt path. No verified-compaction or sleep guarantee is claimed for Kimi.
 
+## Compact at natural pauses, 2026-10-11
+
+Mattias, 2026-10-11 04:49Z (voice, transcribed): "ska vi ha som tydliga regler som orkestrator att den ska kompaktera eller kan man automatisera upp till viss del ... det verkar ju funka bra om du kompakterar vid rimliga punkter också för att spara pengar liksom ... Kanske att orkestratorn inte ska kompakteras för ofta men jag vet inte, jag bara tänker högt. Fundera själv du hur du tror det hade varit bäst." and "tänk om det kan få några nackdelar eller konsekvenser också liksom, försök avgöra så att man bara implementerar det smart så att vi man känner sig ändå relativt säker på att det kommer lösa problem och relativt säker på att det inte kommer introducera några allvarliga nya buggar".
+
+Why: busy builders never rest 50 minutes. From 22:00Z to 05:00Z on 10–11 October, lsrc:0, lsrc:1, lsrc:2 and skyvw:0 ended 122 turns; the median pause before the next prompt was 1.5–7 minutes and none lasted 50 minutes. lsrc:0 grew to 860k and lsrc:2 to 783k. skyvw:0 compacted them five times by hand at the first idle moment; all five resumed from their plan within a minute.
+
+The conditions are skyvw:0's decision as orchestrator. They apply to Claude panes only:
+
+- Only after the turn ended: the pane is idle with an empty composer, one quiet minute after its last turn. Never mid-turn.
+- Not while a subagent or background job of the session wrote in the last 5 minutes, or a background job younger than an hour still holds its output open. Older holders are treated as hung.
+- Not with an open permission prompt, menu or a delivery in flight.
+- Above 400,000 tokens for builders, 700,000 for leader panes (the agent's `orchestrator` pane and its `leaders` list). Leaders carry the conversation with Mattias and the plan.
+- At most once per 30 minutes per pane, counted from the last compact amux recorded or the journal shows. The 50-minute idle rule stays.
+- Codex panes are excluded until the Codex cache and compaction costs are measured.
+- `AUTO_COMPACT_PAUSE=dry` logs what would happen to `~/.agentmux/pause-compact.jsonl` without compacting; `on` compacts; `off` disables.
+
+Cost: the compact reads the warm context once and writes a summary. A builder that keeps working at 500k afterwards reads about 100–200k per call instead of 500k.
+
 # Cost evidence
 
 Elapsed idle time is a risk signal, not proof of an exact cache hit, miss or bill. The providers' actual usage records are the authority for observed cache use. Compaction itself can use paid quota, including a cold input context. It can lower subsequent context cost, but cannot guarantee a cheaper first interaction.

@@ -113,6 +113,12 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
             || (orchestrator >= qwenPaneStart && orchestrator < qwenPaneStart + qwenCount)))) {
       throw new Error(`agentmux.yaml: agent '${name}' has invalid orchestrator pane`);
     }
+    // Panes that lead besides the orchestrator, e.g. a Claude leader beside a Codex orchestrator.
+    const leaders = config.leaders;
+    if (leaders !== undefined && (!Array.isArray(leaders)
+        || leaders.some(pane => !Number.isSafeInteger(pane) || pane < 0 || pane >= codingPaneCount))) {
+      throw new Error(`agentmux.yaml: agent '${name}' has invalid leaders; list coding pane numbers`);
+    }
     if (backend === "native" && kimiCount > 0) {
       throw new Error(`agentmux.yaml: native agent '${name}' cannot define Kimi tmux panes`);
     }
@@ -150,6 +156,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
       labels,
       interAgentSend: config.interAgentSend,
       orchestrator: orchestrator ?? null,
+      leaders: leaders ?? [],
       backend,
       runtimeUrl: backend === "native"
         ? String(config.runtime || "http://127.0.0.1:8811").replace(/\/+$/, "")
@@ -350,6 +357,7 @@ export function generateAgentsYaml(
     };
     if (typeof config.interAgentSend === "boolean") entry.interAgentSend = config.interAgentSend;
     if (Number.isSafeInteger(config.orchestrator)) entry.orchestrator = config.orchestrator;
+    if (config.leaders?.length) entry.leaders = config.leaders;
     if (config.backend === "native") {
       entry.backend = "native";
       entry.runtimeUrl = config.runtimeUrl;

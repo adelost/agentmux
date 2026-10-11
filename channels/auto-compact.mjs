@@ -43,6 +43,7 @@ export function createAutoCompact({
   tmux,      // tmux exec function, same signature as createTmuxContext provides
   config,
   contextMaintenance = null,
+  pauseCompact = null,
   log = (msg) => console.log(`auto-compact | ${msg}`),
 }) {
   const warnings = new Map();
@@ -235,6 +236,22 @@ export function createAutoCompact({
     log(`${paneKey}: compact refused before sending (${reason}), retrying next poll while the prompt cache is warm`);
   }
 
+  /** WHAT: Runs the pause rule for one pane; true when it sent a compact. WHY: Keeps the 50-minute rule off a pane the pause rule just compacted. */
+  async function compactedAtPause(agentConfig, paneIdx, paneKey, { status, paneInMode, contextTokens, lastActivityMs }) {
+    if (!pauseCompact) return false;
+    // Held like a fired compact, so an overlapping poll cannot consider the same pane.
+    compacting.add(paneKey);
+    try {
+      const compacted = await pauseCompact.consider({ agentConfig, pane: paneIdx, engine: paneDialect(agentConfig, paneIdx),
+        paneDir: panePathFor(agentConfig, paneIdx), status, inCopyMode: paneInMode === "1" || paneInMode === 1, contextTokens, lastActivityMs });
+      if (compacted) warnings.delete(paneKey);
+      return compacted;
+    } catch (err) {
+      log(`${paneKey}: pause compact failed: ${err.message}`);
+      return false;
+    } finally { compacting.delete(paneKey); }
+  }
+
   // paneKey → status from the previous tick. Drives the limited-transition
   // alert: when a pane runs out of quota it just goes SILENT — the human
   // discovered ai:4's stall by accident (2026-07-10). One alert per entry
@@ -390,6 +407,7 @@ export function createAutoCompact({
           warnings.delete(paneKey);
           continue;
         }
+        if (await compactedAtPause(a, i, paneKey, { status, paneInMode, contextTokens, lastActivityMs })) continue;
         if (!contextMaintenance && attemptedActivity.has(paneKey) && attemptedActivity.get(paneKey) === lastActivityMs) continue;
         const decision = decideAutoCompactAction({
           paneKey,

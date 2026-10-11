@@ -39,7 +39,13 @@ function write(state, key, record) {
 export function rememberContextCompact(state, name, pane, receipt) {
   // "Nothing to compact" leaves the context as small as a compact would: no attempt is due before new work.
   if (!state || !(receipt?.ok || receipt?.nothingToCompact)) return;
-  write(state, paneKey(name, pane), { sessionId: receipt.sessionId, cursor: receipt.cursor, status: "VERIFIED" });
+  write(state, paneKey(name, pane), { sessionId: receipt.sessionId, cursor: receipt.cursor, status: "VERIFIED", at: Date.now() });
+}
+
+/** WHAT: Reads when amux last tried to compact a pane, whatever the outcome. WHY: Keeps pause compaction at most once per spacing window. */
+export function lastContextCompactAt(state, name, pane) {
+  const record = state?.get?.(STATE_KEY, {})?.[paneKey(name, pane)];
+  return record && record.status !== "NOT_SENT" && Number.isFinite(record.at) ? record.at : null;
 }
 
 /** WHAT: Reads the current context-generation fence. WHY: Keeps warm, cold and nightly maintenance from repeating a paid attempt without new work. */
@@ -70,7 +76,8 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   const existing = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity);
   const canAttempt = (name, pane, sessionId) => !existing(name, pane, sessionId ? { sessionId } : null);
 
-  async function run(name, pane, { cold = false, leaseHeld = false, heldLease = null, jobId = null } = {}) {
+  // pauseTokens: compact at a natural pause above this budget. dry: run every check, then stop before the paid compact.
+  async function run(name, pane, { cold = false, pauseTokens = null, dry = false, leaseHeld = false, heldLease = null, jobId = null } = {}) {
     const target = resolveTarget(name, pane);
     if (!target || !["claude", "codex"].includes(target.engine)) return { ok: true, skipped: "unsupported-engine" };
     if (typeof agent.paneProcessState !== "function" || (await agent.paneProcessState(name, pane).catch(() => null))?.running !== true) {
@@ -91,7 +98,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const input = await agent.isBusy(name, pane) ? "busy"
       : (await agent.promptTransportState(name, pane, "").catch(() => null))?.state || "unreadable";
     const safe = input === "empty-idle";
-    const decision = contextCostDecision({ tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, safe, attempt }, policy);
+    const decision = contextCostDecision({ tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, pauseTokens, safe, attempt }, policy);
     if (decision.values.action === "CONTINUE") return { ok: true, cell: decision.cell };
     if (cold && target.engine === "claude" && decision.cell === "unknown-evidence" && attempt === "NEW"
         && safe && !Number.isFinite(context?.tokens)
@@ -122,6 +129,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       }
       const current = identityFor(target.engine, target.dir);
       if (current?.sessionId !== identity.sessionId || await agent.isBusy(name, pane)) return { ok: false, reason: "context-cost:session-or-activity-changed" };
+      if (dry) return { ok: true, dry: true, cell: decision.cell, tokens: context.tokens };
       if (target.engine === "codex") {
         const idle = await prepareCodexIdle({ agent, name, pane });
         if (!idle.ok) return { ok: false, reason: `context-cost:${idle.stage}:${idle.error}` };

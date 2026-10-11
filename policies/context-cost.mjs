@@ -16,6 +16,15 @@ import { choice, decide, defineDecisionTable, on } from "@v1d/product-spec";
 export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 80_000, coldMaxTokens: 210_000,
   idleMs: 50 * 60_000, coldMs: 60 * 60_000 });
 
+// skyvw:0 2026-10-11, on Mattias's "det verkar ju funka bra om du kompakterar
+// vid rimliga punkter också för att spara pengar": busy builders never rest 50
+// minutes (median pause 1.5-7 min overnight), so a Claude pane is also compacted
+// once its turn has ended. Leaders carry the plan and the conversation with
+// Mattias, so they keep more context.
+/** WHAT: Defines compaction at a natural pause. WHY: Keeps busy panes from growing past 700k between 50-minute rests that never come. */
+export const PAUSE_COMPACT_POLICY = Object.freeze({ builderTokens: 400_000, leaderTokens: 700_000,
+  settleMs: 60_000, spacingMs: 30 * 60_000, backgroundQuietMs: 5 * 60_000, hungJobMs: 60 * 60_000 });
+
 /** WHAT: Reads operator cost-policy overrides. WHY: Keeps daytime and cold-wake thresholds consistent after restart. */
 export function readContextCostPolicy(env = process.env) {
   const maxTokens = Number(env.AUTO_COMPACT_MAX_TOKENS || CONTEXT_COST_POLICY.maxTokens);
@@ -49,9 +58,9 @@ export const contextCostDeclaration = {
 export const contextCostRules = defineDecisionTable(contextCostDeclaration);
 
 /** WHAT: Maps observed context facts to a traceable decision cell. WHY: Keeps numeric thresholds outside effects and unknown values outside permissive defaults. */
-export function contextCostDecision({ tokens, idleMs, cold = false, safe = false, attempt = "NEW" }, policy = CONTEXT_COST_POLICY) {
-  const ageLimit = cold ? policy.coldMs : policy.idleMs;
-  const tokenLimit = cold ? policy.coldMaxTokens ?? policy.maxTokens : policy.maxTokens;
+export function contextCostDecision({ tokens, idleMs, cold = false, pauseTokens = null, safe = false, attempt = "NEW" }, policy = CONTEXT_COST_POLICY) {
+  const ageLimit = cold ? policy.coldMs : pauseTokens ? PAUSE_COMPACT_POLICY.settleMs : policy.idleMs;
+  const tokenLimit = cold ? policy.coldMaxTokens ?? policy.maxTokens : pauseTokens ?? policy.maxTokens;
   const need = (Number.isFinite(tokens) && tokens <= tokenLimit) || (Number.isFinite(idleMs) && idleMs < ageLimit)
     ? "NONE" : !Number.isFinite(tokens) || !Number.isFinite(idleMs) ? "UNKNOWN" : "COMPACT";
   return decide(contextCostRules, { need, readiness: safe ? "SAFE" : "UNSAFE", attempt });
