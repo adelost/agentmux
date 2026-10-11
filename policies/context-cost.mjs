@@ -21,9 +21,15 @@ export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 80_000, coldMaxTok
 // minutes (median pause 1.5-7 min overnight), so a Claude pane is also compacted
 // once its turn has ended. Leaders carry the plan and the conversation with
 // Mattias, so they keep more context.
+// skyvw:0 2026-10-11, on Mattias's "Borde autocompact bara vara tjugo minuter för
+// Codex eller tjugofem minuter": OpenAI keeps a GPT-5.6+ prefix "for 30 minutes
+// after its most recent write or reuse", and our Codex compacts were 83% cached
+// 5-30 minutes after the last call against 43% after 60. Codex compacts an idle
+// pane after 25 minutes; Claude, whose cache lives an hour, keeps 50.
 /** WHAT: Defines compaction at a natural pause. WHY: Keeps busy panes from growing past 700k between 50-minute rests that never come. */
 export const PAUSE_COMPACT_POLICY = Object.freeze({ builderTokens: 400_000, leaderTokens: 700_000,
-  settleMs: 60_000, spacingMs: 30 * 60_000, backgroundQuietMs: 5 * 60_000, hungJobMs: 60 * 60_000 });
+  settleMs: 60_000, spacingMs: 30 * 60_000, backgroundQuietMs: 5 * 60_000, hungJobMs: 60 * 60_000,
+  codexIdleMs: 25 * 60_000 });
 
 /** WHAT: Reads operator cost-policy overrides. WHY: Keeps daytime and cold-wake thresholds consistent after restart. */
 export function readContextCostPolicy(env = process.env) {

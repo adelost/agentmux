@@ -39,23 +39,30 @@ export const pauseCompactLimit = (agentConfig, pane, policy = PAUSE_COMPACT_POLI
 const hold = (cell, detail) => ({ action: "hold", cell, detail });
 
 /**
- * WHAT: Decides whether a pane at a pause is compacted now.
+ * WHAT: Decides whether a pane at a pause is compacted now, and against which budget.
  * WHY: Keeps every condition of the pause rule in one pure, testable place.
- * "none" means no pause or no need; "hold" means an over-budget pause that a guard keeps, which is logged.
+ * "none" means no pause or no need; "hold" means a due compact that a guard keeps, which is logged.
+ * idleLimit and idleMs give Codex its own idle rule: above the daytime budget after 25 quiet minutes.
  */
-export function pauseCompactDecision({ engine, tokens, limit, status, inCopyMode = false, quietMs, background = null, lastCompactAt = null, now },
-  policy = PAUSE_COMPACT_POLICY) {
+export function pauseCompactDecision({ engine, tokens, limit, idleLimit = null, idleMs = null, status, inCopyMode = false, quietMs,
+  background = null, lastCompactAt = null, now }, policy = PAUSE_COMPACT_POLICY) {
   if (!["claude", "codex"].includes(engine)) return { action: "none", cell: "no-compact-receipt" };
-  if (!Number.isFinite(tokens) || tokens <= limit) return { action: "none", cell: "within-budget" };
+  const overPause = Number.isFinite(tokens) && tokens > limit;
+  const overIdle = Number.isFinite(tokens) && Number.isFinite(idleLimit) && Number.isFinite(idleMs) && tokens > idleLimit;
+  if (!overPause && !overIdle) return { action: "none", cell: "within-budget" };
   if (isLiveStatus(status)) return { action: "none", cell: "turn-running" };
-  if (!Number.isFinite(quietMs) || quietMs < policy.settleMs) return { action: "none", cell: "settling" };
+  const pauseDue = overPause && quietMs >= policy.settleMs;
+  const idleDue = overIdle && quietMs >= idleMs;
+  if (!pauseDue && !idleDue) return { action: "none", cell: "settling" };
   if (inCopyMode) return hold("copy-mode", "the pane is in tmux copy-mode");
   if (isCompactUnsafe(status)) return hold("unsafe-status", `its status is ${status}`);
   if (background) return hold("background-active", background);
   if (Number.isFinite(lastCompactAt) && now - lastCompactAt < policy.spacingMs) {
     return hold("spacing", `compacted ${Math.round((now - lastCompactAt) / 60_000)} min ago`);
   }
-  return { action: "compact", cell: "pause", detail: `turn ended ${Math.round(quietMs / 1000)}s ago at ${tokens} tokens > ${limit}` };
+  return pauseDue
+    ? { action: "compact", cell: "pause", budget: limit, detail: `turn ended ${Math.round(quietMs / 1000)}s ago at ${tokens} tokens > ${limit}` }
+    : { action: "compact", cell: "codex-idle", budget: idleLimit, detail: `idle ${Math.round(quietMs / 60_000)} min at ${tokens} tokens > ${idleLimit}` };
 }
 
 const newestMtimeMs = (dir) => {

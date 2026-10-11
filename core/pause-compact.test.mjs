@@ -42,6 +42,23 @@ feature("compaction at a natural pause: one guard per condition", () => {
     when: ["the last compact was 31 minutes ago", () => decide({ lastCompactAt: NOW - 31 * MIN })],
     then: ["it compacts", result => expect(result.action).toBe("compact")],
   });
+  unit("a Codex pane over the daytime budget is compacted after 25 quiet minutes", {
+    when: ["deciding for Codex at 90k, 20 and 26 minutes after its turn", () => [20, 26].map(minutes =>
+      decide({ engine: "codex", tokens: 90_000, idleLimit: 80_000, idleMs: 25 * MIN, quietMs: minutes * MIN }))],
+    then: ["it waits at 20 and compacts against 80k at 26", ([early, due]) => {
+      expect(early).toMatchObject({ action: "none", cell: "settling" });
+      expect(due).toMatchObject({ action: "compact", cell: "codex-idle", budget: 80_000 });
+    }],
+  });
+  unit("a Claude pane keeps the 50-minute rule", {
+    when: ["deciding for Claude at 90k, 26 minutes after its turn", () => decide({ tokens: 90_000, quietMs: 26 * MIN })],
+    then: ["the pause rule leaves it to the 50-minute rule", result => expect(result).toMatchObject({ action: "none", cell: "within-budget" })],
+  });
+  unit("the Codex idle rule keeps every pause guard", {
+    when: ["a Codex pane idle 26 minutes with a running terminal", () => decide({ engine: "codex", tokens: 90_000,
+      idleLimit: 80_000, idleMs: 25 * MIN, quietMs: 26 * MIN, background: "1 Codex terminal process(es) running, the oldest for 26 min" })],
+    then: ["held", result => expect(result).toMatchObject({ action: "hold", cell: "background-active" })],
+  });
   unit("an engine without a compact receipt is left out", {
     when: ["a Kimi pane is over budget at a pause", () => decide({ engine: "kimi" })],
     then: ["nothing happens", result => expect(result).toMatchObject({ action: "none", cell: "no-compact-receipt" })],

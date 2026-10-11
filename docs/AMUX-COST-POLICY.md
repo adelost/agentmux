@@ -59,6 +59,8 @@ The conditions are skyvw:0's decision as orchestrator. They apply to Claude pane
 - Codex panes run only dry, under their own switch `AUTO_COMPACT_PAUSE_CODEX`, until it is turned on. Measured 2026-10-11 (memory/references/codex-cache-compact-2026-10-11.md): a Codex compact within 5 minutes of the last call was 85% cached and pays back in about 11 calls. skyvw:0 decided 2026-10-11 to turn Codex on together with Claude once the dry log shows right decisions, with the same guards: Codex subagents are seen in their rollouts, background terminals in the pane's process tree (the journal has no exit record for a command the model never polls again).
 - `AUTO_COMPACT_PAUSE=dry` (Claude) logs what would happen to `~/.agentmux/pause-compact.jsonl` without compacting; `on` compacts; `off` disables.
 
+Idle compact time per engine (skyvw:0, 2026-10-11, on Mattias's "Borde autocompact bara vara tjugo minuter för Codex eller tjugofem minuter för Codex"): Claude keeps 50 minutes, since its prompt cache lives an hour. Codex compacts a pane above the daytime budget after 25 quiet minutes. OpenAI keeps a GPT-5.6+ prefix "for 30 minutes after its most recent write or reuse", and measured Codex compacts were 83% cached 5-30 minutes after the last call, 71% at 30-60 and 43% after 60. The Codex idle rule runs inside pause compaction, so it has the same guards, the same dry log and the same switch (`AUTO_COMPACT_PAUSE_CODEX`); until that is on, Codex keeps the 50-minute rule.
+
 Cost: the compact reads the warm context once and writes a summary. A builder that keeps working at 500k afterwards reads about 100–200k per call instead of 500k.
 
 # Cost evidence

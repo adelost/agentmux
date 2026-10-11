@@ -6,7 +6,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { PAUSE_COMPACT_POLICY } from "../policies/context-cost.mjs";
+import { PAUSE_COMPACT_POLICY, readContextCostPolicy } from "../policies/context-cost.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { lastContextCompactAt } from "../core/context-maintenance.mjs";
 import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, pauseCompactDecision, pauseCompactLimit,
@@ -22,7 +22,7 @@ const appendJsonLine = (path, record) => {
 };
 
 /** WHAT: Builds the pause-compaction step of the auto-compact poll. WHY: Keeps the new rule beside the 50-minute rule without changing it. */
-export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, now = Date.now,
+export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, idleTokens = readContextCostPolicy().maxTokens, now = Date.now,
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
   identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs }) {
   const lastLogged = new Map();
@@ -53,7 +53,9 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const paneKey = `${name}:${pane}`;
     const limit = pauseCompactLimit(agentConfig, pane, policy);
     const quietMs = Number.isFinite(lastActivityMs) ? now() - lastActivityMs : NaN;
-    const facts = { engine, tokens: contextTokens, limit, status, inCopyMode, quietMs, now: now() };
+    // Codex's cache lives about 30 minutes, so its idle rule is 25 minutes instead of the shared 50.
+    const codexIdle = engine === "codex" ? { idleLimit: idleTokens, idleMs: policy.codexIdleMs } : {};
+    const facts = { engine, tokens: contextTokens, limit, ...codexIdle, status, inCopyMode, quietMs, now: now() };
     if (pauseCompactDecision(facts, policy).action === "none") return false;
 
     const identity = identityFor(engine, paneDir);
@@ -61,7 +63,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const decision = pauseCompactDecision({ ...facts,
       background: backgroundFor[engine]({ sessionPath: identity.path, sessionId: identity.sessionId, paneDir, now: facts.now, policy }),
       lastCompactAt: lastCompactAt(name, pane, paneKey, identity.path) }, policy);
-    const line = { at: new Date(facts.now).toISOString(), pane: paneKey, mode, tokens: contextTokens, limit,
+    const line = { at: new Date(facts.now).toISOString(), pane: paneKey, mode, tokens: contextTokens, limit: decision.budget ?? limit,
       leader: leaderPanes(agentConfig).has(pane), quietSec: Math.round(quietMs / 1000), cell: decision.cell, detail: decision.detail };
     if (decision.action === "hold") {
       report(paneKey, lastActivityMs, { ...line, outcome: "held" });
@@ -69,7 +71,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     }
 
     // The same admission as a live compact: lease, fence, delivery in flight, session, busy screen, composer.
-    const result = await contextMaintenance.run(name, pane, { pauseTokens: limit, dry: mode === "dry" });
+    const result = await contextMaintenance.run(name, pane, { pauseTokens: decision.budget, dry: mode === "dry" });
     if (result.dry) {
       dryCompacts.set(paneKey, facts.now);
       report(paneKey, lastActivityMs, { ...line, outcome: "would-compact", tokens: result.tokens ?? contextTokens });
