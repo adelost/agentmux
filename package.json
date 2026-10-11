@@ -1,6 +1,6 @@
 {
   "name": "agentmux",
-  "version": "1.25.165",
+  "version": "1.25.166",
   "description": "Local bridge and native workspace for coding agents (Claude Code, Codex, Kimi Code, Qwen Code)",
   "license": "MIT",
   "repository": {
