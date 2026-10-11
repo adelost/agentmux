@@ -87,6 +87,26 @@ feature("Dream reads the conversation log before any journal", () => {
     }],
   });
 
+  unit("a log that started mid-window neither drops a pane nor its answers", {
+    given: ["logging began at 04:00; lsrc:0 was asked at 03:00 and answered at 04:30, lsrc:1 answered with no ask in the log", () => ({
+      coverageStartMs: Date.parse(at(2)),
+      asks: [ask("e-1", 0, at(1), "Mattias: bygg paret")],
+      posts: [post(0, at(2, 30), "reply", "SUMMARY: paret byggt"), post(1, at(3), "reply", "SUMMARY: utan fråga i loggen")],
+    })],
+    when: ["collecting the shadow with partial windows", (partial) => collectDreamSources(agents, SINCE, {
+      receipts: { panes: {} }, now: NOW, conversation: { log: partial, partialWindow: true },
+      readHistory: (_engine, dir) => ({ turns: [{ timestamp: at(2), userPrompt: `journal work in ${dir}`, isComplete: true,
+        items: [{ type: "text", content: "done" }] }] }),
+    })],
+    then: ["lsrc:0 keeps its answer from the log, lsrc:1 falls back to its journal", ({ sources }) => {
+      const byPane = Object.fromEntries(sources.map((item) => [`${item.agent}:${item.pane}`, item]));
+      expect(byPane["lsrc:0"].source).toBe("conversation-log");
+      expect(byPane["lsrc:0"].entries[0].items[0].content).toBe("SUMMARY: paret byggt");
+      expect(byPane["lsrc:0"].historyComplete).toBe(false);
+      expect(byPane["lsrc:1"].source).toBe("journal");
+    }],
+  });
+
   unit("the shadow counts settled human asks that got an answer posted", {
     given: ["three discord asks on lsrc:1, one answered, one too recent, plus an unanswered cli brief", () => ({
       coverageStartMs: SINCE,

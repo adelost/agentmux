@@ -56,8 +56,11 @@ warning and never turns into a second post.
 - `amux dream` runs a shadow on the log beside its current journal source.
   Panes that posted an answer in their window are built from asks and the
   `reply`/`file`/`voice` posts after each ask; Dream's own prompt and the
-  curator's reply to it are left out. Panes without such posts fall back to
-  the provider journal. The shadow prints its comparison in `amux dream --dry`
+  curator's reply to it are left out. Panes without such posts, or whose
+  answers belong to an ask from before their window, fall back to the
+  provider journal. Every delivered ask starts a turn in the log, while a
+  journal folds messages delivered mid-turn into the running turn and defers
+  it, so the log can show a busy pane the journal leaves for the next night. The shadow prints its comparison in `amux dream --dry`
   and saves it per run in `~/.agentmux/dream-shadow/`. It never changes the
   packet the curator receives.
 - Window reads go newest file first and stop at the first archive rotated

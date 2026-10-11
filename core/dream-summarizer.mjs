@@ -37,12 +37,13 @@ export function dreamPaneEngine(pane = {}) {
 function conversationHistory(conversation, agent, pane, cutoffMs) {
   if (!conversation) return null;
   const { log, partialWindow = false } = conversation;
-  // A window that began before logging started would lose its earlier answers.
+  // A window that began before logging started has asks without their answers;
+  // only the shadow accepts that, marked as an incomplete history.
   if (!partialWindow && log.coverageStartMs > cutoffMs) return null;
-  const windowStartMs = Math.max(cutoffMs, log.coverageStartMs);
-  const found = conversationForPane(log, agent, pane, windowStartMs);
-  if (!found.answered) return null;
-  return { turns: found.turns, lastWriteMs: found.lastWriteMs, reachedSince: windowStartMs <= cutoffMs, fromLog: true };
+  const found = conversationForPane(log, agent, pane, cutoffMs);
+  // Answers whose ask predates the window cannot form a turn: keep the journal.
+  if (!found.answered || !found.turns.length) return null;
+  return { turns: found.turns, lastWriteMs: found.lastWriteMs, reachedSince: log.coverageStartMs <= cutoffMs, fromLog: true };
 }
 
 /** WHAT: Collects journal-backed work without touching runtimes. WHY: Prevents Dream from waking or interrupting panes. */
