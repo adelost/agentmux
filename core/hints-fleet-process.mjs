@@ -81,17 +81,29 @@ AMUX never authorizes extra checkouts against that policy.
 Commit + push within 30 min of starting an edit. Long-running WIP that
 isn't in git is invisible to other agents.
 
-For missing dependencies in an authorized checkout, follow the repo's setup
-instructions; \`amux --help\` documents \`worktree-deps\`. Bootstrap success
-does not replace the scoped verification in staffing rule 6.
+Missing dependencies: follow the repo's setup (\`amux --help\`: \`worktree-deps\`).
+A bootstrap does not replace staffing rule 6's verification.
 
 ## Subagents
 
 Never fork or copy a session into a subagent (Mattias 2026-10-10: "vi borde
 väl förbjuda det helt"). AMUX blocks Claude forks; in Codex call
 \`spawn_agent\` only with \`fork_turns="none"\`. Start a fresh subagent with a
-short written brief.
-Cache facts: \`~/.openclaw/workspace/memory/references/claude-subagent-cache-2026-10-10.md\`.
+short written brief. Cache facts: see below.
+
+## Context and compaction
+
+- Never mid-turn, or while a subagent or terminal works, a prompt is open or a delivery is pending.
+- A big context compacts when its turn ends; leaders keep more than builders.
+- Idle Claude panes compact before their prompt cache expires.
+- Idle Codex panes compact sooner: their cache expires sooner.
+- A pane idle past its cache's life compacts before its next delivery, when that pays back.
+- Orchestrators compact at a stage boundary (after a release), not mid-conversation.
+- Bounded tasks go to a fresh subagent with a brief; continue your own work after a compact.
+- Write what a compact loses to files as you work: quotes, exact numbers, decisions.
+
+Varför och belägg: \`~/.openclaw/workspace/memory/references/claude-subagent-cache-2026-10-10.md\`,
+avsnittet "Kompaktering: valen och varför". Ändra en regel bara med nya mätningar mot de där.
 
 ## Hotspot reflection
 
@@ -118,46 +130,37 @@ function's own branching or state. Do a small split in the same change.
 ## Staffing and review economics
 
 1. **One owner per feature, end to end.** A direct human request makes its
-   recipient the owner. When a work board is configured, a capable idle agent may also self-claim one READY
-   or otherwise explicitly claimable ticket. No broker relay or peer
-   approval is required. The owner
-   plans, implements, runs targeted checks, rebases, self-merges, deploys when
-   applicable, verifies live, records the completion commit, and cleans up.
-   Feature scope follows the full data-to-consumer seam when that is needed for
-   a real root fix; it is not restricted to one pre-listed file.
+   recipient the owner. With a configured work board, a
+   capable idle agent may also self-claim one READY or explicitly claimable
+   ticket, with no broker relay or peer approval. The owner plans, implements, runs targeted checks,
+   rebases, self-merges, deploys when applicable, verifies live, records the
+   completion commit and cleans up. Scope follows the full data-to-consumer
+   seam when a real root fix needs it, not one pre-listed file.
 2. **Managers are sidecars, not gateways.** A project manager watches capacity,
    blockers, dropped work and duplicate effort. It may nudge or reassign only
    after a concrete stall, collision, delivery failure, or idle-capacity gap.
    Normal tasks, decisions, reviews, merges and deploys do not flow through the
-   manager. Do not make every worker report through one pane.
+   manager.
 3. **Do not wake a fleet to look busy.** A durable task wakes its exact owner;
-   otherwise dormant panes stay dormant. "Sync/check all panels" authorizes
-   reading their status and evidence, not sending prompts to all of them.
-   Even FYI, criteria-only and "no action needed" messages activate a model
-   and can spend quota. Store shared criteria for the next natural turn;
-   contact only an owner who needs a concrete action or handoff. Respect the
-   operator's chosen models and participants: an available idle panel or
-   unused provider is not permission to activate it. A pane returning after seven or more
-   days first re-anchors with \`amux done --week\`, \`amux asks --open\`, this
-   generated policy and the repository's current instructions before acting.
-   \`amux reconcile\` repairs configured service/shell panes; it is not a
-   staffing command and must not be used to wake idle coding agents.
-   Delivery is proven by the recipient's durable receipt, not by enqueue time;
-   the owner-response clock starts only after that receipt.
+   dormant panes stay dormant. "Sync/check all panels" authorizes reading
+   status and evidence, not prompting them. Even FYI or "no action needed"
+   messages run a model and spend quota: store shared criteria for the next
+   natural turn and contact only an owner who needs a concrete action or
+   handoff. An idle panel or unused provider is not permission to activate it.
+   A pane back after seven or more days first re-anchors with
+   \`amux done --week\`, \`amux asks --open\`, this policy and the repository's
+   instructions. \`amux reconcile\` repairs service/shell panes; it is not a
+   staffing command and never wakes coding agents. Delivery is proven by the recipient's durable
+   receipt, not enqueue time; the owner-response clock starts at that receipt.
 
-   Codex cost policy (Mattias, 2026-09-20; model 2026-10-11): the fleet
-   default is \`gpt-6.1-sol\`, never Astra. Claude and Kimi keep theirs.
-   A later explicit pane model choice survives AMUX restart; never reset it
-   to the fleet default.
-   Every Codex model change requires a successful compact of that exact
-   session before switching, followed by live model verification. A failed
-   compact blocks the change and new work; never silently continue on another
-   model or repeatedly retry a paid compact. Dormant panels migrate when next
-   needed, before their work prompt, not through a fleet wake-up. Read model,
-   tokens and compact receipts from the exact pane, never an ancestor session.
-   Change models with Discord \`/model sol\` or \`amux model PROJECT -p N sol\`;
-   a raw \`/model\` is refused because it bypasses compact.
-   Subscription quota is paid capacity. The operator can revise this policy.
+   Codex models (Mattias, 2026-09-20 and 2026-10-11): default
+   \`gpt-6.1-sol\`, never Astra; Claude and Kimi keep theirs. An explicit pane
+   choice survives restart. Change models only with Discord \`/model sol\` or
+   \`amux model PROJECT -p N sol\`: it compacts that exact session first and
+   verifies the live model; a raw \`/model\` is refused. A failed compact blocks
+   the change and new work, with no paid retry. Dormant panes switch at their
+   next work prompt, never by a fleet wake-up. Read model, tokens and receipts
+   from the exact pane. Subscription quota is paid capacity.
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, in a modal, or between tool calls.
    A blocked task does not reserve its pane indefinitely:
@@ -197,8 +200,7 @@ function's own branching or state. Do a small split in the same change.
 9. **Record blockers where work is tracked.** Use a concrete reason and the
    dependency/evidence needed to clear it. Do not keep blockers only in a
    manager's memory, and do not call silence or an unstarted owner clock a
-   worker failure. When a board is enabled, use its typed states rather than
-   encoding state as prose in a private note.
+   worker failure. With a board, use its typed states, not prose in a private note.
 10. **Human direction is authoritative and remains direct.** A decision relayed
     as authority (a GO, a price, a name) keeps the human quote byte-for-byte with
     provenance. A work brief is the orchestrator's interpretation: numbered
@@ -215,7 +217,6 @@ function's own branching or state. Do a small split in the same change.
     Re-evaluate conditional deferrals against completed prerequisites.
     Take the next authorised independent READY item; a blocker holds only its
     actual dependents. Stay idle only when no authorised runnable work remains.
-    Do not invent scope or wake unused panes to look busy.
 
 ## Minnesloggning
 
