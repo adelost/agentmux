@@ -9,7 +9,7 @@ const HOUR = 3_600_000;
 const NOW = Date.parse("2026-10-10T08:30:00Z");
 const RESET = "2026-10-14T07:00:00Z";
 const profile = (id) => ({ provider: "claude", id, key: `claude:${id}` });
-const EMAILS = { 1: "adelost@gmail.com", wetterlind: "mattias.wetterlind@gmail.com", 2: "attrois@gmail.com" };
+const EMAILS = { 1: "adelost@example.test", wetterlind: "wetterlind@example.test", 2: "other@example.test" };
 const identityOf = (candidate) => ({ email: EMAILS[candidate.id] });
 const weekly = (usedPercent) => ({ ok: true, limits: [{ kind: "weekly_all", usedPercent, resetsAt: RESET }] });
 
@@ -63,7 +63,7 @@ feature("weekly Claude quota warning", () => {
     then: ["two notices: the ordinary, then one urgent naming adelost as the target, never attrois", (notify) => {
       expect(notify.mock.calls.map(([, options]) => options.level)).toEqual(["warn", "urgent"]);
       expect(notify.mock.calls[1][0]).toMatch(/tar slut om ca \d+ h/u);
-      expect(notify.mock.calls[1][0]).toMatch(/`\/byt adelost@gmail\.com`/u);
+      expect(notify.mock.calls[1][0]).toMatch(/`\/byt adelost@example\.test`/u);
       expect(notify.mock.calls.map(([text]) => text).join("\n")).not.toMatch(/attrois/u);
     }],
   });

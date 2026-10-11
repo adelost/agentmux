@@ -508,7 +508,7 @@ amux accounts rotate claude:2 --dry
 ```
 
 The target can also be a login dir or an account email
-(`amux accounts rotate claude:mattias.wetterlind@gmail.com --dry`). The real
+(`amux accounts rotate claude:wetterlind@example.test --dry`). The real
 rotation first locks delivery and refuses active turns, drafts, unknown state,
 or missing exact sessions. Only a warm context above 80k tokens gets a verified
 `/compact` on its source first; cold or small contexts move as they are, since

@@ -53,11 +53,11 @@ feature("Claude logins outside the launch slots", () => {
       runtimeProfileCatalog("claude", { HOME: "/home/matt" }, loginDirsFs)],
     when: ["resolving by email, case-insensitively", (catalog) => {
       const identityOf = (profile) => ({ email: profile.id === "wetterlind"
-        ? "mattias.wetterlind@gmail.com" : "adelost@gmail.com" });
+        ? "wetterlind@example.test" : "adelost@example.test" });
       return {
-        wetterlind: resolveClaudeAccountTarget("Mattias.Wetterlind@gmail.com", catalog, { identityOf }),
-        adelost: resolveClaudeAccountTarget("adelost@gmail.com", catalog, { identityOf }),
-        unknown: resolveClaudeAccountTarget("attrois@gmail.com", catalog, { identityOf }),
+        wetterlind: resolveClaudeAccountTarget("Wetterlind@example.test", catalog, { identityOf }),
+        adelost: resolveClaudeAccountTarget("adelost@example.test", catalog, { identityOf }),
+        unknown: resolveClaudeAccountTarget("other@example.test", catalog, { identityOf }),
       };
     }],
     then: ["the email picks that login, a shared login picks its first slot, an absent one nothing", (found) => {

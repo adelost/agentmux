@@ -510,7 +510,7 @@ feature("Claude fleet account rotation", () => {
   unit("a pane already on the target account through the other slot stays where it is", {
     given: ["slots 1 and 2 both logged in as adelost, a warm large pane on slot 1", () => {
       const fx = fixture();
-      fx.deps.identityOf = () => ({ email: "adelost@gmail.com" });
+      fx.deps.identityOf = () => ({ email: "adelost@example.test" });
       fx.deps.observeContext.mockResolvedValue({ facts: { tokens: 150_000, idleMs: 60_000 },
         compactRefusal: null, compacted: false, target: null });
       fx.ctx.agent.restartClaudeAccount = vi.fn();

@@ -52,7 +52,7 @@ again instead.
 
 The target is a slot id, a login dir name or the account email `amux quota`
 shows: `amux accounts rotate claude:wetterlind`, `claude:2` or
-`claude:mattias.wetterlind@gmail.com`. An email held by two slots picks the
+`claude:wetterlind@example.test`. An email held by two slots picks the
 first; both are the same account.
 
 `--dry` reads target access and prints each pane's plan without preparing

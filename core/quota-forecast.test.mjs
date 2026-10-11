@@ -6,7 +6,7 @@ const NOW = Date.parse("2026-10-10T08:30:00Z");
 const RESET = "2026-10-14T07:00:00Z"; // 94.5 h after NOW
 const settings = { warnPercent: 80, urgentHours: 12, now: NOW };
 const reading = (hoursAgo, usedPercent) => ({ at: NOW - hoursAgo * HOUR, usedPercent, resetsAt: RESET });
-const adelost = [{ email: "adelost@gmail.com", usedPercent: 26, resetsAt: "2026-10-14T00:00:00Z" }];
+const adelost = [{ email: "adelost@example.test", usedPercent: 26, resetsAt: "2026-10-14T00:00:00Z" }];
 
 const forecastFrom = (history) => weeklyForecast({ history, latest: history.at(-1), now: NOW });
 
@@ -17,8 +17,8 @@ feature("weekly quota forecast", () => {
     then: ["the threshold notice says no action and names no switch", ({ forecast, level }) => {
       expect(forecast.lastsUntilReset).toBe(true);
       expect(level).toBe("threshold");
-      const text = formatWeeklyNotice({ level, email: "mattias.wetterlind@gmail.com", forecast, alternatives: adelost, now: NOW });
-      expect(text).toMatch(/^Claude mattias\.wetterlind@gmail\.com: ingen åtgärd\. 82 % av veckan använt, takten 0,1 %\/h \(senaste 10 h\) räcker till reset /u);
+      const text = formatWeeklyNotice({ level, email: "wetterlind@example.test", forecast, alternatives: adelost, now: NOW });
+      expect(text).toMatch(/^Claude wetterlind@example\.test: ingen åtgärd\. 82 % av veckan använt, takten 0,1 %\/h \(senaste 10 h\) räcker till reset /u);
       expect(text).not.toMatch(/rotate|gratis reset/u);
     }],
   });
@@ -27,13 +27,13 @@ feature("weekly quota forecast", () => {
     given: ["82 % used after 10 points in 10 h, out in about 18 h", () => forecastFrom([reading(10, 72), reading(0, 82)])],
     when: ["choosing and formatting the notice", (forecast) => {
       const level = weeklyNoticeLevel(forecast, settings);
-      return { level, text: formatWeeklyNotice({ level, email: "mattias.wetterlind@gmail.com", forecast, alternatives: adelost, now: NOW }) };
+      return { level, text: formatWeeklyNotice({ level, email: "wetterlind@example.test", forecast, alternatives: adelost, now: NOW }) };
     }],
     then: ["the free reset comes first and the switch names the target's own numbers", ({ level, text }) => {
       expect(level).toBe("threshold");
       const lines = text.split("\n");
       expect(lines[1]).toMatch(/^1\. Om du har en gratis reset: använd den på claude\.ai/u);
-      expect(lines[2]).toMatch(/^2\. Annars byt konto: adelost@gmail\.com har 26 % av veckan, reset .*`\/byt adelost@gmail\.com` i Discord, så får du planen per panel innan något byts\.$/u);
+      expect(lines[2]).toMatch(/^2\. Annars byt konto: adelost@example\.test har 26 % av veckan, reset .*`\/byt adelost@example\.test` i Discord, så får du planen per panel innan något byts\.$/u);
     }],
   });
 
@@ -41,11 +41,11 @@ feature("weekly quota forecast", () => {
     given: ["85 % used at 5 % an hour", () => forecastFrom([reading(2, 75), reading(0, 85)])],
     when: ["choosing the notice", (forecast) => {
       const level = weeklyNoticeLevel(forecast, settings);
-      return { level, text: formatWeeklyNotice({ level, email: "adelost@gmail.com", forecast, alternatives: [], now: NOW }) };
+      return { level, text: formatWeeklyNotice({ level, email: "adelost@example.test", forecast, alternatives: [], now: NOW }) };
     }],
     then: ["it says hours, keeps the reset first and says no account can take over", ({ level, text }) => {
       expect(level).toBe("urgent");
-      expect(text).toMatch(/^Claude adelost@gmail\.com tar slut om ca 3 h /u);
+      expect(text).toMatch(/^Claude adelost@example\.test tar slut om ca 3 h /u);
       expect(text.split("\n")[1]).toMatch(/^1\. Om du har en gratis reset/u);
       expect(text.split("\n")[2]).toBe("2. Inget annat Claude-konto går att byta till just nu.");
     }],

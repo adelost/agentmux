@@ -53,7 +53,7 @@ feature("account subscription CLI", () => {
         lines,
         output: (line) => lines.push(line),
         prepare: () => {},
-        identityOf: (profile) => (profile.id === "wetterlind" ? { email: "mattias.wetterlind@gmail.com" } : null),
+        identityOf: (profile) => (profile.id === "wetterlind" ? { email: "wetterlind@example.test" } : null),
         newLogin: (name) => ({ provider: "claude", id: name, key: `claude:login:${name}`, home: `/profiles/claude/${name}`, source: "login" }),
         catalog: [
           { provider: "claude", id: "1", key: "claude:1", home: "/home/.claude", source: "primary" },
@@ -63,7 +63,7 @@ feature("account subscription CLI", () => {
     }],
     when: ["logging in by dir name, by email and by a new name", async (ctx) => [
       await cmdAccounts(["login", "claude:wetterlind"], ctx),
-      await cmdAccounts(["login", "claude:mattias.wetterlind@gmail.com"], ctx),
+      await cmdAccounts(["login", "claude:wetterlind@example.test"], ctx),
       await cmdAccounts(["login", "claude:tredje"], ctx),
     ]],
     then: ["each prints its own dir and nothing touches slot 1", (results) => {

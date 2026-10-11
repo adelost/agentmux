@@ -47,8 +47,10 @@ itself, and neither do you.
   refresh token), never log a dir in as a second account.
 - New or expired login: `amux accounts login claude:<login>` prints
   `CLAUDE_CONFIG_DIR=<dir> claude auth login`. Run it with a pty, open the URL
-  in the browser logged in as that account (Windows: Chrome = adelost@gmail.com,
-  Firefox = mattias.wetterlind@gmail.com, through the windows-desktop skill).
+  in the browser logged in as that account, through the windows-desktop skill.
+  `amux quota` shows each login's email, read from its local profile; which
+  Windows browser holds which account is in the private workspace note
+  `memory/references/amux-accounts.md`, not in this public skill.
   Mattias authorizes and pastes the code; you do not choose his Google account.
 - Verify with `CLAUDE_CONFIG_DIR=<dir> claude auth status` and `amux quota`.
 
