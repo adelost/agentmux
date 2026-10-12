@@ -1,5 +1,6 @@
 import { component, feature, unit, expect } from "bdd-vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
 import { tmpdir } from "os";
 import { join } from "path";
 import { archiveMemory, archiveSummary, buildArchiveStub, parseArchiveStub } from "./memory-archive.mjs";
@@ -21,6 +22,7 @@ function day(dateKey, count, { summary = `Full notes for ${dateKey}.`, extra = [
   ].join("\n") + "\n";
 }
 
+const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 const lines = (text) => text.trimEnd().split("\n");
 
 feature("memory archive", () => {
@@ -103,17 +105,47 @@ feature("memory archive", () => {
     }],
   });
 
+  component("a stub left with a template summary is rebuilt from its archived original", {
+    given: ["an old stub whose summary is the Dream template, and one with a real summary", () => {
+      const root = workspace();
+      mkdirSync(join(root, "memory", "archive", "daily"), { recursive: true });
+      const stubs = {};
+      for (const [key, summary] of [["2026-05-01", "Daily notes for 2026-05-01, maintained by amux dream."], ["2026-05-02", "Kameran köptes"]]) {
+        const original = day(key, 40, { summary });
+        writeFileSync(join(root, "memory", "archive", "daily", `${key}.md`), original);
+        stubs[key] = buildArchiveStub({ dateKey: key, summary, sha: sha256(original) });
+        writeFileSync(join(root, "memory", `${key}.md`), stubs[key]);
+      }
+      return { root, stubs };
+    }],
+    when: ["archiving twice", ({ root, stubs }) => ({
+      root, stubs,
+      first: archiveMemory(root, { dryRun: false, now: NOW }),
+      second: archiveMemory(root, { dryRun: false, now: NOW }),
+    })],
+    then: ["the template stub gets the day's headings once, the real summary stays", ({ root, stubs, first, second }) => {
+      expect(first.rebuilt.map((row) => row.dateKey)).toEqual(["2026-05-01"]);
+      expect(second.rebuilt).toEqual([]);
+      const stub = readFileSync(join(root, "memory", "2026-05-01.md"), "utf-8");
+      expect(stub).toContain("> summary: Beslut om kameran");
+      expect(parseArchiveStub(stub)?.sha256).toBe(parseArchiveStub(stubs["2026-05-01"])?.sha256);
+      expect(readFileSync(join(root, "memory", "2026-05-02.md"), "utf-8")).toBe(stubs["2026-05-02"]);
+    }],
+  });
+
   unit("a day without its own summary borrows the digest's headings, then its own", {
     given: ["a day without summary", () => day("2026-05-01", 3, { summary: "" })],
     when: ["summarizing with and without a digest", (text) => ({
       digest: archiveSummary(text, ["## Underlag och kontinuitet\n## Kameran valdes\n## Hoppet\n"]),
       own: archiveSummary(text, []),
       placeholder: archiveSummary("> summary: {Vad som hände idag — en mening.}\n## Händelser\n", []),
+      dreamTemplate: archiveSummary(day("2026-05-01", 3, { summary: "Daily notes for 2026-05-01, maintained by amux dream." }), []),
     })],
-    then: ["real headings, never the template placeholder", ({ digest, own, placeholder }) => {
+    then: ["real headings, never the template placeholder", ({ digest, own, placeholder, dreamTemplate }) => {
       expect(digest).toBe("Kameran valdes; Hoppet");
       expect(own).toBe("Beslut om kameran");
       expect(placeholder).toBe("Arkiverad dagfil");
+      expect(dreamTemplate).toBe("Beslut om kameran");
     }],
   });
 });
