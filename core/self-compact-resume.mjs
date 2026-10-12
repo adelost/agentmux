@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
-import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
+import { hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { codexUserPrompt } from "./codex-user-events.mjs";
 import { extractPromptFromEvent } from "./claude-prompt-text.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
@@ -50,7 +50,7 @@ export function finishSelfCompactRequest(request, ending, { store, queue, identi
     } else {
       const job = existing || queue.enqueue({ agentName: request.agent, pane: request.pane, kind: "prompt", source: "self-compact",
         text: request.continuation, idempotencyKey: key, metadata: { selfCompactContinuation: {
-          ...request.identity, cursor: captureJsonlAppendCursor("self-compact-resume-v1", [request.identity.path]),
+          ...request.identity, cursor: request.cursor,
         } } });
       result = { ...ending, continuationJobId: job.id };
     }

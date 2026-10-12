@@ -49,6 +49,9 @@ feature("a checkpoint compact continues its own saved task", () => {
       expect(fx.calls).toEqual(["compact"]);
       expect(jobs).toHaveLength(1);
       expect(jobs[0]).toMatchObject({ text: HANDOFF, kind: "prompt", source: "self-compact", attempts: 0 });
+      // Input can arrive between the final producer check and enqueue. The
+      // physical guard must not refresh its cursor past that input.
+      expect(jobs[0].metadata.selfCompactContinuation.cursor.positions[fx.path]).toBe(0);
       expect(fx.requests.read("lsrc", 4)).toBeNull();
     }], cleanup: fx => fx.cleanup(),
   });
