@@ -81,12 +81,13 @@ A prompt advances through `pending -> pasting -> drafted -> submitted`, then end
 - `submitted` means the exact draft left the verified composer after Enter.
   Large atomic pastes require two independent empty observations (or fresh
   JSONL proof), so one torn Codex repaint cannot release the FIFO prematurely.
-  The pane's write slot is released immediately, so the next prompt can be
-  injected even while the agent is busy and the earlier JSONL receipt is late.
+  Later prompts wait for an exact receipt or an explicit unverified verdict;
+  unrelated ongoing goal work does not prove this prompt was received.
 - `acknowledged` means the authoritative Claude/Codex history contains the
   exact prompt. Receipt reconciliation runs independently of later writes.
-- `delivered_unverified` is a terminal at-most-once fence used only when a
-  submitted prompt has lacked an exact history receipt for 60 minutes. AMUX
+- `delivered_unverified` is a terminal at-most-once fence for a submit lacking
+  an exact receipt. Codex can release it after a closed turn, or ten minutes
+  with human input waiting; the ordinary maximum is 60 minutes. AMUX
   never re-pastes it, removes it from active queue health, preserves it for
   audit/retention, and warns the bound Discord channel. That warning has its
   own durable retry state: a Discord outage cannot reopen the prompt, while a

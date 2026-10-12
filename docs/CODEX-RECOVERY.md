@@ -19,6 +19,22 @@ receipt fence; recovery never rewrites them.
 Recovery runs on the existing watcher poll, including its unchanged-file
 path. Durable state survives bridge restarts.
 
+A fully observed successful compact with no authored input or product output
+is maintenance, not superseding work. A task start alone, an incomplete compact,
+an error, real input or tool work receives no exemption.
+
+## Unverified submit blocking human input
+
+Only an exact authored event after the saved byte cursor earns acknowledgement.
+Reading an image from the queue, an assistant mentioning it, or a goal's internal
+context is not that receipt. A later closed Codex turn can release the lane as
+`delivered_unverified` after one minute, even if another goal turn is already busy.
+With no closed turn, a waiting human Discord message bounds this ambiguity to
+ten minutes. Native runtime completion keeps its own contract. Neither verdict
+resends the original, clears the composer or claims the original was not sent.
+The ordinary broker delivers subsequent prompts once, in FIFO order. The
+existing stall-watch investigates stalled deliveries; it is not a second writer.
+
 ## Reached weekly limit
 
 An exact `usage limit` refusal plus a fresh official Codex weekly observation

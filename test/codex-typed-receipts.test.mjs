@@ -179,4 +179,31 @@ feature("strict authored Codex receipt normalization", () => {
       } finally { fx.cleanup(); }
     }],
   });
+
+  component("an unrelated goal loop cannot hold an unreceived image submit after a closed turn", {
+    given: ["the skyvw:4 shape: goal activation, completed goal turn and immediate continuation, with no image input", () => {
+      const fx = fixture(), now = Date.parse(at) + 47 * 60_000, submittedAt = Date.parse(at) - 1_000;
+      const queue = createDeliveryQueue({ rootDir: join(fx.home, "queue"), now: () => now });
+      const job = queue.enqueue({ agentName: "fixture", pane: 4, text: "[image attached: /private/screenshot.jpg]", source: "discord" });
+      const cursor = captureCodexPromptEchoCursor(fx.dir, job.verifyText);
+      queue.update(job, { status: "submitted", attempts: 1, submittedAt, echoCursor: cursor, nextAttemptAt: 0 });
+      fx.append(input('<codex_internal_context source="user_goal">User set goal status: "active".</codex_internal_context>', ["user.goal"]),
+        lifecycle("task_started"), lifecycle("task_complete"), lifecycle("task_started"));
+      const forbidden = vi.fn(async () => { throw new Error("a goal reply is not an image receipt or permission to resend"); });
+      const agent = { waitForPromptEcho: async (_name, _pane, text, _timeout, options) => isPromptInCodexJsonl(fx.dir, text, options),
+        promptTransportState: async () => ({ state: "empty-busy", busy: true, dialect: "codex" }),
+        sendOnly: forbidden, sendEnter: forbidden, restartPaneExact: forbidden, paneProcessState: forbidden };
+      return { ...fx, queue, job, forbidden, broker: createDeliveryBroker({ agent, queue, now: () => now, notify: async () => {} }) };
+    }],
+    when: ["the ordinary broker reconciles the still-busy goal loop twice", async fx => {
+      await fx.broker.kickTarget("fixture", 4);
+      await fx.broker.kickTarget("fixture", 4);
+      return fx.queue.read("fixture", 4, fx.job.id);
+    }],
+    then: ["the lane releases as explicitly unverified, never as received and never retyped", (job, fx) => {
+      expect(job).toMatchObject({ status: "delivered_unverified", attempts: 1, acknowledgedAt: null });
+      expect(fx.queue.next("fixture", 4)).toBeNull();
+      expect(fx.forbidden).not.toHaveBeenCalled();
+    }], cleanup: fx => fx.cleanup(),
+  });
 });
