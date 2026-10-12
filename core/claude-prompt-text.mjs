@@ -34,8 +34,8 @@ function promptContentText(content) {
 const PASTE_OPEN = '<pasted_content id="';
 const PASTE_ID_RE = /^[0-9a-f]{4}$/u;
 
-/** WHAT: Unwraps every complete Claude paste envelope as Claude reads it. WHY: Keeps a message pasted in parts from reading as undelivered. */
-function unwrapPastedContent(text) {
+/** WHAT: Maps complete Claude paste envelopes to their authored content. WHY: Keeps multipart input from losing receipt or origin identity. */
+export function unwrapPastedContent(text) {
   let read = "";
   let from = 0;
   let scan = 0;

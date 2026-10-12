@@ -8,6 +8,7 @@
 // DOES NOT: Judge whether HUMAN text is important — only whether the turn is
 //           machine-authored plumbing. Inter-agent briefs ("[from project:2]...")
 //           and cron briefs ("[dream ...]") are real directives, never noise.
+import { unwrapPastedContent } from "./claude-prompt-text.mjs";
 
 // Union of the two predicates this module replaced (cli/commands.mjs local +
 // core/resume-hint.mjs inline) plus the live-repro gaps: a PLAIN "/compact"
@@ -33,7 +34,7 @@ const NOISE_PATTERNS = [
 /** WHAT: Returns the authored content of one complete engine paste envelope. WHY: Classifies and matches observations without rewriting their saved verbatim text. */
 export function authoredPromptText(text) {
   const value = String(text || "").trim();
-  return /^<pasted_content(?:\s[^>]*)?>([\s\S]*)<\/pasted_content>$/u.exec(value)?.[1].trim() ?? value;
+  return unwrapPastedContent(value).trim();
 }
 
 /**

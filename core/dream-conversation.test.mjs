@@ -62,7 +62,7 @@ feature("Dream reads the conversation log before any journal", () => {
   });
   unit("an engine-wrapped agent brief is not human, and a genuinely unanswered human remains counted", {
     given: ["a wrapped relay and one unanswered human", () => ({ coverageStartMs: SINCE,
-      asks: [ask("relay", 0, at(1), '<pasted_content id="c93f">\n[from lsrc:0]\nSUMMARY: granska paret\n</pasted_content>', "pane-hook"),
+      asks: [ask("relay", 0, at(1), '<pasted_content id="c93f">\n[from lsrc:0]\nSUMMARY: granska paret\n</pasted_content id="c93f">', "pane-hook"),
         ask("human", 0, at(2), "har du ett svar?")], posts: [],
     })],
     when: ["counting settled human input", data => answeredShare(data, { nowMs: NOW })],
