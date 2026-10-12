@@ -15,6 +15,25 @@ function fixture() {
 }
 
 feature("streaming JSONL append cursor", () => {
+  unit("an incremental probe crosses an oversized record without blocking one poll or losing the receipt", {
+    given: ["an oversized tool line followed by an exact receipt", () => {
+      const fx = fixture();
+      appendFileSync(fx.file, `${JSON.stringify({ type: "tool", blob: "x".repeat(512) })}\n`);
+      appendFileSync(fx.file, `${JSON.stringify({ type: "receipt" })}\n`);
+      return fx;
+    }],
+    when: ["reading at most 64 bytes per poll through the same scan progress", fx => {
+      const progress = new Map(), outcomes = [];
+      for (let attempt = 0; attempt < 10; attempt++) outcomes.push(hasJsonlEventAfterCursor([fx.file], fx.cursor,
+        event => event.type === "receipt", { progress, maxScanBytes: 64, maxEventBytes: 128, chunkBytes: 31 }));
+      return outcomes;
+    }],
+    then: ["the first poll waits and the later receipt is proved", outcomes => {
+      expect(outcomes[0]).toBe(false);
+      expect(outcomes.at(-1)).toBe(true);
+    }],
+    cleanup: fx => rmSync(fx.root, { recursive: true, force: true }),
+  });
   unit("skips an oversized irrelevant record and finds a later receipt", {
     given: ["a cursor followed by one bounded-oversize line", () => fixture()],
     when: ["scanning in tiny chunks", (ctx) => {

@@ -57,8 +57,9 @@ export async function launchCodexWithPolicy({
   validReceipt = validCodexCompactReceipt,
 }) {
   const verified = validReceipt(receipt, sessionId);
+  const transition = Boolean(sessionId && previous?.model !== selected.model);
   const decision = codexLaunchDecision({ sessionId, previous, selected,
-    blocked: blocked?.target === selected.model && !retry && !verified, receipt: verified });
+    blocked: transition && blocked?.target === selected.model && !retry && !verified, receipt: verified });
   if (decision.values.action === "HOLD") throw new Error(`Codex model change blocked: ${decision.cell}: ${blocked?.reason || "previous model unknown"}`);
   try {
     if (decision.values.action === "COMPACT") {
@@ -77,7 +78,7 @@ export async function launchCodexWithPolicy({
   } catch (error) {
     // This process was opened only for the guarded transition. Preserve its
     // journal and leave a shell, so a later prompt cannot slip past the gate.
-    recordBlocked({ target: selected.model, reason: error.message });
+    if (transition) recordBlocked({ target: selected.model, reason: error.message });
     await reset();
     throw error;
   }

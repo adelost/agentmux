@@ -700,7 +700,6 @@ export function createJsonlWatcher({
           { autoCapacity: !!deliveryBroker && isCodexCapacityError(unseen.at(-1).reason) }) });
       seedCustomToolMigration(channelId, result?.turns || []);
       if (!result?.turns?.length) {
-        if (startupAudit) auditedPanes.add(key);
         rememberReadSnapshot(key, fileInfo, [], channelId, fileInfo?.mtimeMs ?? null, result);
         metric(`${key} read bytes=${readBytes} ms=${readMs} turns=0`);
         return { readBytes, readMs };

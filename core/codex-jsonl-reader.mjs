@@ -1,18 +1,17 @@
 // Read Codex's session rollout files as the source of truth for responses.
 //
 // Codex writes every session to ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
-// as a stream of JSON events:
+// as JSON events:
 //   - session_meta   (payload.cwd identifies which workspace)
 //   - event_msg      (task_started, task_complete, user_message, agent_message,
 //                     token_count, reasoning, function_call, exec_command_end)
-//   - response_item  (message with role=user/assistant/developer,
-//                     function_call with name+arguments)
+//   - response_item  (message with role, or tool call)
 import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from "fs";
 import { dirname, join } from "path";
 import { createHash } from "crypto";
 import { describeCustomExec, describeToolCall } from "./tool-display.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
-import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
+import { captureJsonlAppendCursor, createJsonlReceiptProbe } from "./jsonl-append-cursor.mjs";
 import { codexUserPrompt, normalizeCodexUserEvents } from "./codex-user-events.mjs";
 import { readCodexDreamEvents } from "./codex-dream-history.mjs";
 import { codexRefusals, codexLastPrompt } from "./codex-refusal-notice.mjs";
@@ -253,6 +252,7 @@ function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
 }
 
 const CODEX_PROMPT_CURSOR_KIND = "codex-prompt-events-v1";
+const promptReceipt = createJsonlReceiptProbe();
 
 /**
  * Capture the identities of every currently visible occurrence of one exact
@@ -283,7 +283,7 @@ export function isPromptInCodexJsonl(paneDir, promptText, { notBeforeMs = 0, cur
 
   const eventCursor = cursor?.kind === CODEX_PROMPT_CURSOR_KIND;
   if (eventCursor) {
-    return hasJsonlEventAfterCursor([file], cursor, (event) =>
+    return promptReceipt([file], cursor, needle, (event) =>
       codexUserPrompt(event) === needle);
   }
   const events = parseOperationalJsonl(file);

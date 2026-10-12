@@ -7,10 +7,24 @@
 // local coding-agent process.
 
 import { closeSync, fstatSync, openSync, readSync, statSync } from "fs";
+import { createHash } from "node:crypto";
 
 const DEFAULT_MAX_APPEND_BYTES = 8 * 1024 * 1024;
 const DEFAULT_SCAN_CHUNK_BYTES = 256 * 1024;
 const DEFAULT_MAX_EVENT_BYTES = 2 * 1024 * 1024;
+
+/** WHAT: Builds a bounded incremental probe for pure receipt predicates. WHY: Avoids repeated history scans without changing stateful reducers. */
+export function createJsonlReceiptProbe() {
+  const probes = new Map();
+  return (files, cursor, receiptKey, predicate) => {
+    const key = createHash("sha256").update(JSON.stringify([cursor, receiptKey])).digest("hex");
+    const progress = probes.get(key) || new Map();
+    probes.delete(key);
+    probes.set(key, progress);
+    while (probes.size > 64) probes.delete(probes.keys().next().value);
+    return hasJsonlEventAfterCursor(files, cursor, predicate, { progress, maxScanBytes: DEFAULT_MAX_APPEND_BYTES });
+  };
+}
 
 export function captureJsonlAppendCursor(kind, files) {
   const positions = {};
@@ -77,6 +91,8 @@ export function jsonlEventsAfterCursor(files, cursor, { maxBytes = DEFAULT_MAX_A
 export function hasJsonlEventAfterCursor(files, cursor, predicate, {
   chunkBytes = DEFAULT_SCAN_CHUNK_BYTES,
   maxEventBytes = DEFAULT_MAX_EVENT_BYTES,
+  progress = null,
+  maxScanBytes = Infinity,
 } = {}) {
   if (typeof predicate !== "function") throw new TypeError("JSONL event predicate is required");
   const positions = cursor?.positions && typeof cursor.positions === "object"
@@ -89,20 +105,29 @@ export function hasJsonlEventAfterCursor(files, cursor, predicate, {
     let fd;
     try {
       fd = openSync(file, "r");
-      const size = fstatSync(fd).size;
+      const stat = fstatSync(fd), size = stat.size;
       let position = Number(positions[file] ?? 0);
       if (!Number.isFinite(position) || position < 0 || position > size) position = 0;
 
-      let discardPartial = false;
-      if (position > 0) {
+      const saved = progress?.get(file);
+      const reusable = saved && saved.dev === stat.dev && saved.ino === stat.ino
+        && saved.size <= size && (saved.size !== size || saved.mtimeMs === stat.mtimeMs);
+      if (reusable && saved.found) return true;
+      if (reusable) position = saved.position;
+
+      let discardPartial = reusable ? saved.discardPartial : false;
+      if (!reusable && position > 0) {
         const previous = Buffer.alloc(1);
         readSync(fd, previous, 0, 1, position - 1);
         discardPartial = previous[0] !== 0x0a;
       }
 
-      let fragments = [];
-      let eventBytes = 0;
-      let oversized = false;
+      let fragments = reusable ? saved.fragments : [];
+      let eventBytes = reusable ? saved.eventBytes : 0;
+      let oversized = reusable ? saved.oversized : false;
+      const scanEnd = Math.min(size, position + maxScanBytes);
+      const save = (found = false) => progress?.set(file, { dev: stat.dev, ino: stat.ino,
+        size, mtimeMs: stat.mtimeMs, position, discardPartial, fragments, eventBytes, oversized, found });
       const consumeLine = () => {
         if (discardPartial) {
           discardPartial = false;
@@ -118,8 +143,8 @@ export function hasJsonlEventAfterCursor(files, cursor, predicate, {
         return false;
       };
 
-      while (position < size) {
-        const length = Math.min(readChunkBytes, size - position);
+      while (position < scanEnd) {
+        const length = Math.min(readChunkBytes, scanEnd - position);
         const buffer = Buffer.allocUnsafe(length);
         const bytesRead = readSync(fd, buffer, 0, length, position);
         if (bytesRead <= 0) break;
@@ -139,7 +164,7 @@ export function hasJsonlEventAfterCursor(files, cursor, predicate, {
               oversized = true;
             }
           }
-          if (consumeLine()) return true;
+          if (consumeLine()) { save(true); return true; }
           start = index + 1;
         }
 
@@ -158,12 +183,13 @@ export function hasJsonlEventAfterCursor(files, cursor, predicate, {
 
       // JSONL writers normally end events with a newline, but a complete last
       // record is still a valid receipt if the process has not flushed '\n' yet.
-      if (!discardPartial && !oversized && eventBytes > 0) {
+      if (position === size && !discardPartial && !oversized && eventBytes > 0) {
         try {
           const event = JSON.parse(Buffer.concat(fragments, eventBytes).toString("utf8"));
-          if (predicate(event)) return true;
+          if (predicate(event)) { save(true); return true; }
         } catch { /* final record is still in flight */ }
       }
+      save();
     } catch { /* a rotating session may disappear between list and open */ }
     finally {
       if (fd !== undefined) { try { closeSync(fd); } catch {} }

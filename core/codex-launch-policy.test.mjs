@@ -21,6 +21,26 @@ const fixture = (extra = {}) => {
 };
 
 feature("Codex wake cannot bypass compact-first model selection", () => {
+  component("a repaired binary can wake the same selected model after a previous startup failure", {
+    given: ["Sol already selected when the Codex binary was missing", () => fixture({
+      previous: { model: "gpt-5.6-sol", effort: "xhigh" },
+      blocked: { target: "gpt-5.6-sol", reason: "Missing optional dependency" },
+    })],
+    when: ["waking after the binary was repaired", ctx => launchCodexWithPolicy(ctx)],
+    then: ["no model change or compaction is needed", (_, ctx) =>
+      expect(ctx.events).toEqual(["launch:gpt-5.6-sol", "remember:gpt-5.6-sol"])],
+  });
+  component("an ordinary same-model launch failure is not stored as a model transition", {
+    given: ["the same requested model but a temporarily missing binary", () => fixture({
+      previous: { model: "gpt-5.6-sol", effort: "xhigh" },
+      launch: async () => { throw new Error("Missing optional dependency"); },
+    })],
+    when: ["attempting startup", ctx => launchCodexWithPolicy(ctx).catch(error => error.message)],
+    then: ["the actual error is reported and the next wake remains allowed", (error, ctx) => {
+      expect(error).toBe("Missing optional dependency");
+      expect(ctx.events).toEqual(["reset"]);
+    }],
+  });
   component("a later Codex user turn invalidates an old compact receipt", {
     when: ["checking the real response_item user shape after a compact", () => {
       const root = mkdtempSync(join(tmpdir(), "codex-compact-user-"));
