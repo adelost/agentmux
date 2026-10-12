@@ -55,14 +55,16 @@ stops the isolated app and closes its localhost server.
 Accepted and inspected: `cancel-before.png` and `flow-cancel.png` show the
 actual listening ring and return to HOLD TO TALK with empty history. The
 ordinary Activity was also exercised without Compose's test clock:
-`ordinary-26s.png` shows the full reply, all labels/icons and the idle wake
-phrase. `ordinary-54s.png` has incomplete text/icons and is not accepted as
-full visual proof; the mock still records exactly one question at 54 s.
+`ordinary-26s.png` and `ordinary-54s.png` contain the same complete idle frame
+(SHA256 `23d9ceb28c8c8457c3259133f02053e0f9618fb3ae41509008432964071f4fea`):
+reply, labels/icons and wake phrase. They are not independent changing-frame
+evidence; the separate mock observations still record one question at54s.
 
-Two instrumentation captures after playback have incomplete static text despite
-passing behavioral assertions. They are not accepted as visual proof. The
-complete ordinary-26s capture covers that displayed state; no product
-renderer was changed to work around a test screenshot.
+Inspect the originals at native resolution. A scaled inspection preview can
+omit static text/icons even when the original PNG and its opaque pixels retain
+them. The ordinary-Activity frame is the visual oracle for idle controls;
+the instrumentation/HTTP logs prove the action sequence and request counts.
+No product renderer was changed to work around an inspection preview.
 
 The previous owner's failed S3 did not prove the cancel button was broken:
 `[516,2135][566,2185]` was stripped to three tokens and produced a tap at
