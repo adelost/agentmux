@@ -1,5 +1,6 @@
 import { expect, feature, unit } from "bdd-vitest";
 import { codexRefusals, codexThreadOfRollout } from "./codex-refusal-notice.mjs";
+import { capacityEvents } from "../test/fixtures/codex-capacity-2026-10-12.mjs";
 
 const turn = (id, ...between) => [
   { type: "event_msg", timestamp: `${id}-start`, payload: { type: "user_message", message: "Hej" } },
@@ -9,6 +10,14 @@ const turn = (id, ...between) => [
 const usage = { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 9 } } } };
 
 feature("a Codex turn that no model ran is told apart from a quiet answer", () => {
+  unit("the October 12 capacity stop remains discoverable after earlier token usage", {
+    when: ["reading the sanitized actual stop", () => codexRefusals(capacityEvents)],
+    then: ["the failed final request is available for exact log classification", (refusals) => {
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0].timestamp).toBe("2026-10-12T07:10:03.473Z");
+      expect(refusals[0].turnId).toBe("01a12ef1-69fa-70a3-9fbe-3d7994a8d712");
+    }],
+  });
   unit("only a prompt closed without any token usage is a refusal", {
     when: ["reading refused, answered, aborted and open turns", () => codexRefusals([
       ...turn("refused"),

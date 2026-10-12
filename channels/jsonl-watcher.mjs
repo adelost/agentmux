@@ -5,21 +5,6 @@
 // project dir, polling fallback for WSL 9p reliability, persistent
 // state for restart-resume and dedupe.
 //
-// Lifecycle of a reply:
-//   1. agent writes a turn to ~/.claude/projects/<encoded-pane-dir>/*.jsonl
-//   2. fs.watch fires (or 15s poll catches it on slow filesystems)
-//   3. watcher reads the latest jsonl, groups events into turns
-//   4. for each turn that:
-//        - has timestamp > last-posted-ts for this channel
-//        - has isComplete = true (terminal stop_reason hit)
-//        - or endTimestamp older than COMPLETION_GRACE_MS (failsafe)
-//      → render text, split into Discord-sized chunks, post with pacing,
-//        attach image markers if present, append context footer, run TTS,
-//        update last-posted-ts in persistent state
-//   5. dedupe: per-channel last-posted-ts written to appState. Survives
-//      bridge restart. Other forwarders update channel_last_mirror_ts via
-//      stampChannelMirror, which we ALSO honour as a "covered" signal.
-//
 // Stops the user-visible problems we kept hitting:
 //   - drift-guard / resume-hint forwarders timing out → reply lost
 //   - bridge restart mid-streamResponse → reply lost
@@ -60,7 +45,8 @@ import { notifyUser } from "../cli/send-notify.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
 import { compactionNoticeText } from "../core/compaction-notice.mjs";
 import { announceNewPaneEvents } from "../core/pane-notices.mjs";
-import { codexThreadOfRollout, codexTurnError, refusalNoticeText } from "../core/codex-refusal-notice.mjs";
+import { confirmedCodexRefusals, refusalNoticeText } from "../core/codex-refusal-notice.mjs";
+import { createCodexCapacityRecovery, isCodexCapacityError } from "../core/codex-capacity-recovery.mjs";
 import {
   paneModelSelection,
   recordPaneModelReading,
@@ -155,6 +141,7 @@ export function createJsonlWatcher({
   let pollTimer = null;
   let typingTimer = null;
   let stopped = false;
+  const capacityRecovery = createCodexCapacityRecovery({ state, broker: deliveryBroker, agent, log });
 
   const paneKey = (name, idx) => `${name}:${idx}`;
   const queue = createPaneQueue({
@@ -659,7 +646,7 @@ export function createJsonlWatcher({
     return dueAt;
   }
 
-  function rememberReadSnapshot(key, info, turns, channelId, latestMtimeMs) {
+  function rememberReadSnapshot(key, info, turns, channelId, latestMtimeMs, result) {
     if (!info) {
       readSnapshots.delete(key);
       return;
@@ -667,6 +654,7 @@ export function createJsonlWatcher({
     readSnapshots.set(key, {
       ...info,
       graceDueAtMs: pendingGraceDueAt(turns, channelId, latestMtimeMs),
+      recovery: result && { refusals: result.refusals, lastPrompt: result.lastPrompt, jsonlFile: result.jsonlFile },
     });
   }
 
@@ -688,6 +676,7 @@ export function createJsonlWatcher({
       const startupAudit = !auditedPanes.has(key);
 
       if (sameFileStamp(cached, fileInfo) && !retryDue && !graceDue) {
+        await capacityRecovery.tick({ name, pane: idx, result: cached.recovery });
         metric(`${key} skip unchanged bytes=0 nextGrace=${cached?.graceDueAtMs || "-"}`);
         return { skipped: "unchanged" };
       }
@@ -700,6 +689,8 @@ export function createJsonlWatcher({
       // advancing past it (belt-and-suspenders on top of id-based dedupe).
       const tailBytes = startupAudit ? STARTUP_AUDIT_TAIL_BYTES : WATCHER_TAIL_BYTES;
       const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes, headless: true });
+      if (result?.refusals?.length) result.refusals = await confirmedCodexRefusals(result, selectedCodexProfile(state, name, idx).home);
+      await capacityRecovery.tick({ name, pane: idx, result });
       const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
       const readMs = Date.now() - readStarted;
       const readBytes = estimatedReadBytes(fileInfo, tailBytes);
@@ -707,12 +698,12 @@ export function createJsonlWatcher({
       await announceNewPaneEvents({ ...notice, stateKey: STATE_KEY_COMPACTION_IDS, kind: "compaction",
         events: result?.compactions || [], text: unseen => compactionNoticeText(`${name}:${idx}`, unseen) });
       await announceNewPaneEvents({ ...notice, stateKey: STATE_KEY_REFUSAL_IDS, kind: "unanswered-turn",
-        events: result?.refusals || [], text: async unseen => refusalNoticeText(`${name}:${idx}`, unseen, await codexTurnError({
-          home: selectedCodexProfile(state, name, idx).home, threadId: codexThreadOfRollout(result.jsonlFile), refusal: unseen.at(-1) })) });
+        events: result?.refusals || [], text: unseen => refusalNoticeText(`${name}:${idx}`, unseen, unseen.at(-1).reason,
+          { autoCapacity: !!deliveryBroker && isCodexCapacityError(unseen.at(-1).reason) }) });
       seedCustomToolMigration(channelId, result?.turns || []);
       if (!result?.turns?.length) {
         if (startupAudit) auditedPanes.add(key);
-        rememberReadSnapshot(key, fileInfo, [], channelId, fileInfo?.mtimeMs ?? null);
+        rememberReadSnapshot(key, fileInfo, [], channelId, fileInfo?.mtimeMs ?? null, result);
         metric(`${key} read bytes=${readBytes} ms=${readMs} turns=0`);
         return { readBytes, readMs };
       }
@@ -781,7 +772,7 @@ export function createJsonlWatcher({
           }, action, { nowMs: now, retryBackoffMs: RETRY_BACKOFF_MS });
           commitEngineState(channelId, nextState);
           log(`${name}:${idx} → ${channelId} main post failed; retry after ${Math.round(RETRY_BACKOFF_MS / 1000)}s`);
-          rememberReadSnapshot(key, fileInfo, result.turns, channelId, mtimeMs);
+          rememberReadSnapshot(key, fileInfo, result.turns, channelId, mtimeMs, result);
           return { retryAfterMs: RETRY_BACKOFF_MS };
         }
 
@@ -795,7 +786,7 @@ export function createJsonlWatcher({
         log(`${name}:${idx} → ${channelId} (${action.reason}, age=${ageS}s, items ${action.postedCount}→${action.totalItems})`);
       }
 
-      rememberReadSnapshot(key, fileInfo, result.turns, channelId, mtimeMs);
+      rememberReadSnapshot(key, fileInfo, result.turns, channelId, mtimeMs, result);
       return { readBytes, readMs, actions: planned.actions.length };
     } catch (err) {
       log(`check ${paneKey(name, idx)}: ${err.stack || err.message}`);

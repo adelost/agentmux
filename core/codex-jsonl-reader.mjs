@@ -15,7 +15,7 @@ import { codexSessionDirs } from "./codex-profiles.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { codexUserPrompt, normalizeCodexUserEvents } from "./codex-user-events.mjs";
 import { readCodexDreamEvents } from "./codex-dream-history.mjs";
-import { codexRefusals } from "./codex-refusal-notice.mjs";
+import { codexRefusals, codexLastPrompt } from "./codex-refusal-notice.mjs";
 
 // Content-addressed line identity for the watcher's posted-set dedupe. Codex
 // rollout events carry no stable id (no uuid, no payload.id), so we key on a
@@ -827,5 +827,5 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
 
   if (turns.length > limit) turns = turns.slice(-limit);
 
-  return { turns, compactions: codexCompactions(events), refusals: codexRefusals(events), jsonlFile: file };
+  return { turns, compactions: codexCompactions(events), refusals: codexRefusals(events), lastPrompt: codexLastPrompt(events), jsonlFile: file };
 }

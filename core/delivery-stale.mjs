@@ -3,6 +3,7 @@
 
 import { DELIVERED_UNVERIFIED_STATE } from "./delivery-queue-policy.mjs";
 import { reportBlockedHandoffs } from "./delivery-handoff.mjs";
+import { fenceCodexCapacityJobs } from "./codex-capacity-delivery.mjs";
 
 const STALE_WARN_MS = 20 * 60_000;
 const PHYSICAL_STATES = new Set(["pasting", "submitting"]);
@@ -63,6 +64,7 @@ async function reconcileLateEchoWatch({ agentName, pane, queue, now, exactEcho, 
 
 /** WHAT: Dispatches cancellation requests, terminal notices, and stale reporting before delivery. WHY: Keeps every pre-delivery terminal path in one ordered pass. */
 export async function runDeliveryPreflight({ agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, flushTerminalNotices = null, exactEcho = null, acknowledge = null, notifyBlocked = null, agent = null }) {
+  await fenceCodexCapacityJobs({ agentName, pane, queue, agent, now, terminalizeNotSent, log });
   const cancellationRequests = queue.pendingCancellationRequests?.(agentName, pane) || [];
   for (const request of cancellationRequests) await terminalizeNotSent(request);
   await reconcileLateEchoWatch({ agentName, pane, queue, now, exactEcho, acknowledge });
