@@ -32,7 +32,37 @@ verifies the account identity and session after restart. No session is silently
 replaced. A blocked continuity check posts one notice naming the pane. An
 unknown outcome after starting a switch is never retried automatically.
 
+At the reached limit AMUX transfers only that pane's quiescent rollout to the
+other account. Credentials are never copied. An existing target is replaced
+only when its bytes are an exact prefix of the source, no target writer exists,
+and the source did not change during the verified atomic copy. Divergent history
+is preserved. A real isolated Sol session resumed on account 2 on 2026-10-12;
+the provider accepted the copied history and returned `CONTINUITY_PROBE_OK`.
+
+If a session cannot be transferred safely, the authorized fallback creates
+one fresh Sol/xhigh session on the other account. Before restarting, AMUX saves
+the exact latest assignment and reply posts from the conversation log in a
+private handover. The new prompt explains the new account/session, links the
+original evidence, requires reading Git and receipts, and forbids replaying a
+release, move or go without its receipt. Missing task evidence blocks the
+fallback. The same opt-out applies. An ambiguous submitted handover is never
+replaced with another send.
+
 After verification, the broker receives one ordinary continuation with the
 same pre-submit guards as capacity recovery. Other errors only notify.
 Set `AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false` in the bridge environment to
 disable account recovery. Restart the bridge while its delivery queue is clear.
+
+## Unavailable historical model
+
+Astra launches and explicit Astra choices are refused under Mattias's current
+policy. For a stopped pane whose old session cannot compact, explicitly run:
+
+```
+amux model PROJECT -p N sol xhigh --new-session
+```
+
+This creates a new conversation, verifies Sol/xhigh and the new session id,
+preserves the old journal and its id, and sends no previous prompt again.
+It refuses working panes and queued deliveries. Ordinary wake still resumes
+the owned session; it never silently resets history.

@@ -11,6 +11,7 @@ function setup({ continuity = true, wrongSession = false } = {}) {
       getContext: async () => ({ model: "gpt-6.1-sol", effort: "xhigh" }),
       restartCodex: async (_name, _pane, launch) => { calls.push(launch); profile = launch.profile.id; } },
     statusDriver: async () => ({ ok: true, status: { session: profile === "2" && wrongSession ? "foreign" : "exact",
+      directory: "/pane",
       account: `${profile === "2" ? "second" : "first"}@example.com (Pro)`, model: { id: "gpt-6.1-sol", effort: "xhigh" } } }) };
   return { options, calls, data };
 }

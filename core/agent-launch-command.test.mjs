@@ -1,5 +1,5 @@
 import { expect, feature, unit } from "bdd-vitest";
-import { buildClaudeLaunchCommand } from "./agent-launch-command.mjs";
+import { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./agent-launch-command.mjs";
 
 feature("account-scoped Claude launch", () => {
   unit("binds the profile home while resuming the exact native session", {
@@ -23,5 +23,14 @@ feature("account-scoped Claude launch", () => {
       expect(command).toContain("--effort 'high'");
       expect(command).toContain("--resume '11111111-1111-4111-8111-111111111111'");
     }],
+  });
+});
+
+feature("Mattias's October 11 Codex launch policy", () => {
+  unit("Astra is refused even for an exact historical resume", {
+    when: ["building the stopped pane's old Astra launch", () => () => buildCodexLaunchCommand({
+      profileHome: "/profiles/one", model: "gpt-6-astra", effort: "xhigh",
+      resumeSessionId: "11111111-1111-4111-8111-111111111111" })],
+    then: ["the launch names the Sol policy instead of starting Astra", build => expect(build).toThrow(/Mattias.*Sol/u)],
   });
 });

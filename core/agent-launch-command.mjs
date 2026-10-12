@@ -2,6 +2,7 @@
 
 import { esc } from "../lib.mjs";
 import { resolveClaudeEffort, resolveClaudeModel } from "./claude-model.mjs";
+import { allowedCodexLaunchModel } from "./codex-profiles.mjs";
 import {
   CLAUDE_AUTONOMOUS_FLAGS,
   CODEX_AUTONOMOUS_FLAGS,
@@ -64,6 +65,9 @@ export function buildCodexLaunchCommand({
   allowFreshBootstrap = false,
 } = {}) {
   if (!profileHome) throw new Error("Codex profile home is required");
+  const policy = allowedCodexLaunchModel(model);
+  if (!policy.ok) throw new Error(policy.reason);
+  model = policy.model;
   if (model && !/^[a-z0-9._-]+$/iu.test(model)) throw new Error(`invalid Codex model: ${model}`);
   if (effort && !/^(minimal|low|medium|high|xhigh|max|ultra)$/iu.test(effort)) {
     throw new Error(`invalid Codex reasoning effort: ${effort}`);

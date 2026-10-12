@@ -24,8 +24,12 @@ first, recommend the cheapest action, switch only on his word.
 3. Only then a switch, to the account with the most room before its reset.
 
 amux warns once per account and week when an account panes run on passes
-`AMUX_QUOTA_WARN_PERCENT` (default 80 % weekly used). It never switches by
-itself, and neither do you.
+`AMUX_QUOTA_WARN_PERCENT` (default 80 % weekly used). Forecasts never switch.
+Mattias authorized Codex automatic recovery on 2026-10-12: an actual usage
+refusal plus reached weekly quota and verified spare capacity may switch that
+one pane. Transfer its exact session, or save its task and replies before a
+labeled fresh Sol/xhigh session. `AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false`
+disables this recovery. Other rotations still require his instruction.
 
 ## 3. Switch only on Mattias's word
 

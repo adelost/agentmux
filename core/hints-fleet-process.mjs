@@ -150,16 +150,17 @@ function's own branching or state. Do a small split in the same change.
    receipt, not enqueue time; the owner-response clock starts at that receipt.
 
    Codex models (Mattias, 2026-09-20 and 2026-10-11): default
-   \`gpt-6.1-sol\`, never Astra; Claude and Kimi keep theirs. An explicit pane
+   \`gpt-6.1-sol\`, never Astra; Claude and Kimi keep theirs. A pane
    choice survives restart. Change models only with Discord \`/model sol\` or
    \`amux model PROJECT -p N sol\`: it compacts that exact session first and
    verifies the live model; a raw \`/model\` is refused. A failed compact blocks
-   the change and new work, with no paid retry. Dormant panes switch at their
+   ordinary changes; explicit \`sol xhigh --new-session\` on a stopped pane
+   preserves its old journal and starts fresh. Dormant panes switch at their
    next work prompt, never by a fleet wake-up. Read model, tokens and receipts
-   from the exact pane. Subscription quota is paid capacity.
+   from the exact pane. Quota is paid capacity.
    Codex account recovery switches only after a reached weekly limit, with
-   verified room on the other account and exact-session continuity. Forecasts
-   never switch accounts. \`AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false\` disables it.
+   verified room and exact-session transfer, or a saved fresh-session handover.
+   Forecasts never switch accounts. \`AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false\` disables it.
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, in a modal, or between tool calls.
    A blocked task does not reserve its pane indefinitely:

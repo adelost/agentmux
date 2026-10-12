@@ -30,7 +30,6 @@ import {
   extractFromCodexJsonl,
   isBusyFromCodexJsonl,
   isPromptInCodexJsonl,
-  latestCodexSessionIdentity,
 } from "./core/codex-jsonl-reader.mjs";
 import { createKimiAgentRuntime, kimiComposerHasCollapsedPaste, kimiJournal } from "./core/kimi-agent-runtime.mjs";
 import { createQwenAgentRuntime, qwenJournal } from "./core/qwen-agent-runtime.mjs";
@@ -67,7 +66,7 @@ import {
   selectedCodexProfile,
   setCodexModelOverride,
 } from "./core/codex-profiles.mjs";
-import { allowsFreshCodexBootstrap, decideCodexStart, liveRolloutWriters } from "./core/codex-session-guard.mjs";
+import { selectCodexStart } from "./core/codex-start-selection.mjs";
 import { waitForCodexUiReady as waitForCodexReady } from "./core/codex-readiness.mjs";
 import { driveCodexStatus } from "./core/codex-status.mjs";
 import { mapWithConcurrency } from "./core/concurrency.mjs";
@@ -107,7 +106,7 @@ export function paneDir(rootDir, pane) {
 // The marker lets ensureAgentHints detect stale copies on spawn; bump it
 // whenever AGENT_HINTS content changes. Appended content survives upgrades.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
-export const HINTS_VERSION = "1.25.177";
+export const HINTS_VERSION = "1.25.178";
 /** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
@@ -526,30 +525,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const owner = `${name}:${pane}@${profile.id}`;
     const allSessionState = state?.get?.(CODEX_SESSION_STATE_KEY, {}) || {};
     const remembered = allSessionState[owner] || null;
-    const discovered = latestCodexSessionIdentity(dir, {
-      sessionDirs: [join(profile.home, "sessions")],
-    });
-    const requestedSessionId = launch?.resumeSessionId
-      || agentConfig(name).panes?.[pane]?.resumeSessionId
-      || null;
-    const persisted = requestedSessionId
-      ? { pane: owner, sessionId: requestedSessionId }
-      : discovered
-        ? { pane: owner, sessionId: discovered.sessionId }
-        : remembered?.sessionId
-          ? { pane: owner, sessionId: remembered.sessionId }
-          : null;
-    const decision = decideCodexStart({
-      pane: owner,
-      persisted,
-      rolloutPathFor: (sessionId) => discovered?.sessionId === sessionId ? discovered.path : null,
-      writersFor: liveRolloutWriters,
-      allowFreshBootstrap: !discovered && !requestedSessionId && allowsFreshCodexBootstrap(owner, remembered),
-    });
-    if (decision.action === "blocked") {
-      const holders = decision.heldBy?.length ? ` (live writer ${decision.heldBy.join(",")})` : "";
-      throw new Error(`Codex continuity blocked for ${owner}: ${decision.reason}${holders}`);
-    }
+    const { decision, discovered, requestedSessionId } = selectCodexStart({ dir, profile, owner, remembered, launch,
+      configuredSessionId: agentConfig(name).panes?.[pane]?.resumeSessionId });
     await assertEngineStartAllowed({ session: name, pane, dir, engine: "codex",
       sessionId: decision.action === "resume" ? decision.sessionId : null });
 
@@ -557,7 +534,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       if (!state?.set) return;
       state.set(CODEX_SESSION_STATE_KEY, {
         ...(state.get(CODEX_SESSION_STATE_KEY, {}) || {}),
-        [owner]: { pane: owner, profileId: profile.id, ...record },
+        [owner]: { pane: owner, profileId: profile.id, ...record,
+          ...(launch?.newSession ? { supersededSessionId: discovered?.sessionId || remembered?.sessionId || null } : {}) },
       });
     };
     const { previous, launchOptions, resumeSessionId, startRecord } = await prepareCodexResume({

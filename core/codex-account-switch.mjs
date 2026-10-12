@@ -26,7 +26,7 @@ export async function switchCodexAccount({ agent, state, name, pane, current, ta
   const effective = beforeStatus.ok && beforeStatus.status.model?.id
     ? { model: beforeStatus.status.model.id, effort: beforeStatus.status.model.effort }
     : previousOverride || (context?.model ? { model: context.model, effort: context.effort ?? null } : null);
-  if (continuity && (!effective?.model || beforeStatus.status?.session !== continuity.sessionId)) {
+  if (continuity && (!effective?.model || !beforeStatus.status?.directory || beforeStatus.status?.session !== continuity.sessionId)) {
     return { kind: "failed", error: "current model/session could not be verified before the account switch" };
   }
   setCodexProfile(state, name, pane, target.id);
@@ -39,6 +39,7 @@ export async function switchCodexAccount({ agent, state, name, pane, current, ta
     if (effective?.model && (verified.status.model?.id !== effective.model
         || (effective.effort && verified.status.model?.effort !== effective.effort))) throw new Error("account switch changed the requested model or effort");
     if (continuity && verified.status.session !== continuity.sessionId) throw new Error("account switch lost the exact session");
+    if (continuity && verified.status.directory !== beforeStatus.status.directory) throw new Error("account switch changed the working directory");
     const accountEmail = String(verified.status.account || "").match(/[^\s()]+@[^\s()]+/u)?.[0];
     if (expectedEmail && accountEmail !== expectedEmail) throw new Error("the new account identity could not be verified");
     if (verified.status.model?.id) setCodexModelOverride(state, name, pane, verified.status.model.id, verified.status.model.effort);

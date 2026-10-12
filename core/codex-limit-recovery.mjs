@@ -1,6 +1,8 @@
 import { readCodexAccountQuota } from "./codex-account-quota.mjs";
 import { codexProfileCatalog, selectedCodexProfile, isCodexProfileAuthenticated } from "./codex-profiles.mjs";
 import { codexAccountContinuity, switchCodexAccount } from "./codex-account-switch.mjs";
+import { transferCodexSession } from "./codex-session-transfer.mjs";
+import { prepareCodexAccountHandover, freshCodexAccount } from "./codex-account-handover.mjs";
 import { driveCodexStatus } from "./codex-status.mjs";
 import { codexLastPrompt } from "./codex-refusal-notice.mjs";
 import { parseJsonlText, readTailWindow } from "./jsonl-reader.mjs";
@@ -18,6 +20,8 @@ const hasRoom = quota => quota.ok && windows(quota).some(window => window.window
 export function createCodexLimitRecovery({ state, broker, agent, notify, log = console.warn,
   enabled = process.env.AMUX_CODEX_LIMIT_RECOVERY_ENABLED !== "false", catalog = codexProfileCatalog(),
   quota = readCodexAccountQuota, continuity = codexAccountContinuity, authenticated = isCodexProfileAuthenticated,
+  transferSession = transferCodexSession,
+  prepareHandover = prepareCodexAccountHandover, freshAccount = freshCodexAccount,
   switchAccount = switchCodexAccount, statusDriver = driveCodexStatus,
   readLatestPrompt = file => codexLastPrompt(parseJsonlText(readTailWindow(file, 256 * 1024).text)) } = {}) {
   const running = new Set();
@@ -50,20 +54,24 @@ export function createCodexLimitRecovery({ state, broker, agent, notify, log = c
       if (hasRoom(observed)) { target = candidate; targetQuota = observed; break; }
     }
     if (!target) return blocked(key, record, "no authenticated account with verified room");
-    const proof = continuity(dir, current, target);
-    if (!proof.ok) return blocked(key, record, `continuity: ${proof.reason}`);
     if (newerInput(readLatestPrompt(result.jsonlFile)) || broker.queue.list(name, pane).some(job => !TERMINAL_DELIVERY_STATES.has(job.status))) return;
     const lease = broker.queue.acquireSessionLease(name, pane);
     if (!lease) return;
     try {
+      const proof = transferSession(dir, current, target);
       save(key, { ...record, phase: "switching", target: target.id });
-      const switched = await switchAccount({ agent, state, name, pane, current, target, continuity: proof,
-        expectedEmail: targetQuota.account?.email, statusDriver });
+      const canResume = proof.ok && continuity(dir, current, target).ok;
+      const switched = canResume
+        ? await switchAccount({ agent, state, name, pane, current, target, continuity: proof,
+          expectedEmail: targetQuota.account?.email, statusDriver })
+        : await freshAccount({ agent, state, name, pane, dir, current, target, statusDriver, expectedEmail: targetQuota.account?.email,
+          handover: prepareHandover({ name, pane, dir, current, target, refusal }) });
       if (switched.kind !== "switched") return blocked(key, record, switched.error || "switch did not verify");
-      const job = broker.enqueue({ agentName: name, pane, text: CAPACITY_CONTINUE_TEXT, source: "codex-limit-recovery",
+      const job = broker.enqueue({ agentName: name, pane, text: switched.text || CAPACITY_CONTINUE_TEXT, source: "codex-limit-recovery",
         idempotencyKey: `codex-limit:${key}:${refusal.id}`, metadata: { capacityEpisode: refusal.id,
-          capacityRefusedAt: refusal.timestamp, capacitySessionFile: proof.path || result.jsonlFile } });
-      save(key, { ...record, target: target.id, phase: "continued", jobId: job.id });
+          capacityRefusedAt: refusal.timestamp, capacitySessionFile: switched.path || proof.path || result.jsonlFile,
+          ...(switched.handoverPath ? { handoverPath: switched.handoverPath } : {}) } });
+      save(key, { ...record, target: target.id, phase: "continued", fresh: switched.fresh === true, jobId: job.id });
       log(`${key} weekly limit recovery verified on account ${target.id}; continuation ${job.id}`);
     } finally { lease.release(); }
   }

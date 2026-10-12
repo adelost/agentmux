@@ -39,6 +39,14 @@ export function resolveCodexModelName(requested) {
   return CODEX_MODEL_ALIASES[name] || name;
 }
 
+/** WHAT: Checks a Codex launch against Mattias's current model policy. WHY: Prevents old Astra selections from starting through wake, retry or account recovery. */
+export function allowedCodexLaunchModel(requested) {
+  const model = resolveCodexModelName(requested || "sol");
+  return /^gpt-6-astra(?:-|$)/u.test(model)
+    ? { ok: false, reason: "Mattias's model rule forbids Astra. Use GPT-6.1 Sol; if the old session cannot compact, use amux model AGENT -p N sol xhigh --new-session." }
+    : { ok: true, model };
+}
+
 const execFileAsync = promisify(execFile);
 
 // The server answers by client version, and every Codex sharing a home

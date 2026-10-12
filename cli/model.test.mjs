@@ -67,6 +67,24 @@ const runCodexModel = (ctx, model) => cmdModel(["fixture", "-p", "0", model, "xh
 }, { codexModelChanger: ctx.changer, codexModels: () => ACCOUNT }).catch(error => error);
 
 feature("CLI Codex model selection", () => {
+  component("an explicit new-session choice uses the supported fresh Sol path", {
+    given: ["a configured stopped Codex pane", codexPane],
+    when: ["requesting Sol xhigh with a new session", async ctx => {
+      const fresh = vi.fn(async () => ({ model: "gpt-6.1-sol", effort: "xhigh", sessionId: "new" }));
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await cmdModel(["fixture", "-p", "0", "sol", "xhigh", "--new-session"], {
+          configPath: ctx.configPath, agent: {}, state: { get: (_, fallback) => fallback, set() {} }, deliveryQueue: {},
+        }, { codexModelChanger: ctx.changer, codexModels: () => ACCOUNT, freshCodexStarter: fresh });
+      } catch { /* Assertions distinguish the unsupported pre-fix path. */ }
+      finally { output.mockRestore(); }
+      return fresh;
+    }],
+    then: ["fresh start runs once without a compact attempt", (fresh, ctx) => {
+      try { expect(fresh).toHaveBeenCalledOnce(); expect(ctx.changer).not.toHaveBeenCalled(); }
+      finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
   component("a family name reaches the switch as the account's model id", {
     given: ["a configured Codex pane", codexPane],
     when: ["asking for gpt-6.1", ctx => runCodexModel(ctx, "gpt-6.1")],

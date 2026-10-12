@@ -6,13 +6,14 @@ import { runLockedClaudeModelChange } from "../core/claude-model-command.mjs";
 import { codexModelRequest, formatCodexModelChange, formatCodexModelFailure, runLockedCodexModelChange } from "../core/codex-model-command.mjs";
 import { driveCodexStatus } from "../core/codex-status.mjs";
 import { readParkState, unparkPane } from "../core/pane-park.mjs";
+import { startFreshCodexSession } from "../core/codex-fresh-session.mjs";
 
 /** WHAT: Routes a CLI model selection through exact compact and native verification. WHY: Keeps automation from bypassing the Discord model-change cost boundary. */
 export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaudeModelChange,
-  codexModelChanger = runLockedCodexModelChange, codexModels } = {}) {
-  const { flags, positional } = parseFlags(args, { p: "number", help: "boolean" });
+  codexModelChanger = runLockedCodexModelChange, codexModels, freshCodexStarter = startFreshCodexSession } = {}) {
+  const { flags, positional } = parseFlags(args, { p: "number", help: "boolean", "new-session": "boolean" });
   if (flags.help) {
-    console.log("Usage: amux model AGENT [-p N] MODEL [EFFORT]\nVerifies the current model and exact-session compact receipt; compacts only when a change needs new proof.");
+    console.log("Usage: amux model AGENT [-p N] MODEL [EFFORT] [--new-session]\nOrdinary changes verify exact-session compact. --new-session starts sol xhigh on a stopped pane, preserves the old journal and does not replay old prompts.");
     return;
   }
   const [name, model, effort] = positional, pane = flags.p ?? 0;
@@ -36,6 +37,12 @@ export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaude
   }
   const { ok, model: targetModel, reason } = await codexModelRequest({ state: ctx.state, name, pane, requested: model, models: codexModels });
   if (!ok) throw new Error(`${reason}. ${name}:${pane} keeps its current model.`);
+  if (flags["new-session"]) {
+    const result = await freshCodexStarter({ agent: ctx.agent, state: ctx.state, queue: ctx.deliveryQueue,
+      name, pane, targetModel, targetEffort: effort });
+    console.log(`${name}:${pane} now runs ${result.model} ${result.effort} in new session ${result.sessionId}. The old journal is preserved.`);
+    return;
+  }
   const result = await codexModelChanger({ agent: ctx.agent, state: ctx.state, name, pane,
     targetModel, targetEffort: effort, deliveryBroker: { queue: ctx.deliveryQueue }, statusDriver: driveCodexStatus });
   if (!result.ok) throw new Error(formatCodexModelFailure(name, pane, result));

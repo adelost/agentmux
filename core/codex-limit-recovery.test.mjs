@@ -1,7 +1,7 @@
 import { feature, component, expect } from "bdd-vitest";
 import { createCodexLimitRecovery } from "./codex-limit-recovery.mjs";
 
-function fixture({ continuity = true, sourceUsed = 100, otherUsed = 0, enabled = true } = {}) {
+function fixture({ continuity = true, sourceUsed = 100, otherUsed = 0, enabled = true, handover = false } = {}) {
   const data = {}, sent = [], switched = [], notices = [];
   const state = { get: (key, fallback = {}) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
   const broker = { queue: { list: () => [], acquireSessionLease: () => ({ release() {} }) },
@@ -15,6 +15,10 @@ function fixture({ continuity = true, sourceUsed = 100, otherUsed = 0, enabled =
     quota: async profile => ({ ok: true, account: { email: "test@example.com" }, limits: [{ limitId: "codex",
       windows: [{ windowMinutes: 10080, usedPercent: profile.id === "1" ? sourceUsed : otherUsed }] }] }),
     continuity: () => ({ ok: continuity, sessionId: "same-session", reason: "session unavailable" }),
+    transferSession: () => ({ ok: continuity, sessionId: "same-session", reason: "session unavailable" }),
+    prepareHandover: () => ({ ok: handover, path: "/handover.json", text: "exact task and reply", reason: "no verified handover" }),
+    freshAccount: async args => args.handover.ok ? { kind: "switched", fresh: true, text: args.handover.text,
+      path: "/new-rollout.jsonl", handoverPath: args.handover.path } : { kind: "failed", error: "no verified handover" },
     readLatestPrompt: () => null,
     switchAccount: async args => { switched.push(args); return { kind: "switched" }; },
     notify: async message => { notices.push(message); }, log: () => {} });
@@ -22,6 +26,14 @@ function fixture({ continuity = true, sourceUsed = 100, otherUsed = 0, enabled =
 }
 
 feature("automatic Codex account recovery only after a reached weekly limit", () => {
+  component("a nonportable session gets one saved fresh-session handover", {
+    given: ["reached limit, spare account and durable exact task evidence", () => fixture({ continuity: false, handover: true })],
+    when: ["observing the refusal twice", async fx => { await fx.run(); await fx.run(); return fx; }],
+    then: ["one handover replaces capacity continuation without replaying the original input", fx => {
+      expect(fx.sent).toHaveLength(1); expect(fx.sent[0].text).toBe("exact task and reply");
+      expect(fx.sent[0].metadata.handoverPath).toBe("/handover.json"); expect(fx.notices).toHaveLength(0);
+    }],
+  });
   component("one reached limit switches once with continuity and queues one continuation", {
     given: ["a real limit and a spare authenticated account", fixture],
     when: ["observing the same refusal twice", async fx => { await fx.run(); await fx.run(); return fx; }],

@@ -386,7 +386,8 @@ feature("/model dialect routing", () => {
     }],
   });
 
-  component("codex Astra shortcuts restart the pane with the exact model id", {
+  // Mattias's October 11 policy supersedes the former accepted Astra alias.
+  component("codex Astra shortcuts are refused under the Sol policy", {
     given: ["an idle Codex pane addressed with /model gpt-6", () => {
       const path = writeCodexYaml();
       const driver = vi.fn(async () => ({
@@ -411,9 +412,9 @@ feature("/model dialect routing", () => {
       await onMessage(msg);
       unlinkSync(path);
     }],
-    then: ["the process receives gpt-6-astra", (_, { msg, agent }) => {
-      expect(agent.restartCodex.mock.calls[0][2]).toMatchObject({ model: "gpt-6-astra", effort: "xhigh" });
-      expect(msg.reply.mock.calls.at(-1)[0]).toContain("gpt-6-astra");
+    then: ["no restart or compact starts, and the reply explains Mattias's rule", (_, { msg, agent }) => {
+      expect(agent.restartCodex).not.toHaveBeenCalled();
+      expect(msg.reply.mock.calls.at(-1)[0]).toContain("Mattias's model rule forbids Astra");
     }],
   });
 

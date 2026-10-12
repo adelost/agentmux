@@ -124,6 +124,8 @@ Usage:
   agent queue                     List live durable delivery jobs (id, target, age, state, attempts, reason, preview)
   agent sleep <name|:nr> [-p N]   Sleep one 24h-idle Claude pane after exact compact, nonce, and clean-state receipts
   agent wake <name|:nr> [-p N]    Wake the exact recorded session through release and memory admission
+  agent model <name> [-p N] MODEL [EFFORT]  Verified compact-first model change
+    --new-session                 Explicit new sol xhigh conversation on a stopped pane; old journal retained
   agent sleep-watch [--dry]       Report conservative candidates; --apply sleeps at most two after re-gating
     --all                         Include terminal delivery history retained on disk
     --limit N                     Maximum rows (default 100, max 1000)

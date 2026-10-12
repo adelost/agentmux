@@ -6,6 +6,7 @@ import {
   resolveCatalogCodexModel,
   selectedCodexProfile,
   setCodexModelOverride,
+  allowedCodexLaunchModel,
 } from "./codex-profiles.mjs";
 import { compactThenSwitchCodex } from "./codex-model-switch.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
@@ -41,6 +42,8 @@ export function formatCodexModelFailure(name, pane, result) {
 
 /** WHAT: Resolves one pane's model request and its first reply. WHY: Keeps a name the account cannot run from reaching compact or restart. */
 export async function codexModelRequest({ state, name, pane, requested, models = codexModelCatalog }) {
+  const policy = allowedCodexLaunchModel(requested);
+  if (!policy.ok) return { ...policy, reply: `⚠️ ${policy.reason}` };
   const resolved = resolveCatalogCodexModel(requested, await models(selectedCodexProfile(state, name, pane)));
   if (!resolved.ok) return { ...resolved, reply: `⚠️ ${resolved.reason}. ${name}:${pane} keeps its current model.` };
   const match = resolved.requested ? ` (the only ${resolved.requested} model)` : "";
