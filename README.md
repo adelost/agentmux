@@ -536,6 +536,10 @@ acknowledge them. A stale or different session, draft, or unproven live process 
 after a successful restart is made schedulable again when capacity returns, without a second restart or continuation.
 Explicit cancellation remains a broker decision, not a manual queue-file rewrite.
 
+A terminal synthetic rate-limit receipt also closes the busy assessment when only same-session,
+engine-authored background task notifications follow it. New user input or tool activity invalidates
+that evidence. Idle is not quota availability, a delivery acknowledgement, or permission to resend.
+
 Terminal commands:
 
 ```bash
