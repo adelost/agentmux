@@ -1,4 +1,4 @@
-import { isSystemNoiseDirective } from "./system-noise.mjs";
+import { authoredPromptText, isSystemNoiseDirective } from "./system-noise.mjs";
 
 const AUTOMATION_SOURCES = new Set([
   "auto-compact",
@@ -19,7 +19,7 @@ export function inferAskOrigin({
   prompt = "",
 } = {}) {
   if (isSystemNoiseDirective(prompt)) return "system";
-  if (sender || /^\[from\s+[^\]]+\]/iu.test(String(prompt).trimStart())) return "agent";
+  if (sender || /^\[from\s+[^\]]+\]/iu.test(authoredPromptText(prompt))) return "agent";
   if (source === "discord" || source === "pane-hook") return "human";
   if (AUTOMATION_SOURCES.has(source)) return "system";
   // A plain prompt entered through `amux <agent> ...` outside another pane is

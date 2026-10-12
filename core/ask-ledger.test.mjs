@@ -290,6 +290,17 @@ feature("durable ask ledger", () => {
     }],
   });
 
+  unit("a pasted-content hook is one observation of its delivery without rewriting the original quote", {
+    when: ["coalescing two real repeated inputs and their engine-wrapped echoes", () => coalesceAskLedger([
+      delivered("first", 0, 1, "kör testerna"), delivered("second", 1, 1, "kör testerna"),
+      hooked("echo-first", 0, 1, '<pasted_content id="c93f">\nkör testerna\n</pasted_content>'),
+      hooked("echo-second", 1, 1, '<pasted_content id="c93f">\nkör testerna\n</pasted_content>'),
+    ])],
+    then: ["both authored deliveries survive, but neither echo is a third request", rows => {
+      expect(rows.map(row => row.id)).toEqual(["first", "second"]);
+      expect(rows.map(row => row.verbatim)).toEqual(["kör testerna", "kör testerna"]);
+    }],
+  });
   unit("a pane hook folds into the nearest unclaimed identical delivery on its own pane", {
     given: ["repeated identical asks, their hook echoes, and near misses", () => [
       delivered("d-first", 0), delivered("d-second", 10),

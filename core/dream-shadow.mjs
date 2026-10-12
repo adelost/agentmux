@@ -57,7 +57,7 @@ export function dreamShadow({ agents, sinceMs, receipts, readHistory, current, d
       fromLog: fromLog.map(keyOf),
       partialWindow: fromLog.filter((source) => source.historyComplete === false).map(keyOf),
     },
-    answered: answeredShare(log, { nowMs }),
+    answered: answeredShare(log, { sinceMs: Math.max(sinceMs, log.coverageStartMs), nowMs }),
   };
 }
 

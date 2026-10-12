@@ -81,9 +81,13 @@ window edge can be off by the few seconds a delivery waits in the queue.
   `reply`/`file`/`voice` posts after each ask; Dream's own prompt and the
   curator's reply to it are left out. Panes without such posts, or whose
   answers belong to an ask from before their window, fall back to the
-  provider journal. Every delivered ask starts a turn in the log, while a
-  journal folds messages delivered mid-turn into the running turn and defers
-  it, so the log can show a busy pane the journal leaves for the next night. The shadow prints its comparison in `amux dream --dry`
+  provider journal. Consecutive inputs from the same origin before their first
+  output form one logical turn, with every original `logId` preserved in
+  `logIds`. The output is stored once; repeated authored inputs remain distinct.
+  A different origin or a Dream prompt starts a separate turn. Engine paste
+  envelopes are decoded only for observation matching and origin classification,
+  never rewritten in the ledger. Task notifications do not become human asks
+  or separate an input from its answer. The shadow prints its comparison in `amux dream --dry`
   and saves it per run in `~/.agentmux/dream-shadow/`. It never changes the
   packet the curator receives.
 - Window reads go newest file first and stop at the first archive rotated
@@ -96,3 +100,12 @@ and `amux asks` switch to the log, with `AMUX_DREAM_SOURCE=raw` kept for a week
 as the way back. The switch needs the shadow to show at least 95 % of settled
 `discord` and `pane-hook` asks answered by a post, no pane omitted and the
 packet within 96 KB. Legacy readers are removed only after two green nights.
+
+Coverage measures settled human inputs accompanied by successfully posted
+output, not whether an agent fulfilled every requirement in the input. Failed
+posts, agent relays, maintenance and task notifications do not inflate it.
+Several human messages before one reply can share that output without losing
+any original ask. An unrelated agent reply cannot close an earlier human gap.
+Nightly coverage uses that run's requested time window, not all history since
+the first post. Recalculating an old night with a corrected reader is diagnostic
+evidence, not permission to skip a new real shadow night.

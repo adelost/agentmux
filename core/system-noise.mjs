@@ -26,15 +26,22 @@ const NOISE_PATTERNS = [
   /^This session is being continued from a previous conversation/,
   // Hook/system banners that arrive on the user channel (<system-reminder> etc).
   /^<system-/i,
+  /^<task-notification\b/i,
   /^\[Request interrupted/,
 ];
 
+/** WHAT: Returns the authored content of one complete engine paste envelope. WHY: Classifies and matches observations without rewriting their saved verbatim text. */
+export function authoredPromptText(text) {
+  const value = String(text || "").trim();
+  return /^<pasted_content(?:\s[^>]*)?>([\s\S]*)<\/pasted_content>$/u.exec(value)?.[1].trim() ?? value;
+}
+
 /**
- * True when a user-role turn is machine plumbing rather than a directive.
- * An empty turn is noise by definition: there is nothing in it to act on.
+ * WHAT: Returns whether a user-role input is machine plumbing or empty.
+ * WHY: Keeps notifications and wrappers from becoming human directives.
  */
 export function isSystemNoiseDirective(text) {
-  const head = String(text || "").trimStart();
+  const head = authoredPromptText(text);
   if (!head) return true;
   return NOISE_PATTERNS.some((pattern) => pattern.test(head));
 }

@@ -22,6 +22,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseJsonlText } from "./jsonl-reader.mjs";
+import { authoredPromptText } from "./system-noise.mjs";
 
 /** WHAT: Defines the on-disk ask row schema. WHY: Keeps future readers from guessing incompatible records. */
 export const ASK_LEDGER_VERSION = 1;
@@ -419,7 +420,7 @@ export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}
       .filter((row) => !claimed.has(row.id)
         && row.agent === hook.agent
         && row.pane === hook.pane
-        && row.verbatim === hook.verbatim
+        && authoredPromptText(row.verbatim) === authoredPromptText(hook.verbatim)
         && Math.abs(hookAt - Date.parse(row.ts)) <= hookMatchMs)
       .sort((a, b) => Math.abs(hookAt - Date.parse(a.ts)) - Math.abs(hookAt - Date.parse(b.ts)))[0];
     if (!candidate) {
@@ -438,7 +439,7 @@ export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}
 // A hook can only fold into a delivery of the same agent, pane and text, so it
 // is compared with that group instead of with every delivery in the ledger.
 // The key may merge values such as pane 1 and "1"; the exact checks decide.
-const sameAskKey = (row) => `${row.agent}\u0000${row.pane}\u0000${row.verbatim}`;
+const sameAskKey = (row) => `${row.agent}\u0000${row.pane}\u0000${authoredPromptText(row.verbatim)}`;
 
 function groupBySameAsk(rows) {
   const groups = new Map();

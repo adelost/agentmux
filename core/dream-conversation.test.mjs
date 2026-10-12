@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
 import { readCodexDreamEvents } from "./codex-dream-history.mjs";
-import { answeredShare } from "./dream-conversation.mjs";
+import { answeredShare, conversationPaneTurns } from "./dream-conversation.mjs";
 import { buildDreamBatch, collectDreamSources } from "./dream-summarizer.mjs";
+import { dreamShadow } from "./dream-shadow.mjs";
+import { appendAskLedger, appendPost } from "./ask-ledger.mjs";
 
 const SINCE = Date.parse("2026-10-11T02:00:00Z");
 const NOW = Date.parse("2026-10-12T02:00:00Z");
@@ -34,6 +36,59 @@ const log = {
 };
 
 feature("Dream reads the conversation log before any journal", () => {
+  component("nightly coverage uses the requested day, not the catch-up history", {
+    given: ["an older input plus one answered input in this day", () => {
+      const root = mkdtempSync(join(tmpdir(), "dream-shadow-day-")), path = join(root, "ledger.jsonl");
+      const options = { path, now: () => NOW };
+      appendPost({ ts: SINCE - 86400_000, agent: "lsrc", pane: 0, channelId: "c", via: "bridge", kind: "notice", payload: "started" }, options);
+      appendAskLedger({ agent: "lsrc", pane: 0, source: "discord", ts: SINCE - 3_600_000, verbatim: "old input" }, options);
+      appendAskLedger({ agent: "lsrc", pane: 0, source: "discord", ts: at(1), verbatim: "today input" }, options);
+      appendPost({ agent: "lsrc", pane: 0, channelId: "c", via: "bridge", kind: "reply", ts: at(2), payload: "today reply" }, options);
+      return { root, path };
+    }],
+    when: ["building the actual shadow report", fx => dreamShadow({ agents: [], sinceMs: SINCE, receipts: { panes: {} },
+      readHistory: () => ({ turns: [] }), current: { batch: { sourceText: "", included: [], omitted: [] }, observed: { unreadable: [] } },
+      dateKey: "2026-10-12", nowMs: NOW, logPath: fx.path })],
+    then: ["only this day's human input enters the switch metric", report => expect(report.answered).toMatchObject({ asked: 1, answered: 1, share: 1 })],
+    cleanup: fx => rmSync(fx.root, { recursive: true, force: true }),
+  });
+  unit("a real task notification does not count as a human ask or separate the human from its answer", {
+    given: ["a human input followed by a machine notification before its answer", () => ({ coverageStartMs: SINCE,
+      asks: [ask("human", 0, at(1), "fixa det"), ask("notification", 0, at(1, 1), "<task-notification>\n<task-id>a1ca86742c4b24f37</task-id>\n<status>completed</status>\n</task-notification>", "pane-hook")],
+      posts: [post(0, at(1, 2), "reply", "fixat")],
+    })],
+    when: ["measuring the actual input/output coverage", data => answeredShare(data, { nowMs: NOW })],
+    then: ["the single human input has the posted answer", result => expect(result).toMatchObject({ asked: 1, answered: 1, share: 1 })],
+  });
+  unit("an engine-wrapped agent brief is not human, and a genuinely unanswered human remains counted", {
+    given: ["a wrapped relay and one unanswered human", () => ({ coverageStartMs: SINCE,
+      asks: [ask("relay", 0, at(1), '<pasted_content id="c93f">\n[from lsrc:0]\nSUMMARY: granska paret\n</pasted_content>', "pane-hook"),
+        ask("human", 0, at(2), "har du ett svar?")], posts: [],
+    })],
+    when: ["counting settled human input", data => answeredShare(data, { nowMs: NOW })],
+    then: ["only the genuine human input is still unanswered", result => expect(result).toEqual({ asked: 1, answered: 0, share: 0, unanswered: { "lsrc:0": 1 } })],
+  });
+  unit("several human messages before one answer stay distinct inputs in one logical turn", {
+    given: ["two exact human inputs that the pane answers together", () => ({ coverageStartMs: SINCE,
+      asks: [ask("first", 0, at(1), "kolla loggen"), ask("addition", 0, at(1, 1), "och behåll reträtten")],
+      posts: [post(0, at(1, 2), "reply", "logg och reträtt klara")],
+    })],
+    when: ["building turns and counting coverage", data => ({ turns: conversationPaneTurns(data.asks, data.posts), coverage: answeredShare(data, { nowMs: NOW }) })],
+    then: ["both original asks are retained and one posted answer is not duplicated", ({ turns, coverage }) => {
+      expect(coverage).toMatchObject({ asked: 2, answered: 2, share: 1 });
+      expect(turns).toHaveLength(1);
+      expect(turns[0].logIds).toEqual(["first", "addition"]);
+      expect(turns[0].userPrompt).toBe("kolla loggen\n\noch behåll reträtten");
+      expect(turns[0].items).toEqual([{ type: "text", content: "logg och reträtt klara" }]);
+    }],
+  });
+  unit("a later agent reply cannot cover an earlier unanswered human request", {
+    when: ["measuring distinct authors with an intervening relay", () => answeredShare({ coverageStartMs: SINCE,
+      asks: [ask("human", 0, at(1), "min fråga"), ask("relay", 0, at(2), "[from skyvw:0] separat brief", "cli")],
+      posts: [post(0, at(3), "reply", "briefen klar")],
+    }, { nowMs: NOW })],
+    then: ["the human gap remains visible instead of inflating coverage", result => expect(result).toMatchObject({ asked: 1, answered: 0 })],
+  });
   unit("a pane that posted is built from the log without opening its journal", {
     given: ["lsrc:0 posted its answers, lsrc:1 only has a journal", () => ({
       readHistory: vi.fn((_engine, dir) => {

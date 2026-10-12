@@ -5,6 +5,8 @@
 // posted nothing in its window.
 
 import { DREAM_SETTLE_MS } from "./dream-turn-selection.mjs";
+import { inferAskOrigin } from "./ask-origin.mjs";
+import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 /** WHAT: Names the post kinds that carry a pane's own output. WHY: Mirrors and notices repeat an ask or report status; they are not the answer. */
 export const DREAM_ANSWER_KINDS = new Set(["reply", "file", "voice"]);
@@ -14,32 +16,44 @@ const HUMAN_ASK_SOURCES = new Set(["discord", "pane-hook"]);
 const tsMs = (row) => Date.parse(row?.ts || "");
 const paneKey = (row) => `${row.agent}:${row.pane}`;
 const byTime = (left, right) => tsMs(left) - tsMs(right);
+const originOf = ask => inferAskOrigin({ source: ask.source, sender: ask.sender, prompt: ask.verbatim });
 
 const postedText = (post) => [post.text, ...(post.files || []).map((file) => `[file: ${file}]`)]
   .filter(Boolean).join("\n");
 
 /**
- * WHAT: Builds one pane's turns from its asks and the answers posted before the next ask.
- * WHY: Gives Dream the same turn shape as a journal without any engine-specific reader.
+ * WHAT: Maps consecutive inputs and posted output to logical turns with every ask id.
+ * WHY: Keeps shared responses from hiding inputs or closing another author's unanswered request.
  */
 export function conversationPaneTurns(asks, posts) {
-  const ordered = [...asks].sort(byTime);
-  return ordered.map((ask, index) => {
+  const ordered = asks.filter(ask => !isSystemNoiseDirective(ask.verbatim)).sort(byTime);
+  const replies = posts.filter(post => post.status !== "failed" && DREAM_ANSWER_KINDS.has(post.kind)).sort(byTime);
+  const turns = [];
+  for (let index = 0; index < ordered.length;) {
+    const ask = ordered[index], first = index, origin = originOf(ask);
     const startMs = tsMs(ask);
+    const firstReplyMs = tsMs(replies.find(post => tsMs(post) >= startMs)) || Infinity;
+    while (index + 1 < ordered.length && tsMs(ordered[index + 1]) <= firstReplyMs
+      && originOf(ordered[index + 1]) === origin
+      && ask.source !== "dream" && ordered[index + 1].source !== "dream") index++;
     const endMs = index + 1 < ordered.length ? tsMs(ordered[index + 1]) : Infinity;
-    const answers = posts.filter((post) => DREAM_ANSWER_KINDS.has(post.kind) && tsMs(post) >= startMs && tsMs(post) < endMs);
-    return {
-      timestamp: ask.ts,
-      userPrompt: ask.verbatim,
+    const inputs = ordered.slice(first, index + 1);
+    const answers = replies.filter(post => tsMs(post) >= startMs && tsMs(post) < endMs);
+    turns.push({
+      timestamp: inputs.at(-1).ts,
+      userPrompt: inputs.map(input => input.verbatim).join("\n\n"),
       isComplete: index + 1 < ordered.length,
       items: answers.map((post) => ({ type: "text", content: postedText(post) })),
-      logId: ask.id,
-    };
-  });
+      logId: inputs.at(-1).id,
+      logIds: inputs.map(input => input.id),
+    });
+    index++;
+  }
+  return turns;
 }
 
 /**
- * WHAT: Selects one pane's asks and posts in a window, without Dream's own run.
+ * WHAT: Returns one pane's asks and posts in a window, without Dream's own run.
  * WHY: Keeps Dream from summarizing its curator prompt and the curator's reply to it.
  */
 export function conversationForPane(log, agent, pane, windowStartMs) {
@@ -48,7 +62,7 @@ export function conversationForPane(log, agent, pane, windowStartMs) {
   const dreamRuns = asks.filter((ask) => ask.source === "dream").map(tsMs);
   const posts = log.posts.filter((post) => paneKey(post) === key && tsMs(post) > windowStartMs);
   const turns = conversationPaneTurns(asks, posts).filter((turn) => !dreamRuns.includes(Date.parse(turn.timestamp)));
-  const answered = posts.some((post) => DREAM_ANSWER_KINDS.has(post.kind));
+  const answered = posts.some((post) => post.status !== "failed" && DREAM_ANSWER_KINDS.has(post.kind));
   const lastWriteMs = Math.max(-Infinity, ...asks.map(tsMs), ...posts.map(tsMs));
   return { turns, answered, lastWriteMs };
 }
@@ -69,10 +83,12 @@ export function answeredShare(log, { sinceMs = log.coverageStartMs, nowMs = Date
   for (const [key, asks] of byPane) {
     // A failed send never reached the person, so it answers nothing.
     const posts = log.posts.filter((post) => paneKey(post) === key && post.status !== "failed");
-    for (const turn of conversationPaneTurns(asks, posts)) {
-      const ask = asks.find((row) => row.id === turn.logId);
+    const byId = new Map(asks.map(ask => [ask.id, ask]));
+    for (const turn of conversationPaneTurns(asks, posts)) for (const id of turn.logIds) {
+      const ask = byId.get(id);
       const atMs = tsMs(ask);
-      if (!HUMAN_ASK_SOURCES.has(ask.source) || atMs < sinceMs || nowMs - atMs < DREAM_SETTLE_MS) continue;
+      if (!HUMAN_ASK_SOURCES.has(ask.source) || originOf(ask) !== "human"
+        || atMs < sinceMs || nowMs - atMs < DREAM_SETTLE_MS) continue;
       asked++;
       if (turn.items.length) answered++;
       else unanswered[key] = (unanswered[key] || 0) + 1;
