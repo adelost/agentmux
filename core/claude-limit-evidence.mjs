@@ -174,5 +174,3 @@ export function activeClaudeLimitReceiptFromEvents(events, {
     resetAt: parseClaudeLimitResetAt(found.text, found.observedAt),
   });
 }
-
-
