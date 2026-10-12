@@ -33,6 +33,43 @@ function setup(reason = capacityError) {
 }
 
 feature("bounded automatic recovery after an exact Codex capacity stop", () => {
+  component("a refused continuation with memory orientation keeps the original retry budget", {
+    given: ["one capacity episode and a frozen augmented physical payload", setup],
+    when: ["refusing the oriented first continuation, then reaching five minutes", async fx => {
+      fx.advance(2); await fx.tick();
+      const first = fx.queue.list("lsrc", 5)[0];
+      const text = `${first.text}\n\n[amux orientation, memory fixture]\nRead current task evidence.`;
+      fx.queue.update(first, { text, status: "acknowledged", submittedAt: END + 120_000,
+        metadata: { memoryContext: { hinted: true } } });
+      fx.result.lastPrompt = { timestamp: new Date(END + 120_000).toISOString(), text };
+      fx.result.refusals.push({ id: "oriented-retry", timestamp: new Date(END + 121_000).toISOString() });
+      fx.advance(5); await fx.tick();
+      return fx.queue.list("lsrc", 5);
+    }],
+    then: ["the second continuation belongs to the original episode, not a reset budget", jobs => {
+      expect(jobs).toHaveLength(2);
+      expect(jobs[1].metadata.capacityEpisode).toBe(jobs[0].metadata.capacityEpisode);
+    }], cleanup: fx => fx.cleanup(),
+  });
+
+  component("three confirmed failed continuations leave one durable investigation signal", {
+    given: ["one capacity episode", setup],
+    when: ["refusing all three continuations and polling after the final failure", async fx => {
+      for (const minute of [2, 5, 10]) {
+        fx.advance(minute); await fx.tick();
+        const job = fx.queue.list("lsrc", 5).at(-1);
+        fx.queue.update(job, { status: "acknowledged", submittedAt: END + minute * 60_000 });
+        fx.result.lastPrompt = { timestamp: new Date(END + minute * 60_000).toISOString(), text: job.text };
+        fx.result.refusals.push({ id: `failed-${minute}`, timestamp: new Date(END + minute * 60_000 + 1000).toISOString() });
+      }
+      fx.advance(11); await fx.tick(); fx.restart(); await fx.tick();
+      return fx;
+    }],
+    then: ["the existing stall-watch can see exhaustion without a fourth model retry", fx => {
+      expect(fx.queue.list("lsrc", 5)).toHaveLength(3);
+      expect(fx.data[CAPACITY_STATE_KEY]["lsrc:5"].exhaustedAt).toBe(END + 11 * 60_000);
+    }], cleanup: fx => fx.cleanup(),
+  });
   component("the actual mid-turn stop waits two minutes and enqueues once across restart", {
     given: ["the sanitized October 12 stop and a real durable queue", setup],
     when: ["ticking before, at, and after the deadline across restart", async fx => {

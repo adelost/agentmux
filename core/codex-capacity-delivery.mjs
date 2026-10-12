@@ -2,6 +2,7 @@ import { codexUserPrompt } from "./codex-user-events.mjs";
 import { parseJsonlText, readTailWindow } from "./jsonl-reader.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { findBlockingPrompt } from "./dismiss.mjs";
+const CAPACITY_EVIDENCE_BYTES = 8 * 1024 * 1024;
 
 /** WHAT: Identifies fully observed maintenance-only compact tasks. WHY: Their lifecycle must not cancel recovery of the unfinished product task. */
 function completedCompactionTurns(events) {
@@ -34,23 +35,31 @@ export async function fenceCodexCapacityJobs({ agentName, pane, queue, agent, no
         || job.status !== "pending" || job.attempts > 0 || job.draftOwned) continue;
     try {
       const after = Date.parse(job.metadata?.capacityRefusedAt);
-      const events = parseJsonlText(readTailWindow(job.metadata.capacitySessionFile, 256 * 1024).text);
-      const compactions = completedCompactionTurns(events);
-      const superseded = events.some(event => Date.parse(event.timestamp) > after
-        && (codexUserPrompt(event) !== null || (event.type === "event_msg"
-          && ["task_started", "task_complete", "turn_aborted"].includes(event.payload?.type)
-          && (event.payload.type === "turn_aborted" || !compactions.has(event.payload.turn_id)))))
-        || queue.list(agentName, pane).some(other => other.id !== job.id && other.createdAt >= job.createdAt
+      const newerQueuedInput = queue.list(agentName, pane).some(other => other.id !== job.id && other.createdAt >= job.createdAt
           && other.source !== job.source && !TERMINAL_DELIVERY_STATES.has(other.status));
-      if (superseded) {
+      if (newerQueuedInput) {
         queue.requestCancellation(job.id, { requestedBy: "delivery-broker", reason: "capacity continuation superseded by new input or activity" });
         await terminalizeNotSent(queue.read(agentName, pane, job.id));
         continue;
       }
       const transport = await agent.promptTransportState(agentName, pane, job.text);
-      if (transport.dialect === "codex" && transport.state === "empty-idle" && !transport.busy
-          && !findBlockingPrompt(await agent.captureScreen(agentName, pane))) continue;
-      queue.update(job, { nextAttemptAt: now() + 15_000, lastReason: "capacity continuation waits for an idle Codex composer" });
+      if (transport.dialect !== "codex" || transport.state !== "empty-idle" || transport.busy
+          || findBlockingPrompt(await agent.captureScreen(agentName, pane))) {
+        queue.update(job, { nextAttemptAt: now() + 15_000, lastReason: "capacity continuation waits for an idle Codex composer" });
+        continue;
+      }
+      // lsrc:4's compact record alone was 1.52 MB. Retain both boundaries,
+      // bounded to eight MiB, only when a continuation is ready to submit.
+      const events = parseJsonlText(readTailWindow(job.metadata.capacitySessionFile, CAPACITY_EVIDENCE_BYTES).text);
+      const compactions = completedCompactionTurns(events);
+      const superseded = events.some(event => Date.parse(event.timestamp) > after
+        && (codexUserPrompt(event) !== null || (event.type === "event_msg"
+          && ["task_started", "task_complete", "turn_aborted"].includes(event.payload?.type)
+          && (event.payload.type === "turn_aborted" || !compactions.has(event.payload.turn_id)))));
+      if (superseded) {
+        queue.requestCancellation(job.id, { requestedBy: "delivery-broker", reason: "capacity continuation superseded by new input or activity" });
+        await terminalizeNotSent(queue.read(agentName, pane, job.id));
+      }
     } catch (error) {
       log(`capacity continuation held: ${error.message}`);
       queue.update(job, { nextAttemptAt: now() + 15_000, lastReason: "capacity continuation evidence unavailable" });

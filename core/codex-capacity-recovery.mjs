@@ -3,6 +3,7 @@ import { selectedCodexProfile, codexModelOverride } from "./codex-profiles.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { findBlockingPrompt } from "./dismiss.mjs";
 import { parseJsonlText, readTailWindow } from "./jsonl-reader.mjs";
+import { deliveryMemoryReceiptText } from "./delivery-memory-context.mjs";
 
 /** DTO: Durable per-pane bounded capacity episodes. */
 export const CAPACITY_STATE_KEY = "codex_capacity_recovery";
@@ -25,7 +26,7 @@ export function createCodexCapacityRecovery({ state, broker, agent, now = () => 
     const jobs = broker.queue.list(name, pane);
     const owned = job => job.source === SOURCE && job.metadata?.capacityEpisode === episode.id;
     const newerInput = Date.parse(result.lastPrompt?.timestamp || "") > episode.at;
-    const ownInput = newerInput && jobs.some(job => owned(job) && (job.verifyText || job.text) === result.lastPrompt.text);
+    const ownInput = newerInput && jobs.some(job => owned(job) && deliveryMemoryReceiptText(job)?.trim() === result.lastPrompt.text?.trim());
     if ((newerInput && !ownInput) || jobs.some(job => !owned(job) && job.createdAt > episode.at)) return "superseded";
     if (jobs.some(job => owned(job) && job.status === "delivered_unverified")) return "unverified-delivery";
     if (jobs.some(job => !TERMINAL_DELIVERY_STATES.has(job.status))) return "delivery-in-progress";
@@ -51,7 +52,7 @@ export function createCodexCapacityRecovery({ state, broker, agent, now = () => 
     const freshRefusal = episode && episode.lastRefusal !== refusal.id;
     const inputBeforeRefusal = Date.parse(result.lastPrompt?.timestamp || "") <= Date.parse(refusal.timestamp);
     const ownPrompt = broker.queue.list(name, pane).some(job => job.source === SOURCE
-      && job.metadata?.capacityEpisode === episode?.id && (job.verifyText || job.text) === result.lastPrompt?.text);
+      && job.metadata?.capacityEpisode === episode?.id && deliveryMemoryReceiptText(job)?.trim() === result.lastPrompt?.text?.trim());
     if (freshRefusal && inputBeforeRefusal && !ownPrompt) episode = null;
     if (episode && ["superseded", "unverified-delivery"].includes(stillWaiting(name, pane, result, episode))) {
       save(key, { ...episode, done: true });
@@ -69,10 +70,14 @@ export function createCodexCapacityRecovery({ state, broker, agent, now = () => 
       episode = { ...episode, lastRefusal: refusal.id };
       save(key, episode);
     }
-    if (episode.done || episode.attempts >= RETRY_AT_MS.length || !Number.isFinite(episode.at)) return;
-    if (now() < episode.at + RETRY_AT_MS[episode.attempts]) return;
+    if (episode.done || !Number.isFinite(episode.at)) return;
     const blocked = stillWaiting(name, pane, result, episode);
     if (blocked) { if (["superseded", "unverified-delivery"].includes(blocked)) save(key, { ...episode, done: true }); return; }
+    if (episode.attempts >= RETRY_AT_MS.length) {
+      if (!episode.exhaustedAt) save(key, { ...episode, exhaustedAt: now() });
+      return;
+    }
+    if (now() < episode.at + RETRY_AT_MS[episode.attempts]) return;
     const transport = await agent.promptTransportState(name, pane, CAPACITY_CONTINUE_TEXT);
     if (transport.dialect !== "codex" || transport.busy || transport.state !== "empty-idle") return;
     if (findBlockingPrompt(await agent.captureScreen(name, pane))) return;

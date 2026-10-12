@@ -1,16 +1,18 @@
 import { feature, component, expect } from "bdd-vitest";
-import { fenceCodexCapacityJobs } from "./codex-capacity-delivery.mjs";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { compactedCapacityEvents } from "../test/fixtures/codex-capacity-compacted-2026-10-12.mjs";
+import { compactedCapacityEvents, lsrc4CompactedCapacityEvents } from "../test/fixtures/codex-capacity-compacted-2026-10-12.mjs";
+const { fenceCodexCapacityJobs } = await import(process.env.AMUX_TEST_PACKAGE_ROOT
+  ? join(process.env.AMUX_TEST_PACKAGE_ROOT, "core/codex-capacity-delivery.mjs") : "./codex-capacity-delivery.mjs");
 
 feature("capacity continuation is rechecked immediately before delivery", () => {
-  for (const kind of ["completed-compact", "incomplete-compact", "compact-with-input", "compact-with-work", "ordinary-end"]) {
+  for (const kind of ["completed-compact", "completed-compact-lsrc4", "incomplete-compact", "compact-with-input", "compact-with-work", "ordinary-end"]) {
     component(`${kind} distinguishes maintenance from superseding work`, {
       given: ["the actual lsrc:9 capacity and compaction lifecycle in an isolated journal", () => {
         const root = mkdtempSync(join(tmpdir(), "amux-capacity-compact-")), file = join(root, "journal.jsonl");
-        const events = [...compactedCapacityEvents];
+        const events = [...(kind === "completed-compact-lsrc4" ? lsrc4CompactedCapacityEvents : compactedCapacityEvents)];
+        const refusedAt = kind === "completed-compact-lsrc4" ? events[0].timestamp : events[1].timestamp;
         if (kind === "incomplete-compact") events.pop();
         if (kind === "ordinary-end") events.splice(3, 1);
         if (kind === "compact-with-input") events.splice(3, 0, {
@@ -21,7 +23,7 @@ feature("capacity continuation is rechecked immediately before delivery", () => 
         });
         writeFileSync(file, events.map(event => JSON.stringify(event)).join("\n") + "\n");
         const job = { id: "compact-j1", source: "codex-capacity-recovery", status: "pending", attempts: 0, text: "continue",
-          metadata: { capacityRefusedAt: compactedCapacityEvents[1].timestamp, capacitySessionFile: file } };
+          metadata: { capacityRefusedAt: refusedAt, capacitySessionFile: file } };
         const queue = { list: () => [job], read: () => job, update: (_, patch) => Object.assign(job, patch), requestCancellation: () => {} };
         return { root, job, queue };
       }],
@@ -32,7 +34,7 @@ feature("capacity continuation is rechecked immediately before delivery", () => 
         return fx.job;
       }],
       then: ["only a proven completed maintenance-only compact preserves the continuation", job => {
-        expect(job.status).toBe(kind === "completed-compact" ? "pending" : "cancelled");
+        expect(job.status).toBe(kind.startsWith("completed-compact") ? "pending" : "cancelled");
       }], cleanup: fx => rmSync(fx.root, { recursive: true, force: true }),
     });
   }

@@ -22,3 +22,24 @@ export const compactedCapacityEvents = [
     type: "task_complete", turn_id: "01a13037-ecfb-7a80-a4a9-4a10053bcbc9", last_agent_message: null,
   } },
 ];
+
+// lsrc:4 reproduced the same broker cancellation at 12:45:55.629Z.
+// Its earlier capacity error was also present directly on task_complete.
+export const lsrc4CompactedCapacityEvents = [
+  { timestamp: "2026-10-12T12:40:37.443Z", type: "event_msg", payload: {
+    type: "task_complete", turn_id: "01a12fb2-d6b0-7180-8c33-1fb3aaa8d30a", last_agent_message: null,
+    error: { message: "Selected model is at capacity. Please try a different model.", codex_error_info: "server_overloaded" },
+  } },
+  { timestamp: "2026-10-12T12:42:08.929Z", type: "event_msg", payload: {
+    type: "task_started", turn_id: "01a13022-7c96-7030-a720-2c7624415e28",
+  } },
+  // Actual record was 1522285 bytes. Padding preserves window pressure,
+  // without publishing the private replacement history.
+  { timestamp: "2026-10-12T12:45:41.399Z", type: "compacted", payload: { message: "x".repeat(1_522_000) } },
+  { timestamp: "2026-10-12T12:45:41.420Z", type: "turn_context", payload: {
+    turn_id: "01a13022-7c96-7030-a720-2c7624415e28", model: "gpt-6.1-sol", effort: "xhigh",
+  } },
+  { timestamp: "2026-10-12T12:45:41.516Z", type: "event_msg", payload: {
+    type: "task_complete", turn_id: "01a13022-7c96-7030-a720-2c7624415e28", last_agent_message: null,
+  } },
+];

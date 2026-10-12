@@ -22,6 +22,14 @@ path. Durable state survives bridge restarts.
 A fully observed successful compact with no authored input or product output
 is maintenance, not superseding work. A task start alone, an incomplete compact,
 an error, real input or tool work receives no exemption.
+The final check reads at most eight MiB, only with an idle composer; lsrc:4's
+actual compact record exceeded 1.5 MB. An augmented continuation is identified
+by its frozen physical payload, so memory orientation cannot reset the budget.
+Three confirmed failed continuations record `exhaustedAt` in existing recovery
+state. The existing stall-watch cron reads it and queues one investigation.
+It also coalesces stalled human messages per lane, keeps failed alerts retryable,
+and routes to the AMUX owner when the orchestrator's own lane is blocked for
+ten minutes. It never sends a fourth model retry or changes a model/account.
 
 ## Unverified submit blocking human input
 
