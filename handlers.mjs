@@ -34,6 +34,7 @@ import { normalizeClaudeModelName } from "./core/claude-model.mjs";
 import { mergeInboundTarget } from "./core/inbound-target.mjs";
 import { HELP_TEXT } from "./channels/discord-help.mjs";
 import { createAccountSwitchCommand } from "./channels/account-switch-command.mjs";
+import { switchCodexAccount } from "./core/codex-account-switch.mjs";
 /**
  * Reconcile every configured agent's live tmux session against the
  * regenerated config. Per-agent failures are isolated: one broken agent
@@ -451,47 +452,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         return;
       }
 
-      const result = await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
-        if (target.id === current.id) {
-          const status = await nativeCodexStatus(mapping, pane);
-          return { kind: "same", status };
-        }
-
-        const idle = await prepareCodexIdle({ agent, name: mapping.name, pane });
-        if (!idle.ok) return { kind: "failed", error: `${idle.stage}: ${idle.error}` };
-
-        const previousOverride = codexModelOverride(state, mapping.name, pane);
-        const beforeStatus = await nativeCodexStatus(mapping, pane);
-        const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
-        const effective = beforeStatus.ok && beforeStatus.status.model?.id
-          ? { model: beforeStatus.status.model.id, effort: beforeStatus.status.model.effort }
-          : previousOverride || (context?.model ? { model: context.model, effort: context.effort ?? null } : null);
-
-        setCodexProfile(state, mapping.name, pane, target.id);
-        if (effective?.model) setCodexModelOverride(state, mapping.name, pane, effective.model, effective.effort);
-        try {
-          await agent.restartCodex(mapping.name, pane, {
-            profile: target,
-            model: effective?.model || null,
-            effort: effective?.effort || null,
-          });
-          const verified = await nativeCodexStatus(mapping, pane);
-          if (!verified.ok) throw new Error(`native status: ${verified.stage}: ${verified.error}`);
-          if (effective?.model && verified.status.model?.id !== effective.model) {
-            throw new Error(`expected ${effective.model}, status shows ${verified.status.model?.id || "unknown"}`);
-          }
-          rememberNativeModel(mapping, pane, verified.status);
-          return { kind: "switched", status: verified };
-        } catch (err) {
-          let rollbackError = null;
-          try {
-            await rollbackCodexLaunch(mapping, pane, { profile: current, model: previousOverride || effective });
-          } catch (rollback) {
-            rollbackError = rollback.message;
-          }
-          return { kind: "failed", error: err.message, rollbackError };
-        }
-      });
+      const result = await withPaneSendLock(`${mapping.name}:${pane}`, () => switchCodexAccount({
+        agent, state, name: mapping.name, pane, current, target, statusDriver: codexStatusDriver }));
 
       if (result.kind === "failed") {
         await msg.reply(`⚠️ Kontobytet avbröts: ${result.error}.` +

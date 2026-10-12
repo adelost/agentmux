@@ -47,6 +47,7 @@ import { compactionNoticeText } from "../core/compaction-notice.mjs";
 import { announceNewPaneEvents } from "../core/pane-notices.mjs";
 import { confirmedCodexRefusals, refusalNoticeText } from "../core/codex-refusal-notice.mjs";
 import { createCodexCapacityRecovery, isCodexCapacityError } from "../core/codex-capacity-recovery.mjs";
+import { createCodexLimitRecovery } from "../core/codex-limit-recovery.mjs";
 import {
   paneModelSelection,
   recordPaneModelReading,
@@ -125,14 +126,7 @@ export function createJsonlWatcher({
   const fsWatchers = new Map();
   /** per-channel last-sendTyping ms, throttled via TYPING_THROTTLE_MS. */
   const lastTypingAt = new Map();
-  /**
-   * Last parsed jsonl identity per pane.
-   *
-   * WHAT: path+mtime+size stamp plus the next grace deadline, all in memory.
-   * WHY: Safety-net polling should be cheap when a pane's append-only jsonl
-   *      did not change. The grace deadline keeps incomplete turns from being
-   *      skipped forever once they become old enough to mirror.
-   */
+  // Cache journal identity, recovery evidence and the next mirror deadline.
   const readSnapshots = new Map();
   // Panes audited since THIS bridge started — the startup self-heal runs once
   // per pane, then the normal cursor engine owns the stream again.
@@ -142,6 +136,8 @@ export function createJsonlWatcher({
   let typingTimer = null;
   let stopped = false;
   const capacityRecovery = createCodexCapacityRecovery({ state, broker: deliveryBroker, agent, log });
+  const limitRecovery = createCodexLimitRecovery({ state, broker: deliveryBroker, agent, log,
+    notify: (text, target) => discord.send(findChannelForPane(agentsYamlPath, target.name, target.pane), text) });
 
   const paneKey = (name, idx) => `${name}:${idx}`;
   const queue = createPaneQueue({
@@ -677,6 +673,7 @@ export function createJsonlWatcher({
 
       if (sameFileStamp(cached, fileInfo) && !retryDue && !graceDue) {
         await capacityRecovery.tick({ name, pane: idx, result: cached.recovery });
+        await limitRecovery.tick({ name, pane: idx, dir, result: cached.recovery });
         metric(`${key} skip unchanged bytes=0 nextGrace=${cached?.graceDueAtMs || "-"}`);
         return { skipped: "unchanged" };
       }
@@ -691,6 +688,7 @@ export function createJsonlWatcher({
       const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes, headless: true });
       if (result?.refusals?.length) result.refusals = await confirmedCodexRefusals(result, selectedCodexProfile(state, name, idx).home);
       await capacityRecovery.tick({ name, pane: idx, result });
+      await limitRecovery.tick({ name, pane: idx, dir, result });
       const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
       const readMs = Date.now() - readStarted;
       const readBytes = estimatedReadBytes(fileInfo, tailBytes);

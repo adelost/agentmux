@@ -7,6 +7,8 @@ const AUTOMATION_SOURCES = new Set([
   "drift-guard",
   "suggestions-watchdog",
   "quota-recovery",
+  "codex-capacity-recovery",
+  "codex-limit-recovery",
   "fleet-restart-recovery",
 ]);
 

@@ -45,7 +45,8 @@ export function createCodexCapacityRecovery({ state, broker, agent, now = () => 
     const model = JSON.stringify(codexModelOverride(state, name, pane));
     let episode = get(key);
     if (episode && (episode.session !== session || episode.profile !== profile.id || episode.model !== model)) {
-      save(key, { ...episode, done: true }); return;
+      if (episode.lastRefusal === refusal.id) { save(key, { ...episode, done: true }); return; }
+      episode = null;
     }
     const freshRefusal = episode && episode.lastRefusal !== refusal.id;
     const inputBeforeRefusal = Date.parse(result.lastPrompt?.timestamp || "") <= Date.parse(refusal.timestamp);

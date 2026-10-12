@@ -3,9 +3,10 @@ import { vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createJsonlWatcher } from "../channels/jsonl-watcher.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { capacityEvents, capacityError } from "./fixtures/codex-capacity-2026-10-12.mjs";
+const { createJsonlWatcher } = await import(process.env.AMUX_TEST_PACKAGE_ROOT
+  ? join(process.env.AMUX_TEST_PACKAGE_ROOT, "channels/jsonl-watcher.mjs") : "../channels/jsonl-watcher.mjs");
 
 feature("actual capacity evidence through the polling watcher and durable queue", () => {
   integration("an unchanged refused journal resumes once at the two-minute deadline", {

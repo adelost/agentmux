@@ -6,7 +6,8 @@ import { findBlockingPrompt } from "./dismiss.mjs";
 /** WHAT: Checks automatic continuations at the broker's physical boundary. WHY: Prevents input arriving after scheduling from receiving a stale continuation. */
 export async function fenceCodexCapacityJobs({ agentName, pane, queue, agent, now, terminalizeNotSent, log }) {
   for (const job of queue.list(agentName, pane)) {
-    if (job.source !== "codex-capacity-recovery" || job.status !== "pending" || job.attempts > 0 || job.draftOwned) continue;
+    if (!["codex-capacity-recovery", "codex-limit-recovery"].includes(job.source)
+        || job.status !== "pending" || job.attempts > 0 || job.draftOwned) continue;
     try {
       const after = Date.parse(job.metadata?.capacityRefusedAt);
       const events = parseJsonlText(readTailWindow(job.metadata.capacitySessionFile, 256 * 1024).text);

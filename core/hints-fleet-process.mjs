@@ -161,6 +161,9 @@ function's own branching or state. Do a small split in the same change.
    the change and new work, with no paid retry. Dormant panes switch at their
    next work prompt, never by a fleet wake-up. Read model, tokens and receipts
    from the exact pane. Subscription quota is paid capacity.
+   Codex account recovery switches only after a reached weekly limit, with
+   verified room on the other account and exact-session continuity. Forecasts
+   never switch accounts. \`AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false\` disables it.
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, in a modal, or between tool calls.
    A blocked task does not reserve its pane indefinitely:
