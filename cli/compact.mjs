@@ -12,16 +12,19 @@ import { detectPaneAddress } from "../core/sender-detect.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { latestJournalCompactMs } from "../core/pause-compact.mjs";
 import { SELF_COMPACT_POLICY, createSelfCompactStore } from "../core/self-compact.mjs";
+import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
+import { readFileSync, statSync } from "node:fs";
 
 const COMPACT_MIN_TOKENS = CONTEXT_COST_POLICY.maxTokens;
+const ownPane = () => detectPaneAddress(process.env, command => execSync(command, { encoding: "utf8", timeout: 2000 }));
 
 /** WHAT: Routes manual and nightly compaction. WHY: Keeps explicit targeting separate from absolute-token admission. */
-export async function cmdCompact(ctx, flags = {}, positional = []) {
+export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions = {}) {
   if (flags.help || flags.h) {
-    console.log(`Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --self [-m FOCUS]\n       amux compact --nightly [AGENT -p N] [--dry]\nBulk default: over ${COMPACT_MIN_TOKENS} tokens. Percent thresholds are not supported.\n--self: this pane asks to be compacted when its turn ends (a stage boundary), from ${SELF_COMPACT_POLICY.minTokens} tokens,\nat most once per ${SELF_COMPACT_POLICY.spacingMs / 60_000} minutes, never while a subagent or job writes. A waiting delivery is compacted first.`);
+    console.log(`Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --self [-m HANDOFF | --continue-file FILE] [--no-resume]\n       amux compact --nightly [AGENT -p N] [--dry]\nBulk default: over ${COMPACT_MIN_TOKENS} tokens. Percent thresholds are not supported.\n--self: this pane asks to be compacted when its turn ends (a stage boundary), from ${SELF_COMPACT_POLICY.minTokens} tokens,\nat most once per ${SELF_COMPACT_POLICY.spacingMs / 60_000} minutes, never while a subagent or job writes.\nAfter a verified compact, its saved handoff continues once through the durable queue. New input supersedes it.\n--no-resume requests maintenance only. Targeting your own pane also uses this safe path, even with --force.`);
     return { help: true };
   }
-  if (flags.self) return requestSelfCompact(ctx, flags);
+  if (flags.self) return requestSelfCompact(ctx, flags, selfOptions);
   if (flags.nightly) {
     if (flags.force || flags["min-tokens"] != null || flags.m || flags.message || positional.length > 1) {
       throw new Error("Nightly compact uses dream.compact policy; no force or threshold overrides");
@@ -42,6 +45,10 @@ export async function cmdCompact(ctx, flags = {}, positional = []) {
   // the bulk thresholds (you chose the pane deliberately) but KEEPS the
   // working-pane guard — compacting mid-turn drops in-flight work.
   if (positional[0] != null && Number.isNaN(Number(positional[0]))) {
+    const caller = (selfOptions.detect ?? ownPane)();
+    if (caller?.session === positional[0] && caller.pane === (Number.isFinite(flags.p) ? flags.p : 0)) {
+      return requestSelfCompact(ctx, flags, selfOptions);
+    }
     return compactOnePane(ctx, String(positional[0]), flags, compactText);
   }
 
@@ -164,6 +171,11 @@ async function compactOnePane(ctx, name, flags, compactText) {
     console.log(`[dry] ${name} p${paneIdx} (${status}, ${ctxStr}) ← ${compactText}`);
     return;
   }
+  // Codex has no focus argument. Long /compact prose becomes authored work,
+  // not evidence of a compact. Self-targets above preserve it as a handoff.
+  if (dialect === "codex" && compactText !== "/compact") {
+    throw new Error("Codex /compact takes no focus. The pane must use amux compact --self -m HANDOFF or --continue-file FILE.");
+  }
   const sent = await sendToPane(ctx, name, paneIdx, compactText, { source: "amux:compact" });
   if (!sent?.delivered) {
     console.error(`${name} p${paneIdx}: ${sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged"}`);
@@ -185,13 +197,13 @@ function printSelfRequests(requests) {
 }
 
 /**
- * WHAT: Registers this pane's one-shot request to be compacted when its turn ends.
- * WHY: Lets a pane follow the stage-boundary rule itself; the bridge runs it with the pause guards.
- * Identity comes from the pane's own environment, never from an argument.
+ * WHAT: Stores this pane's checkpoint compact and optional handoff.
+ * WHY: Keeps active work untouched until the bridge verifies a safe pause.
  */
 export async function requestSelfCompact(ctx, flags, {
-  detect = () => detectPaneAddress(process.env, (command) => execSync(command, { encoding: "utf8", timeout: 2000 })),
+  detect = ownPane,
   store = createSelfCompactStore(),
+  identityFor = latestPaneSessionIdentity,
   readContext = async (agent, pane) => {
     const panes = await listPanes(ctx, agent.name);
     const found = panes.find((entry) => entry.index === pane);
@@ -209,15 +221,29 @@ export async function requestSelfCompact(ctx, flags, {
   if (!agent || !["claude", "codex"].includes(engine)) throw new Error(`${address.key} is not a configured Claude or Codex pane`);
   const context = await readContext(agent, address.pane);
   const focus = String(flags.m ?? flags.message ?? "");
+  let continuation = focus;
+  if (flags["continue-file"]) {
+    if (statSync(flags["continue-file"]).size > 64 * 1024) throw new Error("self-compact handoff exceeds 64 KiB");
+    continuation = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(flags["continue-file"]));
+    if (!continuation.trim()) throw new Error("self-compact handoff file is empty");
+  }
+  if (flags["no-resume"]) continuation = "";
+  if (Buffer.byteLength(continuation) > 64 * 1024) throw new Error("self-compact handoff exceeds 64 KiB");
+  const dir = `${agent.dir}/.agents/${address.pane}`;
+  const identity = continuation ? identityFor(engine, dir) : null;
+  if (continuation && !identity?.path) throw new Error("self-compact handoff requires this pane's current session");
+  if (flags.dry) { console.log(`[dry] ${address.key}: compact after this turn, ${continuation ? "then queue the exact handoff once" : "maintenance only"}`); return { dry: true }; }
   const result = store.request({ agent: agent.name, pane: address.pane, focus, tokens: context?.tokens,
-    lastCompactAt: lastCompactAt(engine, `${agent.dir}/.agents/${address.pane}`) });
+    lastCompactAt: lastCompactAt(engine, dir), continuation,
+    identity: identity ? { ...identity, engine, dir } : null,
+    cursor: identity ? captureJsonlAppendCursor("self-compact-request-v1", [identity.path]) : null });
   if (!result.ok) {
     console.log(`Self-compact refused for ${address.key} (${result.cell}): ${result.detail}.`);
     process.exitCode = 1;
     return result;
   }
   console.log(`Self-compact requested for ${address.key} at ${formatTokens(context.tokens)}${focus ? `, focus: ${focus}` : ""}.`
-    + " It runs when this turn ends; it waits while a subagent or job writes; a waiting delivery is compacted first.");
-  if (engine === "codex" && focus) console.log("Codex's /compact takes no focus; the text is kept with the request only.");
+    + " It runs when this turn ends; it waits while a subagent or job writes."
+    + (continuation ? " After verification the exact handoff resumes once; newer input supersedes it." : " Maintenance only; no work prompt follows."));
   return result;
 }

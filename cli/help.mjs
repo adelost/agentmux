@@ -111,9 +111,11 @@ Usage:
   agent gate --scoped [path]      Bootstrap deps, run the repo-owned full gate, report skips
     --dry                         Show dependency + gate plan without changing anything
     -- command ...                Override gate discovery with an explicit argv-safe command\n  agent proof --config FILE [--output FILE]  Run a clean red-first measurement
-  agent compact                  Bulk: /compact to idle panes above 100k tokens
+  agent compact                  Bulk: /compact to idle panes above 80k tokens
   agent compact <agent> [-p N]    Target ONE pane (skips thresholds, keeps working-guard)
-    -m "focus"                    Steer the summary: sends '/compact <focus>' (what to preserve)
+    --self --continue-file FILE    At turn end: verified compact, then own exact handoff once
+    -m "handoff"                  Self: own continuation; other Claude pane: summary focus
+    --no-resume                   Maintenance only, without a follow-up work prompt
                                   Bulk uses --min-tokens N; an explicit pane skips the token threshold
     --dry                         Show what would compact, do nothing
     --force                       Include 'working' panes (default: skip)

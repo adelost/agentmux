@@ -21,6 +21,8 @@ feature("bounded automatic instruction context", () => {
       expect(codex).toMatch(/people, projects and decisions[\s\S]*amux search[\s\S]*--show N/u);
       expect(codex).toMatch(/Current implementation[\s\S]*`rg` and Git[\s\S]*read the source/u);
       expect(codex).toContain("If hits do not answer the question, refine the terms");
+      expect(codex).toContain("amux compact --self --continue-file HANDOFF");
+      expect(codex).toContain("`--no-resume` means maintenance only.");
       // Byte budget, not a token estimate or a limit on user-owned operator tails.
       expect(Buffer.byteLength(codex, "utf8")).toBeLessThanOrEqual(16 * 1024);
     }],

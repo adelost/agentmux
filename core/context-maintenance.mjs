@@ -10,6 +10,7 @@ import { getContextPercent } from "./context.mjs";
 import { hasEmptyClaudeEpoch } from "./claude-empty-epoch.mjs";
 import { codexPromptProgress } from "./codex-user-events.mjs";
 import { regainSessionLease } from "./session-lease.mjs";
+import { finishSelfCompactRequest, selfCompactSuperseded } from "./self-compact-resume.mjs";
 
 const STATE_KEY = "context_maintenance_by_pane_v1";
 const paneKey = (name, pane) => `${name}:${pane}`;
@@ -98,7 +99,10 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     } catch { /* the log is evidence, not control */ }
     return mode === "on" && outcome === "compacting" ? early : policy;
   }
-  const canAttempt = (name, pane, sessionId) => !existing(name, pane, sessionId ? { sessionId } : null);
+  const canAttempt = (name, pane, sessionId) => Boolean(selfRequests?.read(name, pane)) || !existing(name, pane, sessionId ? { sessionId } : null);
+  const selfRequestSuperseded = request => selfCompactSuperseded(request, { identityFor, queue });
+  const finishSelfRequest = (request, ending) => finishSelfCompactRequest(request, ending,
+    { store: selfRequests, queue, identityFor, receiptFor: existing });
 
   // A Claude session right after a compact has no token reading yet. When its
   // epoch is provably empty and the pane is still that session, idle and
@@ -237,9 +241,11 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const result = await run(agentName, pane, { pauseTokens: SELF_COMPACT_POLICY.minTokens, pauseSettleMs: 0, beforeDelivery: true,
       focus: request.focus, leaseHeld: true, heldLease: lease, jobId: id });
     if (!result.compacted && !result.attempted) return null;
+    // The waiting delivery already continues or replaces the task. Do not
+    // enqueue the older handoff behind it.
     selfRequests.clear(agentName, pane);
     noticeSelf(request, result.compacted ? { outcome: "compacted", tokens: context?.tokens } : { outcome: "failed", detail: result.reason });
     return result;
   }
-  return { canAttempt, run, beforeWork };
+  return { canAttempt, run, beforeWork, selfRequestSuperseded, finishSelfRequest };
 }

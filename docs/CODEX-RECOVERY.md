@@ -1,4 +1,23 @@
-# Codex capacity recovery
+# Codex recovery
+
+## Checkpoint context changes
+
+Save the remaining task and its evidence to a UTF-8 handoff file. From that
+pane run `amux compact --self --continue-file /absolute/path/handoff.txt`.
+The bridge waits for the turn and background work to end, verifies the native
+compact boundary, then queues the exact saved handoff once. `--self -m TEXT`
+uses TEXT as the handoff too; `--no-resume` requests maintenance only.
+
+Targeting your own pane takes this deferred path, even with `--force`.
+Codex accepts bare `/compact`, not a focus argument. AMUX refuses focus text
+on another Codex pane rather than injecting it as ordinary work.
+
+The existing compact receipt and delivery idempotency survive bridge restarts
+and a failed enqueue. New authored input, a changed session or waiting work
+supersedes the continuation. A busy composer or dialog holds it. A submitted
+handoff with an unknown receipt is never repeated.
+
+## Capacity refusals
 
 The bridge reads a closed unanswered turn and the exact thread/turn error
 from Codex's local SQLite log. Earlier token usage does not hide a failed

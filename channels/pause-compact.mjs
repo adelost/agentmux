@@ -50,9 +50,10 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
    */
   // A self-request ends once it ran or no longer applies; the pane's channel hears how it ended.
   function endRequest(paneKey, request, line) {
-    selfRequests.clear(request.agent, request.pane);
-    report(paneKey, request.requestedAt, line);
-    const text = formatSelfCompactNotice(paneKey, { ...line, focus: request.focus });
+    const ending = contextMaintenance.finishSelfRequest?.(request, line) ?? line;
+    if (!contextMaintenance.finishSelfRequest) selfRequests.clear(request.agent, request.pane);
+    report(paneKey, request.requestedAt, ending);
+    const text = formatSelfCompactNotice(paneKey, { ...ending, focus: request.focus });
     Promise.resolve().then(() => notify(request.agent, request.pane, text))
       .catch((error) => log(`${paneKey} self-compact notice failed: ${error.message}`));
   }
@@ -66,6 +67,11 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const request = selfRequests?.read(name, pane, {
       onExpired: (expired) => report(paneKey, expired.requestedAt, { ...base, outcome: "dropped", detail: "self-request expired unrun after 2 h" }),
     }) ?? null;
+    if (request && contextMaintenance.selfRequestSuperseded?.(request)) {
+      selfRequests.clear(name, pane);
+      report(paneKey, request.requestedAt, { ...base, outcome: "dropped", detail: "new input or session superseded the saved handoff" });
+      return false;
+    }
     // A pane that asked at a stage boundary is compacted from about 80k, the size rule waits for 400k or 700k.
     const limit = request ? SELF_COMPACT_POLICY.minTokens : pauseCompactLimit(agentConfig, pane, policy);
     const quietMs = Number.isFinite(lastActivityMs) ? now() - lastActivityMs : NaN;

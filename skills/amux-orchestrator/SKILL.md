@@ -66,9 +66,10 @@ Read the views for what they are:
   save task/source/evidence, then use the lifecycle commands.
 - At a stage boundary (a release, a finished brief) over about 80k tokens,
   write quotes, numbers and decisions to files, then run
-  `amux compact --self -m "<what to keep>"` in your own pane. It runs when your
-  turn ends, before your next delivery, never while a subagent or job writes,
-  at most once per 30 minutes. A refusal (under 80k, too soon) means: go on.
+  `amux compact --self --continue-file HANDOFF` in your own pane. Save the
+  remaining task first; the verified compact queues that exact handoff once.
+  Use `--no-resume` for maintenance only. It waits for the turn and background
+  work to end, at most once per 30 minutes. A refusal means: go on.
 - Ordinary coordination adds no second test suite, reviewer, benchmark or
   approval hop. An old memory note is not a new approval gate.
 

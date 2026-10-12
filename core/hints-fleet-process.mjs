@@ -99,7 +99,7 @@ short written brief. Cache facts: see below.
 - Idle Codex panes compact sooner: their cache expires sooner.
 - A pane idle past its cache's life compacts before its next delivery, when that pays back.
 - A pane's own recurring check waits less than its idle compaction after its last call: Claude under 50 minutes, through Claude Code's self-paced /loop, never an hourly cron; Codex under 25.
-- Orchestrators compact at a stage boundary (a release) with \`amux compact --self\`, never mid-conversation.
+- At banked boundaries: \`amux compact --self --continue-file HANDOFF\`. \`--no-resume\` means maintenance only.
 - Bounded tasks go to a fresh subagent with a brief; continue your own work after a compact.
 - Write what a compact loses to files as you work: quotes, numbers, decisions.
 
