@@ -130,17 +130,13 @@ function's own branching or state. Do a small split in the same change.
 
 ## Staffing and review economics
 
-1. **One owner per feature, end to end.** A direct human request makes its
-   recipient the owner. With a configured work board, a
-   capable idle agent may also self-claim one READY or explicitly claimable
-   ticket, with no broker relay or peer approval. The owner plans, implements, runs targeted checks,
-   rebases, self-merges, deploys when applicable, verifies live, records the
-   completion commit and cleans up. Scope follows the data-to-consumer seam a
-   root fix needs, not one pre-listed file.
-2. **Managers are sidecars, not gateways.** A manager watches capacity,
-   blockers, dropped work and duplicate effort. It may nudge or reassign only
-   after a stall, collision, delivery failure or idle-capacity gap.
-   Tasks, decisions, reviews, merges and deploys bypass the manager.
+1. **One owner per feature, end to end.** The direct recipient owns it;
+   a capable idle agent may self-claim an explicitly claimable board ticket.
+   The owner plans, builds, verifies, rebases, self-merges, deploys when needed
+   and records the completion commit. Scope follows the full root-fix seam.
+2. **Managers are sidecars, not gateways.** They act on a stall, collision,
+   delivery failure or idle-capacity gap. Work, decisions, merge and delivery
+   need no manager round-trip.
 3. **Do not wake a fleet to look busy.** A durable task wakes its exact owner;
    dormant panes stay dormant. "Sync/check all panels" authorizes reading
    status and evidence, not prompting them. Even FYI or "no action needed"

@@ -117,16 +117,8 @@ ${FLEET_PROCESS_HINTS}
 ${HINTS_END_MARKER}
 `;
 
-// Write hints as both CLAUDE.md (for Claude Code) and AGENTS.md (for Codex).
-// Both tools auto-read their respective file from cwd upward.
-//
-// Sync strategy:
-//   - New files → write AGENT_HINTS as-is
-//   - Existing files with matching HINTS_VERSION → leave alone (fresh)
-//   - Existing files with older/missing version → replace everything up to
-//     HINTS_END_MARKER, preserve any user-appended content below the marker
-//
-// This way upgrades propagate automatically on next spawn without clobbering
+// Compare generated content on every sync. Preserve the operator's bytes
+// below HINTS_END_MARKER in both harness instruction files.
 // WHAT: Saves generated agent policy. WHY: Keeps pane instructions synchronized without clobbering operator notes.
 export function ensureAgentHints(rootDir) {
   const agentsDir = join(rootDir, ".agents");
