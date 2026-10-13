@@ -93,30 +93,26 @@ For a requested queue/role/provider migration, read [the handoff checklist](refe
 
 ## 4. Reconsider the plan, briefly
 
-- Unanswered human requests, including replies consisting only of error or limit text.
-- Waits: on whom, since when; is the gate needed, or can the owner proceed under existing guards?
-- Idle owners with work waiting on them.
-- Repeated failure classes: fix by construction, not another written rule.
-- Skipped written rules: enforce them in code.
-- Duplicate implementations of the same capability.
-- Before asking the human for input, check whether it already exists.
-- External-facing or legal choices: check established practice before issuing instructions.
-- Actions beyond the named target: identify their scope and cost.
-- Delivered outcomes: numbers, named start/end events, rows left; no invented ETA.
-
-- About once per active hour, at a safe checkpoint, two minutes: what delayed
-  the last outcome? Implementation, rework, waiting or administration.
-- Sooner on repeated failure or new evidence. Never interrupt a build for it.
-- Pick at most one change: reuse a capability, drop a redundant step, fix a
-  wrong assumption, shorten a handoff. Reversible and small needs a reason,
-  not a paper. Keep required checks and owners.
-- Note change and expected benefit in the task row only when something
-  changes. Judge by later comparable receipts: elapsed, rework, tokens
-  (waiting and cached input separated). No new measurement system, no speedup
-  percentages from unlike tasks. Research only for a concrete bottleneck.
-- In a run to stop conditions (section 9) this is the hourly review, on its
-  own cron at an off-minute (`28 * * * *`): at most 10 minutes and two
-  changes, and every score cites a fact against the plan's own 9/10 criteria.
+- Once per active hour at a safe checkpoint, two minutes by default.
+  Up to ten only for a blocked critical path or a human asking why work
+  stalled. Include reviewer time; never interrupt productive work.
+- Per bottleneck, compare receipts: keep, adjust or drop. Missing proof
+  is unproven; do not stack experiments on that bottleneck.
+- Rank delays, including external blockers. Split ready-to-verified cycles
+  into machine, agent, waiting and unknown; cite times, count overlaps once.
+  Check stalls, cheaper probes, overhead, fallback triggers and scope.
+- Assign authorised ready work lacking an available owner to suitable idle
+  capacity, never duplicate an owner or wake for status.
+- One small authorised change per bottleneck; at most two independent ones
+  within budget. Preserve risk requirements and delivery ownership.
+  After two unchanged reviews of the same bottleneck, surface a human
+  decision or fallback with a trigger. Reuse an existing pending decision.
+- Protect orchestration time too: park off-scope design. List human decisions
+  early: recommendation, deadline, consequence. No tooling without measured need.
+- First review, then every fourth active hour: fresh eyes sample one
+  assumption without your score. Keep the shared budget; absent or late proof
+  stays unproven, never an approval hop. Update existing rows; notify only
+  after a change or for a decision. Stop at plan conditions.
 
 ## 5. Inspect AMUX transport only when relevant
 
