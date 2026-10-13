@@ -55,10 +55,25 @@ feature("Codex launch admission for a resumed session", () => {
       codexLaunchDecision({ ...known, context: "TRIED", receipt: true }),
       codexLaunchDecision({ ...known, context: "TRIED", work: "HUMAN" }),
       codexLaunchDecision({ ...known, context: "TRIED", selected: { model: "gpt-6.2-sol" } }),
-      codexLaunchDecision({ ...known, context: "WITHIN" })].map(d => `${d.cell}:${d.values.action}`)],
-    then: ["automatic work never starts or pays again after an unverified compact", cells => expect(cells).toEqual([
+      codexLaunchDecision({ ...known, context: "WITHIN" }),
+      codexLaunchDecision({ ...known, context: "UNKNOWN" }),
+      codexLaunchDecision({ ...known, context: "UNKNOWN", receipt: true })].map(d => `${d.cell}:${d.values.action}`)],
+    then: ["automatic work never starts or pays again after an unverified compact or on unread context", cells => expect(cells).toEqual([
       "compact-before-resume:COMPACT", "compacted-resume:LAUNCH", "compact-tried:HOLD", "compacted-resume:LAUNCH",
-      "owner-after-failed-compact:LAUNCH_PAUSED", "compact-tried:HOLD", "remembered-model:LAUNCH"])],
+      "owner-first:LAUNCH_PAUSED", "compact-tried:HOLD", "remembered-model:LAUNCH", "unknown-context:HOLD", "compacted-resume:LAUNCH"])],
+  });
+  // The newest human instruction wins: an owner's message is read before an existing session's goal.
+  unit("the owner's message opens every existing session with its goal paused", {
+    when: ["deciding each context for a Discord message", () => [
+      codexLaunchDecision({ ...known, context: "WITHIN", work: "HUMAN" }),
+      codexLaunchDecision({ ...known, context: "COLD_LARGE", work: "HUMAN" }),
+      codexLaunchDecision({ ...known, context: "COLD_LARGE", receipt: true, work: "HUMAN" }),
+      codexLaunchDecision({ ...known, context: "UNKNOWN", work: "HUMAN" }),
+      codexLaunchDecision({ ...known, receipt: true, selected: { model: "gpt-6.2-sol" }, work: "HUMAN" }),
+      codexLaunchDecision({ ...known, sessionId: null, work: "HUMAN" })].map(d => `${d.cell}:${d.values.action}`)],
+    then: ["a cold large one compacts first; only a fresh session has no goal to pause", cells => expect(cells).toEqual([
+      "owner-first:LAUNCH_PAUSED", "compact-before-resume:COMPACT", "owner-after-compact:LAUNCH_PAUSED",
+      "owner-first:LAUNCH_PAUSED", "owner-verified-change:LAUNCH_PAUSED", "fresh-session:LAUNCH"])],
   });
   unit("the resume context uses the Codex before-delivery limits", {
     when: ["classifying skyvw:4 and its neighbours", () => [
@@ -66,8 +81,11 @@ feature("Codex launch admission for a resumed session", () => {
       codexResumeContext({ tokens: 150_000, idleMs: 94 * 60_000 }),
       codexResumeContext({ tokens: 409_537, idleMs: 24 * 60_000 }),
       codexResumeContext({ tokens: NaN, idleMs: 94 * 60_000 }),
-      codexResumeContext({ tokens: 409_537, idleMs: 94 * 60_000, tried: true })]],
-    then: ["over 150k and 25 quiet minutes is cold and large; unknown tokens start as today", r => expect(r).toEqual(
-      ["COLD_LARGE", "WITHIN", "WITHIN", "WITHIN", "TRIED"])],
+      codexResumeContext({ tokens: 409_537, idleMs: 94 * 60_000, tried: true }),
+      codexResumeContext({ tokens: 409_537, idleMs: NaN }),
+      codexResumeContext({ tokens: NaN, idleMs: 5 * 60_000 }),
+      codexResumeContext({ tokens: 90_000, idleMs: NaN })]],
+    then: ["over 150k and 25 quiet minutes is cold and large; unread evidence is unknown unless the other fact proves it small or warm", r => expect(r).toEqual(
+      ["COLD_LARGE", "WITHIN", "WITHIN", "UNKNOWN", "TRIED", "UNKNOWN", "WITHIN", "WITHIN"])],
   });
 });

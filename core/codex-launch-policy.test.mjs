@@ -59,6 +59,22 @@ feature("a cold large Codex session is compacted before it resumes work", () => 
     then: ["one attempt, then a start where only the owner's message can begin a turn", (_, ctx) => expect(ctx.events).toEqual(
       ["launch:gpt-6.1-sol:goals-off", "compact", "reset", "launch:gpt-6.1-sol:goals-off", "remember:gpt-6.1-sol"])],
   });
+  component("the owner's message opens a warm or freshly compacted session with its goal paused too", {
+    given: ["a warm session and a cold large one, each woken by a Discord message", () => [
+      resumeFixture(() => ({ context: "WITHIN", work: "HUMAN" })), resumeFixture(() => ({ context: "COLD_LARGE", work: "HUMAN" }))]],
+    when: ["waking both", async (contexts) => { for (const ctx of contexts) await launchCodexWithPolicy(ctx); return contexts.map(ctx => ctx.events); }],
+    then: ["no start lets the old goal run before the owner's message", events => expect(events).toEqual([
+      ["launch:gpt-6.1-sol:goals-off", "remember:gpt-6.1-sol"],
+      ["launch:gpt-6.1-sol:goals-off", "compact", "reset", "launch:gpt-6.1-sol:goals-off", "remember:gpt-6.1-sol"]])],
+  });
+  component("an automatic start on unread size or quiet time holds before any process", {
+    given: ["a resumed session whose tokens could not be read", () => resumeFixture(() => ({ context: "UNKNOWN" }))],
+    when: ["the restart revives it", (ctx) => launchCodexWithPolicy(ctx).catch(error => error)],
+    then: ["no goal starts and the queue may let the owner's message pass", (error, ctx) => {
+      expect(ctx.events).toEqual([]);
+      expect(error).toMatchObject({ costHold: true, message: expect.stringMatching(/^Codex resume held: unknown-context/u) });
+    }],
+  });
   component("the owner's message after an earlier unverified attempt opens it the same way, paying nothing", {
     given: ["a tried context woken by a Discord message", () => resumeFixture(() => ({ context: "TRIED", work: "HUMAN" }))],
     when: ["waking it", (ctx) => launchCodexWithPolicy(ctx)],

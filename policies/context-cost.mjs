@@ -80,44 +80,51 @@ export function contextCostDecision({ tokens, idleMs, cold = false, pauseTokens 
 // for 94 minutes and its active goal started a turn at once, before any amux
 // gate. A resumed session past the before-delivery rule (over 150k, 25 quiet
 // minutes) is compacted first. TRIED means a compact of this context was
-// already attempted, unverified, with no work since: automatic work (a goal,
-// a recovery or follow-up prompt) waits, and no second paid attempt runs.
-// A person's own message still opens it, with the goal paused so that message
-// runs first; a failed compact never locks a pane against its owner (the
-// 2026-09-26 availability rule).
+// already attempted, unverified, with no work since; UNKNOWN means its size or
+// quiet time cannot be read. Automatic work (the goal, a recovery or follow-up
+// prompt) waits on either, and no second paid attempt runs. A person's own
+// message opens any existing session with the goal paused (LAUNCH_PAUSED), so
+// the newest human instruction is read before the old goal; a failed compact
+// never locks a pane against its owner (the 2026-09-26 availability rule).
 /** WHAT: Defines every Codex launch admission. WHY: Prevents wake and recovery from bypassing compact-first model changes. */
 export const codexLaunchRules = defineDecisionTable({
   id: "amux.codex-launch",
   axes: { identity: ["FRESH", "KNOWN", "UNKNOWN"], selection: ["SAME", "CHANGED"], receipt: ["VERIFIED", "MISSING"], blocked: ["YES", "NO"],
-    context: ["WITHIN", "COLD_LARGE", "TRIED"], work: ["AUTOMATIC", "HUMAN"] },
+    context: ["WITHIN", "COLD_LARGE", "TRIED", "UNKNOWN"], work: ["AUTOMATIC", "HUMAN"] },
   columns: { action: choice(["LAUNCH", "LAUNCH_PAUSED", "COMPACT", "HOLD"]) },
   cells: [
     on("previous-failure", { blocked: "YES" }, { action: "HOLD" }),
     on("unknown-model", { blocked: "NO", identity: "UNKNOWN" }, { action: "HOLD" }),
     on("fresh-session", { blocked: "NO", identity: "FRESH" }, { action: "LAUNCH" }),
     on("compact-tried", { blocked: "NO", identity: "KNOWN", context: "TRIED", receipt: "MISSING", work: "AUTOMATIC" }, { action: "HOLD" }),
-    on("remembered-model", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: "WITHIN" }, { action: "LAUNCH" }),
-    on("owner-after-failed-compact", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: "TRIED", receipt: "MISSING", work: "HUMAN" }, { action: "LAUNCH_PAUSED" }),
-    on("compacted-resume", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: ["COLD_LARGE", "TRIED"], receipt: "VERIFIED" }, { action: "LAUNCH" }),
+    on("unknown-context", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: "UNKNOWN", receipt: "MISSING", work: "AUTOMATIC" }, { action: "HOLD" }),
+    on("remembered-model", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: "WITHIN", work: "AUTOMATIC" }, { action: "LAUNCH" }),
+    on("compacted-resume", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: ["COLD_LARGE", "TRIED", "UNKNOWN"], receipt: "VERIFIED", work: "AUTOMATIC" }, { action: "LAUNCH" }),
     on("compact-before-resume", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: "COLD_LARGE", receipt: "MISSING" }, { action: "COMPACT" }),
-    on("verified-change", { blocked: "NO", identity: "KNOWN", selection: "CHANGED", receipt: "VERIFIED" }, { action: "LAUNCH" }),
-    on("compact-before-change", { blocked: "NO", identity: "KNOWN", selection: "CHANGED", receipt: "MISSING", context: ["WITHIN", "COLD_LARGE"] }, { action: "COMPACT" }),
+    on("owner-first", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: ["WITHIN", "TRIED", "UNKNOWN"], work: "HUMAN" }, { action: "LAUNCH_PAUSED" }),
+    on("owner-after-compact", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: "COLD_LARGE", receipt: "VERIFIED", work: "HUMAN" }, { action: "LAUNCH_PAUSED" }),
+    on("verified-change", { blocked: "NO", identity: "KNOWN", selection: "CHANGED", receipt: "VERIFIED", work: "AUTOMATIC" }, { action: "LAUNCH" }),
+    on("owner-verified-change", { blocked: "NO", identity: "KNOWN", selection: "CHANGED", receipt: "VERIFIED", work: "HUMAN" }, { action: "LAUNCH_PAUSED" }),
+    on("compact-before-change", { blocked: "NO", identity: "KNOWN", selection: "CHANGED", receipt: "MISSING", context: ["WITHIN", "COLD_LARGE", "UNKNOWN"] }, { action: "COMPACT" }),
     // A failed change compact blocks the pane (previous-failure), so this is one attempt per message.
     on("owner-change-after-failed-compact", { blocked: "NO", identity: "KNOWN", selection: "CHANGED", receipt: "MISSING", context: "TRIED", work: "HUMAN" }, { action: "COMPACT" }),
   ],
   invariants: [
-    { refuse: "a changed existing model cannot launch without compact proof", when: d => d.at.identity === "KNOWN" && d.at.selection === "CHANGED" && d.at.receipt === "MISSING" && d.values.action === "LAUNCH" },
-    { refuse: "a cold large session cannot resume before its compact", when: d => d.at.identity === "KNOWN" && d.at.context === "COLD_LARGE" && d.at.receipt === "MISSING" && d.values.action === "LAUNCH" },
+    { refuse: "a changed existing model cannot launch without compact proof", when: d => d.at.identity === "KNOWN" && d.at.selection === "CHANGED" && d.at.receipt === "MISSING" && d.values.action.startsWith("LAUNCH") },
+    { refuse: "a cold large session cannot resume before its compact", when: d => d.at.identity === "KNOWN" && d.at.context === "COLD_LARGE" && d.at.receipt === "MISSING" && d.values.action.startsWith("LAUNCH") },
     { refuse: "an unverified compact cannot release automatic work or pay again", when: d => d.at.identity === "KNOWN" && d.at.context === "TRIED" && d.at.receipt === "MISSING" && d.at.work === "AUTOMATIC" && d.values.action !== "HOLD" },
-    { refuse: "an unverified compact cannot start the old goal", when: d => d.at.identity === "KNOWN" && d.at.context === "TRIED" && d.at.receipt === "MISSING" && d.values.action === "LAUNCH" },
+    { refuse: "an unverified compact or unknown context cannot start the old goal", when: d => d.at.identity === "KNOWN" && ["TRIED", "UNKNOWN"].includes(d.at.context) && d.at.receipt === "MISSING" && d.values.action === "LAUNCH" },
+    { refuse: "the owner's message is read before an existing session's goal", when: d => d.at.identity === "KNOWN" && d.at.work === "HUMAN" && d.values.action === "LAUNCH" },
     { refuse: "blocked transitions cannot spend automatic retries", when: d => d.at.blocked === "YES" && d.values.action !== "HOLD" },
   ],
 });
 
-/** WHAT: Maps a resumed Codex session's size and quiet time to its launch context. WHY: Keeps launch on Codex's before-delivery limits. */
+/** WHAT: Maps a resumed Codex session's size and quiet time to its launch context. WHY: Keeps launch on Codex's before-delivery limits, never guessing unread evidence small. */
 export function codexResumeContext({ tokens, idleMs, tried = false }, policy = PAUSE_COMPACT_POLICY) {
-  const coldLarge = Number.isFinite(tokens) && tokens > policy.codexMinTokens && Number.isFinite(idleMs) && idleMs >= policy.codexIdleMs;
-  return !coldLarge ? "WITHIN" : tried ? "TRIED" : "COLD_LARGE";
+  const within = (Number.isFinite(tokens) && tokens <= policy.codexMinTokens) || (Number.isFinite(idleMs) && idleMs < policy.codexIdleMs);
+  if (within) return "WITHIN";
+  if (!Number.isFinite(tokens) || !Number.isFinite(idleMs)) return "UNKNOWN";
+  return tried ? "TRIED" : "COLD_LARGE";
 }
 
 /** WHAT: Maps exact session and compact facts to the launch table. WHY: Keeps the model-change decision inspectable before any process side effect. */
