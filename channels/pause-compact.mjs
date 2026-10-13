@@ -6,7 +6,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { CONTEXT_COST_POLICY, PAUSE_COMPACT_POLICY } from "../policies/context-cost.mjs";
+import { CONTEXT_COST_POLICY, PAUSE_COMPACT_POLICY, readContextCostPolicy } from "../policies/context-cost.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { lastContextCompactAt } from "../core/context-maintenance.mjs";
 import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, pauseCompactDecision, pauseCompactLimit,
@@ -26,7 +26,7 @@ const appendJsonLine = (path, record) => {
 export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, now = Date.now,
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
   identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs,
-  selfRequests = null, notify = async () => {} }) {
+  selfRequests = null, notify = async () => {}, cacheLifeMs = readContextCostPolicy().coldMs }) {
   const lastLogged = new Map();
   // A dry run compacts nothing, so it remembers its own would-be compacts to show the spacing rule.
   const dryCompacts = new Map();
@@ -77,7 +77,9 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const quietMs = Number.isFinite(lastActivityMs) ? now() - lastActivityMs : NaN;
     // Codex's cache lives about 30 minutes, so its idle rule is 25 minutes instead of the shared 50.
     const codexIdle = engine === "codex" ? { idleLimit: policy.codexMinTokens, idleMs: policy.codexIdleMs } : {};
-    const facts = { engine, tokens: contextTokens, limit, ...codexIdle, status, inCopyMode, quietMs, now: now() };
+    // A self-request resumes work at once, so its compact is due even on a cold cache.
+    const facts = { engine, tokens: contextTokens, limit, ...codexIdle, status, inCopyMode, quietMs,
+      cacheLifeMs: request ? null : cacheLifeMs, now: now() };
     const first = pauseCompactDecision(facts, policy);
     if (first.action === "none") {
       if (request && first.cell === "within-budget" && mode === "on") {

@@ -345,7 +345,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
   });
 
   component("a compact refused until the prompt cache expires is reported as postponed", {
-    given: ["a pane quiet for ten minutes whose compact is always refused, with a five-minute cache", () => {
+    given: ["a pane quiet for ten minutes whose compact is always refused while its cache is warm", () => {
       const oldHome = process.env.HOME;
       const fakeHome = mkdtempSync(join(tmpdir(), "amux-ac-home-"));
       process.env.HOME = fakeHome;
@@ -359,10 +359,45 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
         run: async () => { state.runs++; return { ok: false, reason: "delivery-lease-busy" }; },
       };
       const agent = { paneProcessState: async () => ({ running: true }), capturePane: async () => CONTENT.full100 };
-      const config = { ...DEFAULT_CONFIG, graceMs: 0, compactLockMs: 0, minIdleMs: 0, warmCacheMs: 5 * 60_000 };
+      const config = { ...DEFAULT_CONFIG, graceMs: 0, compactLockMs: 0, minIdleMs: 0 };
       const ac = createAutoCompact({
         agent, agentsYamlPath: path, discord: { send: async (_channel, text) => { sends.push(text); } },
         tmux: async () => ({ stdout: "0 50" }), config, contextMaintenance, log: () => {},
+      });
+      return { ac, state, config };
+    }],
+    when: ["warn and a refused compact, then the cache expires before three more polls", async ({ ac, state, config }) => {
+      try {
+        await ticks(ac, 2);
+        config.warmCacheMs = 5 * 60_000; // the ten quiet minutes now outlive the cache
+        await ticks(ac, 3);
+        return state;
+      } finally { process.env.HOME = state.oldHome; rmSync(state.fakeHome, { recursive: true, force: true }); }
+    }],
+    then: ["one warning, one postponed notice with the reason, and no further attempt", (state) => {
+      expect(state.runs).toBe(1);
+      expect(state.sends).toHaveLength(2);
+      // The before-delivery rule (channels/pause-compact.mjs) compacts Claude from 80k, not 210k.
+      expect(state.sends[1]).toBe("⚠ Auto-compact of **test:0** postponed: delivery-lease-busy. The prompt cache has expired, so nothing runs now; the pane's next message decides whether to compact first.");
+    }],
+  });
+
+  component("a restarted bridge does not compact a pane whose prompt cache is already cold", {
+    given: ["skyvw:1 on 2026-10-12: a fresh bridge and a pane quiet for 113 minutes", () => {
+      const oldHome = process.env.HOME;
+      const fakeHome = mkdtempSync(join(tmpdir(), "amux-ac-home-"));
+      process.env.HOME = fakeHome;
+      const { path, dir } = writeYaml();
+      writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000099\n  panes:\n    - name: claude\n      cmd: claude\n  discord:\n    "ch-test": 0\n`);
+      writeClaudeTurn(fakeHome, join(dir, ".agents", "0"), new Date(Date.now() - 113 * 60_000).toISOString());
+      const sends = [];
+      const state = { runs: 0, sends, oldHome, fakeHome };
+      const contextMaintenance = { canAttempt: () => true, run: async () => { state.runs++; return { ok: true, compacted: true }; } };
+      const agent = { paneProcessState: async () => ({ running: true }), capturePane: async () => CONTENT.full100 };
+      const ac = createAutoCompact({
+        agent, agentsYamlPath: path, discord: { send: async (_channel, text) => { sends.push(text); } },
+        tmux: async () => ({ stdout: "0 50" }), config: { ...DEFAULT_CONFIG, graceMs: 0, compactLockMs: 0 },
+        contextMaintenance, log: () => {},
       });
       return { ac, state };
     }],
@@ -370,10 +405,9 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       try { await ticks(ac, 5); return state; }
       finally { process.env.HOME = state.oldHome; rmSync(state.fakeHome, { recursive: true, force: true }); }
     }],
-    then: ["one warning, one postponed notice with the reason, and no further attempt", (state) => {
-      expect(state.runs).toBe(1);
-      expect(state.sends).toHaveLength(2);
-      expect(state.sends[1]).toBe("⚠ Auto-compact of **test:0** postponed: delivery-lease-busy. The prompt cache has expired, so the next message compacts first only if the context is above 210000 tokens.");
+    then: ["no warning and no compact; the next delivery decides", (state) => {
+      expect(state.sends).toEqual([]);
+      expect(state.runs).toBe(0);
     }],
   });
 

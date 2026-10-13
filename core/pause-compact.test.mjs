@@ -50,6 +50,18 @@ feature("compaction at a natural pause: one guard per condition", () => {
       expect(due).toMatchObject({ action: "compact", cell: "codex-idle", budget: 80_000 });
     }],
   });
+  unit("a pane first seen after its prompt cache expired is left to its next delivery", {
+    when: ["a builder at 520k and a Codex pane at 90k, each quiet 61 minutes under a one-hour cache", () => [
+      decide({ quietMs: 61 * MIN, cacheLifeMs: 60 * MIN }),
+      decide({ engine: "codex", tokens: 90_000, idleLimit: 80_000, idleMs: 25 * MIN, quietMs: 61 * MIN, cacheLifeMs: 60 * MIN })]],
+    then: ["neither compacts", results => results.forEach(result =>
+      expect(result).toMatchObject({ action: "none", cell: "cache-cold" }))],
+  });
+  unit("a warm pause and a self-request without a cache life still compact", {
+    when: ["a builder quiet 59 minutes, and one quiet 61 minutes for a self-request", () => [
+      decide({ quietMs: 59 * MIN, cacheLifeMs: 60 * MIN }), decide({ quietMs: 61 * MIN })]],
+    then: ["both compact", results => expect(results.map(result => result.action)).toEqual(["compact", "compact"])],
+  });
   unit("a Claude pane keeps the 50-minute rule", {
     when: ["deciding for Claude at 90k, 26 minutes after its turn", () => decide({ tokens: 90_000, quietMs: 26 * MIN })],
     then: ["the pause rule leaves it to the 50-minute rule", result => expect(result).toMatchObject({ action: "none", cell: "within-budget" })],

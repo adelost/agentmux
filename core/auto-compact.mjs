@@ -194,8 +194,9 @@ export function formatCompactHeldMessage(paneKey, reason, contextTokens, coldAtM
  * @returns {{ action: "none"|"warn"|"compact"|"cancel"|"suppress"|"postpone", reason?: string }}
  *   "suppress" = clear any pending warning but KEEP the floor and do not fire;
  *   used when a prior /compact proved ineffective.
- *   "postpone" = a warning whose compact was refused before sending
- *   (`refusedReason`) outlived the warm prompt cache; tell the channel and stop.
+ *   "postpone" = a pending warning, usually one whose compact was refused
+ *   before sending (`refusedReason`), outlived the warm prompt cache; tell the
+ *   channel and stop.
  */
 /** WHAT: Maps idle context evidence to a maintenance action. WHY: Prevents active, unobserved or already-compacted panes from receiving repeated compact requests. */
 export function decideAutoCompactAction({
@@ -276,8 +277,14 @@ export function decideAutoCompactAction({
     }
   }
 
-  if (existing?.refusedReason && promptCacheExpired(lastActivityMs, now, config)) {
-    return { action: "postpone", reason: existing.refusedReason };
+  // skyvw:1, 2026-10-12: a bridge restart forgot a postponed compact, and the
+  // next polls warned and compacted a context quiet for 113 minutes. An idle
+  // compact pays only while the prompt cache is warm; a cold context is left to
+  // its next delivery, which compacts first when that pays, so a pane that gets
+  // no message spends nothing. The clock is the journal's, so a restart keeps it.
+  if (promptCacheExpired(lastActivityMs, now, config)) {
+    if (existing) return { action: "postpone", reason: existing.refusedReason || "the prompt cache expired before the compact ran" };
+    return { action: "none", reason: "prompt cache expired; the next delivery decides" };
   }
 
   // Over threshold + idle long enough. First cross → warn. Second cross after grace → fire.
@@ -318,7 +325,7 @@ export function formatCompactFailedMessage(paneKey, reason) {
  * WHY: Keeps a warning from ending in silence when every retry was refused.
  */
 export function formatCompactPostponedMessage(paneKey, reason) {
-  return `⚠ Auto-compact of **${paneKey}** postponed: ${reason}. The prompt cache has expired, so the next message compacts first only if the context is above ${CONTEXT_COST_POLICY.coldMaxTokens} tokens.`;
+  return `⚠ Auto-compact of **${paneKey}** postponed: ${reason}. The prompt cache has expired, so nothing runs now; the pane's next message decides whether to compact first.`;
 }
 
 export function formatCompactedMessage(paneKey, contextPercent) {

@@ -19,11 +19,13 @@ const base = {
   warnings: new Map(),
   config: cfg(),
   now: 1_700_000_000_000,
-  lastActivityMs: 1_700_000_000_000 - 60 * 60_000,
+  // Inside the warm window: idle compaction runs from 50 quiet minutes until the
+  // one-hour prompt cache expires (policies/context-cost.mjs).
+  lastActivityMs: 1_700_000_000_000 - 55 * 60_000,
 };
 
 feature("decideAutoCompactAction — disabled config", () => {
-  unit("waiting for a worker does not prevent compact after one quiet hour", {
+  unit("waiting for a worker does not prevent compact after 55 quiet minutes", {
     when: ["the waiting pane is idle above 100k", () => decideAutoCompactAction(base)],
     then: ["the warning starts", result => expect(result.action).toBe("warn")],
   });
@@ -119,6 +121,26 @@ feature("decideAutoCompactAction — a compact refused before sending", () => {
   });
 });
 
+feature("decideAutoCompactAction — a cold prompt cache is left to the next delivery", () => {
+  unit("a restarted bridge neither warns nor compacts a pane quiet past the cache", {
+    given: ["skyvw:1 after the 2026-10-12 restart: 233k tokens, 113 quiet minutes, no warning in memory", () => ({
+      ...base, contextTokens: 233_731, lastActivityMs: base.now - 113 * 60_000, warnings: new Map(),
+    })],
+    when: ["deciding on each of three polls", (args) => [0, 1, 2].map((poll) => decideAutoCompactAction({
+      ...args, now: args.now + poll * 60_000 }))],
+    then: ["nothing runs", (results) => expect(results.map((r) => r.action)).toEqual(["none", "none", "none"])],
+  });
+  unit("a warning whose cache expires during the grace is postponed, not compacted", {
+    given: ["a warning from 59 quiet minutes, decided at 61", () => ({
+      ...base, lastActivityMs: base.now - 61 * 60_000,
+      warnings: new Map([[key, { warned_at: base.now - 120_000 }]]),
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["postpone with the expiry as reason", (r) => expect(r).toEqual({
+      action: "postpone", reason: "the prompt cache expired before the compact ran" })],
+  });
+});
+
 feature("decideAutoCompactAction — activity cancels warning", () => {
   unit("pane went from idle to working during grace → cancel warning", {
     given: ["warning exists, now status=working", () => {
@@ -199,10 +221,10 @@ feature("decideAutoCompactAction — min-idle gate (conversation freshness)", ()
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
   });
 
-  unit("one quiet hour allows a warning", {
-    given: ["last turn one hour ago", () => ({
+  unit("55 quiet minutes, inside the warm prompt cache, allow a warning", {
+    given: ["last turn 55 minutes ago", () => ({
       ...base,
-      lastActivityMs: base.now - 3_600_000,
+      lastActivityMs: base.now - 55 * 60_000,
     })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
@@ -410,16 +432,16 @@ feature("regression: an unreadable giant-turn pane fails closed", () => {
 
 feature("regression: idle pane with mtime noise matures to compact (not endless re-warn)", () => {
   // End-to-end of the observed ai:2 flood: a 93% idle pane whose jsonl mtime is
-  // 37s old but whose newest real turn is 1h old. With the activity signal fixed
+  // 37s old but whose newest real turn is 55 min old. With the activity signal fixed
   // to the turn ts, the min-idle gate passes, so a pending warning that has sat
   // out the grace window FIRES /compact instead of being cancelled by phantom
   // "recent activity".
   const now = 1_700_000_000_000;
   const cfgIdle = cfg();
 
-  unit("warn matures to compact: turn 1h old beats fresh 37s mtime", {
-    given: ["93% idle, warned 60s ago, turn 1h old, mtime 37s old", () => {
-      const lastActivityMs = resolveActivityMs({ turnMs: now - 3_600_000, fileMtimeMs: now - 37_000 });
+  unit("warn matures to compact: turn 55 min old beats fresh 37s mtime", {
+    given: ["93% idle, warned 60s ago, turn 55 min old, mtime 37s old", () => {
+      const lastActivityMs = resolveActivityMs({ turnMs: now - 55 * 60_000, fileMtimeMs: now - 37_000 });
       const warnings = new Map([[key, { warned_at: now - 60_000 }]]);
       return { ...base, contextPercent: 93, warnings, lastActivityMs, config: cfgIdle, now };
     }],
@@ -428,8 +450,8 @@ feature("regression: idle pane with mtime noise matures to compact (not endless 
   });
 
   unit("first crossing warns instead of being cancelled by mtime noise", {
-    given: ["93% idle, no warning, turn 1h old, mtime 37s old", () => {
-      const lastActivityMs = resolveActivityMs({ turnMs: now - 3_600_000, fileMtimeMs: now - 37_000 });
+    given: ["93% idle, no warning, turn 55 min old, mtime 37s old", () => {
+      const lastActivityMs = resolveActivityMs({ turnMs: now - 55 * 60_000, fileMtimeMs: now - 37_000 });
       return { ...base, contextPercent: 93, lastActivityMs, config: cfgIdle, now };
     }],
     when: ["deciding", (args) => decideAutoCompactAction(args)],

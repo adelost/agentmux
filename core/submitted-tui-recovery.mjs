@@ -3,6 +3,25 @@
 const MIN_RECOVERY_AGE_MS = 60_000;
 const LIVE_IDLE_RESTART_AGE_MS = 2 * 60_000;
 const RETRY_RECOVERY_MS = 30_000;
+const SLOW_TUI_CHECK_MS = 10_000;
+
+// skyvw, 2026-10-12: skyvw:0's prompt waited an hour for its receipt, and every second the broker
+// read the pane and its processes under the session lease, so skyvw:1's warm compact was refused
+// as delivery-lease-busy on every poll until its prompt cache expired. The broker still reads the
+// JSONL receipt every second; after the first minute the pane is inspected every 10 s.
+/**
+ * WHAT: Checks whether a prompt awaiting its receipt should have its pane inspected on this pass.
+ * WHY: Keeps a long wait from holding the session lease every second.
+ */
+export const submittedTuiInspectionDue = (job, submittedAge, nowMs) => submittedAge < MIN_RECOVERY_AGE_MS
+  || nowMs - Number(job.tuiCheckedAt || 0) >= SLOW_TUI_CHECK_MS;
+
+/** WHAT: Reads the pane's transport state as a hint for a waiting prompt. WHY: Keeps the reason readable without treating pixels as a receipt. */
+export async function submittedTransportHint(agent, job, submittedAge) {
+  if (submittedAge < 5_000 || typeof agent.promptTransportState !== "function") return null;
+  const transport = await agent.promptTransportState(job.agentName, job.pane, job.text).catch(() => null);
+  return transport?.state ? `TUI hint: ${transport.state}${transport.detail ? ` (${transport.detail})` : ""}` : null;
+}
 
 /** WHAT: Proves one pane has no coding process. WHY: Makes post-Enter redispatch depend on process truth, not pixels. */
 function isProvenDeadRuntime(runtime) {

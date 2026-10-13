@@ -887,6 +887,34 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("a prompt still waiting for its receipt after a minute has its pane read every 10 s, not every second", {
+    given: ["skyvw:0 on 2026-10-12: a prompt submitted 61 s ago, no receipt, a busy pane", () => {
+      const rootDir = tempRoot();
+      let clock = 100_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "skyvw", pane: 0, text: "awaiting receipt" });
+      queue.update(job, { status: "submitted", submittedAt: clock - 61_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0 });
+      const agent = acceptingAgent();
+      const reads = [];
+      let receiptReads = 0;
+      agent.waitForPromptEcho = async () => { receiptReads++; return false; };
+      agent.promptTransportState = async () => { reads.push(clock); return { state: "hidden", busy: true, dialect: "claude" }; };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, broker, reads, receiptReads: () => receiptReads, advance: () => { clock += 500; } };
+    }],
+    when: ["the broker polls every 500 ms for one minute", async ({ broker, advance }) => {
+      for (let poll = 0; poll < 120; poll++) { await broker.kickTarget("skyvw", 0); advance(); }
+    }],
+    then: ["the pane is read six times, ten seconds apart, the receipt every second, and the prompt keeps waiting", (_, ctx) => {
+      expect(ctx.reads).toEqual([0, 10, 20, 30, 40, 50].map((seconds) => 100_000 + seconds * 1_000));
+      expect(ctx.receiptReads()).toBeGreaterThanOrEqual(60);
+      expect(ctx.queue.read("skyvw", 0, ctx.job.id)).toMatchObject({ status: "submitted",
+        lastReason: "awaiting exact JSONL receipt; TUI hint: hidden" });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("an empty composer never turns submitted back into paste permission", {
     given: ["an old submitted job with no JSONL receipt and an idle empty composer", () => {
       const rootDir = tempRoot();

@@ -35,8 +35,8 @@ feature("context-cost decisions are total and fail closed", () => {
     then: ["the first cold prompt compacts before delivery", d => expect(d.values.action).toBe("COMPACT")],
   });
   unit("daytime auto-compact sees a large context below its percentage threshold", {
-    given: ["a 473k pane at 56%, idle one hour", () => ({ paneKey: "claw:2", status: "idle", contextPercent: 56,
-      contextTokens: 473_000, paneInMode: "0", lastActivityMs: 0, warnings: new Map(), config: DEFAULT_CONFIG, now: 3_600_000 })],
+    given: ["a 473k pane at 56%, idle 55 minutes inside the warm cache", () => ({ paneKey: "claw:2", status: "idle", contextPercent: 56,
+      contextTokens: 473_000, paneInMode: "0", lastActivityMs: 0, warnings: new Map(), config: DEFAULT_CONFIG, now: 55 * 60_000 })],
     when: ["polling the existing controller policy", args => decideAutoCompactAction(args)],
     then: ["the warning begins before the absolute-budget compact", d => expect(d.action).toBe("warn")],
   });

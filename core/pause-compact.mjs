@@ -39,14 +39,15 @@ export const pauseCompactLimit = (agentConfig, pane, policy = PAUSE_COMPACT_POLI
 
 const hold = (cell, detail) => ({ action: "hold", cell, detail });
 
+// "none" means no pause or no need; "hold" means a due compact that a guard keeps, which is logged.
+// idleLimit and idleMs give Codex its own idle rule: above the daytime budget after 25 quiet minutes.
+// cacheLifeMs ends both rules once the prompt cache has expired; a self-request, which resumes work, omits it.
 /**
- * WHAT: Decides whether a pane at a pause is compacted now, and against which budget.
+ * WHAT: Maps a pane at a pause to compact, hold or none, with its budget.
  * WHY: Keeps every condition of the pause rule in one pure, testable place.
- * "none" means no pause or no need; "hold" means a due compact that a guard keeps, which is logged.
- * idleLimit and idleMs give Codex its own idle rule: above the daytime budget after 25 quiet minutes.
  */
 export function pauseCompactDecision({ engine, tokens, limit, idleLimit = null, idleMs = null, status, inCopyMode = false, quietMs,
-  background = null, lastCompactAt = null, now }, policy = PAUSE_COMPACT_POLICY) {
+  cacheLifeMs = null, background = null, lastCompactAt = null, now }, policy = PAUSE_COMPACT_POLICY) {
   if (!["claude", "codex"].includes(engine)) return { action: "none", cell: "no-compact-receipt" };
   const overPause = Number.isFinite(tokens) && tokens > limit;
   const overIdle = Number.isFinite(tokens) && Number.isFinite(idleLimit) && Number.isFinite(idleMs) && tokens > idleLimit;
@@ -55,6 +56,9 @@ export function pauseCompactDecision({ engine, tokens, limit, idleLimit = null, 
   const pauseDue = overPause && quietMs >= policy.settleMs;
   const idleDue = overIdle && quietMs >= idleMs;
   if (!pauseDue && !idleDue) return { action: "none", cell: "settling" };
+  // A pause compact pays by reading a warm cache. Held past the cache's life, or
+  // first seen after a bridge restart, the pane is left to its next delivery.
+  if (Number.isFinite(cacheLifeMs) && quietMs >= cacheLifeMs) return { action: "none", cell: "cache-cold" };
   if (inCopyMode) return hold("copy-mode", "the pane is in tmux copy-mode");
   if (isCompactUnsafe(status)) return hold("unsafe-status", `its status is ${status}`);
   if (background) return hold("background-active", background);

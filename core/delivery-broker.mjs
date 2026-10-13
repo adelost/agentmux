@@ -24,6 +24,7 @@ import {
   blockedRetryMs,
 } from "./delivery-queue.mjs";
 import { recoverHiddenDeliveryTui, recoverSubmittedTui } from "./tui-stall-recovery.mjs";
+import { submittedTransportHint, submittedTuiInspectionDue } from "./submitted-tui-recovery.mjs";
 import { needsZoomFallback, terminalizeSlashRejection } from "./slash-ingest-guard.mjs";
 import { createDeliveryMemoryContext, deliveryMemoryReceiptText } from "./delivery-memory-context.mjs";
 const ACTIVE_RETRY_MS = 1_000;
@@ -376,12 +377,13 @@ export function createDeliveryBroker({
         acknowledge, terminalizeUnverified, now,
         onRecovered: (value, state) => queueEvent(value, state) });
       if (superseded) return superseded;
-      const recoveredTui = await recoverSubmittedTui({ job, agent, queue, exactEcho, acknowledge, now, log,
-        onRecovered: (value) => queueEvent(value, "submit_recovered_after_stall") });
-      if (recoveredTui) return recoveredTui;
       const submittedAge = now() - Number(
         job.submittedAt || job.submitFenceAt || job.lastAttemptAt || job.createdAt || now(),
       );
+      const inspectTui = submittedTuiInspectionDue(job, submittedAge, now());
+      const recoveredTui = inspectTui && await recoverSubmittedTui({ job, agent, queue, exactEcho, acknowledge, now, log,
+        onRecovered: (value) => queueEvent(value, "submit_recovered_after_stall") });
+      if (recoveredTui) return recoveredTui;
       const submittedExpired = submittedAge >= submittedTerminalMs(job);
       if (submittedExpired) return terminalizeUnverified(job);
       // One durable notice reports a stalled FIFO and closes with recovered on receipt.
@@ -395,21 +397,16 @@ export function createDeliveryBroker({
           return job;
         });
       }
-      let transportHint = null;
-      if (submittedAge >= 5_000 && typeof agent.promptTransportState === "function") {
-        const transport = await agent.promptTransportState(job.agentName, job.pane, job.text)
-          .catch(() => null);
-        if (transport?.state) {
-          transportHint = `TUI hint: ${transport.state}${transport.detail ? ` (${transport.detail})` : ""}`;
-        }
-      }
+      const transportHint = inspectTui ? await submittedTransportHint(agent, job, submittedAge) : null;
       const receiptWait = job.status === "submitted"
         ? (job.kind === "slash" ? "awaiting exact command receipt" : "awaiting exact JSONL receipt")
         : "submit fence committed before physical completion; awaiting authoritative receipt";
+      if (!inspectTui) return queue.update(job, { draftOwned: false, nextAttemptAt: now() + ACTIVE_RETRY_MS });
       return queue.update(job, {
         status: job.status,
         draftOwned: false,
         nextAttemptAt: now() + ACTIVE_RETRY_MS,
+        tuiCheckedAt: now(),
         lastReason: transportHint
           ? `${receiptWait}; ${transportHint}`
           : receiptWait,
