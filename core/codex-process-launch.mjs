@@ -51,7 +51,7 @@ export async function startCodexProcess({
   return launchCodexWithPolicy({
     sessionId, previous, selected, blocked: remembered?.modelTransitionBlocked,
     retry: launchOptions?.retryModelChange === true,
-    receipt: launchOptions?.compactReceipt, context: launchOptions?.resumeContext,
+    receipt: launchOptions?.compactReceipt, context: launchOptions?.resumeContext, work: launchOptions?.work,
     launch: async (choice, { goals = true } = {}) => {
       const cmd = buildCodexLaunchCommand({ profileHome: profile.home, ...choice,
         resumeSessionId: sessionId, allowFreshBootstrap: !sessionId, disableGoals: !goals });

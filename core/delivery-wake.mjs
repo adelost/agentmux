@@ -2,6 +2,7 @@
 // Every refusal leaves the durable job pending; no wake observation is an ACK.
 
 import { paneNeedsWake } from "./wake-admission.mjs";
+import { ownerMessageWaiting } from "./ask-origin.mjs";
 
 const pendingState = (drafted, ownsPaneDraft) =>
   drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending");
@@ -54,7 +55,8 @@ export async function wakeDeliveryTarget({
   if (!token?.ok) return refuse(token?.reason || "sleep-lifecycle");
 
   try {
-    await agent.ensureReady(job.agentName, job.pane);
+    // A start that finds this context's compact unverified holds automatic work.
+    await agent.ensureReady(job.agentName, job.pane, ownerMessageWaiting(queue, job) ? { work: "HUMAN" } : null);
     const ready = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
     if (paneNeedsWake(ready)) throw new Error("target CLI did not start");
     if (typeof wakeLifecycle?.complete === "function") {

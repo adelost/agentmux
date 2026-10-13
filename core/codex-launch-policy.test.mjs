@@ -39,17 +39,33 @@ feature("a cold large Codex session is compacted before it resumes work", () => 
     then: ["no goal can run before the compact", (_, ctx) => expect(ctx.events).toEqual(
       ["launch:gpt-6.1-sol:goals-off", "compact", "reset", "launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
   });
-  component("a failed compact before resume still starts the pane and records no blocked transition", {
-    given: ["a compact refused by quota", () => resumeFixture(events => ({ context: "COLD_LARGE", log: () => {},
-      compact: async () => { events.push("compact"); return { ok: false, reason: "usage-limit" }; } }))],
+  // Mattias 2026-10-13: compact before a session resumes. A failed compact
+  // leaves the session in a shell, so no goal, recovery or follow-up runs on
+  // the cold context; the 2026-09-26 availability rule keeps the owner's own
+  // message able to start it.
+  const refusedByQuota = events => ({ context: "COLD_LARGE", log: () => {},
+    compact: async () => { events.push("compact"); return { ok: false, reason: "usage-limit" }; } });
+  component("a failed compact before resume holds automatic work in a shell after one attempt", {
+    given: ["a compact refused by quota", () => resumeFixture(refusedByQuota)],
+    when: ["the restart revives it", (ctx) => launchCodexWithPolicy(ctx).catch(error => error.message)],
+    then: ["no work launch, no blocked model change, and the reason names the hold", (error, ctx) => {
+      expect(ctx.events).toEqual(["launch:gpt-6.1-sol:goals-off", "compact", "reset"]);
+      expect(error).toMatch(/^Codex resume held: compact-tried: .*usage-limit/u);
+    }],
+  });
+  component("the owner's own message still starts the pane after a failed compact", {
+    given: ["the same refused compact, woken by a Discord message", () => resumeFixture(events => ({ ...refusedByQuota(events), work: "HUMAN" }))],
     when: ["waking it", (ctx) => launchCodexWithPolicy(ctx)],
     then: ["one attempt, then a normal start", (_, ctx) => expect(ctx.events).toEqual(
       ["launch:gpt-6.1-sol:goals-off", "compact", "reset", "launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
   });
-  component("a context whose compact was already tried starts without another paid attempt", {
-    given: ["the same cold context after an unverified attempt", () => resumeFixture(() => ({ context: "TRIED" }))],
-    when: ["waking it again", (ctx) => launchCodexWithPolicy(ctx)],
-    then: ["no compact", (_, ctx) => expect(ctx.events).toEqual(["launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
+  component("a context whose compact was already tried holds without another paid attempt", {
+    given: ["the same cold context after an unverified attempt, as after a bridge restart", () => resumeFixture(() => ({ context: "TRIED" }))],
+    when: ["waking it again", (ctx) => launchCodexWithPolicy(ctx).catch(error => error.message)],
+    then: ["no process, no compact", (error, ctx) => {
+      expect(ctx.events).toEqual([]);
+      expect(error).toMatch(/^Codex resume held: compact-tried/u);
+    }],
   });
   component("a warm or small session starts directly", {
     given: ["a session within the before-delivery rule", () => resumeFixture(() => ({ context: "WITHIN" }))],

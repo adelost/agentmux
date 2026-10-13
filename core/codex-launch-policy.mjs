@@ -60,17 +60,22 @@ export function validCodexCompactReceipt(receipt, sessionId) {
   return compacted && !prompts.isOpen();
 }
 
+const heldLaunchReason = (decision, blocked) => decision.cell === "compact-tried"
+  ? "Codex resume held: compact-tried: this context's compact is unverified, so automatic work waits"
+  : `Codex model change blocked: ${decision.cell}: ${blocked?.reason || "previous model unknown"}`;
+
 /** WHAT: Routes one exact Codex session through compact-first launch. WHY: Keeps config changes, wake and recovery behind the same cost boundary as /model. */
 export async function launchCodexWithPolicy({
-  sessionId, previous, selected, blocked, retry = false, receipt = null, context = "WITHIN",
+  sessionId, previous, selected, blocked, retry = false, receipt = null, context = "WITHIN", work = "AUTOMATIC",
   launch, compact, reset, verify, remember, recordBlocked,
   validReceipt = validCodexCompactReceipt, log = message => console.warn(`codex launch | ${message}`),
 }) {
   const verified = validReceipt(receipt, sessionId);
   const transition = Boolean(sessionId && previous?.model !== selected.model);
-  const decision = codexLaunchDecision({ sessionId, previous, selected,
-    blocked: transition && blocked?.target === selected.model && !retry && !verified, receipt: verified, context });
-  if (decision.values.action === "HOLD") throw new Error(`Codex model change blocked: ${decision.cell}: ${blocked?.reason || "previous model unknown"}`);
+  const decideFor = launchContext => codexLaunchDecision({ sessionId, previous, selected,
+    blocked: transition && blocked?.target === selected.model && !retry && !verified, receipt: verified, context: launchContext, work });
+  const decision = decideFor(context);
+  if (decision.values.action === "HOLD") throw new Error(heldLaunchReason(decision, blocked));
   // An active goal starts a turn as soon as Codex opens the session, so the
   // launch that only compacts runs with goals off; the next launch resumes it.
   const compactFirst = async () => {
@@ -82,10 +87,12 @@ export async function launchCodexWithPolicy({
   try {
     if (decision.values.action === "COMPACT" && transition) await compactFirst();
     else if (decision.values.action === "COMPACT") {
-      // Best effort, like compact before work: the pane still starts, and the
-      // recorded attempt keeps the same context from paying for a second one.
+      // The attempt is now on record, so the table decides as for any tried
+      // context: automatic work waits in a shell, a person's message starts it.
       await compactFirst().catch(async (error) => {
-        log(`${sessionId}: compact before resume failed, starting uncompacted: ${error.message}`);
+        const tried = decideFor("TRIED");
+        if (tried.values.action === "HOLD") throw new Error(`${heldLaunchReason(tried, blocked)}: ${error.message}`);
+        log(`${sessionId}: compact before resume failed, ${tried.cell} starts it uncompacted: ${error.message}`);
         await reset();
       });
     }

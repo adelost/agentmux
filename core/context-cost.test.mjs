@@ -45,14 +45,20 @@ feature("context-cost decisions are total and fail closed", () => {
 
 feature("Codex launch admission for a resumed session", () => {
   const known = { sessionId: "s4", previous: { model: "gpt-6.1-sol" }, selected: { model: "gpt-6.1-sol" } };
-  unit("a cold large session compacts first, a tried or verified one starts", {
+  // Mattias 2026-10-13: compact before a session resumes; a failed or unknown
+  // compact holds automatic work instead of starting it on the cold context.
+  unit("a cold large session compacts first, and only a verified compact or its owner releases a tried one", {
     when: ["deciding each context", () => [
       codexLaunchDecision({ ...known, context: "COLD_LARGE" }),
       codexLaunchDecision({ ...known, context: "COLD_LARGE", receipt: true }),
       codexLaunchDecision({ ...known, context: "TRIED" }),
+      codexLaunchDecision({ ...known, context: "TRIED", receipt: true }),
+      codexLaunchDecision({ ...known, context: "TRIED", work: "HUMAN" }),
+      codexLaunchDecision({ ...known, context: "TRIED", selected: { model: "gpt-6.2-sol" } }),
       codexLaunchDecision({ ...known, context: "WITHIN" })].map(d => `${d.cell}:${d.values.action}`)],
-    then: ["only the untried cold large context compacts", cells => expect(cells).toEqual([
-      "compact-before-resume:COMPACT", "compacted-resume:LAUNCH", "compact-tried:LAUNCH", "remembered-model:LAUNCH"])],
+    then: ["automatic work never starts or pays again after an unverified compact", cells => expect(cells).toEqual([
+      "compact-before-resume:COMPACT", "compacted-resume:LAUNCH", "compact-tried:HOLD", "compacted-resume:LAUNCH",
+      "owner-after-failed-compact:LAUNCH", "compact-tried:HOLD", "remembered-model:LAUNCH"])],
   });
   unit("the resume context uses the Codex before-delivery limits", {
     when: ["classifying skyvw:4 and its neighbours", () => [

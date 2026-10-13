@@ -381,11 +381,15 @@ feature("a held Claude paste never buys or fakes a compact", () => {
       ctx.agent.promptTransportState = async () => ({ state: "pasting", busy: false, dialect: "claude" });
       return ctx;
     }],
-    when: ["the first delivery after the night is admitted", ctx => createContextMaintenance(ctx).beforeWork({ agentName: "skyvw", pane: 0, id: "first" })],
-    then: ["no compact is attempted and the work is still delivered", (result, ctx) => {
+    when: ["the first automatic and the first Discord delivery after the night are admitted", async ctx => ({
+      automatic: await createContextMaintenance(ctx).beforeWork({ agentName: "skyvw", pane: 0, id: "first", source: "cli" }),
+      owner: await createContextMaintenance(ctx).beforeWork({ agentName: "skyvw", pane: 0, id: "mine", source: "discord", text: "Hur går det?" }),
+    })],
+    then: ["no compact is attempted, the automatic work waits and the owner's message is delivered", ({ automatic, owner }, ctx) => {
       try {
         expect(ctx.calls).toHaveLength(0);
-        expect(result).toMatchObject({ ok: true, cell: "delivered-uncompacted", reason: "context-cost:not-idle:pasting" });
+        expect(automatic).toMatchObject({ ok: false, cell: "held-for-compact", reason: "held-for-compact:context-cost:not-idle:pasting" });
+        expect(owner).toMatchObject({ ok: true, cell: "delivered-uncompacted", reason: "context-cost:not-idle:pasting" });
       } finally { ctx.cleanup(); }
     }],
   });
@@ -406,6 +410,107 @@ feature("a held Claude paste never buys or fakes a compact", () => {
     then: ["only the journaled boundary makes it verified", (result, ctx) => {
       try { expect(result).toEqual({ before: "FAILED", after: "VERIFIED" }); } finally { ctx.cleanup(); }
     }],
+  });
+});
+
+// skyvw:4 2026-10-13: a recovery prompt and Wingman follow-ups reached a 409k
+// context 94 minutes cold. Mattias 2026-10-13: compact before resuming. Automatic
+// work waits for a verified compact; the owner's own message still goes through.
+feature("automatic work waits on a cold context whose compact did not verify", () => {
+  const afterRefusedCompact = async () => {
+    const ctx = fixture({ fail: true });
+    await ctx.maintenance.run("claw", 2, { cold: true, leaseHeld: true });
+    return ctx;
+  };
+  const admit = (ctx, job) => createContextMaintenance(ctx).beforeWork({ agentName: "claw", pane: 2, text: "Fortsätt", ...job });
+  component("a recovery prompt, a timer follow-up and another pane's message all wait, with no second attempt", {
+    given: ["a cold 473k pane whose compact quota refused", afterRefusedCompact],
+    when: ["three automatic messages arrive through a restarted controller", async ctx => [
+      await admit(ctx, { id: "recovery", source: "cli" }),
+      await admit(ctx, { id: "wingman", source: "cli" }),
+      await admit(ctx, { id: "relay", source: "discord", metadata: { sender: "claw:3" } })]],
+    then: ["each is held with the failed attempt as its reason", (results, ctx) => {
+      try {
+        expect(results.map(r => [r.ok, r.cell])).toEqual([[false, "held-for-compact"], [false, "held-for-compact"], [false, "held-for-compact"]]);
+        expect(results[0].reason).toBe("held-for-compact:context-cost:failed-attempt:provider-usage-limited");
+        expect(ctx.calls).toEqual(["compact"]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("the owner's Discord or voice message is delivered uncompacted", {
+    given: ["the same refused compact", afterRefusedCompact],
+    when: ["Mattias writes and speaks to the pane", async ctx => [
+      await admit(ctx, { id: "typed", source: "discord" }), await admit(ctx, { id: "spoken", source: "voice-pwa" })]],
+    then: ["both go through and nothing is paid again", (results, ctx) => {
+      try {
+        expect(results.map(r => r.cell)).toEqual(["delivered-uncompacted", "delivered-uncompacted"]);
+        expect(ctx.calls).toEqual(["compact"]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("an owner's message queued behind a held automatic prompt releases the pane", {
+    given: ["the refused compact, a Wingman prompt at the head and Mattias's message behind it", async () => {
+      const ctx = await afterRefusedCompact();
+      ctx.jobs.push({ id: "wingman", source: "cli", status: "pending", text: "Fortsätt" },
+        { id: "mine", source: "discord", status: "pending", text: "Hur går det?" });
+      return ctx;
+    }],
+    when: ["the head is admitted", ctx => admit(ctx, { id: "wingman", source: "cli" })],
+    then: ["the FIFO moves, since the owner's message pays the cold read anyway", (result, ctx) => {
+      try { expect(result).toMatchObject({ ok: true, cell: "delivered-uncompacted" }); expect(ctx.calls).toEqual(["compact"]); }
+      finally { ctx.cleanup(); }
+    }],
+  });
+  component("a compact boundary that appears later releases the waiting work", {
+    given: ["the refused compact, then a boundary journaled for the same session", async () => {
+      const ctx = await afterRefusedCompact();
+      ctx.append({ type: "system", subtype: "compact_boundary" });
+      return ctx;
+    }],
+    when: ["the held recovery prompt is retried", ctx => admit(ctx, { id: "recovery", source: "cli" })],
+    then: ["it is delivered on the verified receipt", (result, ctx) => {
+      try { expect(result).toMatchObject({ ok: true, cell: "receipt-exists" }); expect(ctx.calls).toEqual(["compact"]); }
+      finally { ctx.cleanup(); }
+    }],
+  });
+  component("a small or recently used context is never held", {
+    given: ["a 60k pane quiet for 61 minutes and a 473k pane quiet for 5", () => {
+      const small = fixture({ fail: true }), warm = fixture({ fail: true });
+      small.agent.getContext = async () => ({ tokens: 60_000 });
+      small.activityFor = () => 100_000_000 - 61 * 60_000;
+      warm.activityFor = () => 100_000_000 - 5 * 60_000;
+      return { small, warm };
+    }],
+    when: ["an automatic message arrives at each", async ({ small, warm }) => [
+      await admit(small, { id: "a", source: "cli" }), await admit(warm, { id: "b", source: "cli" })]],
+    then: ["both are delivered without a compact", (results, { small, warm }) => {
+      try {
+        expect(results.map(r => [r.ok, r.cell])).toEqual([[true, "within-policy"], [true, "within-policy"]]);
+        expect([...small.calls, ...warm.calls]).toEqual([]);
+      } finally { small.cleanup(); warm.cleanup(); }
+    }],
+  });
+  component("a stopped pane is started for its owner's message but not for automatic work", {
+    given: ["a stopped pane and a launch recorder", () => {
+      const launches = [];
+      const agent = { paneProcessState: async () => ({ running: launches.length > 0 }),
+        ensureReady: async (name, pane, launch) => { launches.push(launch); } };
+      return { agent, launches };
+    }],
+    when: ["a timer prompt, a Discord message, and a timer prompt with Mattias's message behind it each wake it", async ({ agent, launches }) => {
+      const wake = (job, behind = []) => wakeDeliveryTarget({ agent, job: { kind: "prompt", agentName: "skyvw", pane: 4, status: "pending", text: "Fortsätt", ...job },
+        wakeGate: async () => ({ ok: true }), queue: { update: (j, patch) => ({ ...j, ...patch }), list: () => behind }, now: () => 0, retryMs: () => 1_000,
+        queueEvent: () => {}, notifyBlocked: async j => j });
+      const seen = [];
+      for (const [job, behind] of [[{ id: "wingman", source: "cli" }], [{ id: "mine", source: "discord" }],
+        [{ id: "wingman", source: "cli" }, [{ id: "mine", source: "discord", status: "pending", text: "Hej" }]]]) {
+        await wake(job, behind);
+        seen.push(launches.splice(0)[0]);
+      }
+      return seen;
+    }],
+    then: ["only a wake carrying the owner's message may start a context whose compact is unverified", launches =>
+      expect(launches).toEqual([null, { work: "HUMAN" }, { work: "HUMAN" }])],
   });
 });
 
