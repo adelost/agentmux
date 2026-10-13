@@ -53,19 +53,30 @@ feature("a cold large Codex session is compacted before it resumes work", () => 
       expect(error).toMatch(/^Codex resume held: compact-tried: .*usage-limit/u);
     }],
   });
-  component("the owner's own message still starts the pane after a failed compact", {
+  component("the owner's own message opens the pane after a failed compact, with the old goal paused", {
     given: ["the same refused compact, woken by a Discord message", () => resumeFixture(events => ({ ...refusedByQuota(events), work: "HUMAN" }))],
     when: ["waking it", (ctx) => launchCodexWithPolicy(ctx)],
-    then: ["one attempt, then a normal start", (_, ctx) => expect(ctx.events).toEqual(
-      ["launch:gpt-6.1-sol:goals-off", "compact", "reset", "launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
+    then: ["one attempt, then a start where only the owner's message can begin a turn", (_, ctx) => expect(ctx.events).toEqual(
+      ["launch:gpt-6.1-sol:goals-off", "compact", "reset", "launch:gpt-6.1-sol:goals-off", "remember:gpt-6.1-sol"])],
+  });
+  component("the owner's message after an earlier unverified attempt opens it the same way, paying nothing", {
+    given: ["a tried context woken by a Discord message", () => resumeFixture(() => ({ context: "TRIED", work: "HUMAN" }))],
+    when: ["waking it", (ctx) => launchCodexWithPolicy(ctx)],
+    then: ["no compact and no goal turn", (_, ctx) => expect(ctx.events).toEqual(["launch:gpt-6.1-sol:goals-off", "remember:gpt-6.1-sol"])],
   });
   component("a context whose compact was already tried holds without another paid attempt", {
     given: ["the same cold context after an unverified attempt, as after a bridge restart", () => resumeFixture(() => ({ context: "TRIED" }))],
     when: ["waking it again", (ctx) => launchCodexWithPolicy(ctx).catch(error => error.message)],
-    then: ["no process, no compact", (error, ctx) => {
+    then: ["no process, no compact, and the queue may let the owner's message pass", (error, ctx) => {
       expect(ctx.events).toEqual([]);
       expect(error).toMatch(/^Codex resume held: compact-tried/u);
     }],
+  });
+  component("a launch hold for an unverified compact is marked as a cost hold", {
+    given: ["a tried context and a blocked model change", () => [resumeFixture(() => ({ context: "TRIED" })),
+      fixture({ previous: { model: "gpt-5.6-sol" }, blocked: { target: "gpt-6.1-sol", reason: "compact failed" }, selected: { model: "gpt-6.1-sol" } })]],
+    when: ["starting each", async (contexts) => Promise.all(contexts.map(ctx => launchCodexWithPolicy(ctx).catch(error => error.costHold)))],
+    then: ["only the compact hold can be passed by the owner's message", marks => expect(marks).toEqual([true, false])],
   });
   component("a warm or small session starts directly", {
     given: ["a session within the before-delivery rule", () => resumeFixture(() => ({ context: "WITHIN" }))],

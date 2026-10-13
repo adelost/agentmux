@@ -82,21 +82,22 @@ export function contextCostDecision({ tokens, idleMs, cold = false, pauseTokens 
 // minutes) is compacted first. TRIED means a compact of this context was
 // already attempted, unverified, with no work since: automatic work (a goal,
 // a recovery or follow-up prompt) waits, and no second paid attempt runs.
-// A person's own message still starts it, so a failed compact never locks a
-// pane against its owner (the 2026-09-26 availability rule).
+// A person's own message still opens it, with the goal paused so that message
+// runs first; a failed compact never locks a pane against its owner (the
+// 2026-09-26 availability rule).
 /** WHAT: Defines every Codex launch admission. WHY: Prevents wake and recovery from bypassing compact-first model changes. */
 export const codexLaunchRules = defineDecisionTable({
   id: "amux.codex-launch",
   axes: { identity: ["FRESH", "KNOWN", "UNKNOWN"], selection: ["SAME", "CHANGED"], receipt: ["VERIFIED", "MISSING"], blocked: ["YES", "NO"],
     context: ["WITHIN", "COLD_LARGE", "TRIED"], work: ["AUTOMATIC", "HUMAN"] },
-  columns: { action: choice(["LAUNCH", "COMPACT", "HOLD"]) },
+  columns: { action: choice(["LAUNCH", "LAUNCH_PAUSED", "COMPACT", "HOLD"]) },
   cells: [
     on("previous-failure", { blocked: "YES" }, { action: "HOLD" }),
     on("unknown-model", { blocked: "NO", identity: "UNKNOWN" }, { action: "HOLD" }),
     on("fresh-session", { blocked: "NO", identity: "FRESH" }, { action: "LAUNCH" }),
     on("compact-tried", { blocked: "NO", identity: "KNOWN", context: "TRIED", receipt: "MISSING", work: "AUTOMATIC" }, { action: "HOLD" }),
     on("remembered-model", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: "WITHIN" }, { action: "LAUNCH" }),
-    on("owner-after-failed-compact", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: "TRIED", receipt: "MISSING", work: "HUMAN" }, { action: "LAUNCH" }),
+    on("owner-after-failed-compact", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: "TRIED", receipt: "MISSING", work: "HUMAN" }, { action: "LAUNCH_PAUSED" }),
     on("compacted-resume", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: ["COLD_LARGE", "TRIED"], receipt: "VERIFIED" }, { action: "LAUNCH" }),
     on("compact-before-resume", { blocked: "NO", identity: "KNOWN", selection: "SAME", context: "COLD_LARGE", receipt: "MISSING" }, { action: "COMPACT" }),
     on("verified-change", { blocked: "NO", identity: "KNOWN", selection: "CHANGED", receipt: "VERIFIED" }, { action: "LAUNCH" }),
@@ -108,6 +109,7 @@ export const codexLaunchRules = defineDecisionTable({
     { refuse: "a changed existing model cannot launch without compact proof", when: d => d.at.identity === "KNOWN" && d.at.selection === "CHANGED" && d.at.receipt === "MISSING" && d.values.action === "LAUNCH" },
     { refuse: "a cold large session cannot resume before its compact", when: d => d.at.identity === "KNOWN" && d.at.context === "COLD_LARGE" && d.at.receipt === "MISSING" && d.values.action === "LAUNCH" },
     { refuse: "an unverified compact cannot release automatic work or pay again", when: d => d.at.identity === "KNOWN" && d.at.context === "TRIED" && d.at.receipt === "MISSING" && d.at.work === "AUTOMATIC" && d.values.action !== "HOLD" },
+    { refuse: "an unverified compact cannot start the old goal", when: d => d.at.identity === "KNOWN" && d.at.context === "TRIED" && d.at.receipt === "MISSING" && d.values.action === "LAUNCH" },
     { refuse: "blocked transitions cannot spend automatic retries", when: d => d.at.blocked === "YES" && d.values.action !== "HOLD" },
   ],
 });
@@ -125,6 +127,10 @@ export function codexLaunchDecision({ sessionId, previous, selected, blocked, re
     receipt: receipt ? "VERIFIED" : "MISSING", blocked: blocked ? "YES" : "NO", context, work });
 }
 
+// 518 deliveries once waited on unreadable evidence and locked panes against
+// their owner (2026-09-26). The owner's own message therefore always passes;
+// automatic work waits for evidence or a verified compact. A proven empty
+// epoch after a compact is settled, not unknown.
 /** WHAT: Defines whether work may reach a pane whose compact did not settle. WHY: Keeps automatic work off a cold context while its owner can still write. */
 export const workAdmissionRules = defineDecisionTable({
   id: "amux.work-admission",
@@ -132,13 +138,12 @@ export const workAdmissionRules = defineDecisionTable({
   columns: { action: choice(["DELIVER", "HOLD"]) },
   cells: [
     on("compact-settled", { compact: "SETTLED" }, { action: "DELIVER" }),
-    // 518 deliveries once waited on unreadable evidence; that never holds work.
-    on("unknown-evidence", { compact: "UNKNOWN" }, { action: "DELIVER" }),
-    on("owner-uncompacted", { compact: "UNVERIFIED", work: "HUMAN" }, { action: "DELIVER" }),
+    on("owner-uncompacted", { compact: ["UNKNOWN", "UNVERIFIED"], work: "HUMAN" }, { action: "DELIVER" }),
+    on("held-for-evidence", { compact: "UNKNOWN", work: "AUTOMATIC" }, { action: "HOLD" }),
     on("held-for-compact", { compact: "UNVERIFIED", work: "AUTOMATIC" }, { action: "HOLD" }),
   ],
   invariants: [
-    { refuse: "automatic work cannot reach a context whose required compact is unverified", when: d => d.at.compact === "UNVERIFIED" && d.at.work === "AUTOMATIC" && d.values.action !== "HOLD" },
+    { refuse: "automatic work cannot reach an unknown context or one whose required compact is unverified", when: d => d.at.compact !== "SETTLED" && d.at.work === "AUTOMATIC" && d.values.action !== "HOLD" },
   ],
 });
 

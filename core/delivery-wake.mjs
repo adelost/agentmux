@@ -2,7 +2,8 @@
 // Every refusal leaves the durable job pending; no wake observation is an ACK.
 
 import { paneNeedsWake } from "./wake-admission.mjs";
-import { ownerMessageWaiting } from "./ask-origin.mjs";
+import { isOwnerChannelJob } from "./ask-origin.mjs";
+import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 
 const pendingState = (drafted, ownsPaneDraft) =>
   drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending");
@@ -26,11 +27,13 @@ export async function wakeDeliveryTarget({
   if (typeof agent.paneProcessState !== "function") return { proceed: true, job };
   const processState = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
 
-  const refuse = async (reason) => {
+  // costHold: held for a compact or for context evidence, which only the owner's message may pass.
+  const refuse = async (reason, costHold = false) => {
     const pending = queue.update(job, {
       status: pendingState(drafted, ownsPaneDraft),
       nextAttemptAt: now() + retryMs(job),
       lastReason: `wake-refused:${reason}`,
+      costHold: costHold || null,
     });
     queueEvent(pending, "wake_refused", { reason: String(reason) });
     return { proceed: false, job: await notifyBlocked(pending) };
@@ -39,7 +42,8 @@ export async function wakeDeliveryTarget({
   const costGate = async () => {
     if (job.kind !== "prompt" || !costAdmission) return { proceed: true, job };
     const verdict = await costAdmission(job, { lease }).catch(error => ({ ok: false, reason: error.message }));
-    return verdict?.ok ? { proceed: true, job } : refuse(verdict?.reason || "context-cost-unverified");
+    if (!verdict?.ok) return refuse(verdict?.reason || "context-cost-unverified", verdict?.held === true);
+    return { proceed: true, job: job.costHold ? queue.update(job, { costHold: null }) : job };
   };
   if (!paneNeedsWake(processState)) return costGate();
 
@@ -56,7 +60,7 @@ export async function wakeDeliveryTarget({
 
   try {
     // A start that finds this context's compact unverified holds automatic work.
-    await agent.ensureReady(job.agentName, job.pane, ownerMessageWaiting(queue, job) ? { work: "HUMAN" } : null);
+    await agent.ensureReady(job.agentName, job.pane, isOwnerChannelJob(job) ? { work: "HUMAN" } : null);
     const ready = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
     if (paneNeedsWake(ready)) throw new Error("target CLI did not start");
     if (typeof wakeLifecycle?.complete === "function") {
@@ -70,6 +74,15 @@ export async function wakeDeliveryTarget({
     }
     return costGate();
   } catch (error) {
-    return refuse(error instanceof Error ? error.message : "wake-verification-failed");
+    return refuse(error instanceof Error ? error.message : "wake-verification-failed", error?.costHold === true);
   }
+}
+
+const heldForCost = job => job?.costHold === true && job.status === "pending" && !job.draftOwned;
+
+/** WHAT: Returns the job the broker serves next for one pane. WHY: Lets the owner's message pass work held for a compact, without moving, cancelling or resending it. */
+export function deliveryHead(jobs) {
+  const open = jobs.filter(job => !TERMINAL_DELIVERY_STATES.has(job.status));
+  if (!heldForCost(open[0])) return open[0] || null;
+  return open.find(job => isOwnerChannelJob(job) && !heldForCost(job)) || open[0];
 }

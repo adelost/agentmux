@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { contextMaintenanceAttempt, createContextMaintenance } from "./context-maintenance.mjs";
-import { wakeDeliveryTarget } from "./delivery-wake.mjs";
+import { deliveryHead, wakeDeliveryTarget } from "./delivery-wake.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createSelfCompactStore } from "./self-compact.mjs";
@@ -141,8 +141,9 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
     });
   }
   // Mattias 2026-09-26: a held delivery locks the orchestrated pane ("då kommer ju
-  // panelen låsa sig"), so unknown evidence delivers without a compact instead.
-  component("transport admits both the proven empty pane and the unknown pane, spending no compact", {
+  // panelen låsa sig"), so the owner's message passes unknown evidence. Automatic
+  // work does not: unknown context cannot authorize paid work (claw:3 2026-10-13).
+  component("transport admits the proven empty pane, and the unknown pane only for its owner", {
     given: ["two exact idle sessions with unknown usage and different post-compact histories", () => {
       const empty = fixture(), used = fixture();
       for (const ctx of [empty, used]) {
@@ -154,21 +155,22 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
       used.append({ type: "assistant", message: { content: [{ type: "text", text: "prior work" }] } });
       return { empty, used };
     }],
-    when: ["routing one prompt to each session through delivery wake admission", async ({ empty, used }) => {
-      const route = ctx => wakeDeliveryTarget({
+    when: ["routing an automatic prompt to each session, and the owner's message to the unknown one", async ({ empty, used }) => {
+      const route = (ctx, job = {}) => wakeDeliveryTarget({
         agent: ctx.agent,
-        job: { id: "first", kind: "prompt", agentName: "claw", pane: 2, status: "pending" },
+        job: { id: "first", kind: "prompt", agentName: "claw", pane: 2, status: "pending", source: "cli", text: "Fortsätt", ...job },
         costAdmission: job => createContextMaintenance(ctx).beforeWork(job),
         queue: { update: (job, patch) => ({ ...job, ...patch }) },
         now: () => 100_000_000, retryMs: () => 1_000,
         queueEvent: () => {}, notifyBlocked: async job => job,
       });
-      return { accepted: await route(empty), unknown: await route(used) };
+      return { accepted: await route(empty), unknown: await route(used), owner: await route(used, { id: "mine", source: "discord" }) };
     }],
-    then: ["both proceed, with no provider compact", (result, { empty, used }) => {
+    then: ["the empty epoch and the owner proceed, automatic work on unknown context waits, and nothing is compacted", (result, { empty, used }) => {
       try {
         expect(result.accepted.proceed).toBe(true);
-        expect(result.unknown.proceed).toBe(true);
+        expect(result.unknown).toMatchObject({ proceed: false, job: { costHold: true, lastReason: "wake-refused:held-for-evidence:context-cost:unknown-evidence" } });
+        expect(result.owner.proceed).toBe(true);
         expect(empty.calls).toHaveLength(0);
         expect(used.calls).toHaveLength(0);
       } finally { empty.cleanup(); used.cleanup(); }
@@ -448,18 +450,34 @@ feature("automatic work waits on a cold context whose compact did not verify", (
       } finally { ctx.cleanup(); }
     }],
   });
-  component("an owner's message queued behind a held automatic prompt releases the pane", {
-    given: ["the refused compact, a Wingman prompt at the head and Mattias's message behind it", async () => {
+  component("an owner's message queued behind a held automatic prompt does not release it", {
+    given: ["the refused compact, a recovery prompt at the head and Mattias's \"Stopp\" behind it", async () => {
       const ctx = await afterRefusedCompact();
-      ctx.jobs.push({ id: "wingman", source: "cli", status: "pending", text: "Fortsätt" },
-        { id: "mine", source: "discord", status: "pending", text: "Hur går det?" });
+      ctx.jobs.push({ id: "recovery", source: "cli", status: "pending", text: "Fortsätt" },
+        { id: "mine", source: "discord", status: "pending", text: "Stopp" });
       return ctx;
     }],
-    when: ["the head is admitted", ctx => admit(ctx, { id: "wingman", source: "cli" })],
-    then: ["the FIFO moves, since the owner's message pays the cold read anyway", (result, ctx) => {
-      try { expect(result).toMatchObject({ ok: true, cell: "delivered-uncompacted" }); expect(ctx.calls).toEqual(["compact"]); }
+    when: ["the head is admitted", ctx => admit(ctx, { id: "recovery", source: "cli" })],
+    then: ["the head still waits for its own evidence", (result, ctx) => {
+      try { expect(result).toMatchObject({ ok: false, held: true, cell: "held-for-compact" }); expect(ctx.calls).toEqual(["compact"]); }
       finally { ctx.cleanup(); }
     }],
+  });
+  component("the broker serves the owner's message past an untyped job held for its cost", {
+    when: ["choosing the next job for several queues", () => {
+      const held = { id: "recovery", source: "cli", status: "pending", costHold: true, text: "Fortsätt" };
+      const later = { id: "wingman", source: "cli", status: "pending", text: "Fortsätt" };
+      const mine = { id: "mine", source: "discord", status: "pending", text: "Stopp" };
+      return [
+        deliveryHead([held, later, mine]),
+        deliveryHead([held, later]),
+        deliveryHead([{ ...held, draftOwned: true }, mine]),
+        deliveryHead([{ ...held, status: "submitted" }, mine]),
+        deliveryHead([{ ...held, costHold: null }, mine]),
+      ].map(job => job.id);
+    }],
+    then: ["only the owner's message passes, and only an untyped held job; the held job stays queued", ids =>
+      expect(ids).toEqual(["mine", "recovery", "recovery", "recovery", "recovery"])],
   });
   component("a compact boundary that appears later releases the waiting work", {
     given: ["the refused compact, then a boundary journaled for the same session", async () => {
@@ -497,20 +515,29 @@ feature("automatic work waits on a cold context whose compact did not verify", (
         ensureReady: async (name, pane, launch) => { launches.push(launch); } };
       return { agent, launches };
     }],
-    when: ["a timer prompt, a Discord message, and a timer prompt with Mattias's message behind it each wake it", async ({ agent, launches }) => {
-      const wake = (job, behind = []) => wakeDeliveryTarget({ agent, job: { kind: "prompt", agentName: "skyvw", pane: 4, status: "pending", text: "Fortsätt", ...job },
-        wakeGate: async () => ({ ok: true }), queue: { update: (j, patch) => ({ ...j, ...patch }), list: () => behind }, now: () => 0, retryMs: () => 1_000,
+    when: ["a timer prompt and a Discord message each wake it", async ({ agent, launches }) => {
+      const wake = job => wakeDeliveryTarget({ agent, job: { kind: "prompt", agentName: "skyvw", pane: 4, status: "pending", text: "Fortsätt", ...job },
+        wakeGate: async () => ({ ok: true }), queue: { update: (j, patch) => ({ ...j, ...patch }) }, now: () => 0, retryMs: () => 1_000,
         queueEvent: () => {}, notifyBlocked: async j => j });
       const seen = [];
-      for (const [job, behind] of [[{ id: "wingman", source: "cli" }], [{ id: "mine", source: "discord" }],
-        [{ id: "wingman", source: "cli" }, [{ id: "mine", source: "discord", status: "pending", text: "Hej" }]]]) {
-        await wake(job, behind);
+      for (const job of [{ id: "wingman", source: "cli" }, { id: "mine", source: "discord" }]) {
+        await wake(job);
         seen.push(launches.splice(0)[0]);
       }
       return seen;
     }],
-    then: ["only a wake carrying the owner's message may start a context whose compact is unverified", launches =>
-      expect(launches).toEqual([null, { work: "HUMAN" }, { work: "HUMAN" }])],
+    then: ["only the owner's own wake may open a context whose compact is unverified", launches =>
+      expect(launches).toEqual([null, { work: "HUMAN" }])],
+  });
+  component("a wake the launch holds for its compact marks the job as a cost hold", {
+    given: ["a stopped pane whose start is held", () => ({ paneProcessState: async () => ({ running: false }),
+      ensureReady: async () => { throw Object.assign(new Error("Codex resume held: compact-tried"), { costHold: true }); } })],
+    when: ["a recovery prompt wakes it", agent => wakeDeliveryTarget({ agent,
+      job: { id: "recovery", kind: "prompt", agentName: "skyvw", pane: 4, status: "pending", source: "cli", text: "Fortsätt" },
+      wakeGate: async () => ({ ok: true }), queue: { update: (j, patch) => ({ ...j, ...patch }) }, now: () => 0, retryMs: () => 1_000,
+      queueEvent: () => {}, notifyBlocked: async j => j })],
+    then: ["it stays pending with its reason, passable only by the owner's message", result =>
+      expect(result).toMatchObject({ proceed: false, job: { status: "pending", costHold: true, lastReason: "wake-refused:Codex resume held: compact-tried" } })],
   });
 });
 

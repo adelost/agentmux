@@ -1,5 +1,5 @@
 import { contextCostDecision, readContextCostPolicy, workAdmission } from "../policies/context-cost.mjs";
-import { ownerMessageWaiting } from "./ask-origin.mjs";
+import { isOwnerChannelJob } from "./ask-origin.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice, selfCompactAdmission } from "./self-compact.mjs";
 import { latestConversationActivityMs } from "./pane-activity.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
@@ -215,11 +215,10 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     } finally { lease?.release(); }
   }
   // Mattias 2026-09-26: "ni orkestrerar ju. Jag kan ju inte få en fråga, då
-  // kommer ju panelen låsa sig". Unknown evidence never holds work (518
-  // deliveries once waited on it), and a person's own message is delivered
-  // even when the compact failed. skyvw:4 2026-10-13: automatic work (a goal,
-  // recovery or follow-up prompt) on a cold large context waits instead, with
-  // no second paid attempt, until the compact verifies or new work arrives.
+  // kommer ju panelen låsa sig". A person's own message is delivered even when
+  // the compact failed or the evidence is unreadable. skyvw:4 2026-10-13:
+  // automatic work (a goal, recovery or follow-up prompt) waits instead, with
+  // no second paid attempt, until evidence, a verified compact or new work arrives.
   async function beforeWork(job, { lease = null } = {}) {
     const { agentName, pane, id } = job;
     const self = await selfBeforeWork({ agentName, pane, id }, lease);
@@ -228,11 +227,9 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     if (!await regainSessionLease(lease)) return { ok: false, reason: "delivery-lease-busy" };
     if (result.ok) return result;
     // A pane's own compact request is about growth, not a cold cache: it never holds work.
-    // The FIFO delivers in order, so an owner's message behind this job releases it too:
-    // that message pays the cold read anyway.
-    const admission = workAdmission({ ok: false, need: self ? null : result.need, human: ownerMessageWaiting(queue, job) });
-    if (admission.values.action === "HOLD") return { ok: false, cell: admission.cell, reason: `${admission.cell}:${result.reason}` };
-    log(`${agentName}:${pane} delivered without compact (${admission.cell}): ${result.reason}`);
+    const admission = self ? null : workAdmission({ ok: false, need: result.need, human: isOwnerChannelJob(job) });
+    if (admission?.values.action === "HOLD") return { ok: false, held: true, cell: admission.cell, reason: `${admission.cell}:${result.reason}` };
+    log(`${agentName}:${pane} delivered without compact (${admission?.cell || "self-compact"}): ${result.reason}`);
     return { ok: true, cell: "delivered-uncompacted", reason: result.reason };
   }
   // A pane that asked to be compacted at its stage boundary gets it before the next

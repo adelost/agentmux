@@ -17,7 +17,7 @@ import { createDeliveryTerminalizer } from "./delivery-terminal.mjs";
 import { runDeliveryPreflight } from "./delivery-stale.mjs";
 import { createIngestProbeGate } from "./ingest-probe-gate.mjs";
 import { createWakeAdmissionGate } from "./wake-admission.mjs";
-import { wakeDeliveryTarget } from "./delivery-wake.mjs";
+import { deliveryHead, wakeDeliveryTarget } from "./delivery-wake.mjs";
 import {
   DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
   NOT_INGESTING_UNVERIFIED_STREAK, isTargetProvenNotIngesting, waitForDeliveryJob,
@@ -602,10 +602,10 @@ export function createDeliveryBroker({
           exactEcho, acknowledge, notifyBlocked: maybeNotifyBlocked,
         });
 
-        // Every non-terminal head, including `submitted`, retains FIFO until
-        // the exact JSONL event acknowledges it. A TUI transition can no
-        // longer release later writes or create out-of-order receipts.
-        const head = queue.next(agentName, pane);
+        // Every non-terminal head, including `submitted`, retains FIFO until its
+        // exact JSONL receipt; only an untyped job held for its cost lets the
+        // owner's own message pass. No TUI transition releases later writes.
+        const head = deliveryHead(queue.list(agentName, pane));
         if (!head) return;
         const yielded = await yieldSupersededMaintenance(head);
         if (yielded && TERMINAL_DELIVERY_STATES.has(yielded.status)) continue;

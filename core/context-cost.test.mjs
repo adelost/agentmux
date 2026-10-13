@@ -58,7 +58,7 @@ feature("Codex launch admission for a resumed session", () => {
       codexLaunchDecision({ ...known, context: "WITHIN" })].map(d => `${d.cell}:${d.values.action}`)],
     then: ["automatic work never starts or pays again after an unverified compact", cells => expect(cells).toEqual([
       "compact-before-resume:COMPACT", "compacted-resume:LAUNCH", "compact-tried:HOLD", "compacted-resume:LAUNCH",
-      "owner-after-failed-compact:LAUNCH", "compact-tried:HOLD", "remembered-model:LAUNCH"])],
+      "owner-after-failed-compact:LAUNCH_PAUSED", "compact-tried:HOLD", "remembered-model:LAUNCH"])],
   });
   unit("the resume context uses the Codex before-delivery limits", {
     when: ["classifying skyvw:4 and its neighbours", () => [

@@ -60,9 +60,10 @@ export function validCodexCompactReceipt(receipt, sessionId) {
   return compacted && !prompts.isOpen();
 }
 
-const heldLaunchReason = (decision, blocked) => decision.cell === "compact-tried"
-  ? "Codex resume held: compact-tried: this context's compact is unverified, so automatic work waits"
-  : `Codex model change blocked: ${decision.cell}: ${blocked?.reason || "previous model unknown"}`;
+// costHold marks a hold for an unverified compact, which the owner's message may pass in the queue.
+const heldLaunch = (decision, blocked, detail = null) => Object.assign(new Error(decision.cell === "compact-tried"
+  ? `Codex resume held: compact-tried: this context's compact is unverified, so automatic work waits${detail ? `: ${detail}` : ""}`
+  : `Codex model change blocked: ${decision.cell}: ${blocked?.reason || "previous model unknown"}`), { costHold: decision.cell === "compact-tried" });
 
 /** WHAT: Routes one exact Codex session through compact-first launch. WHY: Keeps config changes, wake and recovery behind the same cost boundary as /model. */
 export async function launchCodexWithPolicy({
@@ -75,7 +76,7 @@ export async function launchCodexWithPolicy({
   const decideFor = launchContext => codexLaunchDecision({ sessionId, previous, selected,
     blocked: transition && blocked?.target === selected.model && !retry && !verified, receipt: verified, context: launchContext, work });
   const decision = decideFor(context);
-  if (decision.values.action === "HOLD") throw new Error(heldLaunchReason(decision, blocked));
+  if (decision.values.action === "HOLD") throw heldLaunch(decision, blocked);
   // An active goal starts a turn as soon as Codex opens the session, so the
   // launch that only compacts runs with goals off; the next launch resumes it.
   const compactFirst = async () => {
@@ -84,19 +85,22 @@ export async function launchCodexWithPolicy({
     if (!validReceipt(proof, sessionId)) throw new Error(`compact not verified: ${proof?.reason || "missing exact-session receipt"}`);
     await reset();
   };
+  let action = decision.values.action;
   try {
-    if (decision.values.action === "COMPACT" && transition) await compactFirst();
-    else if (decision.values.action === "COMPACT") {
+    if (action === "COMPACT" && transition) await compactFirst();
+    else if (action === "COMPACT") {
       // The attempt is now on record, so the table decides as for any tried
-      // context: automatic work waits in a shell, a person's message starts it.
-      await compactFirst().catch(async (error) => {
+      // context: automatic work waits in a shell, a person's message opens it.
+      action = await compactFirst().then(() => "LAUNCH", async (error) => {
         const tried = decideFor("TRIED");
-        if (tried.values.action === "HOLD") throw new Error(`${heldLaunchReason(tried, blocked)}: ${error.message}`);
-        log(`${sessionId}: compact before resume failed, ${tried.cell} starts it uncompacted: ${error.message}`);
+        if (tried.values.action === "HOLD") throw heldLaunch(tried, blocked, error.message);
+        log(`${sessionId}: compact before resume failed, ${tried.cell} opens it uncompacted: ${error.message}`);
         await reset();
+        return tried.values.action;
       });
     }
-    await launch(selected);
+    // A paused goal lets the owner's message run first; the next normal start resumes it.
+    await launch(selected, { goals: action !== "LAUNCH_PAUSED" });
     const actual = await verify();
     if (actual?.model !== selected.model || (selected.effort && actual?.effort !== selected.effort)) {
       throw new Error(`requested ${selected.model}, running ${actual?.model || "unknown"}`);
