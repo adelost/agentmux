@@ -2,7 +2,8 @@ import { component, expect, feature } from "bdd-vitest";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { launchCodexWithPolicy, codexResumeEvidence, validCodexCompactReceipt } from "./codex-launch-policy.mjs";
+import { launchCodexWithPolicy, codexResumeEvidence, prepareCodexResume, validCodexCompactReceipt } from "./codex-launch-policy.mjs";
+import { createCodexCompact } from "./codex-process-launch.mjs";
 import { readCodexRolloutModel } from "./codex-rollout-model.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 
@@ -19,6 +20,88 @@ const fixture = (extra = {}) => {
     validReceipt: (r, id) => r?.ok === true && r.sessionId === id,
     ...extra };
 };
+
+// skyvw:4, 2026-10-13: a 409 537-token Codex session quiet for 94 minutes resumed
+// after a host restart, and its active goal started a turn before any amux gate.
+const MIN = 60_000;
+const sol = { model: "gpt-6.1-sol", effort: "xhigh" };
+// extra(events) may record into the same event list as the launch.
+const resumeFixture = (extra = () => ({})) => {
+  const ctx = fixture({ previous: sol, selected: sol, verify: async () => sol });
+  return { ...ctx, launch: async ({ model }, options = {}) => ctx.events.push(`launch:${model}${options.goals === false ? ":goals-off" : ""}`),
+    ...extra(ctx.events) };
+};
+
+feature("a cold large Codex session is compacted before it resumes work", () => {
+  component("the compact runs in a launch with goals off, then the pane starts normally", {
+    given: ["skyvw:4's session, cold and large", () => resumeFixture(() => ({ context: "COLD_LARGE" }))],
+    when: ["waking it", (ctx) => launchCodexWithPolicy(ctx)],
+    then: ["no goal can run before the compact", (_, ctx) => expect(ctx.events).toEqual(
+      ["launch:gpt-6.1-sol:goals-off", "compact", "reset", "launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
+  });
+  component("a failed compact before resume still starts the pane and records no blocked transition", {
+    given: ["a compact refused by quota", () => resumeFixture(events => ({ context: "COLD_LARGE", log: () => {},
+      compact: async () => { events.push("compact"); return { ok: false, reason: "usage-limit" }; } }))],
+    when: ["waking it", (ctx) => launchCodexWithPolicy(ctx)],
+    then: ["one attempt, then a normal start", (_, ctx) => expect(ctx.events).toEqual(
+      ["launch:gpt-6.1-sol:goals-off", "compact", "reset", "launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
+  });
+  component("a context whose compact was already tried starts without another paid attempt", {
+    given: ["the same cold context after an unverified attempt", () => resumeFixture(() => ({ context: "TRIED" }))],
+    when: ["waking it again", (ctx) => launchCodexWithPolicy(ctx)],
+    then: ["no compact", (_, ctx) => expect(ctx.events).toEqual(["launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
+  });
+  component("a warm or small session starts directly", {
+    given: ["a session within the before-delivery rule", () => resumeFixture(() => ({ context: "WITHIN" }))],
+    when: ["waking it", (ctx) => launchCodexWithPolicy(ctx)],
+    then: ["no compact", (_, ctx) => expect(ctx.events).toEqual(["launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
+  });
+  component("a model change compacts the old model with goals off too", {
+    given: ["an Astra session selected for Sol", () => resumeFixture(() => ({ previous: { model: "gpt-6-astra" } }))],
+    when: ["waking it", (ctx) => launchCodexWithPolicy(ctx)],
+    then: ["the old model cannot run its goal before the compact", (_, ctx) => expect(ctx.events).toEqual(
+      ["launch:gpt-6-astra:goals-off", "compact", "reset", "launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
+  });
+  component("the resume facts are read before Codex opens the session", {
+    given: ["skyvw:4's rollout: 409 537 tokens, last turn 94 minutes ago, with and without an earlier attempt", () => {
+      const root = mkdtempSync(join(tmpdir(), "codex-resume-context-"));
+      const path = join(root, "rollout.jsonl");
+      writeFileSync(path, `${JSON.stringify({ type: "turn_context", payload: { model: "gpt-6.1-sol" } })}\n`);
+      const base = { decision: { action: "resume", sessionId: "s4" }, discovered: { path }, remembered: null, launch: {},
+        requestedSessionId: "s4", dir: root, now: () => 100 * MIN, activityFor: () => 6 * MIN,
+        observed: { sessionId: "s4", tokens: 409_537, model: "gpt-6.1-sol" } };
+      return { root, base };
+    }],
+    when: ["preparing the launch", async ({ root, base }) => {
+      try {
+        return await Promise.all([prepareCodexResume(base),
+          prepareCodexResume({ ...base, maintenance: { sessionId: "s4", status: "ATTEMPTING" } }),
+          prepareCodexResume({ ...base, activityFor: () => 80 * MIN })]);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+    then: ["cold and large, then already tried, then warm", (results) => expect(results.map(r => r.launchOptions.resumeContext))
+      .toEqual(["COLD_LARGE", "TRIED", "WITHIN"])],
+  });
+  component("a Codex compact records its intent before the paid call", {
+    given: ["a pane whose compact cannot be sent", () => {
+      const root = mkdtempSync(join(tmpdir(), "codex-compact-intent-"));
+      const path = join(root, "rollout.jsonl");
+      writeFileSync(path, `${JSON.stringify({ type: "session_meta", payload: { id: "s4" } })}\n`);
+      const data = {};
+      const state = { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
+      const refuse = async () => { throw new Error("pane unavailable"); };
+      const compact = createCodexCompact({ state, dirFor: () => root, wait: async () => {}, identityFor: () => ({ sessionId: "s4", path }),
+        control: { sendOnly: refuse, dismissBlockingPrompt: refuse, capturePane: refuse, captureScreen: refuse, sendEnter: refuse } });
+      return { root, data, compact };
+    }],
+    when: ["compacting", async ({ root, data, compact }) => {
+      try { await compact("skyvw", 4).catch(() => null); return data; }
+      finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+    then: ["an unverified attempt stays on record for that session", (data) =>
+      expect(data.context_maintenance_by_pane_v1["skyvw:4"]).toMatchObject({ sessionId: "s4", status: "ATTEMPTING" })],
+  });
+});
 
 feature("Codex wake cannot bypass compact-first model selection", () => {
   component("a repaired binary can wake the same selected model after a previous startup failure", {

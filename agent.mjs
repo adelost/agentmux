@@ -539,7 +539,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       });
     };
     const { previous, launchOptions, resumeSessionId, startRecord } = await prepareCodexResume({
-      decision, discovered, remembered, launch, requestedSessionId,
+      decision, discovered, remembered, launch, requestedSessionId, dir,
       observed: getContextPercentByDialect(dir, "codex"),
       maintenance: contextMaintenanceAttempt(state, name, pane, { sessionId: decision.sessionId }),
     });

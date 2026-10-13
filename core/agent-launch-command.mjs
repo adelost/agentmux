@@ -63,6 +63,7 @@ export function buildCodexLaunchCommand({
   effort = null,
   resumeSessionId = null,
   allowFreshBootstrap = false,
+  disableGoals = false,
 } = {}) {
   if (!profileHome) throw new Error("Codex profile home is required");
   const policy = allowedCodexLaunchModel(model);
@@ -75,6 +76,8 @@ export function buildCodexLaunchCommand({
   const overrideFlags = [
     model ? `-m ${shellQuote(model)}` : "",
     effort ? `-c ${shellQuote(`model_reasoning_effort="${effort.toLowerCase()}"`)}` : "",
+    // Verified on codex-cli 0.162.1: no goal turn starts, and the goal resumes on the next launch.
+    disableGoals ? "--disable goals" : "",
   ].filter(Boolean).join(" ");
   const flags = [CODEX_AUTONOMOUS_FLAGS, overrideFlags].filter(Boolean).join(" ");
   const env = `CODEX_HOME=${shellQuote(profileHome)}`;

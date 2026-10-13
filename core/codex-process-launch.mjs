@@ -4,7 +4,8 @@ import { parseCodexPaneReading } from "./codex-status.mjs";
 import { findBlockingPrompt } from "./dismiss.mjs";
 import { codexModelOverride, resolveCodexModelSelection, selectedCodexProfile } from "./codex-profiles.mjs";
 import { verifiedCodexCompact } from "./verified-compact.mjs";
-import { rememberContextCompact } from "./context-maintenance.mjs";
+import { beginContextCompact, rememberContextCompact } from "./context-maintenance.mjs";
+import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
 import { esc } from "../lib.mjs";
 
 /** WHAT: Reads the requested live model after startup. WHY: Prevents an early empty composer from masquerading as a fully rendered startup. */
@@ -50,10 +51,10 @@ export async function startCodexProcess({
   return launchCodexWithPolicy({
     sessionId, previous, selected, blocked: remembered?.modelTransitionBlocked,
     retry: launchOptions?.retryModelChange === true,
-    receipt: launchOptions?.compactReceipt,
-    launch: async (choice) => {
+    receipt: launchOptions?.compactReceipt, context: launchOptions?.resumeContext,
+    launch: async (choice, { goals = true } = {}) => {
       const cmd = buildCodexLaunchCommand({ profileHome: profile.home, ...choice,
-        resumeSessionId: sessionId, allowFreshBootstrap: !sessionId });
+        resumeSessionId: sessionId, allowFreshBootstrap: !sessionId, disableGoals: !goals });
       await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
       await wait(500);
       if (!await ready()) throw new Error("Codex composer did not become ready");
@@ -101,8 +102,12 @@ export async function assertCodexWorkModel({ state, name, pane, configured, scre
 }
 
 /** WHAT: Builds an exact-session compact operation. WHY: Keeps the command and its completion receipt bound to the addressed pane. */
-export function createCodexCompact({ control, dirFor, wait, state }) {
+export function createCodexCompact({ control, dirFor, wait, state, identityFor = latestPaneSessionIdentity }) {
   return async (name, pane, { sendCompact } = {}) => {
+    // The intent is durable before the paid call, so a crash or an unverified
+    // outcome is never followed by a second attempt on the same context.
+    const identity = identityFor("codex", dirFor(name, pane));
+    if (identity?.path) beginContextCompact(state, name, pane, identity);
     const receipt = await verifiedCodexCompact({
       agentName: name, pane, paneDir: dirFor(name, pane), agent: control, sleep: wait,
       ...(sendCompact ? { sendSlash: () => sendCompact() } : {}),

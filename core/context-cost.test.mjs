@@ -1,6 +1,7 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { defineDecisionTable, decisionPoints, decide } from "@v1d/product-spec";
-import { contextCostDeclaration, contextCostRules, contextCostDecision, readContextCostPolicy } from "../policies/context-cost.mjs";
+import { codexLaunchDecision, codexResumeContext, contextCostDeclaration, contextCostRules, contextCostDecision,
+  readContextCostPolicy } from "../policies/context-cost.mjs";
 import { decideAutoCompactAction, DEFAULT_CONFIG } from "./auto-compact.mjs";
 
 feature("context-cost decisions are total and fail closed", () => {
@@ -39,5 +40,28 @@ feature("context-cost decisions are total and fail closed", () => {
       contextTokens: 473_000, paneInMode: "0", lastActivityMs: 0, warnings: new Map(), config: DEFAULT_CONFIG, now: 55 * 60_000 })],
     when: ["polling the existing controller policy", args => decideAutoCompactAction(args)],
     then: ["the warning begins before the absolute-budget compact", d => expect(d.action).toBe("warn")],
+  });
+});
+
+feature("Codex launch admission for a resumed session", () => {
+  const known = { sessionId: "s4", previous: { model: "gpt-6.1-sol" }, selected: { model: "gpt-6.1-sol" } };
+  unit("a cold large session compacts first, a tried or verified one starts", {
+    when: ["deciding each context", () => [
+      codexLaunchDecision({ ...known, context: "COLD_LARGE" }),
+      codexLaunchDecision({ ...known, context: "COLD_LARGE", receipt: true }),
+      codexLaunchDecision({ ...known, context: "TRIED" }),
+      codexLaunchDecision({ ...known, context: "WITHIN" })].map(d => `${d.cell}:${d.values.action}`)],
+    then: ["only the untried cold large context compacts", cells => expect(cells).toEqual([
+      "compact-before-resume:COMPACT", "compacted-resume:LAUNCH", "compact-tried:LAUNCH", "remembered-model:LAUNCH"])],
+  });
+  unit("the resume context uses the Codex before-delivery limits", {
+    when: ["classifying skyvw:4 and its neighbours", () => [
+      codexResumeContext({ tokens: 409_537, idleMs: 94 * 60_000 }),
+      codexResumeContext({ tokens: 150_000, idleMs: 94 * 60_000 }),
+      codexResumeContext({ tokens: 409_537, idleMs: 24 * 60_000 }),
+      codexResumeContext({ tokens: NaN, idleMs: 94 * 60_000 }),
+      codexResumeContext({ tokens: 409_537, idleMs: 94 * 60_000, tried: true })]],
+    then: ["over 150k and 25 quiet minutes is cold and large; unknown tokens start as today", r => expect(r).toEqual(
+      ["COLD_LARGE", "WITHIN", "WITHIN", "WITHIN", "TRIED"])],
   });
 });

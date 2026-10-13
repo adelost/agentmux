@@ -34,3 +34,10 @@ feature("Mattias's October 11 Codex launch policy", () => {
     then: ["the launch names the Sol policy instead of starting Astra", build => expect(build).toThrow(/Mattias.*Sol/u)],
   });
 });
+
+feature("a Codex launch that only compacts", () => {
+  unit("turns goals off for that launch", {
+    when: ["building it", () => buildCodexLaunchCommand({ profileHome: "/p", model: "gpt-6.1-sol", resumeSessionId: "019f5b1d-16b8-7973-8bbf-414991667268", disableGoals: true })],
+    then: ["the goal cannot start a turn before the compact", cmd => expect(cmd).toMatch(/codex resume '?019f5b1d-16b8-7973-8bbf-414991667268'? .*--disable goals/u)],
+  });
+});
