@@ -93,6 +93,17 @@ For a requested queue/role/provider migration, read [the handoff checklist](refe
 
 ## 4. Reconsider the plan, briefly
 
+- Unanswered human requests, including replies consisting only of error or limit text.
+- Waits: on whom, since when; is the gate needed, or can the owner proceed under existing guards?
+- Idle owners with work waiting on them.
+- Repeated failure classes: fix by construction, not another written rule.
+- Skipped written rules: enforce them in code.
+- Duplicate implementations of the same capability.
+- Before asking the human for input, check whether it already exists.
+- External-facing or legal choices: check established practice before issuing instructions.
+- Actions beyond the named target: identify their scope and cost.
+- Delivered outcomes: numbers, named start/end events, rows left; no invented ETA.
+
 - About once per active hour, at a safe checkpoint, two minutes: what delayed
   the last outcome? Implementation, rework, waiting or administration.
 - Sooner on repeated failure or new evidence. Never interrupt a build for it.
