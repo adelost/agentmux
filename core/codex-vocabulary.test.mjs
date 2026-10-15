@@ -11,6 +11,7 @@ import {
 import {
   locateInstalledCodex, probeCodexVocabulary, scanFileForStrings,
 } from "./codex-vocabulary-probe.mjs";
+import { checkCodexVocabulary } from "./doctor.mjs";
 
 const CHUNK = 8 * 1024 * 1024;
 
@@ -29,9 +30,9 @@ function withTempDir(run) {
 }
 
 feature("Codex composer vocabulary", () => {
-  unit("the pinned text is exactly what Codex 0.154.0 paints into an empty composer", {
+  unit("the pinned text is exactly what Codex 0.162.1 paints into an empty composer", {
     then: ["placeholders and version are the chatwidget.rs literals", () => {
-      expect(CODEX_VOCABULARY.verifiedCodexVersion).toBe("0.154.0");
+      expect(CODEX_VOCABULARY.verifiedCodexVersion).toBe("0.162.1");
       expect([...CODEX_VOCABULARY.placeholders]).toEqual([
         "Ask Codex to do anything",
         "Ask a follow-up question",
@@ -123,13 +124,20 @@ feature("Codex install discovery", () => {
 });
 
 feature("Codex vocabulary probe", () => {
+  unit("the inspected installed current release has no doctor vocabulary warning", {
+    when: ["all six composer strings are present in Codex 0.162.1", () => checkCodexVocabulary({
+      required: true, probe: probeCodexVocabulary({ locate: () => fakeInstall("0.162.1"),
+        identity: () => "verified-162", scan: (_path, needles) => ({ found: needles, missing: [] }), cache: false }),
+    })],
+    then: ["the doctor check is OK", result => expect(result.status).toBe("ok")],
+  });
   unit("an unlocatable Codex yields an error probe with the pinned version", {
     when: ["probing with a failing locator", () => probeCodexVocabulary({
       locate: () => ({ error: "codex is not on PATH" }), cache: false,
     })],
     then: ["the probe carries the error and no false facts", (probe) => {
       expect(probe).toEqual({
-        error: "codex is not on PATH", installedVersion: null, verifiedVersion: "0.154.0", checked: 0, missing: [],
+        error: "codex is not on PATH", installedVersion: null, verifiedVersion: CODEX_VOCABULARY.verifiedCodexVersion, checked: 0, missing: [],
       });
     }],
   });
@@ -146,7 +154,7 @@ feature("Codex vocabulary probe", () => {
     })],
     then: ["the probe names it against the installed version", (probe) => {
       expect(probe).toMatchObject({
-      installedVersion: "0.153.0", verifiedVersion: "0.154.0", checked: 6, missing: ["Ask Codex to do anything"],
+      installedVersion: "0.153.0", verifiedVersion: CODEX_VOCABULARY.verifiedCodexVersion, checked: 6, missing: ["Ask Codex to do anything"],
       });
     }],
   });

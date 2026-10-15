@@ -15,10 +15,11 @@
 // Source of truth: openai/codex tag rust-v<verifiedCodexVersion>
 //   codex-rs/tui/src/chatwidget.rs         PLACEHOLDER, SIDE_PLACEHOLDER
 //   codex-rs/tui/src/bottom_pane/footer.rs  esc_hint_line, left_side_line
+//   codex-rs/tui/src/app_backtrack.rs      NO_PREVIOUS_MESSAGE_TO_EDIT
 
 /** WHAT: Defines the Codex composer text pinned to one release. WHY: Keeps placeholder knowledge in one copy the probe can verify. */
 export const CODEX_VOCABULARY = Object.freeze({
-  verifiedCodexVersion: "0.154.0",
+  verifiedCodexVersion: "0.162.1",
   // Painted alone on the › row while the composer is empty, idle and busy.
   placeholders: Object.freeze([
     "Ask Codex to do anything",
