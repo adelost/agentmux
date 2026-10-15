@@ -119,6 +119,14 @@ describe("Claude context belongs to the current compact epoch", () => {
       .not.toBe("HOLD");
   });
 
+  it("does not discard a new observation made in the compact boundary's own second", () => {
+    vi.setSystemTime(NOW + 750);
+    compact(new Date(NOW + 500).toISOString());
+    writeClaudeStatuslineBridge({ session_id: sessionId, context_window: { used_percentage: 7,
+      current_usage: { input_tokens: 70_000, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } });
+    expect(getContextPushed(paneDir)?.tokens).toBe(70_000);
+  });
+
   it("a fresh official small context can restart after manual compaction", () => {
     compact();
     writeClaudeStatuslineBridge({ session_id: sessionId, version: "2.1.300",

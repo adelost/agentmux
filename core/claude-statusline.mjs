@@ -121,7 +121,7 @@ export function decorateClaudeStatusline(output, effort) {
 /** WHAT: Stores Claude's official statusline observation. WHY: Keeps pane-local effort separate from global defaults. */
 export function writeClaudeStatuslineBridge(data, {
   directory = tmpdir(),
-  nowSeconds = () => Math.floor(Date.now() / 1000),
+  nowSeconds = () => Date.now() / 1000,
   delegatedSince = null,
 } = {}) {
   const sessionId = cleanSessionId(data?.session_id);
