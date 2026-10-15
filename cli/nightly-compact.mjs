@@ -18,7 +18,7 @@ import { findBlockingPrompt } from "../core/dismiss.mjs";
 import { createDeliveryQueue, TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
 import { compactAccessBlocker, nightlyCompactDecision, nightlyCompactOutcome, nightlyCompactPolicy, nightlyUnresolvedCount,
-  sharedNightlyCompactOutcome } from "../core/nightly-compact.mjs";
+  sharedNightlyCompactOutcome, isUnmeasuredCompact } from "../core/nightly-compact.mjs";
 import { claudeComposerIsPasting } from "../core/claude-paste-stall.mjs";
 
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -43,6 +43,11 @@ function writeReport(path, value) {
   const temporary = `${path}.${process.pid}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   renameSync(temporary, path);
+}
+
+/** WHAT: Reads one pane's saved compact attempt for this night. WHY: Keeps rotation and the compact runner on the same durable attempt evidence. */
+export function readNightlyCompactAttempt(path, dateKey, key) {
+  return readReport(join(path, `${encodeURIComponent(key)}.json`), dateKey).panes[key] || null;
 }
 
 function composerText(screen, engine) {
@@ -172,14 +177,19 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     try { first = await observe(ctx, target, { queue, now }); }
     catch { rows.push({ pane: key, status: "skipped", reason: "observation-unavailable" }); continue; }
     const previous = readReport(receiptPath, dateKey).panes[key];
-    const sharedOutcome = () => sharedNightlyCompactOutcome(contextMaintenanceAttempt(ctx.state,
-      target.agent.name, target.pane.index, { sessionId: first.sessionId }), first);
+    const retryUnmeasured = dependencies.retryUnmeasured === true && target.engine === "claude";
+    const sharedOutcome = () => {
+      const record = contextMaintenanceAttempt(ctx.state, target.agent.name, target.pane.index, { sessionId: first.sessionId });
+      const current = readNightlyCompactAttempt(path, dateKey, key);
+      if (retryUnmeasured && isUnmeasuredCompact(current, first) && record?.status === "VERIFIED") return null;
+      return sharedNightlyCompactOutcome(record, first);
+    };
     const priorShared = sharedOutcome();
     if (priorShared) {
       rows.push({ pane: key, ...priorShared });
       continue;
     }
-    const reason = nightlyCompactDecision(first, policy, previous, { force: dependencies.force });
+    const reason = nightlyCompactDecision(first, policy, previous, { force: dependencies.force, retryUnmeasured });
     if (reason) { rows.push({ pane: key, status: "skipped", reason, beforeTokens: first.tokens }); continue; }
     if (flags.dry) { rows.push({ pane: key, status: "eligible", beforeTokens: first.tokens }); continue; }
 
@@ -207,7 +217,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       await sleep(200);
       const check = async () => {
         const fresh = await observe(ctx, target, { queue, now });
-        const why = nightlyCompactDecision(fresh, policy, current, { force: dependencies.force });
+        const why = nightlyCompactDecision(fresh, policy, current, { force: dependencies.force, retryUnmeasured });
         if (why || fresh.sessionId !== first.sessionId || fresh.sessionPath !== first.sessionPath
             || fresh.activity !== first.activity) throw new Error(why || "session-or-activity-changed");
         return fresh;
@@ -260,7 +270,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       rows.push({ pane: key, ...row });
     } finally { lease.release(); }
   }
-  if (!flags.dry) rows = reconcileRows(ctx, rows, { agents, identityFor: dependencies.reconcileIdentity });
+  if (!flags.dry && !dependencies.retryUnmeasured) rows = reconcileRows(ctx, rows, { agents, identityFor: dependencies.reconcileIdentity });
   for (const row of rows) {
     if (row.status !== "skipped" || (row.beforeTokens > policy.maxTokens)) {
       console.log(`  ${row.pane} ${row.status} ${row.beforeTokens ?? "?"} -> ${row.afterTokens ?? "?"} tokens${row.reason ? ` (${row.reason})` : ""}`);

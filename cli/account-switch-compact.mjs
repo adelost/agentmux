@@ -8,10 +8,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { findChannelForPane } from "./config.mjs";
 import { sendToChannelId } from "./send-notify.mjs";
-import { compactDayKey, discoverCompactTargets, observeNightlyPane, runNightlyCompact } from "./nightly-compact.mjs";
-import { nightlyCompactDecision } from "../core/nightly-compact.mjs";
+import { compactDayKey, discoverCompactTargets, observeNightlyPane, runNightlyCompact, readNightlyCompactAttempt } from "./nightly-compact.mjs";
+import { nightlyCompactDecision, isUnmeasuredCompact } from "../core/nightly-compact.mjs";
 import { contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
+import { hasEmptyClaudeEpoch } from "../core/claude-empty-epoch.mjs";
 
 // Statuses whose compact receipt is verified, whatever size the summary landed at, plus
 // Claude's "Not enough messages to compact": no context, so no cache for the switch to lose,
@@ -20,6 +21,7 @@ const VERIFIED_COMPACT = new Set(["within-budget", "compacted-above-budget", "co
   "already-compacted"]);
 
 const compactPolicy = (policy) => ({ enabled: true, maxTokens: policy.maxTokens, idleMinutes: 0 });
+const reportDirectory = now => join(homedir(), ".agentmux", "account-switch-compact", compactDayKey(now));
 
 async function mirrorSwitchCompact(ctx, target, command) {
   const channel = findChannelForPane(ctx.configPath, target.agent.name, target.pane.index);
@@ -44,8 +46,17 @@ export async function observeSwitchContext(ctx, entry, {
   const prior = facts.sessionId
     ? contextMaintenanceAttempt(ctx.state, entry.agentName, entry.pane, { sessionId: facts.sessionId })
     : null;
-  if (prior?.status === "VERIFIED") return { target, facts, compactRefusal: null, compacted: true };
-  const refusal = prior ? `previous-compact-${String(prior.status).toLowerCase()}`
+  const previous = readNightlyCompactAttempt(reportDirectory(now()), compactDayKey(now()), `${entry.agentName}:${entry.pane}`);
+  const unmeasured = isUnmeasuredCompact(previous, facts);
+  // Claude clears usage at /compact. Its exact, unchanged compact epoch is
+  // still proof for an idle restart; never turn that proof into zero tokens.
+  if (!Number.isFinite(facts.tokens) && facts.running === true && facts.status === "idle"
+      && facts.composerEmpty && facts.queued === 0
+      && await hasEmptyClaudeEpoch({ sessionId: facts.sessionId, path: facts.sessionPath })) {
+    return { target, facts, compactRefusal: null, compacted: true };
+  }
+  if (prior?.status === "VERIFIED" && !unmeasured) return { target, facts, compactRefusal: null, compacted: true };
+  const refusal = prior && !(unmeasured && prior.status === "VERIFIED") ? `previous-compact-${String(prior.status).toLowerCase()}`
     : nightlyCompactDecision(facts, compactPolicy(policy), null);
   return { target, facts, compactRefusal: refusal === "within-budget" ? null : refusal, compacted: false };
 }
@@ -59,12 +70,15 @@ export async function compactBeforeSwitch(ctx, target, {
 } = {}) {
   const key = `${target.agent.name}:${target.pane.index}`;
   const pass = await run(ctx, {}, {
-    targets: [target], queue, now, mirror: mirrorSwitchCompact, force,
+    targets: [target], queue, now, mirror: mirrorSwitchCompact, force, retryUnmeasured: target.engine === "claude",
     label: `Compact before account switch (${key})`,
     policy: compactPolicy(policy),
-    path: join(homedir(), ".agentmux", "account-switch-compact", compactDayKey(now())),
+    path: reportDirectory(now()),
   });
   const row = pass.rows.find((candidate) => candidate.pane === key) || pass.rows[0] || null;
+  if (target.engine === "claude" && row?.status === "compacted-unmeasured") {
+    return { ok: false, reason: "compact-size-unmeasured" };
+  }
   if (row && VERIFIED_COMPACT.has(row.status)) return { ok: true, status: row.status, afterTokens: row.afterTokens ?? null };
   return { ok: false, reason: `compact-${row?.status || "missing"}${row?.reason ? `:${row.reason}` : ""}` };
 }

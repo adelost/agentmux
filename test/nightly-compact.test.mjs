@@ -37,6 +37,42 @@ function fixture() {
 }
 
 feature("nightly context budget", () => {
+  for (const [size, shared] of [[70_000, false], [199_293, false], [199_293, true]]) {
+    component(`an explicitly retried unmeasured account compact remeasures ${size} tokens${shared ? " with shared proof" : ""}`, {
+      given: ["a finished compact with an unknown size, saved earlier tonight", () => {
+        const fx = fixture();
+        fx.deps.retryUnmeasured = true;
+        fx.deps.policy = { ...policy, maxTokens: 80_000, idleMinutes: 0 };
+        fx.change({ tokens: size });
+        fx.sessionPath = "/exact.jsonl";
+        if (shared) {
+          fx.sessionPath = join(fx.root, "session.jsonl");
+          writeFileSync(fx.sessionPath, "");
+          fx.change({ sessionPath: fx.sessionPath });
+          fx.ctx.state = createState(join(fx.root, "state.json"));
+          rememberContextCompact(fx.ctx.state, "claw", 4, { ok: true, sessionId: "same-session",
+            cursor: { positions: { [fx.sessionPath]: 0 } } });
+        }
+        return fx;
+      }],
+      when: ["the account-switch pass runs again on fresh facts", async fx => {
+        const { mkdirSync } = await import("node:fs");
+        mkdirSync(fx.deps.path, { recursive: true });
+        writeFileSync(join(fx.deps.path, "claw%3A4.json"), JSON.stringify({ version: 1,
+          dateKey: "2026-09-07", panes: { "claw:4": { sessionId: "same-session", sessionPath: fx.sessionPath,
+            status: "compacted-unmeasured", afterTokens: null } } }));
+        return runNightlyCompact(fx.ctx, {}, fx.deps);
+      }],
+      then: ["a small pane needs no call; a large one earns a fresh verified attempt", (result, fx) => {
+        try {
+          expect(result.rows[0]).toMatchObject(size <= 80_000
+            ? { status: "skipped", reason: "within-budget" }
+            : { status: "within-budget", afterTokens: 23_000 });
+          expect(fx.calls()).toBe(size <= 80_000 ? 0 : 1);
+        } finally { fx.clean(); }
+      }],
+    });
+  }
   unit("an explicit account compact bypasses only the size threshold", {
     when: ["forcing a compact for a small known idle context and unsafe contexts", () => [
       { ...facts(), tokens: 0 }, { ...facts(), tokens: null }, { ...facts(), status: "working" },
@@ -298,6 +334,7 @@ feature("nightly context budget", () => {
   component("runs through the shared lease and persists one exact result per night", {
     when: ["running twice with a later large context", async () => {
       const fx = fixture();
+      fx.deps.retryUnmeasured = true;
       try {
         const first = await runNightlyCompact(fx.ctx, {}, fx.deps);
         fx.change({ tokens: 150_000 });

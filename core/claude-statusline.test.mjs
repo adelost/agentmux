@@ -42,6 +42,16 @@ describe("Claude statusline effort bridge", () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
+  it("publishes current tokens but never carries them across a compact refresh", () => {
+    const root = mkdtempSync(join(tmpdir(), "amux-claude-tokens-")); roots.push(root);
+    const data = { session_id: "tokens", context_window: { used_percentage: 7, current_usage: {
+      input_tokens: 100, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 68_400, output_tokens: 500,
+    } } };
+    expect(writeClaudeStatuslineBridge(data, { directory: root }).record.tokens).toBe(70_000);
+    data.context_window.current_usage = null;
+    expect(writeClaudeStatuslineBridge(data, { directory: root }).record).not.toHaveProperty("tokens");
+  });
+
   it("shows a bounded provider effort without duplicating an existing label", () => {
     expect(decorateClaudeStatusline("Fable 5 · █░ 13%", "XHIGH"))
       .toBe("Fable 5 · █░ 13% · thinking: xhigh");

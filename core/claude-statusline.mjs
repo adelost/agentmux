@@ -4,6 +4,33 @@ import { join } from "node:path";
 
 const EFFORT_TOKEN = /^[a-z][a-z0-9_-]{0,31}$/iu;
 const MODEL_TOKEN = /^[a-z0-9][a-z0-9._[\]/-]{0,159}$/iu;
+const CONTEXT_FRESH_MS = 2 * 60 * 60 * 1000;
+const tokenCount = value => Number.isSafeInteger(value) && value >= 0;
+
+function officialContextTokens(data) {
+  // Claude clears current_usage at /compact. Neither lifetime totals from
+  // older releases nor a missing observation can prove an empty context.
+  const usage = data?.context_window?.current_usage;
+  const counts = usage && [usage.input_tokens, usage.cache_creation_input_tokens,
+    usage.cache_read_input_tokens, usage.output_tokens];
+  return counts?.every(tokenCount) && counts.some(value => value > 0)
+    ? counts.reduce((sum, value) => sum + value, 0) : null;
+}
+
+/** WHAT: Reads a fresh exact-session statusline snapshot. WHY: Prevents stale or pre-compact counters from authorizing a context decision. */
+export function readClaudeStatuslineBridge(session, compactMs, { now = Date.now, directory = tmpdir() } = {}) {
+  if (!cleanSessionId(session?.sessionId)) return null;
+  let data;
+  try { data = JSON.parse(readFileSync(join(directory, `claude-ctx-${session.sessionId}.json`), "utf8")); }
+  catch { return null; }
+  const observedMs = Number(data?.timestamp) * 1000, age = now() - observedMs;
+  if (data?.session_id != null && data.session_id !== session.sessionId) return null;
+  if (!Number.isFinite(data?.used_pct) || data.used_pct < 0 || data.used_pct > 100) return null;
+  if (!Number.isFinite(age) || age < 0 || age > CONTEXT_FRESH_MS || compactMs != null && observedMs <= compactMs) return null;
+  return { ...data, tokens: data.token_source === "claude-current-context" && tokenCount(data.tokens) ? data.tokens : null,
+    windowTokens: tokenCount(data.window_tokens) && data.window_tokens > 0 ? data.window_tokens : null,
+    observedAt: new Date(observedMs).toISOString() };
+}
 
 /** WHAT: Normalizes one provider-reported effort label. WHY: Keeps display metadata bounded without freezing future effort names. */
 export function normalizeClaudeEffort(value) {
@@ -121,12 +148,16 @@ export function writeClaudeStatuslineBridge(data, {
   const remaining = finitePercent(data?.context_window?.remaining_percentage)
     ?? (freshDelegate ? finitePercent(previous.remaining_percentage) : null)
     ?? (finitePercent(data?.context_window?.used_percentage) == null ? null : 100 - finitePercent(data.context_window.used_percentage));
+  const tokens = officialContextTokens(data);
+  const window = data?.context_window?.context_window_size;
   const record = {
     session_id: sessionId,
     ...(used == null ? {} : { used_pct: used }),
     ...(remaining == null ? {} : { remaining_percentage: remaining }),
     effort,
     model,
+    ...(tokens == null ? {} : { tokens, token_source: "claude-current-context" }),
+    ...(tokenCount(window) && window > 0 ? { window_tokens: window } : {}),
     timestamp: nowSeconds(),
   };
   const temporary = `${path}.${process.pid}.tmp`;

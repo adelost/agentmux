@@ -7,6 +7,8 @@ import { getContextFromPane, getContextPercent, getContextPushed } from "../core
 import { claudeProjectDir } from "../core/claude-paths.mjs";
 import { createAutoCompact } from "../channels/auto-compact.mjs";
 import { DEFAULT_CONFIG } from "../core/auto-compact.mjs";
+import { writeClaudeStatuslineBridge } from "../core/claude-statusline.mjs";
+import { accountSwitchPlan } from "../policies/account-switch-cost.mjs";
 
 vi.mock("../cli/send-notify.mjs", () => ({
   notifyUser: vi.fn(), setChannelTopicThrottled: vi.fn(async () => ({ updated: true })),
@@ -31,9 +33,10 @@ describe("Claude context belongs to the current compact epoch", () => {
     writeFileSync(yaml, `test:\n  dir: ${home}\n  discord: "offline-channel"\n  panes:\n    - name: claude\n      cmd: claude\n`);
     const enqueueAndWait = vi.fn(async () => ({ delivered: true }));
     const send = vi.fn(), log = vi.fn();
-    const ac = createAutoCompact({ agentsYamlPath: yaml, agent: { capturePane: async () => state.content },
+    const ac = createAutoCompact({ agentsYamlPath: yaml, agent: { capturePane: async () => state.content,
+      paneProcessState: async () => ({ running: true }) },
       deliveryBroker: { enqueueAndWait }, tmux: async () => ({ stdout: "0 30" }),
-      config: DEFAULT_CONFIG, discord: { send }, log });
+      config: { ...DEFAULT_CONFIG, minIdleMs: 20 * 60_000 }, discord: { send }, log });
     return { ac, state, enqueueAndWait, send, log };
   };
   const humanTurn = () => append({ type: "user", timestamp: "2026-09-06T05:30:00Z",
@@ -100,6 +103,31 @@ describe("Claude context belongs to the current compact epoch", () => {
     compact();
     writeFileSync(bridge, JSON.stringify({ session_id: sessionId, used_pct: 0, timestamp: NOW / 1000 }));
     expect(getContextPushed(paneDir)).toMatchObject({ percent: 0, tokens: null, sessionId });
+  });
+
+  it("reads the next official token observation after a manual compact", () => {
+    compact();
+    writeClaudeStatuslineBridge({ session_id: sessionId, version: "2.1.300",
+      model: { id: "claude-opus-5-5" }, context_window: {
+        used_percentage: 8, context_window_size: 1_000_000,
+        total_input_tokens: 83_200, total_output_tokens: 500,
+        current_usage: { input_tokens: 200, cache_read_input_tokens: 80_000, cache_creation_input_tokens: 3_000, output_tokens: 500 },
+      } });
+    const reading = getContextFromPane(SCREEN, paneDir);
+    expect(reading).toMatchObject({ tokens: 83_700, sessionId });
+    expect(accountSwitchPlan({ mode: "running", facts: { tokens: reading.tokens, idleMs: 60_000 } }).action)
+      .not.toBe("HOLD");
+  });
+
+  it("a fresh official small context can restart after manual compaction", () => {
+    compact();
+    writeClaudeStatuslineBridge({ session_id: sessionId, version: "2.1.300",
+      context_window: { used_percentage: 7, context_window_size: 1_000_000,
+        total_input_tokens: 69_500, total_output_tokens: 500,
+        current_usage: { input_tokens: 69_500, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 500 } } });
+    const reading = getContextFromPane(SCREEN, paneDir);
+    expect(accountSwitchPlan({ mode: "running", facts: { tokens: reading.tokens, idleMs: 60_000 } }).action)
+      .toBe("RESTART");
   });
 
   it("prefers the current footer over a conflicting cache and ignores a past footer", () => {

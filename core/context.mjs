@@ -9,11 +9,10 @@
 
 import { readFileSync, readdirSync, statSync, existsSync, openSync, fstatSync, readSync, closeSync } from "fs";
 import { join } from "path";
-import { tmpdir } from "os";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
 import { getContextFromKimiJsonl } from "./kimi-jsonl-reader.mjs";
-import { normalizeClaudeEffort, readClaudeFooterModel, readClaudeScreenStatus } from "./claude-statusline.mjs";
+import { normalizeClaudeEffort, readClaudeFooterModel, readClaudeScreenStatus, readClaudeStatuslineBridge } from "./claude-statusline.mjs";
 /**
  * Read only the last `maxBytes` of a file and return its complete trailing
  * lines (the partial leading line is dropped). Claude session jsonl grows to
@@ -415,7 +414,6 @@ function headTurnContext(filePath) {
 // tracks live work closely; a pane idle for hours has an old file but an
 // UNCHANGED context — the window is generous, it only exists to shed
 // files from dead sessions.
-const STATUSLINE_BRIDGE_FRESH_MS = 2 * 60 * 60 * 1000;
 
 /**
  * Claude Code's OWN context percent, pushed — not scraped.
@@ -435,27 +433,16 @@ const STATUSLINE_BRIDGE_FRESH_MS = 2 * 60 * 60 * 1000;
  * WHAT: Reads Claude's statusline context observation.
  * WHY: Keeps displayed percent authoritative over reconstructed estimates.
  */
-export function getContextPushed(paneDir) {
-  const { session, usage, compactMs } = readClaudeContextState(paneDir);
-  if (!session) return null;
-  let data;
-  try {
-    data = JSON.parse(readFileSync(join(tmpdir(), `claude-ctx-${session.sessionId}.json`), "utf-8"));
-  } catch {
-    return null; // no bridge file — this pane's statusline doesn't push
-  }
-  if (data?.session_id != null && data.session_id !== session.sessionId) return null;
-  const percent = data?.used_pct;
-  const observedMs = Number(data?.timestamp) * 1000;
-  const ageMs = Date.now() - Number(data?.timestamp) * 1000;
-  if (!Number.isFinite(percent) || percent < 0 || percent > 100) return null;
-  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > STATUSLINE_BRIDGE_FRESH_MS) return null;
-  if (compactMs != null && observedMs <= compactMs) return null;
-  return { percent: Math.round(percent), tokens: usage?.tokens ?? null, windowTokens: usage?.windowTokens ?? null,
+export function getContextPushed(paneDir, state = readClaudeContextState(paneDir)) {
+  const { session, usage, compactMs } = state;
+  const data = readClaudeStatuslineBridge(session, compactMs);
+  if (!data) return null;
+  return { percent: Math.round(data.used_pct), tokens: data.tokens ?? usage?.tokens ?? null,
+    windowTokens: data.windowTokens ?? usage?.windowTokens ?? null,
     sessionId: session.sessionId,
     model: typeof data?.model === "string" && data.model.length <= 160 ? data.model : usage?.model ?? null,
     effort: normalizeClaudeEffort(data?.effort),
-    observedAt: new Date(Number(data.timestamp) * 1000).toISOString(),
+    observedAt: data.observedAt,
     source: "claude-statusline", confidence: "reported" };
 }
 
@@ -555,7 +542,8 @@ export function getContextFromPane(paneContent, paneDir = null) {
   const visible = readClaudeScreenStatus(paneContent);
   if (visible) {
     const state = paneDir ? readClaudeContextState(paneDir) : null;
-    return { ...visible, tokens: visible.tokens ?? state?.usage?.tokens ?? null, sessionId: state?.session?.sessionId ?? null,
+    const pushed = paneDir ? getContextPushed(paneDir, state) : null;
+    return { ...visible, tokens: visible.tokens ?? pushed?.tokens ?? state?.usage?.tokens ?? null, sessionId: state?.session?.sessionId ?? null,
       observedAt: new Date().toISOString(), confidence: "reported" };
   }
   // Pushed truth first: Claude Code's own rendered percent via the

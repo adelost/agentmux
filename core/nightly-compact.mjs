@@ -20,12 +20,14 @@ export function nightlyCompactPolicy(value) {
 }
 
 /** WHAT: Checks idle contexts by tokens. WHY: Prevents a large million-token pane escaping through a low percentage. */
-export function nightlyCompactDecision(facts, policy, previous = null, { force = false } = {}) {
+export function nightlyCompactDecision(facts, policy, previous = null, { force = false, retryUnmeasured = false } = {}) {
   if (!policy.enabled) return "disabled";
   if (!["claude", "codex"].includes(facts.engine)) return "compact-receipt-unsupported";
   if (facts.backend !== "tmux" || facts.running !== true) return "not-running-tmux";
   if (!facts.sessionId || !facts.sessionPath) return "exact-session-unknown";
-  if (previous?.sessionId === facts.sessionId) return `already-attempted:${previous.status}`;
+  if (previous?.sessionId === facts.sessionId && !(retryUnmeasured && isUnmeasuredCompact(previous, facts))) {
+    return `already-attempted:${previous.status}`;
+  }
   if (facts.blocker) return facts.blocker;
   if (facts.status !== "idle") return `not-idle:${facts.status || "unknown"}`;
   if (!facts.composerEmpty) return "composer-not-empty";
@@ -38,6 +40,12 @@ export function nightlyCompactDecision(facts, policy, previous = null, { force =
   if (!Number.isFinite(facts.idleMs)) return "activity-unknown";
   if (facts.idleMs < policy.idleMinutes * 60_000) return "recent-activity";
   return null;
+}
+
+/** WHAT: Checks an exact session's completed but unmeasured compact. WHY: Separates missing size proof from failed or still-running model calls. */
+export function isUnmeasuredCompact(record, facts) {
+  return record?.status === "compacted-unmeasured" && record.sessionId === facts.sessionId
+    && record.sessionPath === facts.sessionPath;
 }
 
 /** WHAT: Describes the verified result without retrying it. WHY: Prevents slash acknowledgement or unknown usage from becoming a budget-success claim. */
