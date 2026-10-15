@@ -11,6 +11,19 @@ const adelost = [{ email: "adelost@example.test", usedPercent: 26, resetsAt: "20
 const forecastFrom = (history) => weeklyForecast({ history, latest: history.at(-1), now: NOW });
 
 feature("weekly quota forecast", () => {
+  unit("reserve chooses the lowest verified usage below its own boundary", {
+    given: ["a slow 91 percent forecast and unordered alternatives", () => forecastFrom([reading(10, 90), reading(0, 91)])],
+    when: ["formatting reserve with a configurable boundary", forecast => formatWeeklyNotice({
+      level: "reserve", email: "active@example.test", forecast, reservePercent: 90, now: NOW,
+      alternatives: [{ email: "full@example.test", usedPercent: 90, resetsAt: RESET },
+        { email: "more@example.test", usedPercent: 30, resetsAt: RESET },
+        { email: "least@example.test", usedPercent: 17, resetsAt: RESET }],
+    })],
+    then: ["only the lowest account is the actionable target", text => {
+      expect(text).toContain("amux accounts rotate claude:least@example.test");
+      expect(text).not.toMatch(/full@example|more@example|ingen åtgärd/u);
+    }],
+  });
   unit("a slow pace past the threshold asks for nothing", {
     given: ["82 % used, 1 point in the last 10 h, 180 h of room", () => forecastFrom([reading(10, 81), reading(0, 82)])],
     when: ["choosing the notice", (forecast) => ({ forecast, level: weeklyNoticeLevel(forecast, settings) })],

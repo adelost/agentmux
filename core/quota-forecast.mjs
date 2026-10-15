@@ -1,9 +1,7 @@
 // Weekly Claude quota forecast and the warning text built from it.
 //
-// Mattias 2026-10-10: "tänk dock på att inte byta i onödan.. pga cache miss".
-// A switch costs every moved pane a cache miss, so the warning leads with the
-// cheapest action that works: nothing when the pace lasts until the reset, a
-// free reset if he has one (amux cannot see those), and only then a switch.
+// Forecast warnings avoid unnecessary cache misses. Reserve warnings preserve
+// spare weekly capacity regardless of pace; all account changes remain explicit.
 
 import { formatReset } from "./quota-format.mjs";
 
@@ -52,10 +50,11 @@ export function weeklyForecast({ history = [], latest, now }) {
 
 /**
  * WHAT: Maps a forecast to the notice it deserves, if any.
- * WHY: Keeps one ordinary notice at the threshold and one stronger one when the limit is hours away.
+ * WHY: Keeps reserve capacity independent of the forecast's urgency.
  */
-export function weeklyNoticeLevel(forecast, { warnPercent, urgentHours, now }) {
+export function weeklyNoticeLevel(forecast, { warnPercent, reservePercent = 90, urgentHours, now }) {
   if (!forecast || !Number.isFinite(forecast.resetAt) || now >= forecast.resetAt) return null;
+  if (forecast.usedPercent >= reservePercent) return "reserve";
   // Below the threshold a fast hour early in the week is a burst, not a forecast worth a notice.
   if (forecast.usedPercent < warnPercent) return null;
   return !forecast.lastsUntilReset && forecast.exhaustAt - now <= urgentHours * HOUR_MS ? "urgent" : "threshold";
@@ -78,11 +77,21 @@ function switchStep(alternatives) {
 }
 
 /**
- * WHAT: Builds the notice text, cheapest action first.
- * WHY: Keeps a quota warning from pushing a switch, and its cache misses, that the pace does not need.
+ * WHAT: Builds forecast advice or an actionable reserve notice.
+ * WHY: Keeps reserve warnings from being dismissed when the pace lasts until reset.
  */
-export function formatWeeklyNotice({ level, email, forecast, alternatives = [], now }) {
+export function formatWeeklyNotice({ level, email, forecast, alternatives = [], reservePercent = 90, now }) {
   const reset = formatReset(forecast.resetsAt);
+  if (level === "reserve") {
+    const best = alternatives.filter(candidate => Number.isFinite(candidate.usedPercent)
+      && candidate.usedPercent < reservePercent).sort((a, b) => a.usedPercent - b.usedPercent)[0];
+    const headline = `Claude ${email}: reservgränsen ${percent(reservePercent)} är nådd. `
+      + `${percent(forecast.usedPercent)} av veckan använt, ${reset}. Bevara återstående kvot som reserv.`;
+    return best ? [headline,
+      `Bästa alternativ: ${best.email}, ${percent(best.usedPercent)} av veckan använt, ${formatReset(best.resetsAt)}.`,
+      `Åtgärd: \`amux accounts rotate claude:${best.email}\`. amux byter aldrig konto själv.`].join("\n")
+      : `${headline}\nInget annat Claude-konto har verifierad plats under reservgränsen ${percent(reservePercent)}.`;
+  }
   if (forecast.lastsUntilReset) {
     return `Claude ${email}: ingen åtgärd. ${percent(forecast.usedPercent)} av veckan använt, `
       + `takten ${paceText(forecast.pace)} räcker till ${reset}.`;

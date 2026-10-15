@@ -110,5 +110,18 @@ the reset, otherwise a free reset on claude.ai if he has one (amux cannot see
 those), and only then the target's own usage and `/byt <target>` for the plan. Past the
 threshold, a second, stronger notice comes once when the limit is less than
 `AMUX_QUOTA_WARN_URGENT_HOURS` (default 12) away and before the reset; below it,
-a fast hour is treated as a burst. Nothing switches automatically.
+a fast hour is treated as a burst.
+
+At `AMUX_QUOTA_RESERVE_PERCENT` (default 90 % weekly used), a separate
+`reserve` notice is sent regardless of pace or previous threshold/urgent
+notices. Its sent-store survives bridge restarts. The text names the least-used
+verified alternative below that boundary and the exact
+`amux accounts rotate claude:<email>` command. If none has room, the notice
+says so without an action line.
+
+Set `AMUX_QUOTA_WARN_ACTOR=project:pane` in the bridge's runtime environment
+(`~/.agentmux/.env` by default) to deliver reserve notices through the durable
+CLI queue with `[quota-warning reserve]` provenance. Only a reserve notice
+with an available alternative wakes that pane. Without an actor, only the
+human is notified. amux never switches by itself.
 `AMUX_QUOTA_WARNING_ENABLED=false` turns it off.

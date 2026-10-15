@@ -53,11 +53,11 @@ feature("weekly Claude quota warning", () => {
       });
       return { run, notify };
     }],
-    when: ["a slow 82 %, then a fast 95 %, then the fast pace again", async ({ run, notify }) => {
+    when: ["a slow 82 %, then a fast 89 %, then the fast pace again", async ({ run, notify }) => {
       await run(82, [{ at: NOW - 10 * HOUR, usedPercent: 81, resetsAt: RESET }, { at: NOW, usedPercent: 82, resetsAt: RESET }], NOW);
-      const fast = [{ at: NOW - HOUR, usedPercent: 82, resetsAt: RESET }, { at: NOW + HOUR, usedPercent: 95, resetsAt: RESET }];
-      await run(95, fast, NOW + HOUR);
-      await run(95, fast, NOW + HOUR + 15 * 60_000);
+      const fast = [{ at: NOW - HOUR, usedPercent: 82, resetsAt: RESET }, { at: NOW + HOUR, usedPercent: 89, resetsAt: RESET }];
+      await run(89, fast, NOW + HOUR);
+      await run(89, fast, NOW + HOUR + 15 * 60_000);
       return notify;
     }],
     then: ["two notices: the ordinary, then one urgent naming adelost as the target, never attrois", (notify) => {

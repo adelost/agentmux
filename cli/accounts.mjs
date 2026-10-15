@@ -20,7 +20,7 @@ const usage = `Usage:
 
 Login dirs: ~/.config/agent/account-profiles/claude/<login>, one account per dir.
 rotate --dry prints the plan per pane and changes nothing; Discord: /byt <login>.
-Weekly warning: AMUX_QUOTA_WARN_PERCENT (default 80 % weekly used).
+Weekly warning: AMUX_QUOTA_WARN_PERCENT (default 80 %), AMUX_QUOTA_RESERVE_PERCENT (default 90 % weekly used); amux never switches by itself.
 Codex automatic switch: only after a reached weekly limit, spare account quota and exact-session continuity.
 Disable with AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false. Predictions never switch accounts.`;
 

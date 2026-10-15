@@ -6,6 +6,7 @@ Current runtime receipt: **1.25.84 / 4241763cd9acae64bf6de40305b5c470cf166494**,
 
 | # | Outcome | Owner | Done when | State | Closed on |
 |---|---|---|---|---|---|
+| 21 | Claude reserve warning reaches the human and a configured action owner without automatic rotation | api:3 | Slow-pace 91 % regression red/green, persistent per-window deduplication, no-capacity/no-actor checks, real-quota dry run, installed bridge delivery | Source verified, release pending | Five regressions red before, 26 targeted cases green after; real-quota preview sends nothing and preserves sent-store |
 | 1 | Requested AMUX cost policy is installed and documented | Codex root | Rows 2–5 verified; installed bridge reports the release SHA | Closed | 1.25.77 / 5091190d8ac5; running bridge SHA, pid and readiness agree |
 | 2 | Codex panels report their own model, retain choices and compact before changes | Codex root | Parent-session regression red/green; launch and work gates verified; existing Codex choices set to Sol | Closed | 34 Sol choices saved, three active panes compacted and verified; later user choice ai:3 Astra verified after compact, same session. Final saved choices: 33 Sol, 1 Astra |
 | 3 | Idle compact prevents repeated large-context wakes | Codex root | 10-minute/150k rule, exact receipt and no retry without new work verified | Closed | 473k/56% old decision none, fixed warn; durable fence survives controller restart; stopped-process regression red/green; shared night fence avoids a second paid compact |

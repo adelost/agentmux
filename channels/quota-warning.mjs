@@ -1,8 +1,8 @@
 // Weekly Claude quota warning for the accounts panes actually run on.
 //
 // It reads through the shared five-minute budget, forecasts from readings
-// already stored there, and tells Mattias once per account and weekly window,
-// with one stronger notice when the limit is hours away. It never switches.
+// already stored there, and warns once per account, level and weekly window.
+// Reserve notices can also reach an action owner. It never switches accounts.
 
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -20,6 +20,8 @@ export function parseQuotaWarningConfig(env = process.env) {
   return {
     enabled: env.AMUX_QUOTA_WARNING_ENABLED !== "false",
     warnPercent: Math.min(100, positiveNumber(env.AMUX_QUOTA_WARN_PERCENT, 80)),
+    reservePercent: Math.min(100, positiveNumber(env.AMUX_QUOTA_RESERVE_PERCENT, 90)),
+    actor: env.AMUX_QUOTA_WARN_ACTOR?.trim() || null,
     urgentHours: positiveNumber(env.AMUX_QUOTA_WARN_URGENT_HOURS, 12),
     pollMs: Math.max(5 * 60_000, positiveNumber(env.AMUX_QUOTA_WARN_POLL_MS, 15 * 60_000)),
   };
@@ -67,11 +69,11 @@ export function claudeAccountsOf(profiles, identityOf) {
 }
 
 /**
- * WHAT: Checks every Claude account a pane runs on and sends the notice its forecast deserves.
- * WHY: Keeps Mattias ahead of a weekly limit without spending usage calls or switching anything for him.
+ * WHAT: Checks active Claude accounts against forecast and reserve thresholds.
+ * WHY: Keeps warnings actionable without automatic account changes.
  */
 export async function runQuotaWarningTick({
-  accountsInUse, allAccounts, readQuota, historyOf, notify, sent, config = parseQuotaWarningConfig(), now = Date.now(),
+  accountsInUse, allAccounts, readQuota, historyOf, notify, deliverActor, sent, config = parseQuotaWarningConfig(), now = Date.now(),
 }) {
   const notices = [];
   const readings = new Map();
@@ -90,14 +92,23 @@ export async function runQuotaWarningTick({
     const alternatives = [];
     for (const other of allAccounts().filter((candidate) => candidate.email !== account.email)) {
       const otherWeekly = weeklyOf(await reading(other));
-      if (otherWeekly) alternatives.push({ email: other.email, usedPercent: otherWeekly.usedPercent, resetsAt: otherWeekly.resetsAt });
+      if (Number.isFinite(otherWeekly?.usedPercent) && Date.parse(otherWeekly.resetsAt) > now
+          && otherWeekly.usedPercent < (config.reservePercent ?? 90)) {
+        alternatives.push({ email: other.email, usedPercent: otherWeekly.usedPercent, resetsAt: otherWeekly.resetsAt });
+      }
     }
     alternatives.sort((left, right) => left.usedPercent - right.usedPercent);
-    const text = formatWeeklyNotice({ level, email: account.email, forecast, alternatives, now });
-    await notify(text, { level: level === "urgent" ? "urgent" : "warn", title: "Claude-kvot",
-      idempotencyKey: `claude-weekly:${key}:${level}` });
+    const text = formatWeeklyNotice({ level, email: account.email, forecast, alternatives,
+      reservePercent: config.reservePercent, now });
+    const idempotencyKey = `claude-weekly:${key}:${level}`;
+    await notify(text, { level: level === "threshold" ? "warn" : "urgent", title: "Claude-kvot", idempotencyKey });
+    if (level === "reserve" && config.actor && alternatives.length) {
+      await deliverActor(config.actor, text, { idempotencyKey: `${idempotencyKey}:actor:${config.actor}` });
+    }
     // The stronger notice already says everything the ordinary one would.
-    sent.record(key, level === "urgent" ? ["threshold", "urgent"] : [level], { now, resetAt: forecast.resetAt });
+    const levels = level === "reserve" ? ["threshold", "urgent", "reserve"]
+      : level === "urgent" ? ["threshold", "urgent"] : [level];
+    sent.record(key, levels, { now, resetAt: forecast.resetAt });
     notices.push({ email: account.email, level, text });
   }
   return notices;
