@@ -183,6 +183,11 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   const collect = () => {
     const receipts = readReceipts(receiptPath);
     const observed = collectSources(agents, since.getTime(), { receipts, ...(readHistory ? { readHistory } : {}) });
+    for (const skipped of observed.skipped || []) {
+      if (skipped.reason === "active-turn-deferred") {
+        console.log(`Dream: ${skipped.agent}:${skipped.pane} has ${skipped.deferredTurns} active turn(s) deferred; cursor unchanged.`);
+      }
+    }
     return { receipts, observed, batch: buildDreamBatch(observed.sources, dateKey, dependencies.batchOptions) };
   };
   // The conversation-log shadow only compares; a failure never stops Dream.

@@ -31,6 +31,21 @@ const writeJsonl = (file, events) => writeFileSync(file, `${events.map((event) =
 const prompts = (result) => result.sources[0]?.entries.map((item) => item.userPrompt);
 
 feature("Dream reads a pane back to its window start", () => {
+  unit("keeps an ongoing long turn explicitly deferred without failing or receipting it", {
+    when: ["a recovered origin belongs to the pane's still-running turn", () => collectDreamSources([
+      { name: "api", dir: "/workspace", panes: [{ cmd: "codex" }] },
+    ], SINCE_MS, { now: SINCE_MS + 7200000, readHistory: () => ({
+      turns: [{ timestamp: new Date(SINCE_MS + 1000).toISOString(), userPrompt: "Behåll hela min uppgift åäö",
+        isComplete: false, items: [{ type: "text", content: "Working" }] }],
+      reachedSince: false, lastWriteMs: SINCE_MS + 7200000,
+    }) })],
+    then: ["the deferred pane is visible and no completed source/cursor is fabricated", result => {
+      expect(result.unreadable).toEqual([]);
+      expect(result.sources).toEqual([]);
+      expect(result.skipped).toContainEqual({ agent: "api", pane: 0, engine: "codex", reason: "active-turn-deferred", deferredTurns: 1 });
+    }],
+  });
+
   component("reads work before and after a Claude compact rotation", {
     given: ["two recently modified session files for one pane", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-dream-rotated-"));

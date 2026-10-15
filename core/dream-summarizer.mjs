@@ -78,7 +78,10 @@ export function collectDreamSources(agents, sinceMs, options = {}) {
       const { entries, omittedTurns, deferredTurns, activityCursor, waitingSince } = selectDreamTurns(result?.turns || [], {
         cursorMs: cutoffMs, limit, lastWriteMs: result?.lastWriteMs, nowMs,
       });
-      if (!entries.length) continue;
+      if (!entries.length) {
+        if (deferredTurns) skipped.push({ agent: agent.name, pane, engine, reason: "active-turn-deferred", deferredTurns });
+        continue;
+      }
       sources.push({
         agent: agent.name,
         pane,

@@ -51,9 +51,17 @@ Only the selected, exactly receipted product can enter memory.
    Tails start at 512 KiB and double until they reach the window start, not
    until any work is visible: on 2026-09-16 one 0.52 MiB tool output hid 20 of
    skyvw:5's 21 turns. Claude reads up to 64 MiB in each of at most six rotated
-   sessions. Codex grows to 8 MiB, then reuses the search JSONL stream over at
-   most 64 MiB of disk history, retaining at most 8 MiB of authored/lifecycle
-   events. A shared bounded writer-prefix classifier identifies the top-level
+   sessions. Codex grows to 8 MiB, then reuses the search JSONL stream over a
+   64 MiB output window, retaining at most 8 MiB of authored/lifecycle events.
+   When that window begins mid-turn, a single streaming prefix scan recovers
+   only the last still-open canonical user input and its same-task context.
+   Original input stays exact; closed/different tasks, setup and quoted output
+   cannot provide it. The 4 MiB record and 8 MiB retained limits still fail
+   loudly, including for an oversized origin. Prefix IO can exceed 64 MiB;
+   it does not allocate the journal or enter older output into model context.
+   A recovered active turn remains explicitly deferred with no cursor advance,
+   rather than failing the night or claiming its work is finished.
+   A shared bounded writer-prefix classifier identifies the top-level
    and first payload type, never quoted types inside text. Oversized records
    unused by the reader are skipped, including future image/tool result types.
    Oversized human/assistant messages, lifecycle/context and tool calls remain

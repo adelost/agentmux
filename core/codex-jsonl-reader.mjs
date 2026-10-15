@@ -802,7 +802,7 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
   const file = latestSessionFor(paneDir);
   if (!file) return null;
 
-  const events = opts.dreamHistory ? normalizeCodexUserEvents(readCodexDreamEvents(file)) : (tailBytes && !since && !grep)
+  const events = opts.dreamHistory ? normalizeCodexUserEvents(readCodexDreamEvents(file, typeof opts.dreamHistory === "object" ? opts.dreamHistory : undefined)) : (tailBytes && !since && !grep)
     ? parseJsonlTail(file, tailBytes)
     : parseJsonl(file);
   if (events.length === 0) return { turns: [], compactions: [], refusals: [], jsonlFile: file };
