@@ -111,4 +111,3 @@ export async function prepareDreamOwner(ctx, owner, dependencies) {
   }
   return { compact, quality };
 }
-
