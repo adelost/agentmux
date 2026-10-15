@@ -259,8 +259,11 @@ Discord voice notes are stored privately before transcription. If STT fails,
 the pane receives one separate notice with the error and audio path; the
 original stays pending for transcript retries. The notice and transcript have
 different durable identities, so a notice cannot suppress the eventual words.
-Later text messages can pass a failed voice note. Clips over 60 seconds are
-split into ordered 50-second WAV parts by the existing wrapper, with at most
+There is one failure notice per message, including messages with several audio
+files. Recipient-resolved records suppress late STT results and notices.
+Later text messages can pass a failed voice note. Clips over 45 seconds are
+split into ordered 25-second parts by the existing wrapper, preserving Opus
+or Vorbis bytes in Ogg (otherwise WAV), with at most
 three concurrent calls to `~/bin/transcribe`. All parts must succeed; any
 Whisper fallback is labelled in both the pane and Discord transcript.
 

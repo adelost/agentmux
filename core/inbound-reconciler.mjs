@@ -68,6 +68,7 @@ export function durableMessage(record, store, channel, baseMessage = null) {
     id: record.messageId,
     createdTimestamp: record.createdTimestamp,
     resolvedTarget: record.target,
+    isInboundCompleted: () => store.read(record.channelId, record.messageId)?.status === "completed",
     attachments: (record.attachments || []).map((attachment) => ({ ...attachment })),
     getCachedTranscript: (attachmentId) => store.transcriptFor(record, attachmentId),
     saveTranscript: (attachmentId, transcript) =>
@@ -140,6 +141,7 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
         return { delivered: true, inactive: true };
       }
       const outcome = await onMessage(durableMessage(current, store, channel, baseMessage));
+      if (store.read(current.channelId, current.messageId)?.status === "completed") return { duplicate: true };
       if (outcome?.delivered === false) {
         store.fail(current, outcome.reason || "handler did not durably accept the message");
         return { delivered: false, retryable: true };
@@ -147,6 +149,7 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
       store.complete(current, outcome || null);
       return { delivered: true };
     } catch (error) {
+      if (store.read(current.channelId, current.messageId)?.status === "completed") return { duplicate: true };
       store.fail(current, error);
       if (error.voiceFailure) {
         try {

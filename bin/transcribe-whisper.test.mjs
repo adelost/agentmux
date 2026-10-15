@@ -13,8 +13,8 @@ describe("the existing voice wrapper bounds long clips", () => {
       writeFileSync(join(root, "bin/transcribe"), `#!/bin/bash
 file="\${@: -1}"
 duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$file")
-awk -v d="$duration" 'BEGIN { exit !(d <= 60) }' || { echo '504 DEADLINE_EXCEEDED' >&2; exit 1; }
-part=$(basename "$file" .wav)
+awk -v d="$duration" 'BEGIN { exit !(d <= 25.1) }' || { echo '504 DEADLINE_EXCEEDED' >&2; exit 1; }
+part=$(basename "$file"); part="\${part%.*}"
 case "$part:$*:$(printenv FAIL_PART)" in
   part-0001:*gemini*) echo '504 DEADLINE_EXCEEDED' >&2; exit 1 ;;
   part-0002:*:yes) echo 'provider unavailable' >&2; exit 1 ;;
@@ -28,7 +28,7 @@ echo "$part"
       });
       const complete = run(false);
       expect(complete.status, complete.stderr).toBe(0);
-      expect(complete.stdout.trim()).toBe("[stt-fallback:whisper1] part-0000 part-0001 part-0002");
+      expect(complete.stdout.trim()).toBe("[stt-fallback:whisper1] part-0000 part-0001 part-0002 part-0003 part-0004");
       const partial = run(true);
       expect(partial.status).toBe(1);
       expect(partial.stdout).toBe("");

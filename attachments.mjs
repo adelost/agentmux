@@ -47,6 +47,7 @@ export function createAttachmentHandler({
   }
 
   async function buildPrompt(msg, tmpFiles) {
+    if (msg.isInboundCompleted?.()) return null;
     let rawText = msg.text.trim();
 
     for (const att of msg.attachments) {
@@ -55,6 +56,7 @@ export function createAttachmentHandler({
 
       if (isAudio) {
         let transcribed = await transcribeAudio(msg, att, tmpFiles);
+        if (msg.isInboundCompleted?.()) return null;
         if (transcribed === null) return null;
         // The wrapper marks fallback-engine transcripts (gemini failed →
         // whisper1 took over). The mark must survive into BOTH destinations:
@@ -106,6 +108,7 @@ export function createAttachmentHandler({
       // surfaced them as a bare "Command failed" (2026-07-11, api:3: the
       // user's voice order was silently never delivered).
       const { stdout } = await run(`'${transcribeScript}' '${tmpPath}'`, 300000);
+      if (msg.isInboundCompleted?.()) return null;
       const text = stdout.trim();
       if (!text) {
         if (att.durablePath) throw new Error("transcription returned no text");

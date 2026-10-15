@@ -67,21 +67,29 @@ transcribe_clip() {
   return 1
 }
 
-# A 110-second voice note repeatedly hit DEADLINE_EXCEEDED; its 50-second
-# parts worked. The client deadline is 90 seconds; server causality is unknown.
+# A 110-second voice note repeatedly hit DEADLINE_EXCEEDED; its short
+# parts worked, but its first 45-second part still timed out in live testing.
+# Use the incident's successful 25-second bound. Server causality is unknown.
 # Keep the same transcriber and quality; bound clip duration instead of hiding
-# failures behind a larger deadline. WAV parts retain their source order and
-# independent duration headers, unlike segmented FLAC's shared stream length.
+# failures behind a larger deadline. Keep Discord Opus compressed, matching the
+# successful incident reproduction. Other codecs use independent WAV headers.
 DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO_FILE") || exit 1
-if ! awk -v duration="$DURATION" 'BEGIN { exit !(duration > 60) }'; then
+if ! awk -v duration="$DURATION" 'BEGIN { exit !(duration > 45) }'; then
   transcribe_clip "$AUDIO_FILE"
   exit $?
 fi
 
 PARTS=$(mktemp -d /tmp/amux-stt.XXXXXX) || exit 1
 trap 'rm -rf "$PARTS"' EXIT
-ffmpeg -nostdin -loglevel error -i "$AUDIO_FILE" -map 0:a:0 -vn -c:a pcm_s16le \
-  -f segment -segment_time 50 -reset_timestamps 1 "$PARTS/part-%04d.wav" || exit 1
+CODEC=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$AUDIO_FILE") || exit 1
+EXT=wav
+CODEC_ARGS=(-c:a pcm_s16le)
+if [[ "$CODEC" == opus || "$CODEC" == vorbis ]]; then
+  EXT=ogg
+  CODEC_ARGS=(-c:a copy)
+fi
+ffmpeg -nostdin -loglevel error -i "$AUDIO_FILE" -map 0:a:0 -vn "${CODEC_ARGS[@]}" \
+  -f segment -segment_time 25 -reset_timestamps 1 "$PARTS/part-%04d.$EXT" || exit 1
 
 pids=()
 failed=0
@@ -90,7 +98,7 @@ wait_batch() {
   for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
   pids=()
 }
-for clip in "$PARTS"/part-*.wav; do
+for clip in "$PARTS"/part-*."$EXT"; do
   [ -f "$clip" ] || { echo "[stt] audio split produced no parts" >&2; exit 1; }
   transcribe_clip "$clip" > "$clip.txt" 2> "$clip.log" &
   pids+=("$!")
@@ -102,7 +110,7 @@ for log in "$PARTS"/*.log; do cat "$log" >&2; done
 
 fallback=false
 joined=""
-for result in "$PARTS"/part-*.wav.txt; do
+for result in "$PARTS"/part-*."$EXT".txt; do
   TEXT=$(< "$result")
   if [[ "$TEXT" == '[stt-fallback:whisper1] '* ]]; then
     fallback=true
