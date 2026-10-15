@@ -440,6 +440,26 @@ user with normal `git worktree remove`, never force. The janitor syncs the
 exact SHA and restore command to `~/.agentmux/janitor/retirements.jsonl`
 before removal, then records the result. Without the flag it remains read-only.
 
+`node bin/install-disk-guard.mjs` installs the persistent hourly user timer
+and `~/.gradle/init.d/agentmux-disk-retention.gradle`. The timer runs
+`node bin/disk-guard.mjs poll` under a nonblocking lock with a five-minute
+deadline. Every poll reads `df /` and maintains dependency entries unused
+seven days, preserving file access timestamps during inspection. Unlinking
+a cache leaves its hardlinked worktree consumers intact.
+
+Gradle keeps downloaded resources seven days and build-cache entries one day,
+with cleanup after builds. At 10 GiB it pauses local cache pushes for the
+next build; an already running build can temporarily exceed the approximate
+ceiling. Idle-only hourly trimming handles the default build cache and logs
+older than 12 hours. Active Gradle/Kotlin processes and all other Gradle caches
+stay intact. The earlier 29.26 GiB cleanup did not preserve entry ages.
+
+Below 100 GB free, the disk guard also considers idle npm/pip caches and old
+unused Playwright binaries. It preserves npx servers, browser profiles, user
+data and models. Below 30 GB it notifies the human with one durable episode
+key; the episode clears at 100 GB. `~/.agentmux/disk-guard.json` holds the
+latest sample and action results. Unlinks journal actual df before and after.
+
 `proof` takes an argv-only JSON recipe. It creates clean detached base/head
 worktrees, asserts a named fixture anchor before applying the test-only patch,
 rejects a no-op, runs the same real gate exactly once red and once green, and

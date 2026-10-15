@@ -47,6 +47,10 @@ def receipt_references(request):
                 return
             if not re.search(r"\.(jsonl?|md|txt|log|sh|service|timer|yaml|yml)$", path):
                 return
+            named = re.search(r"receipt|proof|qualif|guard|release|attest|context|runtime|manifest|source|build|live|deploy|window|verif|result|checkpoint|state|config|settings|agent|event|ledger|references", os.path.basename(path), re.I)
+            artifact_data = "/.artifacts/" in path and not re.search(r"/(source|tests?|fixtures|node_modules|docs|tools|core|packages|cloud)/", path)
+            if not (unit or named or artifact_data or path.endswith((".log", ".jsonl"))):
+                return
             if re.search(r"/worktree-cleanup-[^/]+/references\.json$", path):
                 with open(path, encoding="utf8") as source:
                     prior = json.load(source)

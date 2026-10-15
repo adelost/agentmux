@@ -1,0 +1,23 @@
+// WHAT: Defines machine-wide Gradle retention through the supported init-script API.
+// WHY: Keeps downloaded dependencies warm while retiring reproducible build entries promptly.
+import org.gradle.api.cache.Cleanup
+
+beforeSettings { settings ->
+    settings.caches {
+        downloadedResources.removeUnusedEntriesAfterDays = 7
+        buildCache.removeUnusedEntriesAfterDays = 1
+        cleanup = Cleanup.ALWAYS
+    }
+}
+
+// WHAT: Checks the local cache ceiling before each build.
+// WHY: Prevents long-lived daemons from growing the cache while idle-only trimming waits.
+settingsEvaluated { settings ->
+    def directory = settings.buildCache.local.directory ?: new File(gradle.gradleUserHomeDir, "caches/build-cache-1")
+    def cacheDirectory = directory instanceof File ? directory : new File(directory.toString())
+    long bytes = (cacheDirectory.listFiles() ?: []).findAll { it.isFile() }.sum(0L) { it.length() }
+    if (bytes >= 10L * 1024 * 1024 * 1024) {
+        settings.buildCache.local.push = false
+        logger.lifecycle("amux disk retention: local cache pushes paused at ${bytes} bytes (10 GiB ceiling)")
+    }
+}

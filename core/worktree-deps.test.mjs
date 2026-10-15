@@ -26,6 +26,7 @@ import {
   selectScopedGate,
   snapshotLocks,
 } from "./worktree-deps.mjs";
+import { dependencyCacheRetirementDecision,applyGradleCacheRetention } from "./disk-cache-retention.mjs";
 
 function fixture({ cacheOverride = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-worktree-deps-"));
@@ -80,6 +81,33 @@ function writeInstalledTree(root, lock = JSON.parse(readFileSync(join(root, "pac
 }
 
 feature("worktree dependency bootstrap", () => {
+  unit("idle Gradle retention enforces its byte ceiling while live builds and control files stay", {
+    then:["only idle build entries and old daemon logs are removed",()=>{
+      const ctx=fixture();const gradleHome=join(ctx.root,"gradle");
+      const cache=join(gradleHome,"caches/build-cache-1"); const logs=join(gradleHome,"daemon/8.10.2");
+      mkdirSync(cache,{recursive:true});mkdirSync(logs,{recursive:true});
+      const file=join(cache,"a".repeat(32));const control=join(cache,"gc.properties");const log=join(logs,"daemon-1.out.log");
+      writeFileSync(file,Buffer.alloc(8192));writeFileSync(control,"control");writeFileSync(log,"old log");
+      const references=(targets)=>({holders:Object.fromEntries(targets.map((path)=>[path,[]])),errors:[]});
+      const options={gradleHome,nowMs:Date.now()+2*86400000,maxBuildCacheBytes:4096,references,
+        journal:()=>{},sampleDisk:()=>({availableBytes:1e12}),dryRun:false};
+      const busy=applyGradleCacheRetention({...options,listProcesses:()=>"123 java org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.10.2"});
+      expect(busy.actions).toHaveLength(0);expect(existsSync(file)).toBe(true);
+      const idle=applyGradleCacheRetention({...options,listProcesses:()=>""});
+      expect(idle.capSatisfied).toBe(true);expect(idle.actions.filter(({mode})=>mode==="removed")).toHaveLength(2);
+      expect(existsSync(control)).toBe(true);expect(existsSync(file)).toBe(false);expect(existsSync(log)).toBe(false);
+      ctx.cleanup();
+    }],
+  });
+  unit("cache retention admits only seven-day-unused entries with complete idle evidence", {
+    then:["stale entries retire while recent, held and unknown entries stay",()=>{
+      const sample={entry:{path:"/cache",identity:"inode-snapshot",bytes:4096,newestUseMs:0},nowMs:8*86400000};
+      expect(dependencyCacheRetirementDecision(sample).ok).toBe(true);
+      expect(dependencyCacheRetirementDecision({...sample,nowMs:6*86400000}).ok).toBe(false);
+      expect(dependencyCacheRetirementDecision({...sample,holders:[123]}).ok).toBe(false);
+      expect(dependencyCacheRetirementDecision({...sample,errors:["unreadable"]}).ok).toBe(false);
+    }],
+  });
   unit("discovers every tracked npm/uv root and reports uncovered manifests", {
     given: ["a monorepo file ledger", () => [
       "package.json", "package-lock.json",
