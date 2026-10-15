@@ -29,7 +29,7 @@ import { startBot } from "./bot.mjs";
 import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
-import { createColdDeliveryRule, createPauseCompact } from "./channels/pause-compact.mjs";
+import { createPauseCompact } from "./channels/pause-compact.mjs";
 import { readPauseCompactModes } from "./core/pause-compact.mjs";
 import { createLeaderReview, leaderFromConfig } from "./core/leader-review.mjs";
 import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
@@ -51,7 +51,7 @@ import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
-import { createContextMaintenance } from "./core/context-maintenance.mjs";
+import { createBridgeWorkAdmission } from "./cli/bridge-work-admission.mjs";
 import { createDiscordInboundStore } from "./core/discord-inbound-store.mjs";
 import { startLinkConnectorIfConfigured } from "./channels/link-connector-start.mjs";
 import { observeLinkTargetModels } from "./channels/link-target-models.mjs";
@@ -232,11 +232,7 @@ const paneSleepWakeLifecycle = createPaneSleepWakeLifecycle({
   processState: (agentName, pane) => tmuxAgent.paneProcessState(agentName, pane),
 });
 
-// Startup housekeeping for interrupted sleep records. A bridge stop mid-sleep
-// or mid-wake used to park the pane until its state file was deleted by hand.
-// Only records older than the repair TTL are re-judged, always against live
-// process and session truth; unclear panes stay parked and no process is ever
-// stopped or started here.
+// Reconcile expired sleep receipts against live truth without lifecycle writes.
 const paneSleepRepairs = await createPaneSleepRepair({
   resolvePane: resolveSleepPane,
   processState: (agentName, pane) => tmuxAgent.paneProcessState(agentName, pane),
@@ -249,22 +245,9 @@ if (repairedSleeps.length) {
 
 // `amux compact --self` requests, run at the end of the pane's turn or before its next delivery.
 const selfCompactRequests = createSelfCompactStore();
-const postSelfCompactNotice = async (agentName, pane, text) => {
-  const channelId = discord && findChannelForPane(AGENTS_YAML, agentName, pane);
-  if (channelId) await discord.send(channelId, text, { kind: "notice" });
-};
-const contextMaintenance = createContextMaintenance({
-  agent, state: appState, queue: deliveryQueue,
-  resolveTarget: (name, pane) => {
-    const config = listAgents(AGENTS_YAML).find(entry => entry.name === name);
-    const cmd = config?.panes?.[pane]?.cmd || "";
-    return config ? { engine: /codex/.test(cmd) ? "codex" : /claude/.test(cmd) ? "claude" : "unsupported",
-      dir: join(config.dir, ".agents", String(pane)) } : null;
-  },
+const contextMaintenance = createBridgeWorkAdmission({
+  agent, state: appState, queue: deliveryQueue, configPath: AGENTS_YAML, discord, selfRequests: selfCompactRequests,
   log: message => console.log(`context-cost | ${message}`),
-  coldBeforeDelivery: createColdDeliveryRule({ modes: readPauseCompactModes() }),
-  selfRequests: selfCompactRequests,
-  notify: postSelfCompactNotice,
 });
 const deliveryBroker = createDeliveryBroker({
   agent,
@@ -403,11 +386,7 @@ const permissionWatchdog = createPermissionWatchdog({
 });
 permissionWatchdog.start();
 
-// jsonl-watcher: the single mirror path. fs.watch on each pane's project
-// dir, posts every complete turn to the bound Discord channel, persistent
-// state so bridge-restart resumes exactly where it left off. Replaced
-// streamResponse (1.16.32), drift-guard.forwardReplyAsync (1.16.33),
-// resume-hint forwarder (1.16.33), and mirror-loop (1.16.33).
+// One persistent journal mirror owns Discord replies and refusal recovery.
 const jsonlWatcher = createJsonlWatcher({
   agent,
   deliveryBroker,

@@ -45,7 +45,7 @@ import { notifyUser } from "../cli/send-notify.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
 import { compactionNoticeText } from "../core/compaction-notice.mjs";
 import { announceNewPaneEvents } from "../core/pane-notices.mjs";
-import { confirmedCodexRefusals, refusalNoticeText } from "../core/codex-refusal-notice.mjs";
+import { refusalNoticeText } from "../core/codex-refusal-notice.mjs";
 import { isCodexCapacityError } from "../core/codex-capacity-recovery.mjs";
 import { createCodexRecovery } from "../cli/codex-recovery.mjs";
 import {
@@ -649,7 +649,7 @@ export function createJsonlWatcher({
     readSnapshots.set(key, {
       ...info,
       graceDueAtMs: pendingGraceDueAt(turns, channelId, latestMtimeMs),
-      recovery: result && { refusals: result.refusals, lastPrompt: result.lastPrompt, jsonlFile: result.jsonlFile },
+      recovery: result && { refusals: result.refusals, refusalCandidates: result.refusalCandidates, lastPrompt: result.lastPrompt, jsonlFile: result.jsonlFile },
     });
   }
 
@@ -684,7 +684,6 @@ export function createJsonlWatcher({
       // advancing past it (belt-and-suspenders on top of id-based dedupe).
       const tailBytes = startupAudit ? STARTUP_AUDIT_TAIL_BYTES : WATCHER_TAIL_BYTES;
       const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes, headless: true });
-      if (result?.refusals?.length) result.refusals = await confirmedCodexRefusals(result, selectedCodexProfile(state, name, idx).home);
       await codexRecovery.tick({ name, pane: idx, dir, result });
       const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
       const readMs = Date.now() - readStarted;

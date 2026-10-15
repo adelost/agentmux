@@ -5,6 +5,16 @@ configured profiles. Tokens stay in provider-owned files, never in memory or
 reports. Profile labels are routing names, not proof of distinct subscriptions.
 Agents load the `amux-accounts` skill for reading quota, switching and logins.
 
+Codex recovery rechecks unresolved provider errors even when the rollout has
+not changed: its SQLite error can arrive after the journal's final write.
+Before new delivery, a cached exhausted weekly window is confirmed through a
+fresh provider read. An idle pane then resumes its exact session on an
+authenticated account with verified room, under the delivery lease. No extra
+prompt is added and post-submit fences are never bypassed. Explicit account
+switches likewise skip a source compact only at a confirmed reached weekly
+limit (`would-resume-after-weekly-limit`); other switches still compact first.
+`AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false` disables automatic switching.
+
 ## Which account is in use
 
 Under each account `amux quota` prints the panes that run on it right now, for

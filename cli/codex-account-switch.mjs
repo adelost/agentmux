@@ -18,6 +18,7 @@ import { findBlockingPrompt } from "../core/dismiss.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import { defaultDeliveryQueueDir } from "../core/delivery-queue.mjs";
 import { acquireFileLease } from "../core/file-lease.mjs";
+import { codexWeeklyLimitReached } from "../core/codex-limit-recovery.mjs";
 
 /** WHAT: Defines explicit pane-local account request keys. WHY: Keeps operator intent separate from provider quota evidence and unrelated state writers. */
 export const CODEX_ACCOUNT_REQUESTS = "codex_account_requests_v1";
@@ -122,8 +123,9 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
     if (!before) throw new Error("source session identity unavailable");
     const prior = contextMaintenanceAttempt(ctx.state, name, pane, before);
     if (prior?.status === "ATTEMPTING") return { key, status: "pending", reason: "compact-already-in-flight" };
+    const exhausted = codexWeeklyLimitReached(await deps.quota(current));
     const targetPane = { agent: cfg, pane: { index: pane }, engine: "codex", paneDir: dir, sourceHome: current.home };
-    const compact = prior?.status === "VERIFIED" ? { ok: true } : await deps.compact(ctx, targetPane, { force: true });
+    const compact = exhausted || prior?.status === "VERIFIED" ? { ok: true } : await deps.compact(ctx, targetPane, { force: true });
     if (!compact.ok) {
       if (/^(?:compact-skipped:(?:not-idle:|delivery-|composer-|recent-activity$|not-running-tmux$|session-or-activity-changed$)|context-cost:(?:not-idle:|delivery-|session-or-activity-changed$|compose:)|delivery-lease-busy$)/u.test(compact.reason || "")) {
         return { key, status: "pending", reason: compact.reason };
@@ -138,7 +140,7 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
         || observed.current.id !== current.id || after?.sessionId !== before.sessionId) {
       return { key, status: "pending", reason: observed.blocked || "account-or-session-changed" };
     }
-    if (contextMaintenanceAttempt(ctx.state, name, pane, after)?.status !== "VERIFIED") {
+    if (!exhausted && contextMaintenanceAttempt(ctx.state, name, pane, after)?.status !== "VERIFIED") {
       return { key, status: "pending", reason: "new-work-or-compact-unverified" };
     }
     const proof = deps.transfer(dir, current, target);
@@ -185,8 +187,9 @@ export async function switchCodexAccounts(ctx, args, options = {}) {
     if (dry) {
       const observed = await observe(ctx, entry.agent.name, entry.pane, deps);
       const selected = observed.current || selectedCodexProfile(ctx.state, entry.agent.name, entry.pane, deps.profiles());
+      const exhausted = !observed.blocked && !observed.dormant && selected.id !== profileId && codexWeeklyLimitReached(await deps.quota(selected));
       rows.push({ key, status: observed.blocked ? "would-defer" : selected.id === profileId ? "would-already-selected"
-        : observed.dormant ? "would-select-next-start" : "would-compact-then-switch",
+        : observed.dormant ? "would-select-next-start" : exhausted ? "would-resume-after-weekly-limit" : "would-compact-then-switch",
         reason: observed.blocked || null });
       continue;
     }

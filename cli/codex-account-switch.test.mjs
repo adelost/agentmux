@@ -42,6 +42,20 @@ function fixture({ busy = false, dormant = false, wrongModel = false } = {}) {
 }
 
 describe("Codex operator account switches", () => {
+  it("resumes the exact session without compacting an actually exhausted source", async () => {
+    const fx = fixture();
+    fx.options.quota = async profile => ({ ok: true, account: { email: "second@example.com" },
+      limits: [{ limitId: "codex", windows: [{ windowMinutes: 10080, usedPercent: profile.id === "1" ? 100 : 24 }] }] });
+    fx.options.compact = async () => ({ ok: false, reason: "source-usage-limit" });
+    try {
+      const dry = await switchCodexAccounts(fx.ctx, ["codex:2", "claw", "--dry"], fx.options);
+      expect(dry.rows[0].status).toBe("would-resume-after-weekly-limit");
+      const result = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(result.rows[0].status).toBe("switched");
+      expect(fx.calls.map(call => call.step)).toEqual(["prepare", "transfer", "restart"]);
+      expect(fx.calls.at(-1).resumeSessionId).toBe("exact-session");
+    } finally { fx.clean(); }
+  });
   it("keeps an idle-to-working race pending instead of permanently blocking migration", async () => {
     const fx = fixture();
     fx.options.compact = async () => ({ ok: false, reason: "compact-skipped:not-idle:working" });
