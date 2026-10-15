@@ -13,6 +13,8 @@ import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { latestJournalCompactMs } from "../core/pause-compact.mjs";
 import { SELF_COMPACT_POLICY, createSelfCompactStore } from "../core/self-compact.mjs";
 import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
+import { contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
+import { panePathFor } from "../core/jsonl-reader.mjs";
 import { readFileSync, statSync } from "node:fs";
 
 const COMPACT_MIN_TOKENS = CONTEXT_COST_POLICY.maxTokens;
@@ -62,6 +64,7 @@ export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions =
   const agents = listAgents(ctx.configPath);
   const targets = [];
   const skipped = [];
+  const fenced = [];
 
   for (const a of agents) {
     if (!(await hasSession(ctx, a.name))) continue;
@@ -74,6 +77,11 @@ export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions =
       const { status, context } = await inspectPane(ctx, a, p);
       if (!context) continue;
       if (!Number.isFinite(context.tokens) || context.tokens <= minTokens) continue;
+      const attempt = compactAttemptWithoutNewWork(ctx.state, a, p.index, dialect);
+      if (attempt) {
+        fenced.push({ agent: a.name, pane: p.index, context, attempt: attempt.status });
+        continue;
+      }
       const unsafe = isCompactUnsafe(status);
       if (unsafe && !force) {
         skipped.push({ agent: a.name, pane: p.index, dialect, context, status });
@@ -97,8 +105,14 @@ export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions =
       console.log(`  ${s.agent.padEnd(10)} p${s.pane}  ${s.context.percent}%  ${formatTokens(s.context.tokens)}  (${s.status})`);
     }
   }
+  if (fenced.length) {
+    console.log(`\nSkipped ${fenced.length} pane(s), no new work since the last compact. Target one pane to override:`);
+    for (const f of fenced) {
+      console.log(`  ${f.agent.padEnd(10)} p${f.pane}  ${f.context.percent}%  ${formatTokens(f.context.tokens)}  (compact ${f.attempt})`);
+    }
+  }
   if (!targets.length && !skipped.length) {
-    console.log(`\nNo claude/codex panes above ${formatTokens(minTokens)} tokens. Nothing to do.`);
+    if (!fenced.length) console.log(`\nNo claude/codex panes above ${formatTokens(minTokens)} tokens. Nothing to do.`);
     return;
   }
 
@@ -118,6 +132,17 @@ export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions =
     }
   }
   console.log(`\nNote: /compact runs asynchronously in each pane. Run 'amux top' in a minute to see new values.`);
+}
+
+/**
+ * WHAT: Reads the shared compact fence of a context that has had no work since that compact.
+ * WHY: Claude reports the pre-compact size until its next turn, so size alone sent
+ * api:2 a second /compact a day after its verified one (2026-10-12). Pause and
+ * nightly compaction already read this fence; bulk mode now does too.
+ */
+function compactAttemptWithoutNewWork(state, agent, paneIndex, engine) {
+  const identity = latestPaneSessionIdentity(engine, panePathFor(agent, paneIndex));
+  return contextMaintenanceAttempt(state, agent.name, paneIndex, identity);
 }
 
 /**
