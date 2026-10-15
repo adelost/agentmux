@@ -54,7 +54,7 @@ export async function startCodexProcess({
     receipt: launchOptions?.compactReceipt, context: launchOptions?.resumeContext, work: launchOptions?.work,
     launch: async (choice, { goals = true } = {}) => {
       const cmd = buildCodexLaunchCommand({ profileHome: profile.home, ...choice,
-        resumeSessionId: sessionId, allowFreshBootstrap: !sessionId, disableGoals: !goals });
+        resumeSessionId: sessionId, allowFreshBootstrap: !sessionId, disableGoals: !goals, cwd: dir });
       await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
       await wait(500);
       if (!await ready()) throw new Error("Codex composer did not become ready");

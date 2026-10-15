@@ -1,5 +1,7 @@
 import { feature, component, expect } from "bdd-vitest";
 import { switchCodexAccount } from "./codex-account-switch.mjs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 function setup({ continuity = true, wrongSession = false } = {}) {
   const calls = [], data = {};
@@ -17,6 +19,39 @@ function setup({ continuity = true, wrongSession = false } = {}) {
 }
 
 feature("manual and automatic Codex account transitions share continuity verification", () => {
+  component("a genuinely changed native directory still rolls back the switch", {
+    when: ["the resumed session changes its working directory", async () => {
+      const fx = setup(), originalStatus = fx.options.statusDriver;
+      fx.options.statusDriver = async () => {
+        const native = await originalStatus();
+        return { ...native, status: { ...native.status,
+          directory: fx.calls.at(-1)?.profile.id === "2" ? "/different/pane" : "/pane" } };
+      };
+      return { result: await switchCodexAccount(fx.options), fx };
+    }],
+    then: ["the original account and exact session are restored", ({ result, fx }) => {
+      expect(result.kind).toBe("failed");
+      expect(result.error).toContain("working directory");
+      expect(fx.calls.at(-1)).toMatchObject({ profile: { id: "1" }, resumeSessionId: "exact" });
+    }],
+  });
+  component("a fresh handover resolves the native home abbreviation before finding its journal", {
+    when: ["native status uses ~/ while the journal has an absolute cwd", async () => {
+      const fx = setup(), originalStatus = fx.options.statusDriver;
+      fx.options.continuity = null;
+      fx.options.freshHandover = { ok: true, path: "/private/handover.json", text: "Read exact task evidence first." };
+      fx.options.identityFor = dir => dir === join(homedir(), "project/.agents/5")
+        ? { sessionId: "fresh-session", path: "/two/sessions/fresh.jsonl" } : null;
+      fx.options.statusDriver = async () => {
+        const native = await originalStatus();
+        return { ...native, status: { ...native.status, directory: "~/project/.agents/5",
+          session: fx.calls.at(-1)?.profile.id === "2" ? "fresh-session" : "exact" } };
+      };
+      return switchCodexAccount(fx.options);
+    }],
+    then: ["the exact new identity verifies instead of rolling back a correct fresh session", result =>
+      expect(result).toMatchObject({ kind: "switched", fresh: true })],
+  });
   for (const wrongModel of [false, true]) {
     component(`fresh handover keeps model and rollback, wrong model=${wrongModel}`, {
       when: ["the source session cannot be transferred", async () => {

@@ -32,6 +32,43 @@ function fixture({ fail = false, jobs = [] } = {}) {
 }
 
 feature("warm and cold compaction share a durable one-attempt fence", () => {
+  component("an explicit switch compact still runs for a small context, once per work generation", {
+    given: ["a small idle session with an explicit compact requirement", () => {
+      const ctx = fixture();
+      ctx.agent.getContext = async () => ({ tokens: 1_000 });
+      return ctx;
+    }],
+    when: ["requesting it twice, then requesting it after genuinely new work", async ctx => {
+      const m = createContextMaintenance(ctx);
+      const first = await m.run("claw", 2, { required: true });
+      const same = await m.run("claw", 2, { required: true });
+      ctx.append({ type: "user", message: { content: "new work after the verified compact" } });
+      const next = await m.run("claw", 2, { required: true });
+      return { first, same, next };
+    }],
+    then: ["the existing native fence allows only one call for each actual generation", ({ first, same, next }, ctx) => {
+      expect(first.compacted).toBe(true);
+      expect(same.cell).toBe("receipt-exists");
+      expect(next.compacted).toBe(true);
+      expect(ctx.calls).toHaveLength(2);
+    }], cleanup: ctx => ctx.cleanup(),
+  });
+  component("an explicit compact requirement does not override unread context or a failed attempt", {
+    when: ["requesting maintenance for unknown usage and a refused prior call", async () => {
+      const unknown = fixture(), failed = fixture({ fail: true });
+      unknown.agent.getContext = async () => ({ tokens: null });
+      try {
+        const a = await createContextMaintenance(unknown).run("claw", 2, { required: true });
+        const m = createContextMaintenance(failed);
+        await m.run("claw", 2, { required: true });
+        const b = await m.run("claw", 2, { required: true });
+        return { a, b, calls: [unknown.calls.length, failed.calls.length] };
+      } finally { unknown.cleanup(); failed.cleanup(); }
+    }],
+    then: ["both hold without a second paid attempt", ({ a, b, calls }) => {
+      expect(a.ok).toBe(false); expect(b.ok).toBe(false); expect(calls).toEqual([0, 1]);
+    }],
+  });
   component("a later Codex response_item user turn expires a saved maintenance receipt", {
     given: ["a compact receipt followed by actual Codex user work", () => {
       const ctx = fixture();

@@ -552,12 +552,8 @@ export function latestCodexSessionIdentity(paneDir, options) {
   return Object.freeze({ sessionId: String(meta.id), cwd: meta.cwd, path });
 }
 
-/**
- * Resolve one persisted Codex rollout by its immutable thread id and exact
- * starting cwd. Cutover uses this stricter lookup than latestSessionFor(): an
- * ancestor match is useful for displaying history, but is not proof that a
- * session belongs to the pane being migrated.
- */
+/** WHAT: Reads one unique persisted thread by id and optional exact cwd.
+ * WHY: Prevents ambiguous ids or ancestor matches from proving pane ownership. */
 export function codexSessionIdentityById(sessionId, paneDir, {
   sessionDirs = codexSessionDirs(),
 } = {}) {
@@ -567,9 +563,9 @@ export function codexSessionIdentityById(sessionId, paneDir, {
   }
   const matches = sessionDirs.flatMap((base) => findJsonlFiles(base, 0, []))
     .map((path) => ({ path, meta: readSessionMeta(path) }))
-    .filter(({ meta }) => String(meta?.id || "") === expectedId && meta?.cwd === paneDir);
+    .filter(({ meta }) => String(meta?.id || "") === expectedId && (paneDir == null || meta?.cwd === paneDir));
   if (matches.length !== 1) return null;
-  return Object.freeze({ sessionId: expectedId, cwd: paneDir, path: matches[0].path });
+  return Object.freeze({ sessionId: expectedId, cwd: matches[0].meta.cwd, path: matches[0].path });
 }
 
 /**

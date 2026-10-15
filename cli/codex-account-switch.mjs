@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { listAgents } from "./config.mjs";
-import { compactBeforeSwitch } from "./account-switch-compact.mjs";
+import { compactCodexBeforeSwitch } from "./codex-account-compact.mjs";
 import { accountEngineForCommand } from "../core/runtime-account-profiles.mjs";
 import { codexProfileCatalog, selectedCodexProfile, setCodexProfile, prepareCodexProfile,
   isCodexProfileAuthenticated } from "../core/codex-profiles.mjs";
@@ -37,7 +37,7 @@ const engine = definition => definition.engine || accountEngineForCommand(defini
 const defaults = { profiles: codexProfileCatalog, authenticated: isCodexProfileAuthenticated,
   prepare: prepareCodexProfile, live: readLivePaneHomes, quota: readCodexAccountQuota,
   identity: latestCodexSessionIdentity, transfer: transferCodexSession, switchAccount: switchCodexAccount,
-  handover: prepareCodexAccountHandover, status: driveCodexStatus, compact: compactBeforeSwitch };
+  handover: prepareCodexAccountHandover, status: driveCodexStatus, compact: compactCodexBeforeSwitch };
 
 async function observe(ctx, name, pane, deps) {
   const process = await ctx.agent.paneProcessState(name, pane);
@@ -122,10 +122,10 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
     if (!before) throw new Error("source session identity unavailable");
     const prior = contextMaintenanceAttempt(ctx.state, name, pane, before);
     if (prior?.status === "ATTEMPTING") return { key, status: "pending", reason: "compact-already-in-flight" };
-    const targetPane = { agent: cfg, pane: { index: pane }, engine: "codex", paneDir: dir };
+    const targetPane = { agent: cfg, pane: { index: pane }, engine: "codex", paneDir: dir, sourceHome: current.home };
     const compact = prior?.status === "VERIFIED" ? { ok: true } : await deps.compact(ctx, targetPane, { force: true });
     if (!compact.ok) {
-      if (/^compact-skipped:(?:not-idle:|delivery-|composer-|recent-activity$|not-running-tmux$|session-or-activity-changed$)/u.test(compact.reason || "")) {
+      if (/^(?:compact-skipped:(?:not-idle:|delivery-|composer-|recent-activity$|not-running-tmux$|session-or-activity-changed$)|context-cost:(?:not-idle:|delivery-|session-or-activity-changed$|compose:)|delivery-lease-busy$)/u.test(compact.reason || "")) {
         return { key, status: "pending", reason: compact.reason };
       }
       throw new Error(`source compact did not verify: ${compact.reason}`);

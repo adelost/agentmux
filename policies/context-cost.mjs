@@ -68,10 +68,11 @@ export const contextCostRules = defineDecisionTable(contextCostDeclaration);
 
 /** WHAT: Maps observed context facts to a traceable decision cell. WHY: Keeps numeric thresholds outside effects and unknown values outside permissive defaults. */
 export function contextCostDecision({ tokens, idleMs, cold = false, pauseTokens = null, pauseSettleMs = PAUSE_COMPACT_POLICY.settleMs,
-  safe = false, attempt = "NEW" }, policy = CONTEXT_COST_POLICY) {
+  safe = false, attempt = "NEW", required = false }, policy = CONTEXT_COST_POLICY) {
   const ageLimit = cold ? policy.coldMs : pauseTokens ? pauseSettleMs : policy.idleMs;
   const tokenLimit = cold ? policy.coldMaxTokens ?? policy.maxTokens : pauseTokens ?? policy.maxTokens;
-  const need = (Number.isFinite(tokens) && tokens <= tokenLimit) || (Number.isFinite(idleMs) && idleMs < ageLimit)
+  const need = required ? (!Number.isFinite(tokens) || tokens < 0 || !Number.isFinite(idleMs) ? "UNKNOWN" : "COMPACT")
+    : (Number.isFinite(tokens) && tokens <= tokenLimit) || (Number.isFinite(idleMs) && idleMs < ageLimit)
     ? "NONE" : !Number.isFinite(tokens) || !Number.isFinite(idleMs) ? "UNKNOWN" : "COMPACT";
   return decide(contextCostRules, { need, readiness: safe ? "SAFE" : "UNSAFE", attempt });
 }

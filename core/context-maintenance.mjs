@@ -120,7 +120,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   // focus: what a self-requested Claude compact should keep (Codex's /compact takes no focus).
   // beforeDelivery: the broker holds the pane for a waiting job, so queued jobs do not count as in flight.
   async function run(name, pane, { cold = false, pauseTokens = null, pauseSettleMs, dry = false, leaseHeld = false, heldLease = null,
-    jobId = null, focus = "", beforeDelivery = cold } = {}) {
+    jobId = null, focus = "", beforeDelivery = cold, required = false } = {}) {
     const target = resolveTarget(name, pane);
     if (!target || !["claude", "codex"].includes(target.engine)) return { ok: true, skipped: "unsupported-engine" };
     if (typeof agent.paneProcessState !== "function" || (await agent.paneProcessState(name, pane).catch(() => null))?.running !== true) {
@@ -142,7 +142,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       : (await agent.promptTransportState(name, pane, "").catch(() => null))?.state || "unreadable";
     const safe = input === "empty-idle";
     const facts = { tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, pauseTokens,
-      ...(pauseSettleMs != null ? { pauseSettleMs } : {}), safe, attempt };
+      ...(pauseSettleMs != null ? { pauseSettleMs } : {}), safe, attempt, required };
     let coldPolicy = policy;
     try { if (cold) coldPolicy = coldPolicyFor(name, pane, target, identity, facts); }
     catch (error) { log(`${name}:${pane} compact-before-delivery check failed, delivering by the 60-minute rule: ${error.message}`); }

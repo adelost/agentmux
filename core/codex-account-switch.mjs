@@ -1,7 +1,16 @@
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { prepareCodexIdle } from "./codex-tui.mjs";
 import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { codexModelOverride, setCodexProfile, setCodexModelOverride, clearCodexModelOverride } from "./codex-profiles.mjs";
+
+/** WHAT: Resolves absolute native status directories, including the home abbreviation.
+ * WHY: Keeps display notation from breaking continuity checks and fresh journal lookup. */
+function statusDirectory(status) {
+  if (typeof status?.directory !== "string") return null;
+  const directory = status.directory.replace(/^~(?=\/|$)/u, homedir());
+  return isAbsolute(directory) ? resolve(directory) : null;
+}
 
 /** WHAT: Checks exact-session availability on both account homes. WHY: Prevents an automatic account switch from bootstrapping a replacement conversation. */
 export function codexAccountContinuity(dir, current, target) {
@@ -23,11 +32,12 @@ export async function switchCodexAccount({ agent, state, name, pane, current, ta
   if (!idle.ok) return { kind: "failed", error: `${idle.stage}: ${idle.error}` };
   const previousOverride = codexModelOverride(state, name, pane);
   const beforeStatus = await status();
+  const beforeDirectory = statusDirectory(beforeStatus.status);
   const context = await (agent.getContext?.(name, pane) ?? agent.getContextPercent?.(name, pane));
   const effective = beforeStatus.ok && beforeStatus.status.model?.id
     ? { model: beforeStatus.status.model.id, effort: beforeStatus.status.model.effort }
     : previousOverride || (context?.model ? { model: context.model, effort: context.effort ?? null } : null);
-  if ((continuity || freshHandover) && (!beforeStatus.ok || !effective?.model || !beforeStatus.status?.directory
+  if ((continuity || freshHandover) && (!beforeStatus.ok || !effective?.model || !beforeDirectory
       || !beforeStatus.status.session || (continuity && beforeStatus.status.session !== continuity.sessionId))) {
     return { kind: "failed", error: "current model/session could not be verified before the account switch" };
   }
@@ -41,10 +51,10 @@ export async function switchCodexAccount({ agent, state, name, pane, current, ta
     if (effective?.model && (verified.status.model?.id !== effective.model
         || (effective.effort && verified.status.model?.effort !== effective.effort))) throw new Error("account switch changed the requested model or effort");
     if (continuity && verified.status.session !== continuity.sessionId) throw new Error("account switch lost the exact session");
-    if (continuity && verified.status.directory !== beforeStatus.status.directory) throw new Error("account switch changed the working directory");
-    const freshIdentity = freshHandover && identityFor(beforeStatus.status.directory, { sessionDirs: [join(target.home, "sessions")] });
+    if (continuity && statusDirectory(verified.status) !== beforeDirectory) throw new Error("account switch changed the working directory");
+    const freshIdentity = freshHandover && identityFor(beforeDirectory, { sessionDirs: [join(target.home, "sessions")] });
     if (freshHandover && (!freshIdentity || freshIdentity.sessionId !== verified.status.session
-        || verified.status.session === beforeStatus.status.session || verified.status.directory !== beforeStatus.status.directory)) {
+        || verified.status.session === beforeStatus.status.session || statusDirectory(verified.status) !== beforeDirectory)) {
       throw new Error("fresh account session identity/directory did not verify");
     }
     const accountEmail = String(verified.status.account || "").match(/[^\s()]+@[^\s()]+/u)?.[0];

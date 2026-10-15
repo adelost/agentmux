@@ -1,7 +1,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, openSync, closeSync, readSync, realpathSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
+import { codexSessionIdentityById, latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { liveRolloutWriters } from "./codex-session-guard.mjs";
 
 function prefixMatches(older, newer) {
@@ -39,6 +39,10 @@ export function transferCodexSession(dir, current, target, { discover = latestCo
     if (before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ino !== after.ino) return { ok: false, reason: "source session changed during transfer" };
     if (!prefixMatches(temporary, source.path) || statSync(temporary).size !== Number(after.size)) return { ok: false, reason: "session copy did not verify" };
     renameSync(temporary, path);
+    // Native resume selects by UUID, not by the path we copied. A probe under
+    // another cwd can share that UUID and redirect both history and cwd.
+    const unique = codexSessionIdentityById(source.sessionId, null, { sessionDirs: [join(target.home, "sessions")] });
+    if (unique?.path !== path || unique.cwd !== dir) return { ok: false, reason: "target session UUID is ambiguous or belongs to another directory; history preserved" };
     return { ok: true, sessionId: source.sessionId, path };
   } finally { if (existsSync(temporary)) unlinkSync(temporary); }
 }
