@@ -16,6 +16,8 @@ import { driveCodexStatus } from "../core/codex-status.mjs";
 import { contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
 import { findBlockingPrompt } from "../core/dismiss.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
+import { defaultDeliveryQueueDir } from "../core/delivery-queue.mjs";
+import { acquireFileLease } from "../core/file-lease.mjs";
 
 /** WHAT: Defines explicit pane-local account request keys. WHY: Keeps operator intent separate from provider quota evidence and unrelated state writers. */
 export const CODEX_ACCOUNT_REQUESTS = "codex_account_requests_v1";
@@ -67,16 +69,22 @@ export const codexAccountRequest = (state, name, pane) => state.get(`${CODEX_ACC
 
 /** WHAT: Reads and dispatches an explicit Codex account request at a verified safe boundary. WHY: Keeps busy turns, drafts, session history and selected models outside account-rotation side effects. */
 export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
-  const key = keyOf(name, pane), request = requestOf(ctx, key);
+  const key = keyOf(name, pane);
+  let request = requestOf(ctx, key);
   if (!request || !["pending", "switched"].includes(request.phase) || running.has(key)) return null;
   const deps = { ...defaults, ...options }, cfg = (options.agents || listAgents(ctx.configPath)).find(entry => entry.name === name);
-  if (!cfg || engine(cfg.panes?.[pane] || {}) !== "codex" || cfg.backend === "native" || cfg.dir !== request.dir) {
-    save(ctx, key, { ...request, phase: "blocked", reason: "configured-target-changed-or-unsupported" });
-    return { key, status: "blocked", reason: "configured-target-changed-or-unsupported" };
-  }
+  // This operation lease spans compact and restart; the compact still owns its separate session lease.
+  const operation = acquireFileLease(join(ctx.deliveryQueue.rootDir || defaultDeliveryQueueDir(),
+    `.codex-account-${encodeURIComponent(key)}.lock`));
+  if (!operation) return { key, status: "pending", reason: "account-switch-in-flight" };
   running.add(key);
   let lease = null;
   try {
+    request = requestOf(ctx, key);
+    if (!request || !["pending", "switched"].includes(request.phase)) return null;
+    if (!cfg || engine(cfg.panes?.[pane] || {}) !== "codex" || cfg.backend === "native" || cfg.dir !== request.dir) {
+      throw new Error("configured-target-changed-or-unsupported");
+    }
     const profiles = deps.profiles(), target = profiles.find(profile => profile.id === request.target);
     if (!target || !deps.authenticated(target)) throw new Error("target account needs login");
     let observed = await observe(ctx, name, pane, deps);
@@ -115,8 +123,13 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
     const prior = contextMaintenanceAttempt(ctx.state, name, pane, before);
     if (prior?.status === "ATTEMPTING") return { key, status: "pending", reason: "compact-already-in-flight" };
     const targetPane = { agent: cfg, pane: { index: pane }, engine: "codex", paneDir: dir };
-    const compact = await deps.compact(ctx, targetPane, { force: true });
-    if (!compact.ok) throw new Error(`source compact did not verify: ${compact.reason}`);
+    const compact = prior?.status === "VERIFIED" ? { ok: true } : await deps.compact(ctx, targetPane, { force: true });
+    if (!compact.ok) {
+      if (/^compact-skipped:(?:not-idle:|delivery-|composer-|recent-activity$|not-running-tmux$|session-or-activity-changed$)/u.test(compact.reason || "")) {
+        return { key, status: "pending", reason: compact.reason };
+      }
+      throw new Error(`source compact did not verify: ${compact.reason}`);
+    }
     lease = ctx.deliveryQueue.acquireSessionLease(name, pane);
     if (!lease) return { key, status: "pending", reason: "delivery-lease-busy" };
     observed = await observe(ctx, name, pane, deps);
@@ -139,7 +152,7 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
   } catch (error) {
     save(ctx, key, { ...request, phase: "blocked", reason: error.message });
     return { key, status: "blocked", reason: error.message };
-  } finally { lease?.release(); running.delete(key); }
+  } finally { lease?.release(); operation.release(); running.delete(key); }
 }
 
 /** WHAT: Stores pane/project-scoped operator switches and previews without mutation. WHY: Keeps explicit paid-account intent separate from quota-triggered automatic recovery. */

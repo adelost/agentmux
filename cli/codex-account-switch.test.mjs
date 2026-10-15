@@ -19,7 +19,7 @@ function fixture({ busy = false, dormant = false, wrongModel = false } = {}) {
     promptTransportState: async () => ({ state: "empty-idle", busy: false }),
     getContext: async () => ({ model: "gpt-6.1-sol", effort: "xhigh" }),
     restartCodex: async (_name, _pane, launch) => { calls.push({ step: "restart", ...launch }); profile = launch.profile.id; },
-  }, deliveryQueue: { list: () => [], acquireSessionLease: () => ({ release() {} }),
+  }, deliveryQueue: { rootDir: root, list: () => [], acquireSessionLease: () => ({ release() {} }),
     enqueue: job => { jobs.push(job); return { id: "continuation" }; } } };
   const options = { agents, profiles: () => profiles, authenticated: () => true, prepare: () => calls.push({ step: "prepare" }),
     live: async () => [{ key: "claw:0", engine: "codex", home: profile === "1" ? "/one" : "/two" }],
@@ -42,6 +42,43 @@ function fixture({ busy = false, dormant = false, wrongModel = false } = {}) {
 }
 
 describe("Codex operator account switches", () => {
+  it("keeps an idle-to-working race pending instead of permanently blocking migration", async () => {
+    const fx = fixture();
+    fx.options.compact = async () => ({ ok: false, reason: "compact-skipped:not-idle:working" });
+    try {
+      const result = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(result.rows[0]).toMatchObject({ status: "pending", reason: "compact-skipped:not-idle:working" });
+      expect(codexAccountRequest(fx.ctx.state, "claw", 0).phase).toBe("pending");
+      expect(fx.calls.filter(call => call.step === "restart")).toEqual([]);
+    } finally { fx.clean(); }
+  });
+  it("serializes independent CLI and bridge owners across the source compact", async () => {
+    const fx = fixture(), otherOwner = await import("./codex-account-switch.mjs?independent-owner");
+    let entered, release;
+    const started = new Promise(resolve => { entered = resolve; });
+    const finish = new Promise(resolve => { release = resolve; });
+    const compact = fx.options.compact;
+    fx.options.compact = async () => { entered(); await finish; return compact(); };
+    const first = switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+    await started;
+    try {
+      const result = await otherOwner.switchCodexAccounts(fx.ctx, ["codex:2", "claw"], {
+        ...fx.options, compact: async () => ({ ok: false, reason: "must-not-run-second-compact" }),
+      });
+      expect(result.rows[0]).toMatchObject({ status: "pending", reason: "account-switch-in-flight" });
+    } finally { release(); await first; fx.clean(); }
+  });
+  it("reuses the exact native compact receipt without another maintenance pass", async () => {
+    const fx = fixture();
+    await fx.options.compact();
+    fx.calls.length = 0;
+    fx.options.compact = async () => ({ ok: false, reason: "compact-skipped:already-attempted:compacted-above-budget" });
+    try {
+      const result = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(result.rows[0].status).toBe("switched");
+      expect(fx.calls.map(call => call.step)).toEqual(["prepare", "transfer", "restart"]);
+    } finally { fx.clean(); }
+  });
   it("compacts first and uses the real shared exact-session switch", async () => {
     const fx = fixture();
     try {
