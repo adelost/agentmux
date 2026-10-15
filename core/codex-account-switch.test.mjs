@@ -19,6 +19,23 @@ function setup({ continuity = true, wrongSession = false } = {}) {
 }
 
 feature("manual and automatic Codex account transitions share continuity verification", () => {
+  for (const composer of ["empty-idle", "foreign"]) component(`a torn native status repaint retries only with ${composer} composer`, {
+    given: ["the target starts correctly but its first native status frame is incomplete", () => {
+      const fx = setup(), read = fx.options.statusDriver;
+      let targetReads = 0;
+      fx.options.agent.promptTransportState = async () => ({ dialect: "codex", busy: false, state: composer });
+      fx.options.statusDriver = async () => {
+        if (fx.calls.at(-1)?.profile.id === "2" && ++targetReads === 1) {
+          return { ok: false, stage: "compose", error: "composer did not show a clean /status command" };
+        }
+        return read();
+      };
+      return fx;
+    }],
+    when: ["verifying the exact account switch", async fx => ({ fx, result: await switchCodexAccount(fx.options) })],
+    then: ["only an independently empty composer permits one fresh native verification", ({ result }) =>
+      expect(result.kind).toBe(composer === "empty-idle" ? "switched" : "failed")],
+  });
   component("a genuinely changed native directory still rolls back the switch", {
     when: ["the resumed session changes its working directory", async () => {
       const fx = setup(), originalStatus = fx.options.statusDriver;

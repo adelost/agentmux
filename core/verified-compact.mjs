@@ -6,6 +6,7 @@ import {
 import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
 import { compactAccessBlocker } from "./nightly-compact.mjs";
+import { isCodexCompaction } from "./codex-compaction.mjs";
 import {
   captureJsonlAppendCursor, hasJsonlEventAfterCursor,
 } from "./jsonl-append-cursor.mjs";
@@ -18,8 +19,6 @@ import {
 const CLAUDE_COMPACT_POLLS = 600;
 const CODEX_COMPACT_POLLS = 1_920;
 
-const isCodexCompaction = (event) => event?.type === "compacted"
-  || (event?.type === "event_msg" && event?.payload?.type === "context_compacted");
 const isCodexTurnClosed = (event) => event?.type === "event_msg"
   && (event?.payload?.type === "task_complete" || event?.payload?.type === "turn_aborted");
 

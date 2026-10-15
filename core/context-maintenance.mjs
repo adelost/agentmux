@@ -12,10 +12,11 @@ import { hasEmptyClaudeEpoch } from "./claude-empty-epoch.mjs";
 import { codexPromptProgress } from "./codex-user-events.mjs";
 import { regainSessionLease } from "./session-lease.mjs";
 import { finishSelfCompactRequest, selfCompactSuperseded } from "./self-compact-resume.mjs";
+import { isCodexCompaction } from "./codex-compaction.mjs";
 
 const STATE_KEY = "context_maintenance_by_pane_v1";
 const paneKey = (name, pane) => `${name}:${pane}`;
-const compactEvent = e => e?.type === "compacted" || e?.payload?.type === "context_compacted"
+const compactEvent = e => isCodexCompaction(e)
   || (e?.type === "system" && e.subtype === "compact_boundary");
 // Claude journals a typed slash command ("/compact", "/model x") as its own
 // user row. A command is not work: counting it let a quota-refused /compact

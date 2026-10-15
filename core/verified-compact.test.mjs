@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "./verified-compact.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
+import { validCodexCompactReceipt } from "./codex-launch-policy.mjs";
+import { contextMaintenanceAttempt } from "./context-maintenance.mjs";
 
 feature("verified Claude compact", () => {
   unit("Not enough messages to compact ends the wait within one poll", {
@@ -238,6 +240,28 @@ feature("verified Claude compact", () => {
 });
 
 feature("verified Codex compact", () => {
+  unit("the native ContextCompaction completion verifies and releases the same resume fence", {
+    given: ["the exact event shape observed on skyvw3 after account transfer", () => codexRollout()],
+    when: ["Codex completes compacting before its task closes", async ctx => {
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [ctx.identity.path]);
+      const data = { "skyvw:3": { sessionId: ctx.identity.sessionId, status: "ATTEMPTING", cursor } };
+      const state = { get: () => data, set: (_key, value) => Object.assign(data, value) };
+      const result = await verifiedCodexCompact({ agent: {}, agentName: "skyvw", pane: 3, paneDir: "/pane",
+        latestIdentity: () => ctx.identity, sleep: async () => {}, pollAttempts: 1,
+        sendSlash: async () => {
+          ctx.append({ timestamp: "2026-10-15T22:51:33.341Z", type: "event_msg", payload: { type: "item_completed",
+            thread_id: ctx.identity.sessionId, item: { type: "ContextCompaction", id: "native-compact-item" } } });
+          ctx.append({ type: "event_msg", payload: { type: "task_complete" } });
+          return { delivered: true };
+        } });
+      return { result, resume: validCodexCompactReceipt(result, ctx.identity.sessionId),
+        maintenance: contextMaintenanceAttempt(state, "skyvw", 3, ctx.identity) };
+    }],
+    then: ["all three readers agree on the actual boundary rather than buying another compact", ({ result, resume, maintenance }) => {
+      expect(result.ok).toBe(true); expect(resume).toBe(true); expect(maintenance.status).toBe("VERIFIED");
+    }],
+    cleanup: ctx => rmSync(ctx.root, { recursive: true, force: true }),
+  });
   unit("requires a new rollout compact event in the unchanged exact session", {
     given: ["one append-only pane rollout", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-codex-compact-"));

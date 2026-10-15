@@ -3,6 +3,7 @@ import { readCodexRolloutModel } from "./codex-rollout-model.mjs";
 import { codexPromptProgress } from "./codex-user-events.mjs";
 import { codexLaunchDecision, codexResumeContext } from "../policies/context-cost.mjs";
 import { latestConversationActivityMs } from "./pane-activity.mjs";
+import { isCodexCompaction } from "./codex-compaction.mjs";
 
 /** WHAT: Maps exact-session model and compact evidence to resume inputs. WHY: Prevents old remembered settings from hiding a later provider fallback. */
 export function codexResumeEvidence({ sessionId, observed, rollout, remembered, launch, maintenance,
@@ -51,7 +52,7 @@ export function validCodexCompactReceipt(receipt, sessionId) {
   let compacted = false;
   const prompts = codexPromptProgress();
   hasJsonlEventAfterCursor(files, receipt.cursor, (event) => {
-    if (event?.type === "compacted" || (event?.type === "event_msg" && event.payload?.type === "context_compacted")) {
+    if (isCodexCompaction(event)) {
       compacted = true;
       prompts.settle();
     } else if (prompts.see(event) === "processed") compacted = false;

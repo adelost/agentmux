@@ -24,7 +24,15 @@ export function codexAccountContinuity(dir, current, target) {
 /** WHAT: Dispatches the existing pane-local account transition and verification. WHY: Keeps manual and automatic switching on one rollback and model-preserving path. */
 export async function switchCodexAccount({ agent, state, name, pane, current, target, statusDriver,
   continuity = null, expectedEmail = null, freshHandover = null, identityFor = latestCodexSessionIdentity }) {
-  const status = () => statusDriver({ agent, name, pane });
+  const status = async () => {
+    const result = await statusDriver({ agent, name, pane });
+    if (result.ok || result.stage !== "compose") return result;
+    // The driver cleared only its own /status text. Retry a torn startup
+    // frame once, never through new work, a human draft or a modal.
+    const input = await agent.promptTransportState?.(name, pane, "");
+    return input?.dialect === "codex" && !input.busy && input.state === "empty-idle"
+      ? statusDriver({ agent, name, pane }) : result;
+  };
   if (target.id === current.id) return { kind: "same", status: await status() };
   if (continuity && !continuity.ok) return { kind: "failed", error: `continuity: ${continuity.reason}` };
   if (freshHandover && (!freshHandover.ok || !freshHandover.path || !freshHandover.text)) return { kind: "failed", error: "fresh account requires a saved handover" };
