@@ -16,21 +16,22 @@ import { loadReranker } from "./search-rerank.mjs";
 import { exitAfterGpu, gpuEnv, gpuReady, reindexRunning } from "./search-gpu.mjs";
 import { searchPassages } from "./search-passages.mjs";
 import { isTopicPath } from "./memory-topic-search.mjs";
-import { createRequire } from "node:module";
+import { acquireFileLease } from "./file-lease.mjs";
+import { createEmbedderIdle, embedderLeasePath, legacyEmbedderPid } from "./search-embedder-lifecycle.mjs";
 
-const VERSION = createRequire(import.meta.url)("../package.json").version;
+// Bump for incompatible request/response changes, not for unrelated releases.
+const PROTOCOL_VERSION = 1;
 
-const IDLE_MS = () => (Number(process.env.AMUX_EMBEDDER_IDLE_MIN) || 30) * 60_000;
+const IDLE_MS = () => Math.max(0.001, Number(process.env.AMUX_EMBEDDER_IDLE_MIN) || 2) * 60_000;
 const CONNECT_MS = 150;
 const DAEMON_HEAP_MB = 1536;
 
-// A new release never talks to a daemon still running the previous code.
 /**
- * WHAT: Names the socket for one index, model and amux version.
- * WHY: Keeps one index, model or release from answering another's queries.
+ * WHAT: Names the socket for one index, model and wire protocol.
+ * WHY: Keeps incompatible queries separate while compatible releases reuse native weights.
  */
 export function embedderSocketPath(dir = indexDir(), model = semanticModel().name) {
-  const id = createHash("sha256").update(`${dir}\0${model}\0${VERSION}`).digest("hex").slice(0, 12);
+  const id = createHash("sha256").update(`${dir}\0${model}\0${PROTOCOL_VERSION}`).digest("hex").slice(0, 12);
   return join(process.env.HOME, ".agentmux", `search-embedder-${id}.sock`);
 }
 
@@ -56,11 +57,16 @@ export async function daemonAlive({ dir = indexDir(), model = semanticModel().na
 
 /** WHAT: Schedules the daemon start in the background. WHY: Keeps the current query from waiting on a cold model load. */
 export function startEmbedder({ dir = indexDir(), model = semanticModel().name, roots = null } = {}) {
+  const lease = acquireFileLease(embedderLeasePath());
+  if (!lease) return { unavailable: "search model owner busy or starting; lexical only this time" };
+  let legacyPid;
+  try { legacyPid = legacyEmbedderPid(); } finally { lease.release(); }
+  if (legacyPid) return { unavailable: `existing search worker ${legacyPid} must finish before upgrade; lexical only this time` };
   const script = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "search-embedder.mjs");
   // A bounded V8 heap makes the long-lived daemon collect per-query garbage
   // (rerank inputs, unit scores) instead of growing; golden dev reached 5.3 GB
   // RSS without it against a 4.2 GB budget.
-  const child = spawn(process.execPath, [`--max-old-space-size=${DAEMON_HEAP_MB}`, script], {
+  const child = spawn(process.execPath, [`--max-old-space-size=${DAEMON_HEAP_MB}`, script, "--shared-owner-v1"], {
     detached: true, stdio: "ignore",
     env: { ...(gpuEnv(process.env) || process.env), AMUX_SEARCH_INDEX_DIR: dir, AMUX_SEARCH_MODEL: model,
       ...(Array.isArray(roots) ? { AMUX_SEARCH_WARM_ROOTS: JSON.stringify(roots) } : {}) },
@@ -84,7 +90,10 @@ export async function semanticQuery(query, { k = 30, roots = null, dir = indexDi
       if (!["ENOENT", "ECONNREFUSED"].includes(error.code)) {
         return { hits: [], unavailable: `semantic daemon error: ${error.message}` };
       }
-      if (!started) { start({ dir, model, roots }); started = true; }
+      if (!started) {
+        const startup = start({ dir, model, roots }); started = true;
+        if (startup?.unavailable) return { hits: [], unavailable: startup.unavailable };
+      }
       if (Date.now() >= deadline) {
         return { hits: [], unavailable: "semantic layer warming up (first query after idle); lexical only this time" };
       }
@@ -135,7 +144,24 @@ export function warmStart(rootsJson, { segments, live, search = searchPassages }
 }
 
 /** WHAT: Routes semantic and passage queries on a socket until idle. WHY: Keeps model and vectors loaded across CLI calls without a permanent process. */
-export async function serveEmbedder({ dir = indexDir(), model = semanticModel(), idleMs = IDLE_MS() } = {}) {
+export async function serveEmbedder({ dir = indexDir(), model = semanticModel(), idleMs = IDLE_MS(),
+  load = loadEmbedder, loadRanking = loadReranker, exit = exitAfterGpu } = {}) {
+  const lease = acquireFileLease(embedderLeasePath());
+  if (!lease) return null;
+  try {
+    const legacyPid = legacyEmbedderPid();
+    if (legacyPid) {
+      console.warn(`search-embedder: waiting for existing worker ${legacyPid} to exit; no second model loaded`);
+      lease.release();
+      return null;
+    }
+    const server = await serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking, exit });
+    if (!server) lease.release();
+    return server;
+  } catch (error) { lease.release(); throw error; }
+}
+
+async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking, exit }) {
   const socketPath = embedderSocketPath(dir, model.name);
   mkdirSync(dirname(socketPath), { recursive: true });
   if (existsSync(socketPath)) {
@@ -143,11 +169,12 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
     if (alive) return;
     rmSync(socketPath, { force: true });
   }
-  const embed = await loadEmbedder(model, { threads: 2 });
+  const embed = await load(model, { threads: 2 });
   // The reranker loads in the background; until then queries keep the
   // first-stage order instead of waiting. The GPU model is preferred; any
   // reason it is not used is returned with every answer, never hidden.
   let reranker = null;
+  let rerankLoading = true;
   let rerankNote = "reranker still loading";
   const loadBestReranker = async () => {
     let note = null;
@@ -155,28 +182,32 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
     else if (!gpuReady()) note = "no CUDA libraries (cuDNN or the ONNX Runtime CUDA provider in ~/.cache/agentmux); CPU reranker in use";
     else if (reindexRunning(dir)) note = "GPU busy with a reindex; CPU reranker in use";
     else {
-      try { reranker = await loadReranker("gpu"); rerankNote = null; return; }
+      try { reranker = await loadRanking("gpu"); rerankNote = null; return; }
       catch (error) { note = `GPU reranker unavailable (${String(error.message).split("\n")[0]}); CPU reranker in use`; }
     }
-    reranker = await loadReranker("cpu");
+    reranker = await loadRanking("cpu");
     rerankNote = note;
   };
-  loadBestReranker().catch((error) => { rerankNote = `reranker failed to load: ${error.message}`; });
+  loadBestReranker().catch((error) => { rerankNote = `reranker failed to load: ${error.message}`; })
+    .finally(() => { rerankLoading = false; });
   const rerankInfo = () => reranker ? { kind: reranker.kind, candidates: reranker.candidates, perFile: reranker.perFile, semanticK: reranker.semanticK,
     weight: reranker.weight, note: rerankNote } : { note: rerankNote };
   const segments = new Map();
   const live = createLiveIndex({ dir, embed });
-  let idleTimer;
+  let idle;
   // allowHalfOpen: the client half-closes after its request; the answer
   // still has to go back on the same connection.
   const server = createServer({ allowHalfOpen: true }, (socket) => {
-    clearTimeout(idleTimer);
+    socket.setTimeout(30_000, () => socket.destroy());
+    socket.on("error", () => socket.destroy());
     let data = "";
     socket.on("data", (chunk) => { data += chunk; });
     socket.on("end", async () => {
+      let active = false;
       try {
         const { query, k = 30, ping, op, roots, max, workspace, dates = [], texts, perFile } = JSON.parse(data);
         if (ping) { socket.end("{}"); return; }
+        idle.begin(); active = true;
         if (op === "rerank") {
           if (!reranker || !Array.isArray(texts)) { socket.end(JSON.stringify({ scores: null, unavailable: rerankNote })); return; }
           const timing = {};
@@ -210,22 +241,26 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
       } catch (error) {
         socket.end(JSON.stringify({ hits: [], unavailable: `semantic query failed: ${error.message}` }));
       } finally {
-        idleTimer = setTimeout(() => server.close(), idleMs);
+        if (active) idle.finish();
       }
     });
   });
+  idle = createEmbedderIdle({ idleMs, busy: () => rerankLoading || live.pendingFiles() > 0, close: () => server.close() });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(socketPath, resolve);
   });
   live.index();
-  idleTimer = setTimeout(() => server.close(), idleMs);
+  idle.arm();
   // Warm start: parse every note and scan for edited files while the
   // reranker loads, so the first real question after an idle exit does not
   // pay for it (it took 9.4 s instead of ~1.5 s).
   setImmediate(() => warmStart(process.env.AMUX_SEARCH_WARM_ROOTS, { segments, live }));
   server.on("close", () => {
+    idle.cancel();
     rmSync(socketPath, { force: true });
-    exitAfterGpu(0);
+    lease.release();
+    exit(0);
   });
+  return server;
 }

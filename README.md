@@ -267,6 +267,17 @@ or Vorbis bytes in Ogg (otherwise WAV), with at most
 three concurrent calls to `~/bin/transcribe`. All parts must succeed; any
 Whisper fallback is labelled in both the pane and Discord transcript.
 
+### Shared search model owner
+
+Search reuses one per-user model owner through a kernel-backed lease acquired
+before native weights load. Compatible package releases share a protocol
+socket; incompatible protocols or another index wait rather than load a second
+model. The default idle exit is two minutes (`AMUX_EMBEDDER_IDLE_MIN` overrides
+it). Health pings do not extend it; active queries, model loading and background
+index work prevent shutdown. An older pre-lease worker is left running and
+new callers report an explicit lexical-only handover until it finishes.
+The V8 heap flag is not an RSS limit; native model memory is outside that cap.
+
 ### Suggestions human-comment relay
 
 An optional one-minute poller routes unanswered human comments from private
