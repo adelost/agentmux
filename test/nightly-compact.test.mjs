@@ -3,11 +3,11 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nightlyCompactPolicy, nightlyCompactDecision, nightlyCompactOutcome, nightlyUnresolvedCount, compactAccessBlocker } from "../core/nightly-compact.mjs";
-import { runNightlyCompact } from "../cli/nightly-compact.mjs";
+import { runNightlyCompact, reconcileNightlyCompactReport } from "../cli/nightly-compact.mjs";
 import { cmdDream } from "../cli/dream.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { parseConfig, generateAgentsYaml } from "../sync.mjs";
-import { rememberContextCompact } from "../core/context-maintenance.mjs";
+import { beginContextCompact, rememberContextCompact } from "../core/context-maintenance.mjs";
 import { createState } from "../core/state.mjs";
 
 const now = () => Date.parse("2026-09-07T02:00:00Z");
@@ -37,6 +37,60 @@ function fixture() {
 }
 
 feature("nightly context budget", () => {
+  component("repairs only recorded uncertainty using native proof, preserving the source and work fences", {
+    when: ["a saved pass meets a late boundary, a changed session or later authored work", () => {
+      return ["verified", "changed-session", "new-work", "above-budget"].map(mode => {
+        const fx = fixture(), journal = join(fx.root, "session.jsonl"), path = join(fx.root, "saved.json");
+        writeFileSync(journal, "");
+        fx.ctx.state = createState(join(fx.root, "state.json"));
+        beginContextCompact(fx.ctx.state, "claw", 4, { sessionId: "same-session", path: journal });
+        writeFileSync(journal, JSON.stringify({ type: "system", subtype: "compact_boundary" }) + "\n"
+          + (mode === "new-work" ? JSON.stringify({ type: "user", message: { content: "A new task" } }) + "\n" : ""));
+        const original = JSON.stringify({ dateKey: "2026-09-07", policy, unresolved: 1,
+          dream: { runId: "current-dream", sourceSha256: "a".repeat(64) }, rows: [{ pane: "claw:4", sessionId: "same-session",
+            sessionPath: journal, status: mode === "above-budget" ? "compacted-above-budget" : "unverified", beforeTokens: 227000, afterTokens: 227000 }] });
+        writeFileSync(path, original);
+        const agents = [{ name: "claw", dir: fx.root, panes: Array.from({ length: 5 }, () => ({ cmd: "claude" })) }];
+        try {
+          const result = reconcileNightlyCompactReport(fx.ctx, path, { agents, now,
+            identityFor: () => ({ sessionId: mode === "changed-session" ? "other-session" : "same-session", path: journal }) });
+          const report = JSON.parse(readFileSync(result.path));
+          return { unresolved: result.unresolved, sourceUnchanged: readFileSync(path, "utf8") === original,
+            sameDream: report.dream.runId === "current-dream", calls: fx.calls() };
+        } finally { fx.clean(); }
+      });
+    }],
+    then: ["only the same no-new-work generation resolves, with zero model calls", results => {
+      expect(results.map(result => result.unresolved)).toEqual([0, 1, 1, 1]);
+      expect(results.every(result => result.sourceUnchanged && result.sameDream && result.calls === 0)).toBe(true);
+    }],
+  });
+
+  component("reconciles an unmeasured compact from its exact verified generation without another call", {
+    when: ["the native boundary exists but Claude has no post-compact token reading yet", async () => {
+      const fx = fixture(), journal = join(fx.root, "session.jsonl");
+      writeFileSync(journal, "");
+      fx.ctx.state = createState(join(fx.root, "state.json"));
+      fx.change({ sessionPath: journal });
+      fx.deps.agents = [{ name: "claw", dir: fx.root, backend: "tmux", panes: Array.from({ length: 5 }, () => ({ cmd: "claude" })) }];
+      fx.deps.reconcileIdentity = () => ({ sessionId: "same-session", path: journal });
+      fx.deps.compact = async ({ agent }) => {
+        await agent.sendOnly("claw", "/compact", 4);
+        fx.change({ tokens: null });
+        return { ok: true, sessionId: "same-session", compactBoundary: true,
+          cursor: { positions: { [journal]: 0 } } };
+      };
+      try { return { result: await runNightlyCompact(fx.ctx, {}, fx.deps), calls: fx.calls() }; }
+      finally { fx.clean(); }
+    }],
+    then: ["the existing shared verified receipt resolves uncertainty without pretending to measure tokens", ({ result, calls }) => {
+      expect(result.unresolved).toBe(0);
+      expect(result.rows[0]).toMatchObject({ status: "already-compacted", afterTokens: null,
+        previousOutcome: { status: "compacted-unmeasured" } });
+      expect(calls).toBe(1);
+    }],
+  });
+
   component("binds an existing maintenance report to the verified Dream run", {
     when: ["Dream finishes and its maintenance observes a pane already within budget", async () => {
       const fx = fixture();

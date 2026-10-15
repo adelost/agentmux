@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "../core/context-maintenance.mjs";
 import { listAgents, loadConfig, findChannelForPane } from "./config.mjs";
 import { listPanes } from "./tmux.mjs";
@@ -110,6 +110,40 @@ async function mirror(ctx, target, command) {
   if (!receipts?.length) throw new Error("compact-mirror-unverified");
 }
 
+function reconcileRows(ctx, rows, { agents, identityFor = latestPaneSessionIdentity }) {
+  return rows.map(row => {
+    if (!row.sessionId || !["unverified", "compacted-unmeasured"].includes(row.status)) return row;
+    const [name, number] = row.pane.split(":"), pane = Number(number);
+    const agent = agents.find(candidate => candidate.name === name);
+    const engine = dialectFor(agent, { index: pane });
+    if (!agent || !["claude", "codex"].includes(engine)) return row;
+    const identity = identityFor(engine, panePathFor(agent, pane));
+    if (identity?.sessionId !== row.sessionId || (row.sessionPath && identity.path !== row.sessionPath)) return row;
+    const record = contextMaintenanceAttempt(ctx.state, name, pane, identity);
+    if (record?.status !== "VERIFIED") return row;
+    return { ...row, status: "already-compacted", sharedStatus: "VERIFIED", afterTokens: null,
+      reason: "compact-already-verified-without-new-work",
+      previousOutcome: { status: row.status, reason: row.reason ?? null, afterTokens: row.afterTokens ?? null } };
+  });
+}
+
+/** WHAT: Stores a reconciled copy of one recorded maintenance pass. WHY: Prevents later fleet work from becoming a new moving target when exact native receipts resolve that pass's uncertainty. */
+export function reconcileNightlyCompactReport(ctx, path, { agents = listAgents(ctx.configPath),
+  identityFor = latestPaneSessionIdentity, now = Date.now } = {}) {
+  const bytes = readFileSync(path), report = JSON.parse(bytes);
+  if (!Array.isArray(report.rows) || !report.policy || !/^\d{4}-\d{2}-\d{2}$/u.test(report.dateKey || "")) {
+    throw new Error("nightly-report-invalid");
+  }
+  const rows = reconcileRows(ctx, report.rows, { agents, identityFor });
+  const reconciled = rows.filter((row, index) => row !== report.rows[index]).length;
+  const unresolved = nightlyUnresolvedCount(rows, report.policy);
+  if (!reconciled) return { path, unresolved, reconciled: 0 };
+  const output = join(dirname(path), `${randomUUID()}.json`);
+  writeReport(output, { ...report, rows, unresolved, observedAt: new Date(now()).toISOString(),
+    reconciledFrom: { path, sha256: createHash("sha256").update(bytes).digest("hex") } });
+  return { path: output, unresolved, reconciled };
+}
+
 /** WHAT: Routes one idle context pass per night. WHY: Keeps the 80k budget independent of Dream activity and the 60-percent daytime trigger. */
 export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
   const now = dependencies.now || Date.now;
@@ -117,14 +151,15 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
   const policy = dependencies.policy || nightlyCompactPolicy((dependencies.runtimeConfig || loadConfig(ctx.configPath))?.dream?.compact);
   const label = dependencies.label || "Nightly compact";
   if (!policy.enabled) return { disabled: true, rows: [] };
-  let targets = dependencies.targets || await discoverCompactTargets(ctx, dependencies.agents || listAgents(ctx.configPath));
+  const agents = dependencies.agents || listAgents(ctx.configPath);
+  let targets = dependencies.targets || await discoverCompactTargets(ctx, agents);
   if (dependencies.onlyTarget) targets = targets.filter((target) => target.agent.name === dependencies.onlyTarget.agent && target.pane.index === dependencies.onlyTarget.pane);
   if (dependencies.onlyTarget && !targets.length) throw new Error("No running configured coding pane matches the nightly target");
   const path = dependencies.path || join(homedir(), ".agentmux", "nightly-compact", dateKey);
   const observe = dependencies.observe || observeNightlyPane;
   const sleep = dependencies.sleep || pause;
   const queue = dependencies.queue || createDeliveryQueue({ initialize: !flags.dry });
-  const rows = [];
+  let rows = [];
   console.log(`${label}: >${policy.maxTokens} tokens, idle >=${policy.idleMinutes}min, at most one attempt/session/night${flags.dry ? " (dry)" : ""}.`);
   for (const target of targets) {
     const key = `${target.agent.name}:${target.pane.index}`;
@@ -225,6 +260,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       rows.push({ pane: key, ...row });
     } finally { lease.release(); }
   }
+  if (!flags.dry) rows = reconcileRows(ctx, rows, { agents, identityFor: dependencies.reconcileIdentity });
   for (const row of rows) {
     if (row.status !== "skipped" || (row.beforeTokens > policy.maxTokens)) {
       console.log(`  ${row.pane} ${row.status} ${row.beforeTokens ?? "?"} -> ${row.afterTokens ?? "?"} tokens${row.reason ? ` (${row.reason})` : ""}`);

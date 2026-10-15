@@ -168,6 +168,12 @@ an old summary alone never creates this maintenance proof.
 The newest matching maintenance report controls health; an earlier failed
 observation does not override a later verified pass. Digest validation remains
 independent, so uncertain maintenance never makes a valid summary unrecoverable.
+Unverified/unmeasured rows can reconcile through the shared exact-session,
+no-new-work native compact proof. The normal pass checks that proof before
+reporting; `reconcileNightlyCompactReport` can also store a linked copy of a
+recorded pass without starting any new compacts or surveying later fleet work.
+Original reports and outcomes remain intact. Failed or measured-above-budget
+rows are not converted into successes.
 
 ## Finish an interrupted controller without another model turn
 
