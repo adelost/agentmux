@@ -70,6 +70,10 @@ Read each view for what it is:
 - Nudge only on a concrete gap: wrong scope, missing delivery, an obsolete
   dependency, a blocked resource handoff, an idle owner with real unfinished
   work.
+- An owner waiting on the human for a call it may make itself (fleet rule 11)
+  is a stalled owner. When the human says work is stuck on questions, read
+  every owner's latest reply for such waits, tell each owner to decide, and
+  keep only the kinds rule 11 reserves for the human.
 - Do not resend a brief the owner already has, or redo their diagnostic.
 - Keep the end-to-end owner. Nearby steps stay one owner turn, not a chain of
   subassignments. When code is banked or hardware is released, tell the

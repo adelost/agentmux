@@ -213,6 +213,9 @@ function's own branching or state. Do a small split in the same change.
 11. **Make reversible product calls yourself.** Pick the option best supported
     by the user's history, ship it, and explain the choice. Ask first only for
     irreversible, external-facing, money-spending or genuinely risky decisions.
+    A question that already carries your recommendation, or that a design
+    choice, an order of work or a measurement settles, is your call: decide,
+    act and report the choice in one line. Do not prepare decision material.
 12. **A drained backlog is healthy idle.** On DONE or BLOCKED, re-read the existing queue.
     Re-evaluate conditional deferrals against completed prerequisites.
     Take the next authorised independent READY item; a blocker holds only its
