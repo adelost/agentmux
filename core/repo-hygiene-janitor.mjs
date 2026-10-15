@@ -56,12 +56,13 @@ export function reviewRepo({ common, panes, now, sinceMs, today, firstSeen, revi
   const rows = closedLedgerRows(facts);
   const worktrees = staleWorktrees(facts);
   const originCandidates = originReviewedElsewhere ? [] : [...mergedBranches(facts), ...unreferencedPlans(facts)];
-  const retiring=retirementContext ? retirableWorktrees({common,branch,now,safety:retirementContext}) : [];
+  const retirementSkipped=[];
+  const retiring=retirementContext ? retirableWorktrees({common,branch,now,safety:retirementContext,onSkipped:(entry)=>retirementSkipped.push(entry)}) : [];
   const retiringPaths=new Set(retiring.map(({target})=>target));
   const candidates = [...originCandidates, ...rows.candidates,
     ...worktrees.candidates.filter(({target})=>!retiringPaths.has(target)),...retiring];
   return {
-    ...reviewed, origin, originReviewedElsewhere, decisions: decideCandidates(touchedToday, candidates),
+    ...reviewed, origin, originReviewedElsewhere, decisions: decideCandidates(touchedToday, candidates),retirementSkipped,
     unreadable: [...rows.unreadable, ...worktrees.unreadable], seen: rows.seen,
   };
 }

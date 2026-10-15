@@ -28,6 +28,7 @@ function repoSection(review, entries) {
     ...(entries.length ? ["| Cell | Would | Target | Age (days) | Restore |", "|---|---|---|---|---|", ...actedRows(entries), ""] : []),
     `Decided NOTHING: ${nothing.length}${nothing.length ? ` (${cellCounts(nothing)})` : ""}.`,
     ...review.unreadable.map(({ kind, target, problem }) => `Unreadable ${kind}: ${target} (${problem}).`), "",
+    ...(review.retirementSkipped??[]).map(({target,reasons})=>`Retirement skipped: ${target} (${reasons.join("; ")}).`),"",
   ];
 }
 

@@ -428,6 +428,18 @@ provision. Skips are never green. The gate also exports `UV_LOCKED=1` and hashes
 all tracked npm/uv locks before and after execution, preventing an otherwise
 green test command from dirtying the worktree's dependency contract.
 
+The nightly janitor enables only `worktree.retire`. Its other table actions
+remain reports. `node bin/janitor.mjs --repo PATH --retire-safe-worktrees`
+admits a registered branch checkout only when its HEAD is in fetched origin
+trunk, it is clean, it has no process cwd, open descriptor or mapping, and no
+non-dependency metadata changed in 24 hours. Recent source-root receipts and
+guard units protect their checkouts; `skyvw0-verify` stays protected.
+Read-only scanners use noninteractive sudo to inspect other UIDs. Any unknown
+process or receipt evidence holds all removals. Removal itself runs as the
+user with normal `git worktree remove`, never force. The janitor syncs the
+exact SHA and restore command to `~/.agentmux/janitor/retirements.jsonl`
+before removal, then records the result. Without the flag it remains read-only.
+
 `proof` takes an argv-only JSON recipe. It creates clean detached base/head
 worktrees, asserts a named fixture anchor before applying the test-only patch,
 rejects a no-op, runs the same real gate exactly once red and once green, and

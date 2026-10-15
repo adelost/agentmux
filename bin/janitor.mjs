@@ -9,7 +9,7 @@ import { runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 import { loadRuntimeEnv } from "../core/runtime-env.mjs";
 import { commonDirOf, mainWorktreeOf, paneDirs, withChildDirs } from "../core/repo-hygiene-facts.mjs";
 import { ledgerEntries, reviewRepo, retireWorktrees } from "../core/repo-hygiene-janitor.mjs";
-import { retirementSafety } from "../core/worktree-retirement.mjs";
+import { retirementSafety,registeredWorktrees } from "../core/worktree-retirement.mjs";
 import { redCount, renderReport, withOpenNowNote } from "../core/repo-hygiene-report.mjs";
 
 const USAGE = "Usage: janitor.mjs [--repo PATH]... [--state-dir PATH] [--retire-safe-worktrees]\n"
@@ -82,9 +82,15 @@ function main() {
   const receiptRoots=[join(homedir(),"lsrc/.artifacts"),join(homedir(),"lsrc/.agents"),
     join(homedir(),".openclaw/workspace/projects"),join(homedir(),".agentmux"),
     join(homedir(),".config/systemd/user"),"/tmp"];
+  const retirementContext=options.retire && commons.length ? retirementSafety(commons[0],
+    [...receiptRoots,...commons.map(dirname)],started.getTime(),commons.flatMap((common)=>registeredWorktrees(common).map(({path})=>path))) : undefined;
+  if(retirementContext) {
+    writeAtomic(join(options.stateDir,"retirement-safety.json"),`${JSON.stringify({at:started.toISOString(),...retirementContext},null,2)}\n`);
+    for(const error of retirementContext.errors) warnings.push(`retirement held: ${JSON.stringify(error)}`);
+    if(retirementContext.errors.length) process.exitCode=1;
+  }
   const reviews = commons.map((common) => {
     try {
-      const retirementContext=options.retire ? retirementSafety(common,[...receiptRoots,dirname(common)],started.getTime()) : undefined;
       return reviewRepo({ common, panes, now: started.getTime(), sinceMs, today, firstSeen, reviewedOrigins, retirementContext });
     } catch (error) {
       return { common, error: firstLine(error) };
@@ -94,7 +100,7 @@ function main() {
     ledgerEntries({ repo: review.common, decisions: review.decisions ?? [], at: started.toISOString() })]));
   const entries = [...entriesByRepo.values()].flat();
   const retired=options.retire ? reviews.filter(({error,skipped})=>!error&&!skipped).flatMap((review)=>
-    retireWorktrees({review,journal:join(options.stateDir,"retirements.jsonl"),receiptRoots:[...receiptRoots,dirname(review.common)]})) : [];
+    retireWorktrees({review,journal:join(options.stateDir,"retirements.jsonl"),safety:retirementContext})) : [];
   if (entries.length) appendFileSync(ledgerPath, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
   const seen = Object.fromEntries(Object.entries(firstSeen).filter(([key]) => !reviews.some((review) => review.seen && key.startsWith(`${review.common}#`))));
   writeAtomic(seenPath, `${JSON.stringify(Object.assign(seen, ...reviews.map((review) => review.seen ?? {})), null, 2)}\n`);

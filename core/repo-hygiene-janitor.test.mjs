@@ -79,7 +79,7 @@ feature("the repo-hygiene janitor decides every candidate by the table and touch
       const review = reviewRepo({ common:ctx.common, panes:[], now:ctx.now, sinceMs:0,
         today:new Date(ctx.now).toISOString().slice(0,10), firstSeen:{}, reviewedOrigins:new Set(), retirementContext:ctx.safety });
       const decision = review.decisions.find(({target}) => target === ctx.target);
-      expect(decision?.values.action).toBe("RETIRE_WORKTREE");
+      expect(decision?.values.action,JSON.stringify(review.retirementSkipped)).toBe("RETIRE_WORKTREE");
       const journal = join(ctx.root, "retire.jsonl");
       const retired = janitor.retireWorktrees({review, journal, now:ctx.now, safety:ctx.safety,readProcesses:()=>ctx.safety});
       return {ctx, retired, journal:readFileSync(journal,"utf8")};

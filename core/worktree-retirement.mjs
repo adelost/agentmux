@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync,
-  openSync, readdirSync, readSync, readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, closeSync, fsyncSync, lstatSync, mkdirSync,
+  openSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { processPathReferences } from "./process-path-references.mjs";
+import { processPathReferences, receiptPathReferences } from "./process-path-references.mjs";
 
 const DAY = 86400000;
 const git = (common, args) => execFileSync("git", [`--git-dir=${common}`, ...args],
@@ -36,52 +36,13 @@ export function registeredWorktrees(common) {
 
 /** WHAT: Reads recent source-root bindings from receipts and units. WHY: Keeps the earlier cleanup's protected release and qualification roots alive. */
 export function receiptReferences(targets, roots, {now=Date.now()}={}) {
-  const protectedPaths = new Set(); const errors = [];
-  const targetSet=new Set(targets);
-  const record=(bound)=>{
-    for(let cursor=resolve(bound);;cursor=dirname(cursor)) {
-      if(targetSet.has(cursor)) protectedPaths.add(cursor);
-      if(cursor===dirname(cursor)) break;
-    }
-  };
-  const cutoff = now - 3 * DAY;
-  const binding = /(?:["']?(?:ROOT|root|sourceRoot|source[_-]root|repoRoot|cwd|WorkingDirectory)["']?)\s*[:=]\s*["']?(\/[^\s"'`,;\]}]+)/gu;
-  const scan = (path) => {
-    try {
-      const stat = lstatSync(path);
-      if (stat.isSymbolicLink()) return;
-      if (stat.isDirectory()) {
-        if (["node_modules",".git",".venv","__pycache__"].includes(path.split("/").at(-1))) return;
-        for (const name of readdirSync(path)) scan(join(path,name));
-      } else if (stat.isFile() && stat.mtimeMs >= cutoff
-        && /\.(?:jsonl?|md|txt|log|sh|service|timer|yaml|yml)$/u.test(path)) {
-        if (/\/worktree-cleanup-[^/]+\/references\.json$/u.test(path)) {
-          const prior=JSON.parse(readFileSync(path,"utf8"));
-          for(const [root,refs] of Object.entries(prior.references??{}))
-            if(refs.some(({mtime})=>mtime*1000>=cutoff))
-              for(const target of targets) if(inside(root,target)||inside(target,root)) protectedPaths.add(target);
-        }
-        const fd = openSync(path,"r"); const buffer=Buffer.alloc(65536); let carry="";
-        try {
-          let count;
-          while ((count=readSync(fd,buffer,0,buffer.length,null))) {
-            const text=carry+buffer.toString("utf8",0,count);
-            for (const match of text.matchAll(binding)) record(match[1]);
-            carry=text.slice(-8192);
-          }
-        } finally { closeSync(fd); }
-      }
-    } catch (error) { if(error.code!=="ENOENT") errors.push({path,error:error.message}); }
-  };
-  roots.filter(existsSync).forEach(scan);
-  return {protectedPaths:[...protectedPaths],errors};
+  return receiptPathReferences(targets,roots,now);
 }
 
 /** WHAT: Reads complete process and receipt evidence. WHY: Prevents an unreadable safety boundary from authorizing removal. */
-export function retirementSafety(common, roots, now=Date.now()) {
-  const targets=registeredWorktrees(common).map(({path})=>path);
+export function retirementSafety(common, roots, now=Date.now(), targets=registeredWorktrees(common).map(({path})=>path)) {
   const processes=processPathReferences(targets);
-  const allRoots=[...new Set([...roots,...targets.map(dirname)])];
+  const allRoots=[...new Set([...roots,...targets])];
   const minimalRoots=allRoots.filter((path)=>!allRoots.some((other)=>other!==path&&inside(path,other)));
   const receipts=receiptReferences(targets,minimalRoots,{now});
   return {holders:processes.holders,protectedPaths:receipts.protectedPaths,
@@ -100,6 +61,7 @@ export function retirementEligibility({common,branch,candidate,now=Date.now(),sa
     if(realpathSync(path)!==resolve(path)) reasons.push("noncanonical checkout path");
     if(git(common,["merge-base","--is-ancestor",sha,`origin/${branch}`])!=="") reasons.push("not merged and pushed");
   } catch { reasons.push("not merged and pushed"); }
+  if(reasons.length) return {ok:false,reasons};
   try {
     const status=execFileSync("git",["-C",path,"status","--porcelain","--untracked-files=all"],{encoding:"utf8",timeout:30000});
     if(status.trim()) reasons.push("dirty");
@@ -109,8 +71,12 @@ export function retirementEligibility({common,branch,candidate,now=Date.now(),sa
 }
 
 /** WHAT: Collects candidates admitted by every retirement guard. WHY: Keeps unsafe worktrees out of the single acting decision cell. */
-export function retirableWorktrees({common,branch,now,safety}) {
-  return registeredWorktrees(common).filter((candidate)=>retirementEligibility({common,branch,now,safety,candidate}).ok)
+export function retirableWorktrees({common,branch,now,safety,onSkipped=()=>{}}) {
+  return registeredWorktrees(common).filter((candidate)=>{
+    const verdict=retirementEligibility({common,branch,now,safety,candidate});
+    if(!verdict.ok) onSkipped({target:candidate.path,reasons:verdict.reasons});
+    return verdict.ok;
+  })
     .map(({path,sha,branch:name})=>({kind:"RETIRABLE_WORKTREE",target:path,sha,ageDays:Math.floor((now-worktreeLastChange(path))/DAY),
       restore:`git -C ${quote(dirname(common))} worktree add --detach ${quote(path)} ${quote(sha)} # original branch ${name}`}));
 }
