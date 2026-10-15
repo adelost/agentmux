@@ -14,10 +14,11 @@ export function codexAccountContinuity(dir, current, target) {
 
 /** WHAT: Dispatches the existing pane-local account transition and verification. WHY: Keeps manual and automatic switching on one rollback and model-preserving path. */
 export async function switchCodexAccount({ agent, state, name, pane, current, target, statusDriver,
-  continuity = null, expectedEmail = null }) {
+  continuity = null, expectedEmail = null, freshHandover = null, identityFor = latestCodexSessionIdentity }) {
   const status = () => statusDriver({ agent, name, pane });
   if (target.id === current.id) return { kind: "same", status: await status() };
   if (continuity && !continuity.ok) return { kind: "failed", error: `continuity: ${continuity.reason}` };
+  if (freshHandover && (!freshHandover.ok || !freshHandover.path || !freshHandover.text)) return { kind: "failed", error: "fresh account requires a saved handover" };
   const idle = await prepareCodexIdle({ agent, name, pane });
   if (!idle.ok) return { kind: "failed", error: `${idle.stage}: ${idle.error}` };
   const previousOverride = codexModelOverride(state, name, pane);
@@ -26,24 +27,31 @@ export async function switchCodexAccount({ agent, state, name, pane, current, ta
   const effective = beforeStatus.ok && beforeStatus.status.model?.id
     ? { model: beforeStatus.status.model.id, effort: beforeStatus.status.model.effort }
     : previousOverride || (context?.model ? { model: context.model, effort: context.effort ?? null } : null);
-  if (continuity && (!effective?.model || !beforeStatus.status?.directory || beforeStatus.status?.session !== continuity.sessionId)) {
+  if ((continuity || freshHandover) && (!beforeStatus.ok || !effective?.model || !beforeStatus.status?.directory
+      || !beforeStatus.status.session || (continuity && beforeStatus.status.session !== continuity.sessionId))) {
     return { kind: "failed", error: "current model/session could not be verified before the account switch" };
   }
   setCodexProfile(state, name, pane, target.id);
   if (effective?.model) setCodexModelOverride(state, name, pane, effective.model, effective.effort);
   try {
     await agent.restartCodex(name, pane, { profile: target, model: effective?.model || null, effort: effective?.effort || null,
-      ...(continuity ? { resumeSessionId: continuity.sessionId } : {}) });
+      ...(freshHandover ? { newSession: true } : continuity ? { resumeSessionId: continuity.sessionId } : {}) });
     const verified = await status();
     if (!verified.ok) throw new Error(`native status: ${verified.stage}: ${verified.error}`);
     if (effective?.model && (verified.status.model?.id !== effective.model
         || (effective.effort && verified.status.model?.effort !== effective.effort))) throw new Error("account switch changed the requested model or effort");
     if (continuity && verified.status.session !== continuity.sessionId) throw new Error("account switch lost the exact session");
     if (continuity && verified.status.directory !== beforeStatus.status.directory) throw new Error("account switch changed the working directory");
+    const freshIdentity = freshHandover && identityFor(beforeStatus.status.directory, { sessionDirs: [join(target.home, "sessions")] });
+    if (freshHandover && (!freshIdentity || freshIdentity.sessionId !== verified.status.session
+        || verified.status.session === beforeStatus.status.session || verified.status.directory !== beforeStatus.status.directory)) {
+      throw new Error("fresh account session identity/directory did not verify");
+    }
     const accountEmail = String(verified.status.account || "").match(/[^\s()]+@[^\s()]+/u)?.[0];
     if (expectedEmail && accountEmail !== expectedEmail) throw new Error("the new account identity could not be verified");
     if (verified.status.model?.id) setCodexModelOverride(state, name, pane, verified.status.model.id, verified.status.model.effort);
-    return { kind: "switched", status: verified };
+    return { kind: "switched", status: verified, ...(freshHandover ? { fresh: true, path: freshIdentity.path,
+      text: freshHandover.text, handoverPath: freshHandover.path } : {}) };
   } catch (error) {
     let rollbackError = null;
     try {
@@ -54,7 +62,7 @@ export async function switchCodexAccount({ agent, state, name, pane, current, ta
       if (previous?.model) setCodexModelOverride(state, name, pane, previous.model, previous.effort);
       else clearCodexModelOverride(state, name, pane);
       await agent.restartCodex(name, pane, { profile: current, model: previous?.model || null, effort: previous?.effort || null,
-        ...(continuity ? { resumeSessionId: continuity.sessionId } : {}) });
+        ...(continuity || freshHandover ? { resumeSessionId: continuity?.sessionId || beforeStatus.status.session } : {}) });
     } catch (rollback) { rollbackError = rollback.message; }
     return { kind: "failed", error: error.message, rollbackError };
   }

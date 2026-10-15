@@ -20,7 +20,7 @@ export function nightlyCompactPolicy(value) {
 }
 
 /** WHAT: Checks idle contexts by tokens. WHY: Prevents a large million-token pane escaping through a low percentage. */
-export function nightlyCompactDecision(facts, policy, previous = null) {
+export function nightlyCompactDecision(facts, policy, previous = null, { force = false } = {}) {
   if (!policy.enabled) return "disabled";
   if (!["claude", "codex"].includes(facts.engine)) return "compact-receipt-unsupported";
   if (facts.backend !== "tmux" || facts.running !== true) return "not-running-tmux";
@@ -34,7 +34,7 @@ export function nightlyCompactDecision(facts, policy, previous = null) {
     return "compact-quality-unverified-or-blocked";
   }
   if (!Number.isFinite(facts.tokens) || facts.tokens < 0) return "context-tokens-unknown";
-  if (facts.tokens <= policy.maxTokens) return "within-budget";
+  if (!force && facts.tokens <= policy.maxTokens) return "within-budget";
   if (!Number.isFinite(facts.idleMs)) return "activity-unknown";
   if (facts.idleMs < policy.idleMinutes * 60_000) return "recent-activity";
   return null;

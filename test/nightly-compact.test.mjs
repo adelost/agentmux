@@ -37,6 +37,15 @@ function fixture() {
 }
 
 feature("nightly context budget", () => {
+  unit("an explicit account compact bypasses only the size threshold", {
+    when: ["forcing a compact for a small known idle context and unsafe contexts", () => [
+      { ...facts(), tokens: 0 }, { ...facts(), tokens: null }, { ...facts(), status: "working" },
+      { ...facts(), composerEmpty: false }, { ...facts(), queued: 1 },
+    ].map(item => nightlyCompactDecision(item, policy, null, { force: true }))],
+    then: ["known idle zero is admissible but every safety boundary remains", results => {
+      expect(results[0]).toBeNull(); expect(results.slice(1).every(Boolean)).toBe(true);
+    }],
+  });
   component("repairs only recorded uncertainty using native proof, preserving the source and work fences", {
     when: ["a saved pass meets a late boundary, a changed session or later authored work", () => {
       return ["verified", "changed-session", "new-work", "above-budget"].map(mode => {

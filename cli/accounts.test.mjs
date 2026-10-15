@@ -2,6 +2,19 @@ import { feature, unit, expect } from "bdd-vitest";
 import { cmdAccounts, runQuotaCommand } from "./accounts.mjs";
 
 feature("account subscription CLI", () => {
+  unit("routes a Codex pane switch and dry-run through the shared safe account path", {
+    when: ["requesting an explicit target without running a provider", async () => {
+      const calls = [], ctx = { agent: {}, deliveryQueue: {} };
+      const result = await cmdAccounts(["switch", "codex:2", "claw", "-p", "5", "--dry"], ctx,
+        { switchCodex: async (...args) => { calls.push(args); return { status: "DRY-RUN" }; } });
+      return { result, calls, ctx };
+    }],
+    then: ["the exact pane and nonmutating mode reach the existing boundary", ({ result, calls, ctx }) => {
+      expect(result.status).toBe("DRY-RUN");
+      expect(calls).toEqual([[ctx, ["codex:2", "claw", "-p", "5", "--dry"]]]);
+    }],
+  });
+
   unit("help is offline and does not refresh credentials", {
     given: ["read functions forbidden", () => ({ output: () => {}, readSnapshot: () => { throw new Error("network forbidden"); } })],
     when: ["reading both help entries", async options => [await runQuotaCommand(["--help"], options), await cmdAccounts(["--help"], options)]],

@@ -8,7 +8,7 @@ import { parseCodexPaneReading } from "./codex-status.mjs";
 import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 
 /** WHAT: Saves exact task and reply evidence before a fresh account session. WHY: Prevents new context from inventing or repeating completed operational work. */
-export function prepareCodexAccountHandover({ name, pane, current, target, dir, refusal }, {
+export function prepareCodexAccountHandover({ name, pane, current, target, dir, refusal, cause = "weekly-limit" }, {
   read = readWindow, root = join(homedir(), ".agentmux", "account-handovers"), now = Date.now,
 } = {}) {
   const log = read({ since: now() - 7 * 24 * 3600_000, agents: [name] });
@@ -24,7 +24,9 @@ export function prepareCodexAccountHandover({ name, pane, current, target, dir, 
   writeFileSync(path, JSON.stringify({ version: 1, name, pane, dir, capturedAt: new Date(now()).toISOString(),
     previousAccount: current.id, targetAccount: target.id, ask, reply, replyPosts }, null, 2) + "\n", { mode: 0o600 });
   const text = [
-    `Ditt konto byttes eftersom Codex ${current.id} nådde veckogränsen. Det här är en ny session.`,
+    cause === "operator-switch"
+      ? "Ditt konto byttes på Mattias uttryckliga begäran. Det här är en ny session."
+      : `Ditt konto byttes eftersom Codex ${current.id} nådde veckogränsen. Det här är en ny session.`,
     `Panelens senaste uppdrag och egna senaste svar finns ordagrant med källa och tid i ${path}. Läs dem innan du fortsätter.`,
     `Läs git-läget i din worktree och dina kvitton innan du fortsätter. Arbetsyta: ${dir}.`,
     "Gör aldrig om ett driftsteg (release, flytt, go) utan att först ha läst dess kvitto.",

@@ -17,6 +17,29 @@ function setup({ continuity = true, wrongSession = false } = {}) {
 }
 
 feature("manual and automatic Codex account transitions share continuity verification", () => {
+  for (const wrongModel of [false, true]) {
+    component(`fresh handover keeps model and rollback, wrong model=${wrongModel}`, {
+      when: ["the source session cannot be transferred", async () => {
+        const fx = setup(), originalStatus = fx.options.statusDriver;
+        fx.options.continuity = null;
+        fx.options.freshHandover = { ok: true, path: "/private/handover.json", text: "Read exact task evidence first." };
+        fx.options.identityFor = () => ({ sessionId: "fresh-session", path: "/two/sessions/fresh.jsonl" });
+        fx.options.statusDriver = async (...args) => {
+          const result = await originalStatus(...args);
+          if (fx.calls.at(-1)?.profile.id === "2") return { ...result, status: { ...result.status, session: "fresh-session",
+            model: { id: wrongModel ? "wrong-model" : "gpt-6.1-sol", effort: "xhigh" } } };
+          return result;
+        };
+        return { fx, result: await switchCodexAccount(fx.options) };
+      }],
+      then: ["only a verified fresh identity continues and failures restore the original exact session", ({ fx, result }) => {
+        expect(result.kind).toBe(wrongModel ? "failed" : "switched");
+        expect(fx.calls[0]).toMatchObject({ newSession: true, model: "gpt-6.1-sol", effort: "xhigh" });
+        if (wrongModel) expect(fx.calls.at(-1)).toMatchObject({ profile: { id: "1" }, resumeSessionId: "exact" });
+        else expect(result).toMatchObject({ fresh: true, text: "Read exact task evidence first." });
+      }],
+    });
+  }
   for (const kind of ["verified", "unavailable", "wrong-session"]) {
     component(`${kind} account transition preserves the requested session`, {
       given: ["the actual shared switch with engine IO replaced", () => setup({ continuity: kind !== "unavailable", wrongSession: kind === "wrong-session" })],

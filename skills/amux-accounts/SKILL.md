@@ -42,7 +42,16 @@ disables this recovery. Other rotations still require his instruction.
   - `would-running`: restart now, cold cache or small context, so the miss is small.
   - `would-compact-then-restart`: verified compact on the old account, then restart.
   - `blocked`: left alone (working, queued delivery, unknown context).
-- Codex panes switch per pane with Discord `/switch` (slots 1 and 2).
+- Codex: `amux accounts switch codex:2 PROJECT -p N --dry`, then the same
+  command without `--dry` after the operator's instruction. Omit `-p N` for
+  the project, or use `--all` instead of PROJECT for the configured Codex fleet.
+  Running panes compact on the source first, then keep model/effort and their
+  exact portable session. Otherwise a saved, labeled fresh-session handover
+  uses the same rollback/model checks. Busy panes keep a durable request for
+  the existing journal watcher; dormant selections never wake an engine.
+  `--continue-file PATH` is single-pane only and queues once after verification.
+  Discord `/switch` remains available. Reached-weekly-limit recovery works in
+  both directions; it never switches on a forecast.
 
 ## 4. Logins
 

@@ -160,6 +160,11 @@ export const createState = (path, {
   };
 
   const set = (key, value) => update((current) => { current[key] = value; return value; });
+  const updateKey = (key, change) => update((current) => {
+    const value = change(current[key]);
+    current[key] = value;
+    return value;
+  });
 
   const toggle = (key) => update((current) => {
     current[key] = !(key in current ? current[key] : false);
@@ -170,5 +175,5 @@ export const createState = (path, {
 
   const all = () => { maybeReload(); return { ...data }; };
 
-  return { get, set, toggle, remove, all };
+  return { get, set, updateKey, toggle, remove, all };
 };

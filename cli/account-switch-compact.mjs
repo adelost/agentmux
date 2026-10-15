@@ -55,11 +55,11 @@ export async function observeSwitchContext(ctx, entry, {
  * WHY: Keeps the switch's cache miss on a small context, and an unverified compact from moving the pane.
  */
 export async function compactBeforeSwitch(ctx, target, {
-  queue = ctx.deliveryQueue, now = Date.now, policy = readContextCostPolicy(), run = runNightlyCompact,
+  queue = ctx.deliveryQueue, now = Date.now, policy = readContextCostPolicy(), run = runNightlyCompact, force = false,
 } = {}) {
   const key = `${target.agent.name}:${target.pane.index}`;
   const pass = await run(ctx, {}, {
-    targets: [target], queue, now, mirror: mirrorSwitchCompact,
+    targets: [target], queue, now, mirror: mirrorSwitchCompact, force,
     label: `Compact before account switch (${key})`,
     policy: compactPolicy(policy),
     path: join(homedir(), ".agentmux", "account-switch-compact", compactDayKey(now())),

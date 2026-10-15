@@ -10,17 +10,24 @@ import { readQuotaSnapshotWithPanes } from "../core/quota-in-use.mjs";
 import { prepareRuntimeProfile, resolveClaudeAccountTarget } from "../core/runtime-account-profiles.mjs";
 import { readClaudeProfileIdentity } from "../core/claude-account-quota.mjs";
 import { rotateClaudeFleet } from "./account-rotation.mjs";
+import { switchCodexAccounts } from "./codex-account-switch.mjs";
 
 const usage = `Usage:
   amux accounts                                  same view as amux quota
   amux accounts login <codex|kimi>:<1|2>
   amux accounts login claude:<1|2|login|email>   a new login name gets its own dir
   amux accounts rotate claude:<1|2|login|email> [--dry]
+  amux accounts switch codex:<1|2> PROJECT [-p N] [--dry] [--continue-file PATH]
+  amux accounts switch codex:<1|2> --all [--dry]
   amux quota [--all] [--json]
 
 Login dirs: ~/.config/agent/account-profiles/claude/<login>, one account per dir.
 rotate --dry prints the plan per pane and changes nothing; Discord: /byt <login>.
-Weekly warning: AMUX_QUOTA_WARN_PERCENT (default 80 %), AMUX_QUOTA_RESERVE_PERCENT (default 90 % weekly used); amux never switches by itself.
+Codex switch compacts running panes first and preserves model/effort and the exact session when portable.
+Busy panes keep a durable request for the existing watcher; dormant panes are selected for their next start, never woken.
+--continue-file is single-pane only and queues that continuation once after a verified switch.
+Weekly warning: AMUX_QUOTA_WARN_PERCENT (default 80 %), AMUX_QUOTA_RESERVE_PERCENT (default 90 % weekly used).
+Warnings never switch accounts; explicit operator requests use the guarded path above.
 Codex automatic switch: only after a reached weekly limit, spare account quota and exact-session continuity.
 Disable with AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false. Predictions never switch accounts.`;
 
@@ -62,6 +69,7 @@ export async function cmdAccounts(args, ctxOrOptions = null, suppliedOptions = {
     output = console.log,
     prepare = prepareRuntimeProfile,
     rotate = rotateClaudeFleet,
+    switchCodex = switchCodexAccounts,
   } = options;
   if (args.length === 1 && ["--help", "-h"].includes(args[0])) { output(usage); return { help: true }; }
   if (!args.length || args[0] === "status" || args[0] === "list") {
@@ -73,6 +81,10 @@ export async function cmdAccounts(args, ctxOrOptions = null, suppliedOptions = {
     const [provider, id] = String(args[1]).split(":");
     if (provider !== "claude" || !id) throw new Error(usage);
     return rotate(ctx, id, { dry: args[2] === "--dry" });
+  }
+  if (args[0] === "switch") {
+    if (!ctx) throw new Error(usage);
+    return switchCodex(ctx, args.slice(1));
   }
   if (args[0] !== "login" || args.length !== 2) throw new Error(usage);
   const selected = loginProfile(catalog, args[1], { identityOf, newLogin });

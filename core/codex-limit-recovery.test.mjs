@@ -1,9 +1,10 @@
 import { feature, component, expect } from "bdd-vitest";
 import { createCodexLimitRecovery } from "./codex-limit-recovery.mjs";
 
-function fixture({ continuity = true, sourceUsed = 100, otherUsed = 0, enabled = true, handover = false } = {}) {
+function fixture({ continuity = true, sourceUsed = 100, otherUsed = 0, enabled = true, handover = false, currentId = "1" } = {}) {
   const data = {}, sent = [], switched = [], notices = [];
   const state = { get: (key, fallback = {}) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
+  data.codex_profile_by_pane = { "lsrc:5": currentId };
   const broker = { queue: { list: () => [], acquireSessionLease: () => ({ release() {} }) },
     enqueue: job => { sent.push(job); return { id: "j1" }; }, runExclusive: (_name, _pane, work) => work() };
   const agent = { promptTransportState: async () => ({ dialect: "codex", busy: false, state: "empty-idle" }), captureScreen: async () => "› " };
@@ -13,7 +14,7 @@ function fixture({ continuity = true, sourceUsed = 100, otherUsed = 0, enabled =
     catalog: [{ id: "1", home: "/one" }, { id: "2", home: "/two" }],
     authenticated: () => true,
     quota: async profile => ({ ok: true, account: { email: "test@example.com" }, limits: [{ limitId: "codex",
-      windows: [{ windowMinutes: 10080, usedPercent: profile.id === "1" ? sourceUsed : otherUsed }] }] }),
+      windows: [{ windowMinutes: 10080, usedPercent: profile.id === currentId ? sourceUsed : otherUsed }] }] }),
     continuity: () => ({ ok: continuity, sessionId: "same-session", reason: "session unavailable" }),
     transferSession: () => ({ ok: continuity, sessionId: "same-session", reason: "session unavailable" }),
     prepareHandover: () => ({ ok: handover, path: "/handover.json", text: "exact task and reply", reason: "no verified handover" }),
@@ -26,6 +27,14 @@ function fixture({ continuity = true, sourceUsed = 100, otherUsed = 0, enabled =
 }
 
 feature("automatic Codex account recovery only after a reached weekly limit", () => {
+  component("account2 returns to account1 only at its actual reached weekly limit", {
+    given: ["Codex2 is selected and its real weekly quota is exhausted", () => fixture({ currentId: "2", sourceUsed: 100, otherUsed: 15 })],
+    when: ["observing the provider refusal", async fx => { await fx.run(); return fx; }],
+    then: ["the same guarded switch targets1 with one continuation", fx => {
+      expect(fx.switched[0]).toMatchObject({ current: { id: "2" }, target: { id: "1" } });
+      expect(fx.sent).toHaveLength(1);
+    }],
+  });
   component("a nonportable session gets one saved fresh-session handover", {
     given: ["reached limit, spare account and durable exact task evidence", () => fixture({ continuity: false, handover: true })],
     when: ["observing the refusal twice", async fx => { await fx.run(); await fx.run(); return fx; }],

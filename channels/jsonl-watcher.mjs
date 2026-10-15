@@ -46,8 +46,8 @@ import { createPaneQueue } from "../core/pane-queue.mjs";
 import { compactionNoticeText } from "../core/compaction-notice.mjs";
 import { announceNewPaneEvents } from "../core/pane-notices.mjs";
 import { confirmedCodexRefusals, refusalNoticeText } from "../core/codex-refusal-notice.mjs";
-import { createCodexCapacityRecovery, isCodexCapacityError } from "../core/codex-capacity-recovery.mjs";
-import { createCodexLimitRecovery } from "../core/codex-limit-recovery.mjs";
+import { isCodexCapacityError } from "../core/codex-capacity-recovery.mjs";
+import { createCodexRecovery } from "../cli/codex-recovery.mjs";
 import {
   paneModelSelection,
   recordPaneModelReading,
@@ -135,8 +135,7 @@ export function createJsonlWatcher({
   let pollTimer = null;
   let typingTimer = null;
   let stopped = false;
-  const capacityRecovery = createCodexCapacityRecovery({ state, broker: deliveryBroker, agent, log });
-  const limitRecovery = createCodexLimitRecovery({ state, broker: deliveryBroker, agent, log,
+  const codexRecovery = createCodexRecovery({ state, broker: deliveryBroker, agent, log, configPath: agentsYamlPath,
     notify: (text, target) => discord.send(findChannelForPane(agentsYamlPath, target.name, target.pane), text) });
 
   const paneKey = (name, idx) => `${name}:${idx}`;
@@ -672,8 +671,7 @@ export function createJsonlWatcher({
       const startupAudit = !auditedPanes.has(key);
 
       if (sameFileStamp(cached, fileInfo) && !retryDue && !graceDue) {
-        await capacityRecovery.tick({ name, pane: idx, result: cached.recovery });
-        await limitRecovery.tick({ name, pane: idx, dir, result: cached.recovery });
+        await codexRecovery.tick({ name, pane: idx, dir, result: cached.recovery, idleBoundary: true });
         metric(`${key} skip unchanged bytes=0 nextGrace=${cached?.graceDueAtMs || "-"}`);
         return { skipped: "unchanged" };
       }
@@ -687,8 +685,7 @@ export function createJsonlWatcher({
       const tailBytes = startupAudit ? STARTUP_AUDIT_TAIL_BYTES : WATCHER_TAIL_BYTES;
       const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes, headless: true });
       if (result?.refusals?.length) result.refusals = await confirmedCodexRefusals(result, selectedCodexProfile(state, name, idx).home);
-      await capacityRecovery.tick({ name, pane: idx, result });
-      await limitRecovery.tick({ name, pane: idx, dir, result });
+      await codexRecovery.tick({ name, pane: idx, dir, result });
       const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
       const readMs = Date.now() - readStarted;
       const readBytes = estimatedReadBytes(fileInfo, tailBytes);

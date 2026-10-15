@@ -121,11 +121,19 @@ export function resolveCodexProfile(requested, current, catalog = codexProfileCa
   return catalog.find((profile) => profile.id.toLowerCase() === value) || null;
 }
 
+function updatePaneMap(state, key, change) {
+  if (state.updateKey) return state.updateKey(key, current => change({ ...(current || {}) }));
+  const value = change({ ...(state.get(key, {}) || {}) });
+  state.set(key, value);
+  return value;
+}
+
+/** WHAT: Stores one pane's account selection atomically. WHY: Prevents CLI and bridge writers from losing each other's choices. */
 export function setCodexProfile(state, name, pane, profileId) {
-  const profiles = { ...(state?.get?.(CODEX_PROFILE_STATE_KEY, {}) || {}) };
-  profiles[codexPaneKey(name, pane)] = String(profileId);
-  state.set(CODEX_PROFILE_STATE_KEY, profiles);
-  return profiles;
+  return updatePaneMap(state, CODEX_PROFILE_STATE_KEY, profiles => {
+    profiles[codexPaneKey(name, pane)] = String(profileId);
+    return profiles;
+  });
 }
 
 export function codexModelOverride(state, name, pane) {
@@ -158,23 +166,25 @@ export function isExpectedCodexModel(state, name, pane, configured, observed) {
   return /codex/i.test(configured?.cmd || "") && observed?.model === requested?.model;
 }
 
+/** WHAT: Stores one validated model and effort atomically. WHY: Keeps account transitions from overwriting another pane's model choice. */
 export function setCodexModelOverride(state, name, pane, model, effort = null) {
   if (!/^[a-z0-9._-]+$/i.test(String(model || ""))) throw new Error(`invalid Codex model: ${model}`);
   const normalizedEffort = effort == null ? null : String(effort).toLowerCase();
   if (normalizedEffort && !/^(minimal|low|medium|high|xhigh|max|ultra)$/.test(normalizedEffort)) {
     throw new Error(`invalid Codex reasoning effort: ${effort}`);
   }
-  const models = { ...(state?.get?.(CODEX_MODEL_STATE_KEY, {}) || {}) };
-  models[codexPaneKey(name, pane)] = { model: String(model), effort: normalizedEffort };
-  state.set(CODEX_MODEL_STATE_KEY, models);
-  return models;
+  return updatePaneMap(state, CODEX_MODEL_STATE_KEY, models => {
+    models[codexPaneKey(name, pane)] = { model: String(model), effort: normalizedEffort };
+    return models;
+  });
 }
 
+/** WHAT: Stores the model map with only the named override cleared. WHY: Prevents rollback from deleting another writer's model selection. */
 export function clearCodexModelOverride(state, name, pane) {
-  const models = { ...(state?.get?.(CODEX_MODEL_STATE_KEY, {}) || {}) };
-  delete models[codexPaneKey(name, pane)];
-  state.set(CODEX_MODEL_STATE_KEY, models);
-  return models;
+  return updatePaneMap(state, CODEX_MODEL_STATE_KEY, models => {
+    delete models[codexPaneKey(name, pane)];
+    return models;
+  });
 }
 
 export function isCodexProfileAuthenticated(profile) {

@@ -179,7 +179,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       rows.push({ pane: key, ...priorShared });
       continue;
     }
-    const reason = nightlyCompactDecision(first, policy, previous);
+    const reason = nightlyCompactDecision(first, policy, previous, { force: dependencies.force });
     if (reason) { rows.push({ pane: key, status: "skipped", reason, beforeTokens: first.tokens }); continue; }
     if (flags.dry) { rows.push({ pane: key, status: "eligible", beforeTokens: first.tokens }); continue; }
 
@@ -207,7 +207,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       await sleep(200);
       const check = async () => {
         const fresh = await observe(ctx, target, { queue, now });
-        const why = nightlyCompactDecision(fresh, policy, current);
+        const why = nightlyCompactDecision(fresh, policy, current, { force: dependencies.force });
         if (why || fresh.sessionId !== first.sessionId || fresh.sessionPath !== first.sessionPath
             || fresh.activity !== first.activity) throw new Error(why || "session-or-activity-changed");
         return fresh;

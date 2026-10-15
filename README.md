@@ -503,18 +503,35 @@ separately.
 ### Two Codex accounts
 
 Profile 1 is the existing `~/.codex` login. Profile 2 is isolated under
-`~/.config/agent/codex-profiles/2`; auth and session history never get copied
-between them. Set up the second account once:
+`~/.config/agent/codex-profiles/2`. Credentials never move between profiles;
+only a verified, quiescent pane-owned rollout can transfer for exact resume.
+Set up the second account once:
 
 ```bash
 CODEX_HOME="$HOME/.config/agent/codex-profiles/2" codex login --device-auth
 ```
 
-After that, `//switch` toggles only the current Codex pane and native
-`//status` shows which account actually answered. `//model` uses `codex
-resume --last -m ... -c ...` instead of Codex's TUI picker because the picker
-persists its selection to the account-wide `config.toml`; process-local launch
-overrides prevent one pane's Max/XHigh choice from changing every other pane.
+Preview or request a pane, project or configured-fleet switch:
+
+```bash
+amux accounts switch codex:2 claw -p 5 --dry
+amux accounts switch codex:2 claw -p 5
+amux accounts switch codex:2 --all
+```
+
+Running panes compact first under the existing delivery and native-receipt
+guards, then preserve their model, effort and exact portable session. A
+nonportable session needs a saved, labeled handover; failed verification
+restores the previous account. Busy panes keep a durable request which the
+existing journal watcher applies at a safe idle boundary. Dormant selections
+take effect at the next normal start and never wake a pane. Single-pane
+`--continue-file PATH` queues that continuation once after verification.
+Actual weekly-limit recovery works in either direction; forecasts never
+switch accounts. `AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false` disables it.
+
+`//switch` remains pane-local and native `//status` shows the actual account.
+Model launch overrides are process-local rather than persisted by the TUI
+picker into the account-wide `config.toml`.
 
 ### Rotate a Claude fleet between accounts
 
