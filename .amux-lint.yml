@@ -12,7 +12,7 @@ fileSize:
     core/jsonl-reader.mjs: 918
     core/native-runtime-client.mjs: 544
     core/suggestions-comment-bridge.mjs: 1131
-    core/worktree-deps.mjs: 675
+    core/worktree-deps.mjs: 657
     handlers.mjs: 1159
     spikes/web-ui/app.js: 1660
     spikes/web-ui/server.mjs: 2725

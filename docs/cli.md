@@ -405,15 +405,20 @@ amux proof --config proof.json --output attestation.json
 `worktree-deps` scans tracked lockfiles, including nested UI package roots.
 Relocatable npm installs use a content-addressed cache under the primary
 repository root and outside `.git`; each worktree materializes an
-`immutable-copy` locally with copy-on-write where supported and a safe copy
-fallback. Dependency realpaths therefore remain inside the consuming worktree.
+`immutable-copy` locally as real directories containing read-only hardlinked
+files. Dependency realpaths remain inside the consuming worktree without full
+ext4 copies. Cache and worktree must share a filesystem; cross-device linking
+fails explicitly. Do not chmod or edit shared dependency files. Reinstall a
+changed lock through this command instead. Writable build caches can still
+create new files and directories inside the local tree.
 The cache key includes the exact manifest, lock, repository `.npmrc`, npm
 version and runtime ABI. Workspace/file-linked npm trees stay local. Python
 virtualenvs are never shared: the command replaces an unsafe `.venv` symlink
 with a local `uv sync --locked` environment.
 
-`--check` is mutation-free and exits non-zero for a missing, stale, or unsafe
-root. `--dry` prints the provisioning plan. The standalone
+`--check` is mutation-free and verifies every shared file's inode, device and
+read-only mode, as well as the lock identity. It exits non-zero for a missing,
+stale, writable or detached materialization. `--dry` prints the provisioning plan. The standalone
 `node bin/worktree-deps.mjs` entry point uses only Node built-ins, so it works in
 the exact fresh-worktree state where the normal CLI's dependencies are absent.
 

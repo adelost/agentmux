@@ -9,7 +9,7 @@
 import { createHash, randomUUID } from "crypto";
 import {
   appendFileSync,
-  constants as fsConstants, cpSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -23,11 +23,12 @@ import {
 } from "fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { spawnSync } from "child_process";
+import { createNodeMaterialization, nodeMaterializationReady, MATERIALIZATION_MARKER,
+  sealNodeCache } from "./worktree-node-materialization.mjs";
 
 const MARKER_VERSION = 1;
 const CACHE_DIR = "agentmux-worktree-deps";
 // Preserve the old filename so legacy symlink farms are replaced.
-const MATERIALIZATION_MARKER = ".agentmux-worktree-links.json";
 
 /** WHAT: Resolves a path with a missing suffix. WHY: Existing parents can symlink outside the safe boundary. */
 function futureRealpath(path) {
@@ -329,26 +330,6 @@ function lstatSafe(path) {
   try { return lstatSync(path); } catch { return null; }
 }
 /** WHAT: Verifies a worktree-local materialization. WHY: Vite resolves package symlinks outside its worktree root. */
-function nodeMaterializationReady(path, cacheModules, key) {
-  const stat = lstatSafe(path); if (!stat?.isDirectory() || stat.isSymbolicLink()
-    || !markerMatches(join(path, MATERIALIZATION_MARKER), { cacheModules, key })) return false;
-  try {
-    return readdirSync(cacheModules).every((name) => {
-      const cached = lstatSafe(join(cacheModules, name)); const local = lstatSafe(join(path, name));
-      return cached && local && !local.isSymbolicLink() && cached.isDirectory() === local.isDirectory()
-        && cached.isFile() === local.isFile();
-    });
-  } catch { return false; }
-}
-
-/** WHAT: Materializes a local npm tree. WHY: Copy-on-write keeps dependency realpaths inside the consuming worktree. */
-function createNodeMaterialization(path, cacheModules, key) {
-  const stat = lstatSafe(path); if (stat) rmSync(path, { recursive: !stat.isSymbolicLink(), force: true });
-  cpSync(cacheModules, path, { recursive: true, verbatimSymlinks: true, mode: fsConstants.COPYFILE_FICLONE });
-  writeFileSync(join(path, MATERIALIZATION_MARKER), `${JSON.stringify(
-    { version: MARKER_VERSION, input: { cacheModules, key } }, null, 2)}\n`);
-}
-
 /** WHAT: Compares an npm cache entry with expected input. WHY: Prevents partial staging directories from being shared. */
 function validateNodeCache(cacheEntry, input) {
   const marker = join(cacheEntry, "manifest.json"); const modules = join(cacheEntry, "node_modules");
@@ -374,6 +355,7 @@ function promoteNodeCache({ root, cacheEntry, input }) {
   const staging = `${cacheEntry}.tmp-${process.pid}-${randomUUID()}`; mkdirSync(staging);
   // A safe override may still use another filesystem, so retain the EXDEV fallback.
   moveDir(join(root, "node_modules"), join(staging, "node_modules"));
+  sealNodeCache(join(staging, "node_modules"));
   writeFileSync(join(staging, "manifest.json"), `${JSON.stringify({ version: MARKER_VERSION, input }, null, 2)}\n`);
   try {
     renameSync(staging, cacheEntry);

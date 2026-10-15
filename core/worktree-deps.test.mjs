@@ -242,8 +242,12 @@ feature("worktree dependency bootstrap", () => {
       expect(target).toBe(join(ctx.root, "node_modules", "vitest"));
       expect(existsSync(join(nodeCacheRoot(ctx.commonDir), "node", first.key,
         "node_modules", "vitest"))).toBe(true);
-      writeFileSync(join(ctx.root, "node_modules", "vitest", "index.js"),
-        "export const source = 'worktree';\n");
+      const localFile = join(ctx.root, "node_modules", "vitest", "index.js");
+      const cachedFile = join(nodeCacheRoot(ctx.commonDir), "node", first.key,
+        "node_modules", "vitest", "index.js");
+      expect(lstatSync(localFile).ino).toBe(lstatSync(cachedFile).ino);
+      expect(lstatSync(localFile).mode & 0o222).toBe(0);
+      expect(() => writeFileSync(localFile, "must not change shared bytes\n")).toThrow();
       expect(readFileSync(join(nodeCacheRoot(ctx.commonDir), "node", first.key,
         "node_modules", "vitest", "index.js"), "utf8")).toBe("export const source = 'cache';\n");
       // SKY-0105: a dep realpath must never land inside .git — Vite 6 (and any
