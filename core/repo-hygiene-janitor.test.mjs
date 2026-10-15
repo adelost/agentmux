@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { expect, feature, integration } from "bdd-vitest";
 import { commonDirOf, mainWorktreeOf } from "./repo-hygiene-facts.mjs";
 import { ledgerEntries, reviewRepo } from "./repo-hygiene-janitor.mjs";
+import * as janitor from "./repo-hygiene-janitor.mjs";
+import { retirementEligibility, registeredWorktrees } from "./worktree-retirement.mjs";
 
 const JANITOR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "bin", "janitor.mjs");
 const DAY_S = 86_400;
@@ -53,6 +55,44 @@ function repoWithEveryKind() {
 const cellByTarget = (decisions) => Object.fromEntries(decisions.map(({ target, cell }) => [target, cell]));
 
 feature("the repo-hygiene janitor decides every candidate by the table and touches nothing", () => {
+  integration("only a clean pushed merged quiet unreferenced worktree is retired with a restore journal", {
+    given: ["a merged branch worktree and explicit idle process/receipt boundary", () => {
+      const ctx = repoWithEveryKind();
+      ctx.target = join(ctx.root, "retirable");
+      git(ctx.work, ["worktree", "add", "-q", "-b", "retirable", ctx.target, ctx.oldMerged]);
+      ctx.now = Date.now() + 2 * DAY_S * 1000;
+      ctx.safety = { holders: {}, protectedPaths: [], errors: [] };
+      return ctx;
+    }],
+    when: ["reviewing and applying only the allowed cell", (ctx) => {
+      const candidate=registeredWorktrees(ctx.common).find(({path})=>path===ctx.target);
+      const eligible=(safety,now=ctx.now,other=candidate)=>retirementEligibility({common:ctx.common,
+        branch:"main",candidate:other,now,safety}).ok;
+      expect(eligible({...ctx.safety,holders:{[ctx.target]:[123]}})).toBe(false);
+      expect(eligible({...ctx.safety,protectedPaths:[ctx.target]})).toBe(false);
+      expect(eligible({...ctx.safety,errors:["unreadable"]})).toBe(false);
+      expect(eligible(ctx.safety,Date.now())).toBe(false);
+      expect(eligible(ctx.safety,ctx.now,{...candidate,sha:git(ctx.work,["rev-parse","unmerged"])})).toBe(false);
+      writeFileSync(join(ctx.target,"unsaved"),"keep me");
+      expect(eligible(ctx.safety)).toBe(false);
+      rmSync(join(ctx.target,"unsaved"));
+      const review = reviewRepo({ common:ctx.common, panes:[], now:ctx.now, sinceMs:0,
+        today:new Date(ctx.now).toISOString().slice(0,10), firstSeen:{}, reviewedOrigins:new Set(), retirementContext:ctx.safety });
+      const decision = review.decisions.find(({target}) => target === ctx.target);
+      expect(decision?.values.action).toBe("RETIRE_WORKTREE");
+      const journal = join(ctx.root, "retire.jsonl");
+      const retired = janitor.retireWorktrees({review, journal, now:ctx.now, safety:ctx.safety,readProcesses:()=>ctx.safety});
+      return {ctx, retired, journal:readFileSync(journal,"utf8")};
+    }],
+    then: ["git removed the worktree without force and its exact restore command is durable", ({ctx,retired,journal}) => {
+      expect(retired[0].mode).toBe("removed");
+      expect(git(ctx.work,["worktree","list","--porcelain"])).not.toContain(ctx.target);
+      expect(journal).toContain("git -C");
+      expect(journal).toContain("worktree add");
+      expect(journal).toContain(ctx.oldMerged);
+    }],
+    cleanup: (ctx) => rmSync(ctx.root,{recursive:true,force:true}),
+  });
   integration("each kind lands in its cell, with a restore command, and origin keeps every branch", {
     given: ["a repo touched today with merged, unmerged, planned, closed and worktree leftovers", repoWithEveryKind],
     when: ["the janitor reviews it, having first seen row 5 closed ten days ago", (fixture) => {

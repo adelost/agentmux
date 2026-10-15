@@ -32,10 +32,12 @@ function repoSection(review, entries) {
 }
 
 /** WHAT: Formats the night's Markdown report. WHY: Lets one page show every would-action and why each repo was or was not reviewed. */
-export function renderReport({ startedAt, reviews, entriesByRepo, ledgerPath, warnings }) {
+export function renderReport({ startedAt, reviews, entriesByRepo, ledgerPath, warnings, retirements=[] }) {
   const skipped = reviews.filter(({ skipped }) => skipped);
   return [
-    `# Repo hygiene ${startedAt} (read-only: every action is "would", nothing was touched)`, "",
+    `# Repo hygiene ${startedAt} (${retirements.length ? "safe worktree retirement only; other actions are would" : "read-only: every action is \"would\", nothing was touched"})`, "",
+    ...retirements.flatMap(({mode,target,restore,reasons})=>[
+      `Worktree ${mode}: ${target}. ${reasons.join("; ")}`,`Restore: \`${restore}\``,""]),
     `Table ${repoHygiene.id}: ${repoHygiene.cells.length} cells; refuses: ${repoHygiene.invariants.join("; ")}. Ledger: ${ledgerPath}.`, "",
     ...warnings.map((warning) => `WARNING: ${warning}`), ...(warnings.length ? [""] : []),
     ...reviews.filter(({ skipped }) => !skipped).flatMap((review) => repoSection(review, entriesByRepo.get(review.common) ?? [])),

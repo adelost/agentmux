@@ -7,6 +7,8 @@ import {
   anyRefMovedSince, closedLedgerRows, commitOnBranchSince, fetchDefaultBranch,
   mainWorktreeOf, mergedBranches, originUrl, staleWorktrees, unreferencedPlans,
 } from "./repo-hygiene-facts.mjs";
+import { retirableWorktrees } from "./worktree-retirement.mjs";
+export { retireWorktrees } from "./worktree-retirement.mjs";
 
 const ACTIONS_THAT_ACT = new Set(["NAME_IN_REPORT", "ARCHIVE", "DELETE_WITH_SHA_LEDGER"]);
 
@@ -34,7 +36,7 @@ export const ledgerEntries = ({ repo, decisions, at }) => decisions
 // [panes] holds { dir, common } for each tmux pane. [reviewedOrigins] collects origin URLs whose
 // branches and plans are already decided tonight, since a second clone shares them.
 /** WHAT: Reads one repo's facts and decides every candidate with the table. WHY: Keeps unreadable facts visible as red instead of guessed values. */
-export function reviewRepo({ common, panes, now, sinceMs, today, firstSeen, reviewedOrigins }) {
+export function reviewRepo({ common, panes, now, sinceMs, today, firstSeen, reviewedOrigins, retirementContext }) {
   const untouchedIsFree = untouchedRepoCostsNothing();
   const paneInRepo = panes.some((pane) => pane.common === common);
   if (untouchedIsFree && !paneInRepo && !anyRefMovedSince(common, sinceMs)) {
@@ -54,7 +56,10 @@ export function reviewRepo({ common, panes, now, sinceMs, today, firstSeen, revi
   const rows = closedLedgerRows(facts);
   const worktrees = staleWorktrees(facts);
   const originCandidates = originReviewedElsewhere ? [] : [...mergedBranches(facts), ...unreferencedPlans(facts)];
-  const candidates = [...originCandidates, ...rows.candidates, ...worktrees.candidates];
+  const retiring=retirementContext ? retirableWorktrees({common,branch,now,safety:retirementContext}) : [];
+  const retiringPaths=new Set(retiring.map(({target})=>target));
+  const candidates = [...originCandidates, ...rows.candidates,
+    ...worktrees.candidates.filter(({target})=>!retiringPaths.has(target)),...retiring];
   return {
     ...reviewed, origin, originReviewedElsewhere, decisions: decideCandidates(touchedToday, candidates),
     unreadable: [...rows.unreadable, ...worktrees.unreadable], seen: rows.seen,

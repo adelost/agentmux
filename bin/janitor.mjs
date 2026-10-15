@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Nightly repo hygiene, read-only: decides every stale thing in every repo
-// touched today with policies/repo-hygiene.mjs and writes what it would do.
+// Repo hygiene reports other actions and optionally retires only safe worktrees.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -9,16 +8,18 @@ import { listAgents } from "../cli/config.mjs";
 import { runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 import { loadRuntimeEnv } from "../core/runtime-env.mjs";
 import { commonDirOf, mainWorktreeOf, paneDirs, withChildDirs } from "../core/repo-hygiene-facts.mjs";
-import { ledgerEntries, reviewRepo } from "../core/repo-hygiene-janitor.mjs";
+import { ledgerEntries, reviewRepo, retireWorktrees } from "../core/repo-hygiene-janitor.mjs";
+import { retirementSafety } from "../core/worktree-retirement.mjs";
 import { redCount, renderReport, withOpenNowNote } from "../core/repo-hygiene-report.mjs";
 
-const USAGE = "Usage: janitor.mjs [--repo PATH]... [--state-dir PATH]\n"
+const USAGE = "Usage: janitor.mjs [--repo PATH]... [--state-dir PATH] [--retire-safe-worktrees]\n"
   + "  Without --repo: every repo under the configured agent dirs and every pane's cwd.";
 
 function parseArgs(argv) {
   const options = { repos: [], stateDir: process.env.AMUX_JANITOR_DIR || join(homedir(), ".agentmux", "janitor") };
   for (let index = 0; index < argv.length; index += 2) {
     const [name, value] = [argv[index], argv[index + 1]];
+    if(name==="--retire-safe-worktrees") {options.retire=true;index-=1;continue;}
     if (!value || value.startsWith("--")) throw new Error(USAGE);
     if (name === "--repo") options.repos.push(value);
     else if (name === "--state-dir") options.stateDir = value;
@@ -78,9 +79,13 @@ function main() {
   const reportPath = join(options.stateDir, "reports", `${today}.md`);
   const firstSeen = readJson(seenPath);
   const reviewedOrigins = new Set();
+  const receiptRoots=[join(homedir(),"lsrc/.artifacts"),join(homedir(),"lsrc/.agents"),
+    join(homedir(),".openclaw/workspace/projects"),join(homedir(),".agentmux"),
+    join(homedir(),".config/systemd/user"),"/tmp"];
   const reviews = commons.map((common) => {
     try {
-      return reviewRepo({ common, panes, now: started.getTime(), sinceMs, today, firstSeen, reviewedOrigins });
+      const retirementContext=options.retire ? retirementSafety(common,[...receiptRoots,dirname(common)],started.getTime()) : undefined;
+      return reviewRepo({ common, panes, now: started.getTime(), sinceMs, today, firstSeen, reviewedOrigins, retirementContext });
     } catch (error) {
       return { common, error: firstLine(error) };
     }
@@ -88,13 +93,15 @@ function main() {
   const entriesByRepo = new Map(reviews.map((review) => [review.common,
     ledgerEntries({ repo: review.common, decisions: review.decisions ?? [], at: started.toISOString() })]));
   const entries = [...entriesByRepo.values()].flat();
+  const retired=options.retire ? reviews.filter(({error,skipped})=>!error&&!skipped).flatMap((review)=>
+    retireWorktrees({review,journal:join(options.stateDir,"retirements.jsonl"),receiptRoots:[...receiptRoots,dirname(review.common)]})) : [];
   if (entries.length) appendFileSync(ledgerPath, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
   const seen = Object.fromEntries(Object.entries(firstSeen).filter(([key]) => !reviews.some((review) => review.seen && key.startsWith(`${review.common}#`))));
   writeAtomic(seenPath, `${JSON.stringify(Object.assign(seen, ...reviews.map((review) => review.seen ?? {})), null, 2)}\n`);
-  writeAtomic(reportPath, renderReport({ startedAt: `${today} ${started.toTimeString().slice(0, 5)}`, reviews, entriesByRepo, ledgerPath, warnings }));
+  writeAtomic(reportPath, renderReport({ startedAt: `${today} ${started.toTimeString().slice(0, 5)}`, reviews, entriesByRepo, ledgerPath, warnings,retirements:retired }));
   for (const review of reviews) noteRedOnOpenNow(review, { today, reportPath });
   const red = reviews.reduce((sum, review) => sum + redCount(review), 0);
-  console.log(`janitor: ${reviews.filter((review) => !review.skipped).length} repos reviewed, ${entries.length} would-actions, ${red} red; report ${reportPath}`);
+  console.log(`janitor: ${reviews.filter((review) => !review.skipped).length} repos reviewed, ${entries.length} would-actions, ${red} red; ${retired.filter(({mode})=>mode==="removed").length} retired; report ${reportPath}`);
 }
 
 main();

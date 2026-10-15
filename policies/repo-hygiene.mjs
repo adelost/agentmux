@@ -18,16 +18,17 @@ export const repoHygieneDeclaration = {
   id: "amux.repo-hygiene",
   axes: {
     touchedToday: ["YES", "NO"],                       // a commit on the default branch today, or a pane's cwd in the repo
-    kind: ["MERGED_BRANCH", "UNREFERENCED_PLAN", "CLOSED_LEDGER_ROW", "STALE_WORKTREE"],
+    kind: ["MERGED_BRANCH", "UNREFERENCED_PLAN", "CLOSED_LEDGER_ROW", "STALE_WORKTREE", "RETIRABLE_WORKTREE"],
     age: ["UNDER_7D", "FROM_7_TO_30D", "OVER_30D"],
   },
   columns: {
-    action: choice(["NOTHING", "NAME_IN_REPORT", "ARCHIVE", "DELETE_WITH_SHA_LEDGER"]),
+    action: choice(["NOTHING", "NAME_IN_REPORT", "ARCHIVE", "DELETE_WITH_SHA_LEDGER", "RETIRE_WORKTREE"]),
     opensRow: bool,                                   // a note on the repo's ÖPPET NU line for a person or pane
   },
   cells: [
     on("untouched", { touchedToday: "NO" }, { action: "NOTHING", opensRow: false }),
-    on("fresh", { touchedToday: "YES", age: "UNDER_7D" }, { action: "NOTHING", opensRow: false }),
+    on("fresh", { touchedToday: "YES", kind:["MERGED_BRANCH","UNREFERENCED_PLAN","CLOSED_LEDGER_ROW","STALE_WORKTREE"], age: "UNDER_7D" }, { action: "NOTHING", opensRow: false }),
+    on("worktree.retire", { touchedToday:"YES", kind:"RETIRABLE_WORKTREE" }, {action:"RETIRE_WORKTREE",opensRow:false}),
     on("branch.aging", { touchedToday: "YES", kind: "MERGED_BRANCH", age: "FROM_7_TO_30D" }, { action: "NAME_IN_REPORT", opensRow: false }),
     on("branch.old", { touchedToday: "YES", kind: "MERGED_BRANCH", age: "OVER_30D" }, { action: "DELETE_WITH_SHA_LEDGER", opensRow: false }),
     on("plan.aging", { touchedToday: "YES", kind: "UNREFERENCED_PLAN", age: "FROM_7_TO_30D" }, { action: "NAME_IN_REPORT", opensRow: false }),
@@ -39,6 +40,8 @@ export const repoHygieneDeclaration = {
     // The foolproof rule: nothing is deleted that git cannot restore. Only a merged branch has a SHA ledger.
     { refuse: "only a merged branch may be deleted, and only with its SHA in the ledger",
       when: (/** @type {Decision} */ d) => d.values.action === "DELETE_WITH_SHA_LEDGER" && d.at.kind !== "MERGED_BRANCH" },
+    { refuse:"only a safety-qualified worktree may be retired",
+      when:(/** @type {Decision} */ d)=>d.values.action==="RETIRE_WORKTREE" && d.at.kind!=="RETIRABLE_WORKTREE" },
     { refuse: "a repo nobody touched today costs nothing and is left alone",
       when: (/** @type {Decision} */ d) => d.at.touchedToday === "NO" && d.values.action !== "NOTHING" },
   ],
