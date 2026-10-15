@@ -17,34 +17,49 @@ export function acquireSessionWriteLease({ session, paneFence, fencedPanes }, pa
   // Without a pane the caller acts on the whole session (sleep, rotation,
   // model change) and must wait for every fenced pane, as it did before.
   const fences = [];
-  for (const target of pane == null ? fencedPanes() : [pane]) {
-    const fence = paneFence(target);
-    if (!fence) {
-      for (const held of fences) held.release();
-      sessionLease.release();
-      return null;
+  let transferred = false;
+  try {
+    for (const target of pane == null ? fencedPanes() : [pane]) {
+      const fence = paneFence(target);
+      if (!fence) return null;
+      fences.push(fence);
     }
-    fences.push(fence);
+    transferred = true;
+  } finally {
+    // A pane lock can fail while writing its owner metadata (e.g. ENOSPC).
+    // Its caller must also close the session fd it already acquired.
+    if (!transferred) releaseLeases([sessionLease, ...fences]);
   }
   let held = sessionLease;
   let released = false;
   return {
     holdsSession: () => held !== null,
     releaseSession() {
-      held?.release();
+      const previous = held;
       held = null;
+      previous?.release();
     },
     restoreSession() {
       if (!held && !released) held = session();
       return held !== null;
     },
     release() {
+      if (released) return;
       released = true;
-      held?.release();
+      const previous = held;
       held = null;
-      for (const fence of fences) fence.release();
+      releaseLeases([previous, ...fences]);
     },
   };
+}
+
+function releaseLeases(leases) {
+  const errors = [];
+  for (const lease of leases) {
+    try { lease?.release(); } catch (error) { errors.push(error); }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length) throw new AggregateError(errors, "session lease cleanup failed");
 }
 
 /**

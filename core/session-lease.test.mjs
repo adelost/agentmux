@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
-import { regainSessionLease } from "./session-lease.mjs";
+import { acquireSessionWriteLease, regainSessionLease } from "./session-lease.mjs";
 
 const twoBridges = () => {
   const rootDir = mkdtempSync(join(tmpdir(), "amux-session-lease-"));
@@ -11,6 +11,31 @@ const twoBridges = () => {
 };
 
 feature("a session lease can narrow to one fenced pane", () => {
+  unit("a cleanup error cannot strand the remaining pane fences", {
+    given: ["the session closes but reports a filesystem error", () => {
+      const released = [];
+      const lease = acquireSessionWriteLease({
+        session: () => ({ release() {
+          released.push("session");
+          throw Object.assign(new Error("I/O failure"), { code: "EIO" });
+        } }),
+        paneFence: pane => ({ release: () => released.push(pane) }),
+        fencedPanes: () => [0, 5],
+      });
+      return { lease, released };
+    }],
+    when: ["the writer releases and then repeats cleanup", ctx => {
+      let error;
+      try { ctx.lease.release(); } catch (caught) { error = caught; }
+      ctx.lease.release();
+      return error;
+    }],
+    then: ["all descriptors close exactly once and the error remains visible", (error, ctx) => {
+      expect(error.code).toBe("EIO");
+      expect(ctx.released).toEqual(["session", 0, 5]);
+    }],
+  });
+
   component("siblings are served while a pane waits on its engine", {
     given: ["lsrc:3 sent a compact and kept only its pane fence", () => {
       const ctx = twoBridges();

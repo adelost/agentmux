@@ -67,6 +67,11 @@ one persistent queue before agentmux touches tmux. Delivery is FIFO per pane
 and single-writer per tmux session, including across bridge processes. The
 queue also keeps private copies of temporary image and file attachments so a
 bridge restart cannot turn a valid media prompt into a missing path.
+Failed job or lock-file writes are logged with their target and error code,
+release all acquired writer leases, and leave existing submit fences intact.
+The next round rechecks the exact receipt without retyping the prompt.
+Receipt polling never sleeps under the session writer, so sibling panes can
+receive input while a submitted prompt awaits its journal entry.
 Long and multiline prompts use terminal bracketed-paste mode, so the TUI
 receives one input transaction rather than a slow stream of painted cells.
 

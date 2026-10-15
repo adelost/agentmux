@@ -27,6 +27,7 @@ import { recoverHiddenDeliveryTui, recoverSubmittedTui } from "./tui-stall-recov
 import { submittedTransportHint, submittedTuiInspectionDue } from "./submitted-tui-recovery.mjs";
 import { needsZoomFallback, terminalizeSlashRejection } from "./slash-ingest-guard.mjs";
 import { createDeliveryMemoryContext, deliveryMemoryReceiptText } from "./delivery-memory-context.mjs";
+import { withDeliveryWriter } from "./delivery-writer.mjs";
 const ACTIVE_RETRY_MS = 1_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
 // Warn well before a legitimate long turn reaches the 60-minute verdict.
@@ -443,7 +444,9 @@ export function createDeliveryBroker({
         return await deliverToPane(agent, job.agentName, job.pane, job.text, {
           verifyText: deliveryMemoryReceiptText(job),
           attempts: 1,
-          echoTimeoutMs: 3_000,
+          // The next broker round checks late receipts. Waiting here holds
+          // the session writer and needlessly delays sibling human input.
+          echoTimeoutMs: 0,
           echoCursor: job.echoCursor,
           notBeforeMs: job.echoCursor ? null : job.echoNotBeforeMs,
           precheckEcho: true,
@@ -589,10 +592,7 @@ export function createDeliveryBroker({
         return;
       }
     }
-    const acquireLease = queue.acquireSessionLease || queue.acquireTargetLease;
-    const lease = acquireLease?.(agentName, pane) || null;
-    if (acquireLease && !lease) return;
-    try {
+    return withDeliveryWriter({ queue, agentName, pane, log }, async context => {
       while (!stopped) {
         // Cancellation is a request, never a producer-side state rewrite.
         // All pre-delivery terminal paths run in one ordered pass under the
@@ -607,17 +607,16 @@ export function createDeliveryBroker({
         // owner's own message pass. No TUI transition releases later writes.
         const head = deliveryHead(queue.list(agentName, pane));
         if (!head) return;
+        context.job = head;
         const yielded = await yieldSupersededMaintenance(head);
         if (yielded && TERMINAL_DELIVERY_STATES.has(yielded.status)) continue;
         await answerBacklogBehindProbe(agentName, pane, head);
         if (Number(head.nextAttemptAt || 0) > now()) return;
-        const outcome = await processJob(head, lease);
+        const outcome = await processJob(head, context.lease);
         if (TERMINAL_DELIVERY_STATES.has(outcome.status)) continue;
         return;
       }
-    } finally {
-      lease?.release();
-    }
+    });
   }
 
   function kickTarget(agentName, pane) {
@@ -670,7 +669,7 @@ export function createDeliveryBroker({
     timer = setInterval(() => kick().catch((error) =>
       log(`delivery broker poll failed: ${error.message}`)), intervalMs);
     timer.unref?.();
-    void kick();
+    void kick().catch(error => log(`delivery broker initial poll failed: ${error.message}`));
   }
 
   async function stop() {
