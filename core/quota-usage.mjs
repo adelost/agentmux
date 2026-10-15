@@ -13,7 +13,7 @@ import {
   readClaudeQuota,
 } from "./claude-account-quota.mjs";
 import { readClaudeQuotaBudgeted } from "./claude-quota-budget.mjs";
-import { readCodexAccountQuota } from "./codex-account-quota.mjs";
+import { readCodexQuotaBudgeted } from "./codex-quota-budget.mjs";
 import { readKimiAccountQuota } from "./kimi-account-quota.mjs";
 import { readTailWindow } from "./jsonl-reader.mjs";
 import {
@@ -222,7 +222,7 @@ export async function readQuotaSnapshot({
   profiles = quotaAccountCatalog(),
   readers = {
     claude: readClaudeQuotaBudgeted,
-    codex: readCodexAccountQuota,
+    codex: readCodexQuotaBudgeted,
     kimi: readKimiAccountQuota,
   },
   identityOf = readClaudeProfileIdentity,

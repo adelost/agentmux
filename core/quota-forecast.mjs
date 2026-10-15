@@ -1,7 +1,6 @@
 // Weekly Claude quota forecast and the warning text built from it.
 //
-// Forecast warnings avoid unnecessary cache misses. Reserve warnings preserve
-// spare weekly capacity regardless of pace; all account changes remain explicit.
+// Forecast helpers remain independent of the human-only reserve reminder loop.
 
 import { formatReset } from "./quota-format.mjs";
 
@@ -50,11 +49,10 @@ export function weeklyForecast({ history = [], latest, now }) {
 
 /**
  * WHAT: Maps a forecast to the notice it deserves, if any.
- * WHY: Keeps reserve capacity independent of the forecast's urgency.
+ * WHY: Keeps early usage bursts from triggering forecast warnings.
  */
-export function weeklyNoticeLevel(forecast, { warnPercent, reservePercent = 90, urgentHours, now }) {
+export function weeklyNoticeLevel(forecast, { warnPercent, urgentHours, now }) {
   if (!forecast || !Number.isFinite(forecast.resetAt) || now >= forecast.resetAt) return null;
-  if (forecast.usedPercent >= reservePercent) return "reserve";
   // Below the threshold a fast hour early in the week is a burst, not a forecast worth a notice.
   if (forecast.usedPercent < warnPercent) return null;
   return !forecast.lastsUntilReset && forecast.exhaustAt - now <= urgentHours * HOUR_MS ? "urgent" : "threshold";
@@ -77,21 +75,11 @@ function switchStep(alternatives) {
 }
 
 /**
- * WHAT: Builds forecast advice or an actionable reserve notice.
- * WHY: Keeps reserve warnings from being dismissed when the pace lasts until reset.
+ * WHAT: Builds forecast advice from pace and alternatives.
+ * WHY: Keeps forecast text independent of the reserve reminder policy.
  */
-export function formatWeeklyNotice({ level, email, forecast, alternatives = [], reservePercent = 90, now }) {
+export function formatWeeklyNotice({ level, email, forecast, alternatives = [], now }) {
   const reset = formatReset(forecast.resetsAt);
-  if (level === "reserve") {
-    const best = alternatives.filter(candidate => Number.isFinite(candidate.usedPercent)
-      && candidate.usedPercent < reservePercent).sort((a, b) => a.usedPercent - b.usedPercent)[0];
-    const headline = `Claude ${email}: reservgränsen ${percent(reservePercent)} är nådd. `
-      + `${percent(forecast.usedPercent)} av veckan använt, ${reset}. Bevara återstående kvot som reserv.`;
-    return best ? [headline,
-      `Bästa alternativ: ${best.email}, ${percent(best.usedPercent)} av veckan använt, ${formatReset(best.resetsAt)}.`,
-      `Åtgärd: \`amux accounts rotate claude:${best.email}\`. amux byter aldrig konto själv.`].join("\n")
-      : `${headline}\nInget annat Claude-konto har verifierad plats under reservgränsen ${percent(reservePercent)}.`;
-  }
   if (forecast.lastsUntilReset) {
     return `Claude ${email}: ingen åtgärd. ${percent(forecast.usedPercent)} av veckan använt, `
       + `takten ${paceText(forecast.pace)} räcker till ${reset}.`;

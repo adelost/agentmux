@@ -94,6 +94,7 @@ const asCallersProfile = (result, profile) => ({ ...result, profile: {
  */
 export async function readClaudeQuotaBudgeted({
   profile,
+  cacheOnly = false,
   notBefore = 0,
   now = Date.now,
   read = readClaudeQuota,
@@ -111,6 +112,8 @@ export async function readClaudeQuotaBudgeted({
   };
   const cached = stored();
   if (cached) return cached;
+  if (cacheOnly) return asCallersProfile({ ok: false, engine: "claude", provider: "claude",
+    error: "quota_cache_unavailable" }, profile);
 
   mkdirSync(budgetDir, { recursive: true, mode: 0o700 });
   const lockPath = join(budgetDir, `${key}.lock`);

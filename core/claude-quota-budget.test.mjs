@@ -26,6 +26,20 @@ const budget = (overrides = {}) => {
 };
 
 feature("one Claude usage call per account per five minutes", () => {
+  unit("cache-only reminder reads never spend provider budget", {
+    given: ["a cold usage cache", () => budget()],
+    when: ["a reminder, dashboard and second reminder read", async ctx => {
+      const cold = await readClaudeQuotaBudgeted({ ...ctx, profile: slot("1"), cacheOnly: true, now: () => NOW });
+      await readClaudeQuotaBudgeted({ ...ctx, profile: slot("1"), now: () => NOW });
+      const warm = await readClaudeQuotaBudgeted({ ...ctx, profile: slot("1"), cacheOnly: true, now: () => NOW });
+      return { ctx, cold, warm };
+    }],
+    then: ["only the dashboard calls the provider", ({ ctx, cold, warm }) => {
+      expect(cold.error).toBe("quota_cache_unavailable");
+      expect(warm.ok).toBe(true);
+      expect(ctx.read).toHaveBeenCalledTimes(1);
+    }],
+  });
   unit("a second slot on the same account reuses the first read, labelled as its own slot", {
     given: ["one fresh read through slot 1", async () => {
       const ctx = budget();

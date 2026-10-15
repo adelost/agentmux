@@ -1,61 +1,49 @@
-// Bridge wiring for the weekly Claude quota warning.
-
-import { fileURLToPath } from "node:url";
-import { listAgents } from "../cli/config.mjs";
+// The reminder loop consumes the same cached observations as amux quota.
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { notifyUser } from "../cli/send-notify.mjs";
-import { createState } from "../core/state.mjs";
-import { readClaudeProfileIdentity } from "../core/claude-account-quota.mjs";
-import { readClaudeQuotaBudgeted, readClaudeQuotaHistory } from "../core/claude-quota-budget.mjs";
+import { readQuotaSnapshotWithPanes } from "../core/quota-in-use.mjs";
+import { readQuotaSnapshot } from "../core/quota-usage.mjs";
 import { quotaAccountCatalog } from "../core/quota-profiles.mjs";
-import { accountEngineForCommand, runtimeProfileCatalog, selectedRuntimeProfile } from "../core/runtime-account-profiles.mjs";
-import { runtimeAgentsPath } from "../core/runtime-defaults.mjs";
-import { createAmuxCommentDeliverer } from "../core/suggestions-comment-bridge.mjs";
-import {
-  claudeAccountsOf, createQuotaWarningLoop, createSentNoticeStore, parseQuotaWarningConfig, runQuotaWarningTick,
-} from "./quota-warning.mjs";
+import { createQuotaWarningLoop, createSentNoticeStore, parseQuotaWarningConfig, runQuotaWarningTick } from "./quota-warning.mjs";
 
 const LOOP_KEY = Symbol.for("agentmux.quotaWarningLoop");
 
-/** WHAT: Builds a provenance-bearing durable panel delivery. WHY: Keeps reserve alarms on the same CLI queue as stall-watch. */
-export function createQuotaWarningActorDeliverer({ deliver = createAmuxCommentDeliverer({
-  amuxBin: fileURLToPath(new URL("../bin/agent-cli.mjs", import.meta.url)),
-}) } = {}) {
-  return (actor, text, { idempotencyKey }) => {
-    const match = /^([a-zA-Z0-9_-]+):(\d+)$/u.exec(actor);
-    if (!match) throw new Error("AMUX_QUOTA_WARN_ACTOR must be project:pane");
-    return deliver({ agent: match[1], pane: Number(match[2]),
-      prompt: `[quota-warning reserve]\n${text}`, idempotencyKey });
+/** WHAT: Reads cached quota through the dashboard's snapshot path. WHY: Prevents reminders from adding provider calls. */
+export function readReminderSnapshot() {
+  const profiles = quotaAccountCatalog().filter(profile => ["claude", "codex"].includes(profile.provider));
+  return readQuotaSnapshotWithPanes({ profiles, readSnapshot: () => readQuotaSnapshot({ profiles,
+    claude: { cacheOnly: true }, codex: { cacheOnly: true } }) });
+}
+
+/** WHAT: Builds a human-only tick with replaceable read and notification boundaries. WHY: Allows real-quota previews without sending or changing state. */
+export function createQuotaWarningRuntimeTick({ env = process.env, notify = notifyUser,
+  sent = createSentNoticeStore(), readSnapshot = readReminderSnapshot, observe = () => {} } = {}) {
+  const config = parseQuotaWarningConfig(env);
+  return async () => {
+    const snapshot = await readSnapshot();
+    const notices = await runQuotaWarningTick({ snapshot, notify, sent, config });
+    observe({ mode: "human-only-hourly-growth", cacheOnly: true, reservePercent: config.reservePercent,
+      accounts: snapshot.accounts?.length || 0, notices: notices.length });
+    return notices;
   };
 }
 
-/** WHAT: Builds the bridge quota tick with replaceable delivery boundaries. WHY: Allows real-quota previews without sending or recording notices. */
-export function createQuotaWarningRuntimeTick({ env = process.env, notify = notifyUser,
-  deliverActor = createQuotaWarningActorDeliverer(), sent = createSentNoticeStore() } = {}) {
-  const config = parseQuotaWarningConfig(env);
-  const configPath = runtimeAgentsPath();
-  const state = createState(env.STATE_FILE || "/tmp/agentmux-state.json");
-  const claudePanes = () => listAgents(configPath).flatMap((agent) => (agent.panes || []).flatMap((definition, pane) =>
-    accountEngineForCommand(definition?.cmd) === "claude" ? [{ agentName: agent.name, pane, definition }] : []));
-  const paneProfile = (catalog) => ({ agentName, pane, definition }) => selectedRuntimeProfile({
-    state, agentName, pane, paneConfig: definition, provider: "claude", catalog });
-  return () => runQuotaWarningTick({
-    accountsInUse: () => claudeAccountsOf(claudePanes().map(paneProfile(runtimeProfileCatalog("claude"))),
-      readClaudeProfileIdentity),
-    allAccounts: () => claudeAccountsOf(quotaAccountCatalog().filter((profile) => profile.provider === "claude"),
-      readClaudeProfileIdentity),
-    readQuota: (profile) => readClaudeQuotaBudgeted({ profile }),
-    historyOf: (profile) => readClaudeQuotaHistory(profile),
-    notify, deliverActor, sent,
-    config,
-    now: Date.now(),
-  });
+/** WHAT: Records the running reminder loop after each tick. WHY: Keeps live-code verification independent of terminal output. */
+function writeWarningHeartbeat(beat) {
+  const dir = join(homedir(), ".agentmux"), path = join(dir, "quota-warning-heartbeat.json");
+  mkdirSync(dir, { recursive: true });
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify({ ...beat, pid: process.pid, ts: new Date().toISOString() }), { mode: 0o600 });
+  renameSync(temporary, path);
 }
 
-/** WHAT: Schedules one warning loop per bridge process. WHY: Keeps the preload from stacking loops on a re-import. */
+/** WHAT: Schedules one reminder loop per bridge process. WHY: Prevents duplicate loops on repeated preloads. */
 export function startQuotaWarning(env = process.env) {
   const config = parseQuotaWarningConfig(env);
   if (!config.enabled || globalThis[LOOP_KEY]) return globalThis[LOOP_KEY] || null;
-  const loop = createQuotaWarningLoop({ config, tick: createQuotaWarningRuntimeTick({ env }) });
+  const loop = createQuotaWarningLoop({ config, tick: createQuotaWarningRuntimeTick({ env, observe: writeWarningHeartbeat }) });
   globalThis[LOOP_KEY] = loop;
   loop.start();
   return loop;

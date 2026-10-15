@@ -1,145 +1,124 @@
-// Weekly Claude quota warning for the accounts panes actually run on.
-//
-// It reads through the shared five-minute budget, forecasts from readings
-// already stored there, and warns once per account, level and weekly window.
-// Reserve notices can also reach an action owner. It never switches accounts.
-
+// Human-only reserve reminders based on shared quota observations.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { formatWeeklyNotice, weeklyForecast, weeklyNoticeLevel } from "../core/quota-forecast.mjs";
+import { dirname, join } from "node:path";
+import { formatReset } from "../core/quota-format.mjs";
 
-const positiveNumber = (value, fallback) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
+const HOUR = 3_600_000;
+const positiveNumber = (value, fallback) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
 
-/** WHAT: Reads the warning settings. WHY: Keeps the threshold an operator setting while its meaning is open (default 80 % weekly used). */
+/** WHAT: Reads reserve reminder settings. WHY: Keeps hourly limits independent of operator poll cadence. */
 export function parseQuotaWarningConfig(env = process.env) {
-  return {
-    enabled: env.AMUX_QUOTA_WARNING_ENABLED !== "false",
-    warnPercent: Math.min(100, positiveNumber(env.AMUX_QUOTA_WARN_PERCENT, 80)),
+  return { enabled: env.AMUX_QUOTA_WARNING_ENABLED !== "false",
     reservePercent: Math.min(100, positiveNumber(env.AMUX_QUOTA_RESERVE_PERCENT, 90)),
-    actor: env.AMUX_QUOTA_WARN_ACTOR?.trim() || null,
-    urgentHours: positiveNumber(env.AMUX_QUOTA_WARN_URGENT_HOURS, 12),
-    pollMs: Math.max(5 * 60_000, positiveNumber(env.AMUX_QUOTA_WARN_POLL_MS, 15 * 60_000)),
-  };
+    pollMs: Math.max(5 * 60_000, positiveNumber(env.AMUX_QUOTA_WARN_POLL_MS, 15 * 60_000)) };
 }
 
-const weeklyOf = (result) => result?.ok === true
-  ? result.limits?.find((limit) => limit?.kind === "weekly_all") || null : null;
+/** WHAT: Names one account's weekly window. WHY: Keeps restart deduplication stable across reset-time drift. */
+export const weeklyWindowKey = (identity, resetsAt) => `${createHash("sha256")
+  .update(String(identity).toLowerCase()).digest("hex").slice(0, 16)}:${Math.round(Date.parse(resetsAt) / HOUR)}`;
 
-/** WHAT: Names one account's weekly window. WHY: Keeps "once per window" stable across reset-time drift. */
-export const weeklyWindowKey = (email, resetsAt) => `${createHash("sha256")
-  .update(String(email).toLowerCase()).digest("hex").slice(0, 16)}:${Math.round(Date.parse(resetsAt) / 3_600_000)}`;
-
-/** WHAT: Stores which notices each account window has had. WHY: Keeps a bridge restart from repeating a notice. */
-export function createSentNoticeStore(path = join(resolve(process.env.HOME || homedir()), ".agentmux", "quota-warning-sent.json")) {
+/** WHAT: Stores baseline usage and the last reminder atomically. WHY: Prevents restarts from resetting the hourly cooldown. */
+export function createSentNoticeStore(path = join(homedir(), ".agentmux", "quota-warning-sent.json")) {
   const read = () => {
     try { return JSON.parse(readFileSync(path, "utf8")) || {}; }
-    catch { return {}; }
+    catch (error) { if (error.code === "ENOENT") return {}; throw error; }
+  };
+  const update = (key, patch, { now, resetAt }) => {
+    const current = read();
+    for (const [stored, value] of Object.entries(current)) {
+      if (!(Number(value?.expiresAt) >= now)) delete current[stored];
+    }
+    current[key] = { ...current[key], ...patch, expiresAt: resetAt + 24 * HOUR };
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const temp = `${path}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify(current), { mode: 0o600 });
+    renameSync(temp, path);
   };
   return {
-    levels: (key) => read()[key]?.levels || [],
-    record(key, levels, { now, resetAt }) {
-      const current = read();
-      // A window is never asked about again a day after its reset.
-      for (const [stored, value] of Object.entries(current)) {
-        if (!(Number(value?.expiresAt) >= now)) delete current[stored];
-      }
-      current[key] = { levels: [...new Set([...(current[key]?.levels || []), ...levels])],
-        expiresAt: (Number.isFinite(resetAt) ? resetAt : now) + 24 * 3_600_000 };
-      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-      const temp = `${path}.${process.pid}.tmp`;
-      writeFileSync(temp, JSON.stringify(current), { mode: 0o600 });
-      renameSync(temp, path);
+    entry: key => read()[key] || null,
+    baseline(key, usedPercent, options) {
+      update(key, { baseline: { at: options.now, usedPercent,
+        cooldownAt: options.legacyReserve ? options.now : null } }, options);
     },
+    record(key, usedPercent, options) { update(key, { reminder: { at: options.now, usedPercent } }, options); },
   };
 }
 
-/** WHAT: Collects each Claude account once by email, from the given profiles. WHY: Keeps two slots on one login from being read or warned about twice. */
-export function claudeAccountsOf(profiles, identityOf) {
-  const accounts = new Map();
-  for (const profile of profiles) {
-    const email = identityOf(profile)?.email?.toLowerCase();
-    if (profile?.provider === "claude" && email && !accounts.has(email)) accounts.set(email, { email, profile });
-  }
-  return [...accounts.values()];
+/** WHAT: Extracts the account's weekly quota. WHY: Prevents short and scoped windows from triggering reserve reminders. */
+export function weeklyQuotaOf(account) {
+  if (!account?.ok) return null;
+  if (account.provider === "claude") return account.limits?.find(limit => limit.kind === "weekly_all") || null;
+  if (account.provider === "codex") return (account.limits?.find(limit => limit.limitId === "codex")
+    || account.limits?.[0])?.windows?.find(window => window.windowMinutes === 10080) || null;
+  return null;
 }
 
-/**
- * WHAT: Checks active Claude accounts against forecast and reserve thresholds.
- * WHY: Keeps warnings actionable without automatic account changes.
- */
-export async function runQuotaWarningTick({
-  accountsInUse, allAccounts, readQuota, historyOf, notify, deliverActor, sent, config = parseQuotaWarningConfig(), now = Date.now(),
-}) {
+/** WHAT: Builds a concise account-switch suggestion. WHY: Keeps account changes an explicit human choice. */
+export function formatReserveReminder(account, weekly, alternatives, reservePercent) {
+  const provider = account.provider === "claude" ? "Claude" : "Codex";
+  const headline = `${provider} ${account.account.email}: ${weekly.usedPercent} % av veckan, ${formatReset(weekly.resetsAt)}.`;
+  const best = alternatives[0];
+  if (!best) return `${headline} Inget annat ${provider}-konto har plats under ${reservePercent} %.`;
+  const command = account.provider === "claude"
+    ? `\`/byt ${best.account.email}\` visar planen, \`/byt ${best.account.email} ok\` byter.`
+    : `\`//switch ${best.profile.id}\` i Discord.`;
+  return `${headline}\nDu kan byta till ${best.account.email} (${weeklyQuotaOf(best).usedPercent} %): ${command}`;
+}
+
+/** WHAT: Dispatches hourly reminders for growing, actively used reserve accounts. WHY: Keeps idle accounts and panels undisturbed. */
+export async function runQuotaWarningTick({ snapshot, notify, sent, config = parseQuotaWarningConfig(), now = Date.now() }) {
   const notices = [];
-  const readings = new Map();
-  const reading = async (account) => {
-    if (!readings.has(account.email)) readings.set(account.email, await readQuota(account.profile).catch(() => null));
-    return readings.get(account.email);
-  };
-  for (const account of accountsInUse()) {
-    const weekly = weeklyOf(await reading(account));
-    if (!weekly?.resetsAt) continue;
-    const latest = { at: now, usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt };
-    const forecast = weeklyForecast({ history: historyOf(account.profile), latest, now });
-    const level = weeklyNoticeLevel(forecast, { ...config, now });
-    const key = weeklyWindowKey(account.email, weekly.resetsAt);
-    if (!level || sent.levels(key).includes(level)) continue;
-    const alternatives = [];
-    for (const other of allAccounts().filter((candidate) => candidate.email !== account.email)) {
-      const otherWeekly = weeklyOf(await reading(other));
-      if (Number.isFinite(otherWeekly?.usedPercent) && Date.parse(otherWeekly.resetsAt) > now
-          && otherWeekly.usedPercent < (config.reservePercent ?? 90)) {
-        alternatives.push({ email: other.email, usedPercent: otherWeekly.usedPercent, resetsAt: otherWeekly.resetsAt });
-      }
+  if (!config.enabled) return notices;
+  const accounts = snapshot?.accounts || [];
+  for (const account of accounts) {
+    const weekly = weeklyQuotaOf(account), email = account.account?.email;
+    const resetAt = Date.parse(weekly?.resetsAt);
+    if (!email || !Number.isFinite(weekly?.usedPercent) || !(resetAt > now)) continue;
+    const identity = account.provider === "claude" ? email : `${account.provider}:${email}`;
+    const key = weeklyWindowKey(identity, weekly.resetsAt), previous = sent.entry(key);
+    const accountKey = weeklyWindowKey(identity, "1970-01-01T00:00:00Z");
+    const baseline = previous?.reminder || previous?.baseline;
+    if (!baseline) {
+      sent.baseline(key, weekly.usedPercent, { now, resetAt, legacyReserve: previous?.levels?.includes("reserve") });
+      continue;
     }
-    alternatives.sort((left, right) => left.usedPercent - right.usedPercent);
-    const text = formatWeeklyNotice({ level, email: account.email, forecast, alternatives,
-      reservePercent: config.reservePercent, now });
-    const idempotencyKey = `claude-weekly:${key}:${level}`;
-    await notify(text, { level: level === "threshold" ? "warn" : "urgent", title: "Claude-kvot", idempotencyKey });
-    if (level === "reserve" && config.actor && alternatives.length) {
-      await deliverActor(config.actor, text, { idempotencyKey: `${idempotencyKey}:actor:${config.actor}` });
-    }
-    // The stronger notice already says everything the ordinary one would.
-    const levels = level === "reserve" ? ["threshold", "urgent", "reserve"]
-      : level === "urgent" ? ["threshold", "urgent"] : [level];
-    sent.record(key, levels, { now, resetAt: forecast.resetAt });
-    notices.push({ email: account.email, level, text });
+    const lastAt = Math.max(previous?.reminder?.at ?? baseline.cooldownAt ?? -Infinity,
+      sent.entry(accountKey)?.reminder?.at ?? -Infinity);
+    if (!account.inUse?.length || weekly.usedPercent < config.reservePercent
+        || weekly.usedPercent <= baseline.usedPercent || now - lastAt < HOUR) continue;
+    const alternatives = accounts.filter(other => other.provider === account.provider && other.account?.email
+      && other.account.email.toLowerCase() !== email.toLowerCase()
+      && (other.provider !== "codex" || /^[12]$/u.test(String(other.profile?.id)))
+      && Number.isFinite(weeklyQuotaOf(other)?.usedPercent) && Date.parse(weeklyQuotaOf(other)?.resetsAt) > now
+      && weeklyQuotaOf(other).usedPercent < config.reservePercent)
+      .sort((a, b) => weeklyQuotaOf(a).usedPercent - weeklyQuotaOf(b).usedPercent);
+    const text = formatReserveReminder(account, weekly, alternatives, config.reservePercent);
+    await notify(text, { level: "info", title: "Kontokvot",
+      idempotencyKey: `quota-reserve:${account.provider}:${key}:after:${baseline.at}` });
+    sent.record(accountKey, weekly.usedPercent, { now, resetAt });
+    sent.record(key, weekly.usedPercent, { now, resetAt });
+    notices.push({ provider: account.provider, email, level: "reserve", text });
   }
   return notices;
 }
 
-/** WHAT: Schedules the warning tick without overlap. WHY: Keeps a slow usage read from stacking ticks in the bridge. */
-export function createQuotaWarningLoop({ tick, config = parseQuotaWarningConfig(), log = (message) => console.log(`quota-warning | ${message}`),
+/** WHAT: Schedules non-overlapping reminder ticks. WHY: Prevents slow reads from stacking bridge work. */
+export function createQuotaWarningLoop({ tick, config = parseQuotaWarningConfig(), log = message => console.log(`quota-warning | ${message}`),
   setIntervalImpl = setInterval, clearIntervalImpl = clearInterval } = {}) {
   let running = false, intervalId = null;
   const run = async () => {
     if (running) return;
     running = true;
-    try {
-      for (const notice of await tick()) log(`${notice.level} sent for ${notice.email}`);
-    } catch (error) {
-      log(`tick failed: ${error.message}`);
-    } finally {
-      running = false;
-    }
+    try { for (const notice of await tick()) log(`${notice.level} sent for ${notice.provider}:${notice.email}`); }
+    catch (error) { log(`tick failed: ${error.message}`); }
+    finally { running = false; }
   };
   return {
-    start() {
-      if (intervalId || !config.enabled) return;
-      intervalId = setIntervalImpl(run, config.pollMs);
-      intervalId?.unref?.();
-      void run();
-    },
-    stop() {
-      if (intervalId) clearIntervalImpl(intervalId);
-      intervalId = null;
-    },
+    start() { if (intervalId || !config.enabled) return;
+      intervalId = setIntervalImpl(run, config.pollMs); intervalId?.unref?.(); void run(); },
+    stop() { if (intervalId) clearIntervalImpl(intervalId); intervalId = null; },
     run,
   };
 }

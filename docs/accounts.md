@@ -98,30 +98,27 @@ account switching have their own adapters; this command does not provision
 native sessions or rewrite their configured identity. Repeated profile names
 or equal usage numbers do not prove two different accounts.
 
-## Weekly warning
+## Reserve reminders
 
-The bridge checks the Claude accounts that panes run on every 15 minutes,
-through the same five-minute usage budget, and tells Mattias once per account
-and weekly window when it passes `AMUX_QUOTA_WARN_PERCENT` (default 80 %
-weekly used). The forecast uses the account's own readings from the last day,
-or the average since the window began when they span less than an hour. The
-notice leads with the cheapest action: "ingen åtgärd" when the pace lasts until
-the reset, otherwise a free reset on claude.ai if he has one (amux cannot see
-those), and only then the target's own usage and `/byt <target>` for the plan. Past the
-threshold, a second, stronger notice comes once when the limit is less than
-`AMUX_QUOTA_WARN_URGENT_HOURS` (default 12) away and before the reset; below it,
-a fast hour is treated as a burst.
+The bridge checks cached Claude and Codex weekly observations every 15 minutes.
+At `AMUX_QUOTA_RESERVE_PERCENT` (default 90 %), it sends a quiet suggestion to
+the human through `notifyUser`, Discord DM with the existing #notify fallback.
+There are no panel deliveries or automatic account changes from reminders.
 
-At `AMUX_QUOTA_RESERVE_PERCENT` (default 90 % weekly used), a separate
-`reserve` notice is sent regardless of pace or previous threshold/urgent
-notices. Its sent-store survives bridge restarts. The text names the least-used
-verified alternative below that boundary and the exact
-`amux accounts rotate claude:<email>` command. If none has room, the notice
-says so without an action line.
+A running pane must use the account, and usage must have grown since its last
+reminder. A durable sent-store enforces at least one hour between reminders
+per account, including across bridge restarts. The first observation establishes
+a baseline; a stationary account never prompts. Upgrading an old reserve record
+also establishes a one-hour cooldown. Weekly resets start a new baseline.
 
-Set `AMUX_QUOTA_WARN_ACTOR=project:pane` in the bridge's runtime environment
-(`~/.agentmux/.env` by default) to deliver reserve notices through the durable
-CLI queue with `[quota-warning reserve]` provenance. Only a reserve notice
-with an available alternative wakes that pane. Without an actor, only the
-human is notified. amux never switches by itself.
+The two-line suggestion includes account, usage, reset, and the least-used
+verified alternative below reserve. Claude uses `/byt <email>` for a plan and
+`/byt <email> ok` to confirm. Codex uses `//switch <1|2>` in Discord. Without
+spare capacity, one line explains that no alternative has room.
+
+The warning loop only reads cache through the same quota snapshot as
+`amux quota`. Normal dashboard reads share Claude's existing five-minute budget
+and Codex's fifteen-minute app-server budget. Cold or expired cache produces no
+warning and no extra provider request. Codex limit recovery keeps its fresh
+reader and existing behavior. amux never switches by itself on a reminder.
 `AMUX_QUOTA_WARNING_ENABLED=false` turns it off.

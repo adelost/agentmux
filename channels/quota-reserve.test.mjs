@@ -1,111 +1,106 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { feature, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
 import { createSentNoticeStore, parseQuotaWarningConfig, runQuotaWarningTick, weeklyWindowKey } from "./quota-warning.mjs";
 
-const NOW = Date.parse("2026-10-15T11:00:00Z");
-const RESET = "2026-10-16T11:00:00Z";
-const source = { email: "active@example.test", profile: { id: "active" } };
-const target = { email: "spare@example.test", profile: { id: "spare" } };
-const weekly = (usedPercent, resetsAt = RESET) => ({ ok: true, limits: [{ kind: "weekly_all", usedPercent, resetsAt }] });
+const NOW = Date.parse("2026-10-15T11:00:00Z"), HOUR = 3_600_000;
+const RESET = "2026-10-21T11:00:00Z";
+const account = (provider, id, usedPercent, inUse = ["test:0"]) => ({ ok: true, provider,
+  profile: { id }, account: { email: `${id}@example.test` }, inUse,
+  limits: provider === "claude" ? [{ kind: "weekly_all", usedPercent, resetsAt: RESET }]
+    : [{ limitId: "codex", windows: [{ windowMinutes: 10080, usedPercent, resetsAt: RESET }] }],
+});
 
-function fixture({ actor = "api:0", spare = 17, previous = [], reserve = 90 } = {}) {
-  const path = join(mkdtempSync(join(tmpdir(), "quota-reserve-")), "sent.json");
-  const store = createSentNoticeStore(path);
-  store.record(weeklyWindowKey(source.email, RESET), previous, { now: NOW, resetAt: Date.parse(RESET) });
-  const notify = vi.fn(async () => ({ sent: true }));
-  const deliverActor = vi.fn(async () => ({ queued: true }));
-  const run = (resetsAt = RESET) => runQuotaWarningTick({
-    accountsInUse: () => [source], allAccounts: () => [source, target],
-    readQuota: async (profile) => weekly(profile.id === "active" ? 91 : spare, resetsAt),
-    historyOf: () => [{ at: NOW - 10 * 3_600_000, usedPercent: 90, resetsAt },
-      { at: NOW, usedPercent: 91, resetsAt }],
-    notify, deliverActor, sent: createSentNoticeStore(path), now: NOW,
-    config: parseQuotaWarningConfig({ AMUX_QUOTA_WARN_ACTOR: actor, AMUX_QUOTA_RESERVE_PERCENT: String(reserve) }),
+function fixture(provider = "claude") {
+  const path = join(mkdtempSync(join(tmpdir(), "quota-reminder-")), "sent.json");
+  const notify = vi.fn(async () => ({ sent: true })), deliverActor = vi.fn();
+  const run = (used, now = NOW, inUse = ["test:0"], spare = 17) => runQuotaWarningTick({
+    snapshot: { accounts: [account(provider, "1", used, inUse), account(provider, "2", spare, [])] },
+    accountsInUse: () => inUse.length ? [{ email: "1@example.test", profile: { id: "1" } }] : [],
+    allAccounts: () => [{ email: "2@example.test", profile: { id: "2" } }],
+    readQuota: async profile => account(provider, profile.id, profile.id === "1" ? used : spare),
+    historyOf: () => [],
+    notify, deliverActor, sent: createSentNoticeStore(path), now,
+    config: parseQuotaWarningConfig({ AMUX_QUOTA_WARN_ACTOR: "api:0" }),
   });
-  return { run, notify, deliverActor };
+  return { path, run, notify, deliverActor };
 }
 
-feature("weekly quota reserve", () => {
-  unit("91 percent warns both recipients even when the pace lasts until reset", {
-    given: ["a slow active account with spare capacity and an actor", () => fixture()],
-    when: ["the warning runs", async (fx) => ({ ...fx, notices: await fx.run() })],
-    then: ["the reserve command reaches the human and the actor", (fx) => {
-      expect(fx.notices.map(n => n.level)).toEqual(["reserve"]);
-      const text = fx.notify.mock.calls[0][0];
-      expect(text).not.toContain("ingen åtgärd");
-      expect(text).toContain("amux accounts rotate claude:spare@example.test");
-      expect(fx.deliverActor).toHaveBeenCalledWith("api:0", text, expect.objectContaining({
-        idempotencyKey: expect.stringContaining(":reserve:actor:api:0"),
-      }));
+feature("active subscription reserve reminders", () => {
+  unit("Claude growth gets at most one reminder per hour, including after a restart", {
+    given: ["a durable store with a growing active Claude account", () => fixture()],
+    when: ["usage rises and then stops across fresh store instances", async fx => {
+      await fx.run(90, NOW - HOUR); await fx.run(91);
+      await fx.run(92, NOW + HOUR - 1); await fx.run(93, NOW + HOUR);
+      await fx.run(93, NOW + 2 * HOUR); return fx;
     }],
-  });
-
-  unit("threshold and urgent cannot suppress reserve", {
-    given: ["both older levels recorded", () => fixture({ previous: ["threshold", "urgent"] })],
-    when: ["the warning runs", async (fx) => ({ ...fx, notices: await fx.run() })],
-    then: ["reserve is delivered once to each recipient", (fx) => {
-      expect(fx.notices.map(n => n.level)).toEqual(["reserve"]);
-      expect(fx.notify).toHaveBeenCalledTimes(1);
-      expect(fx.deliverActor).toHaveBeenCalledTimes(1);
-    }],
-  });
-
-  unit("a fresh sent-store preserves deduplication but allows the next weekly window", {
-    given: ["an actor and a persistent sent-store", () => fixture()],
-    when: ["three new store instances read two windows", async (fx) => {
-      await fx.run(); await fx.run(); await fx.run("2026-10-23T11:00:00Z"); return fx;
-    }],
-    then: ["each recipient gets one reserve per window", (fx) => {
+    then: ["only two quiet human prompts with explicit plan and confirmation commands", fx => {
       expect(fx.notify).toHaveBeenCalledTimes(2);
-      expect(fx.deliverActor).toHaveBeenCalledTimes(2);
-      expect(fx.notify.mock.calls.every(([text]) => text.includes("reservgränsen"))).toBe(true);
+      expect(fx.notify.mock.calls.map(([text]) => text.split("\n").length)).toEqual([2, 2]);
+      expect(fx.notify.mock.calls[0][0]).toContain("/byt 2@example.test");
+      expect(fx.notify.mock.calls[0][0]).toContain("/byt 2@example.test ok");
+      expect(fx.notify.mock.calls[0][1].level).toBe("info");
+      expect(fx.deliverActor).not.toHaveBeenCalled();
     }],
   });
 
-  unit("no alternative below reserve warns only the human without an action line", {
-    given: ["the only other account is at the reserve boundary", () => fixture({ spare: 90 })],
-    when: ["the warning runs", async (fx) => { await fx.run(); return fx; }],
-    then: ["the actor stays asleep and the shortage is explicit", (fx) => {
+  unit("an account with no running pane never prompts", {
+    given: ["a Claude baseline", () => fixture()],
+    when: ["usage increases but its last pane has stopped", async fx => {
+      await fx.run(90, NOW - HOUR); await fx.run(91, NOW, []); return fx;
+    }],
+    then: ["neither a human nor a panel is contacted", fx => {
+      expect(fx.notify).not.toHaveBeenCalled(); expect(fx.deliverActor).not.toHaveBeenCalled();
+    }],
+  });
+
+  unit("Codex uses its weekly window and the target slot's Discord switch command", {
+    given: ["an active Codex account with a spare slot", () => fixture("codex")],
+    when: ["weekly usage reaches 91 percent", async fx => {
+      await fx.run(90, NOW - HOUR); await fx.run(91); return fx;
+    }],
+    then: ["one human prompt names the slot without waking a panel", fx => {
       expect(fx.notify).toHaveBeenCalledTimes(1);
-      expect(fx.notify.mock.calls[0][0]).toMatch(/Inget annat Claude-konto.*under.*90 %/u);
-      expect(fx.notify.mock.calls[0][0]).not.toMatch(/rotate|Åtgärd:|ingen åtgärd/u);
+      expect(fx.notify.mock.calls[0][0]).toMatch(/Codex 1@example.test: 91 %.*reset/u);
+      expect(fx.notify.mock.calls[0][0]).toContain("//switch 2");
       expect(fx.deliverActor).not.toHaveBeenCalled();
     }],
   });
 
-  unit("no configured actor keeps the warning human-only", {
-    given: ["spare capacity without an actor", () => fixture({ actor: "" })],
-    when: ["the warning runs", async (fx) => { await fx.run(); return fx; }],
-    then: ["only the human receives the reserve command", (fx) => {
-      expect(fx.notify.mock.calls[0][0]).toContain("amux accounts rotate claude:spare@example.test");
-      expect(fx.deliverActor).not.toHaveBeenCalled();
+  unit("stationary usage after a fresh bridge start sends nothing", {
+    given: ["no earlier observations", () => fixture()],
+    when: ["a stationary account is observed two hours apart", async fx => {
+      await fx.run(91); await fx.run(91, NOW + 2 * HOUR); return fx;
     }],
+    then: ["a baseline alone cannot cause a prompt", fx => expect(fx.notify).not.toHaveBeenCalled()],
   });
 
-  unit("the reserve threshold is configurable", {
-    given: ["reserve set to 92 above current usage", () => fixture({ reserve: 92 })],
-    when: ["the warning runs", async (fx) => ({ ...fx, notices: await fx.run() })],
-    then: ["the ordinary slow-pace warning does not wake the actor", (fx) => {
-      expect(fx.notices[0].level).toBe("threshold");
-      expect(fx.deliverActor).not.toHaveBeenCalled();
+  unit("upgrading an old reserve receipt starts a conservative hourly cooldown", {
+    given: ["a reserve notice recorded by the previous release", () => {
+      const fx = fixture();
+      writeFileSync(fx.path, JSON.stringify({ [weeklyWindowKey("1@example.test", RESET)]: {
+        levels: ["threshold", "urgent", "reserve"], expiresAt: Date.parse(RESET) + HOUR,
+      } }));
+      return fx;
     }],
+    when: ["usage grows during and after the first hour", async fx => {
+      await fx.run(91); await fx.run(92, NOW + HOUR - 1); await fx.run(93, NOW + HOUR); return fx;
+    }],
+    then: ["the prior notice cannot be followed by an immediate duplicate", fx => expect(fx.notify).toHaveBeenCalledTimes(1)],
   });
 
-  unit("a failed actor enqueue is retried with the same durable identities", {
-    given: ["a previously warned human and a failed actor enqueue", () => {
-      const fx = fixture(); fx.deliverActor.mockRejectedValueOnce(new Error("queue unavailable")); return fx;
+  unit("no spare capacity is explained in one line", {
+    given: ["an active account", () => fixture()],
+    when: ["it grows with all other accounts at reserve", async fx => {
+      await fx.run(90, NOW - HOUR); await fx.run(91, NOW, ["test:0"], 90); return fx;
     }],
-    when: ["the tick fails and a fresh store retries", async (fx) => {
-      await expect(fx.run()).rejects.toThrow("queue unavailable"); await fx.run(); await fx.run(); return fx;
-    }],
-    then: ["the completed notice stops retries and both identities stay stable", (fx) => {
-      expect(fx.notify).toHaveBeenCalledTimes(2);
-      expect(fx.notify.mock.calls[0][1].idempotencyKey).toBe(fx.notify.mock.calls[1][1].idempotencyKey);
-      expect(fx.deliverActor).toHaveBeenCalledTimes(2);
-      expect(fx.deliverActor.mock.calls[0][2]).toEqual(fx.deliverActor.mock.calls[1][2]);
+    then: ["the human gets one line with no switch command", fx => {
+      expect(fx.notify).toHaveBeenCalledTimes(1);
+      expect(fx.notify.mock.calls[0][0]).toMatch(/Inget annat Claude-konto.*90 %/u);
+      expect(fx.notify.mock.calls[0][0]).not.toMatch(/\n|byt|switch|rotate/u);
+      expect(fx.deliverActor).not.toHaveBeenCalled();
     }],
   });
 });
