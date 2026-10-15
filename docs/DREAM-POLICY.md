@@ -95,7 +95,10 @@ Only the selected, exactly receipted product can enter memory.
 8. Require all three receipts: bounded valid output, exact final journal-text
    `DREAM_OK` for this run, and idle completion. Earlier working commentary is
    not part of the final reply; a later action or screen-only match is not a
-   completion receipt. Audit tool invocations from the exact original native
+   completion receipt. Codex may write model context before the user prompt;
+   accept it only with matching native task-start, context and completion turn
+   IDs. An earlier unrelated context never proves this task's model. Audit
+   tool invocations from the exact original native
    prompt through its terminal reply, not later independent turns or read
    results. Refuse curator memory writes, including writes later restored.
    Preserve current notes outside the Dream block, including inserts and

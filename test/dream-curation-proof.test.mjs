@@ -30,6 +30,30 @@ function fixture({ writeMemory = false, receipt = true, laterWrite = false } = {
 }
 
 describe("original native Dream proof", () => {
+  it("binds Codex context written before its user prompt to that same native turn", () => {
+    const fx = fixture(), turnId = "native-dream-turn";
+    const events = [
+      { type: "event_msg", payload: { type: "task_started", turn_id: turnId } },
+      { type: "turn_context", payload: { turn_id: turnId, model: "gpt-6.1-sol", effort: "xhigh" } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: fx.prompt }],
+        internal_chat_message_metadata_passthrough: { content_item_kinds: ["user.text"] } } },
+      { type: "response_item", payload: { type: "message", role: "assistant",
+        content: [{ type: "output_text", text: `DREAM_OK ${fx.dateKey} ${fx.runId}` }] } },
+      { type: "event_msg", payload: { type: "task_complete", turn_id: turnId } },
+    ].map(event => ({ timestamp: "2026-10-15T10:08:33Z", ...event }));
+    const options = { ...fx, owner: { ...fx.owner, engine: "codex" }, quality: { model: "gpt-6.1-sol", effort: "xhigh" } };
+    const save = () => writeFileSync(fx.path, events.map(JSON.stringify).join("\n") + "\n");
+    save();
+    expect(readDreamCurationProof(options).terminal.line).toBe(4);
+    events[1].payload.turn_id = "old-unrelated-turn";
+    save();
+    expect(() => readDreamCurationProof(options)).toThrow("quality-mismatch");
+    events[1].payload.turn_id = turnId;
+    events[4].payload.turn_id = "another-completed-turn";
+    save();
+    expect(() => readDreamCurationProof(options)).toThrow("turn-mismatch");
+  });
+
   it("requires the Codex turn's observed quality and native completion after its final answer", () => {
     const fx = fixture();
     const events = [

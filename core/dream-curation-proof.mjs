@@ -18,6 +18,7 @@ export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runI
   const expected = `DREAM_OK ${dateKey} ${runId}`, needle = normalizePrompt(prompt);
   const endByteOffset = Math.min(statSync(identity.path).size, MAX_JOURNAL_BYTES);
   let started = null, terminal = null, toolBytes = 0, observedQuality = null;
+  let pendingTurnId = null, pendingQuality = null;
   const ownerTexts = [];
   for (const record of records(identity.path, { endByteOffset })) {
     if (!record.raw) {
@@ -30,15 +31,25 @@ export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runI
       continue;
     }
     if (event.isSidechain) continue;
+    const observation = owner.engine === "codex" && observationFromCodexEntry(event);
+    const startsCodexTurn = owner.engine === "codex" && event.type === "event_msg" && event.payload?.type === "task_started";
     const item = describeSearchEvent(event);
     const matches = owner.engine === "claude"
       ? promptEventMatches(event, prompt)
       : item.role === "USER" && normalizePrompt(item.text) === needle;
     if (!started) {
-      if (matches) started = { at: item.date, line: record.line, byteOffset: record.byteOffset };
+      if (startsCodexTurn) { pendingTurnId = event.payload.turn_id || null; pendingQuality = null; }
+      if (observation && pendingTurnId && observation.turnId === pendingTurnId) pendingQuality = observation;
+      if (matches) {
+        started = { at: item.date, line: record.line, byteOffset: record.byteOffset, turnId: pendingTurnId };
+        // Modern Codex writes task_started/context before the authored input.
+        // Only their shared native turn ID authorizes that earlier observation.
+        observedQuality = pendingQuality;
+      }
       continue;
     }
-    const observation = owner.engine === "codex" && observationFromCodexEntry(event);
+    if (started.turnId && ((startsCodexTurn && event.payload.turn_id !== started.turnId)
+        || (observation && observation.turnId !== started.turnId))) throw new Error("dream-original-turn-mismatch");
     if (observation) observedQuality = observation;
     if (item.role === "USER" && item.text && !matches) {
       // Tool-result arrays and engine bookkeeping do not start authored turns.
@@ -62,6 +73,7 @@ export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runI
       }
     }
     if (terminal && event.type === "event_msg" && event.payload?.type === "task_complete") {
+      if (started.turnId && event.payload.turn_id !== started.turnId) throw new Error("dream-original-turn-mismatch");
       if (quality && (observedQuality?.model !== quality.model || observedQuality?.effort !== quality.effort)) {
         throw new Error("dream-original-session-quality-mismatch");
       }
