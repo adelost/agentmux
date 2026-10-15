@@ -47,6 +47,15 @@ function liveDeliveryCount(queue, agentName, pane) {
 
 async function observePane(ctx, entry, catalog, target, deps) {
   const { agentName, agent, pane, definition } = entry;
+  const paneDir = join(agent.dir, ".agents", String(pane));
+  const pending = pendingRuntimeProfile(ctx.state, agentName, pane);
+  const currentProfile = selectedRuntimeProfile({ state: ctx.state, agentName, pane,
+    paneConfig: definition, provider: "claude", catalog });
+  // KEEP has no process or session side effects, so activity on that pane is not a rotation gate.
+  if (onTargetAccount({ pending, currentProfile }, target, deps.identityOf)) {
+    return { ...entry, key: paneKey(agentName, pane), paneDir, pending, currentProfile,
+      allow: true, mode: "keep", reason: "already-selected" };
+  }
   const processState = await ctx.agent.paneProcessState(agentName, pane).catch(() => null);
   const running = processState?.running === true;
   const [busy, transport] = running
@@ -55,8 +64,6 @@ async function observePane(ctx, entry, catalog, target, deps) {
       ctx.agent.promptTransportState(agentName, pane, "").catch(() => null),
     ])
     : [null, null];
-  const paneDir = join(agent.dir, ".agents", String(pane));
-  const pending = pendingRuntimeProfile(ctx.state, agentName, pane);
   const identity = running || pending ? deps.latestIdentity(paneDir) : null;
   const liveDeliveryJobs = liveDeliveryCount(ctx.deliveryQueue, agentName, pane);
   let continuity = null, continuityError = null;
@@ -98,14 +105,7 @@ async function observePane(ctx, entry, catalog, target, deps) {
     identity,
     continuity,
     pending,
-    currentProfile: selectedRuntimeProfile({
-      state: ctx.state,
-      agentName,
-      pane,
-      paneConfig: definition,
-      provider: "claude",
-      catalog,
-    }),
+    currentProfile,
     ...verdict,
   };
 }
@@ -130,13 +130,13 @@ function blockedProjectRows(panes, reason, culprit = null) {
 
 function paneChangeReason(before, after, deps) {
   if (!after.allow) return after.reason;
-  if (after.mode !== before.mode) return "rotation-pane-changed";
   if (after.currentProfile?.id !== before.currentProfile?.id) return "rotation-profile-changed";
+  if (after.mode !== before.mode) return "rotation-pane-changed";
   if (after.pending?.sessionId !== before.pending?.sessionId
       || after.pending?.targetProfileId !== before.pending?.targetProfileId) {
     return "rotation-transition-changed";
   }
-  if (before.mode === "dormant") return null;
+  if (before.mode === "dormant" || before.mode === "keep") return null;
   try { deps.assertContinuity(before.continuity, after.identity); }
   catch (error) { return error.message; }
   return null;
