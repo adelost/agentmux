@@ -16,7 +16,7 @@ function visit(root, fn, relative = "") {
   }
 }
 
-/** WHAT: Applies read-only permissions to shared files. WHY: Prevents accidental in-place edits from modifying every consumer. */
+/** WHAT: Normalizes shared file permissions to read-only. WHY: Prevents accidental in-place edits from modifying every consumer. */
 export function sealNodeCache(modules) {
   visit(modules, (path, stat) => {
     if (stat.isFile() && (stat.mode & 0o222)) chmodSync(join(modules, path), stat.mode & ~0o222);
