@@ -48,7 +48,9 @@ export function toolCallTexts(event, { includeCalls = false } = {}) {
   const calls = blocks.filter(block => block?.type === "tool_use")
     .map(block => ({ tool: block.name || "unknown", input: block.input }));
   if (["function_call", "custom_tool_call", "local_shell_call"].includes(payload?.type)) {
-    calls.push({ tool: payload.name || payload.type, input: decoded(payload.arguments ?? payload.input ?? payload.action) });
+    const input = payload.arguments ?? payload.input ?? payload.action;
+    const parsed = decoded(input);
+    calls.push({ tool: payload.name || payload.type, input: typeof input === "string" && Array.isArray(parsed) ? parsed[1] : parsed });
   }
   return calls.map(call => JSON.stringify(call));
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { vi } from "vitest";
 import { commitDreamProduct } from "../cli/dream.mjs";
-import { concurrentNotesJudge, concurrentNotesVerdict, readToolCallTextsSince } from "../core/dream-memory-race.mjs";
+import { concurrentNotesJudge, concurrentNotesVerdict, readToolCallTextsSince, toolCallTexts } from "../core/dream-memory-race.mjs";
 
 // 2026-10-08 04:01:42: lsrc:0 logged its E211 note with `cat >>` while claw:1
 // curated. The commit refused and that night's digest was lost.
@@ -43,6 +43,32 @@ feature("Dream commit beside fleet notes", () => {
       ["../../memory/2026-10-08.md", "/ws/MEMORY.md"].map(file_path => concurrentNotesVerdict(before, before,
         { memPath: "/ws/memory/2026-10-08.md", ownerTexts: [JSON.stringify({ tool: "Write", input: { file_path, content: "Changed by curator." } })] }).reason)],
     then: ["both target forms share the same restriction", reasons => expect(reasons).toEqual(["curator-wrote", "curator-wrote"])],
+  });
+  unit("keeps the real 13 October quoted awk comparison read-only, including scripted Codex calls", {
+    when: ["auditing the native read and a nested shell write", () => {
+      const command = "cd /ws/memory && grep -n '^#' 2026-10-12.md | awk -F: '$1>540' | head -n 200";
+      const nested = cmd => `text(await tools.exec_command({cmd: ${JSON.stringify(cmd)}}));`;
+      return [
+        { tool: "Bash", input: { command } },
+        { tool: "functions.exec", input: nested(command) },
+        { tool: "functions.exec", input: nested("cd /ws/memory && echo changed >> 2026-10-08.md") },
+      ].map(call => concurrentNotesVerdict(before, before, { memPath: "/ws/memory/2026-10-08.md", ownerTexts: [JSON.stringify(call)] }).ok);
+    }],
+    then: ["quoted comparisons stay reads and a real nested redirect stays forbidden", accepted => expect(accepted).toEqual([true, true, false])],
+  });
+  unit("audits native Codex arguments and patch destinations rather than summary contents", {
+    when: ["the summary mentions memory but only a real memory destination is forbidden", () => {
+      const patch = path => `*** Begin Patch\n*** Add File: ${path}\n+- See memory/references/work.md\n*** End Patch`;
+      const script = input => `await tools.apply_patch(${JSON.stringify(input)});`;
+      return [
+        { type: "custom_tool_call", name: "apply_patch", input: patch("/ws/output/summary.md") },
+        { type: "custom_tool_call", name: "functions.exec", input: script(patch("/ws/output/summary.md")) },
+        { type: "custom_tool_call", name: "functions.exec", input: script(patch("/ws/memory/day.md")) },
+        { type: "function_call", name: "exec_command", arguments: JSON.stringify({ cmd: "echo changed>day.md", workdir: "/ws/memory" }) },
+      ].map(payload => concurrentNotesVerdict(before, before, { memPath: "/ws/memory/2026-10-08.md",
+        ownerTexts: toolCallTexts({ type: "response_item", payload }, { includeCalls: true }) }).ok);
+    }],
+    then: ["the actual patch or command targets decide the verdict", accepted => expect(accepted).toEqual([true, true, false, false])],
   });
   unit("refuses edits, deletion and malformed boundaries of a protected Dream block", {
     given: ["a daily file with its protected block", () => before + "<!-- amux-dream-summary:2026-10-08 -->\nVerified original.\n<!-- /amux-dream-summary:2026-10-08 -->\n"],
