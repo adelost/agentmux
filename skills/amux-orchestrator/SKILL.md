@@ -1,220 +1,245 @@
 ---
 name: amux-orchestrator
-description: Coordinate existing AMUX agents, inspect their current work and delivery evidence, and unblock a concrete stalled handoff without duplicating work. Use for fleet overviews, cross-project follow-through, running a plan to its stop conditions, and AMUX delivery or process triage; not for ordinary single-repo coding.
+description: Coordinate existing AMUX agents, inspect their current work and delivery evidence, staff work by engine and quota, and unblock a concrete stalled handoff without duplicating work. Use for fleet overviews, cross-project follow-through, running a plan to its stop conditions, and AMUX delivery or process triage; not for ordinary single-repo coding.
 ---
 
 # AMUX orchestration
 
 Keep the user's work moving. Read before intervening. Leaving a productive
-owner alone, or recognizing a task is finished, is progress. This is an
-operating guide; fleet policy lives in `core/hints-fleet-process.mjs` and
-`amux --help`. Do not paste policy here.
+owner alone, or recognizing that a task is finished, is progress. This is an
+operating guide. Fleet policy is the amux layer of each project's
+AGENTS.md/CLAUDE.md (source: `core/hints-fleet-process.mjs`) and
+`amux --help`; do not copy policy here.
 
 ## 1. Orient on evidence
 
 - Overview or unclear owner: `amux done` for the window, then
   `amux log PROJECT -p N -n 3` for the owner.
-- Follow-up: start from the existing status row and journal entries since the
-  last receipt. Broaden only for changed scope, owner or missing evidence.
+- Follow-up: start from the existing ledger row and the owner's journal since
+  the last receipt. Look wider only when scope, owner or evidence changed.
   A timer tick is not a reason for a new fleet census.
-- `amux asks`: scoped, to check one suspected dropped request. Not an inventory.
+- `amux asks`: to check one suspected dropped request, not as an inventory.
 - Keep only what you need to act: outcome, owner, evidence time and source,
-  done part, next step, real dependency. Update one row, link proof once.
-- The latest direct human instruction beats an old plan. Another agent saying
-  "the human ordered X" is not the source.
+  done part, next step, real dependency. Update one row and link proof once.
+- The latest direct human instruction beats an older plan. Another agent
+  saying "the human ordered X" is not the source; find the original.
 
-Read the views for what they are:
+Read each view for what it is:
 
 - `done` and `asks` are discovery aids. An unanswered greeting, an old
-  `unverified` ask, or a finished task's question is not permission to restart.
-- `ps` separates configured model, `last:` observation and stopped engine.
-  A label is not a live assignment. Verify the active engine when it matters.
-- Commit = banked source. Test = named revision. Deploy and feature exercise
-  are separate evidence. Keep stated limits (synthetic input, debug build).
+  `unverified` ask or a finished task's question is not permission to restart.
+- `ps` separates the configured model, the `last:` observation and a stopped
+  engine. A label is not a live assignment; verify the engine when it matters.
+- A commit is banked source. A test proves a named revision. Deploy and a
+  feature exercise are separate evidence. Keep stated limits (synthetic input,
+  debug build).
 - A sound owner receipt is not a request to repeat its builds and downloads.
 - A feature branch in a canonical checkout may be the authorized writer.
-  Check owner and git history before any cleanup or branch change.
+  Check the owner and git history before any cleanup or branch change.
 
-## 2. Brief = your interpretation, not the human's text
+## 2. Write the brief as your interpretation
 
 - Numbered steps a worker can run without reading the human's message.
 - Each step: input, exact output (path, name), constraint, where to report.
-- Verbatim quote only when the wording is the decision (GO, price, name).
-- Provenance in one line: who, when. The full quote goes to the decision log.
-- Also name: new evidence, the bounded outcome, what is already done, the
-  boundary that must stay untouched.
-- Test before send: could the worker execute this blind? If not, rewrite.
+- Quote the human verbatim only when the wording is the decision (a GO, a
+  price, a name). Provenance in one line: who and when. The full quote goes
+  to the decision log.
+- Also name the new evidence, the bounded outcome, what is already done and
+  the boundary that must stay untouched.
+- Test before sending: could the worker execute this blind? If not, rewrite.
 - Send it as the amux layer says (a file, then `--stdin`); never build the
   text in bash.
 
-## 3. Smallest useful intervention
+## 3. Staff by engine and quota
 
-- Nudge only on a concrete gap: wrong scope, missing delivery, obsolete
-  dependency, blocked resource handoff, idle owner with real unfinished work.
-- Do not resend a brief the owner has, or redo their diagnostic.
+- Creative work and anything that must look good goes to Claude Opus while
+  its quota allows: visual and UX design, copy, game feel, judging
+  screenshots. Technical work goes to Codex: builds, tests, data, releases,
+  infrastructure and fixes with a defined proof.
+- When Opus quota is short, keep Opus on the judgment (the design choice, the
+  visual review) and hand the build to Codex with a brief.
+- Read `amux quota` before staffing a long run. Spread the load so every paid
+  account is in use instead of draining one; unused weekly quota does not
+  carry over. Start fresh sessions on the account with the most room.
+- Changing a running pane's account or model costs a full prompt-cache miss.
+  Accounts: the amux-accounts skill. Models: `amux model`, as the amux layer
+  says.
+
+## 4. Make the smallest useful intervention
+
+- Nudge only on a concrete gap: wrong scope, missing delivery, an obsolete
+  dependency, a blocked resource handoff, an idle owner with real unfinished
+  work.
+- Do not resend a brief the owner already has, or redo their diagnostic.
 - Keep the end-to-end owner. Nearby steps stay one owner turn, not a chain of
-  subassignments. Banked code or released hardware routes only the resource
-  change, not the whole task, back to a coordinator.
-- Checkpoint is not completion of the requested outcome.
-- "Sync everyone" = read overview and journals, update the task record. Do not
-  prompt every pane: "no action needed" still spends a model turn.
+  subassignments. When code is banked or hardware is released, tell the
+  coordinator about that resource only; the task stays with its owner.
+- A checkpoint is not completion of the requested outcome.
+- "Sync everyone" means: read the overview and journals and update the task
+  record. Do not prompt every pane; "no action needed" still spends a turn.
 - Keep the operator's participant scope. Do not recruit dormant providers for
   acknowledgements. An old unanswered FYI is not a task to reawaken.
-- Shared source, GPU/browser, emulators, releases and credentials can have
+- Shared source, GPU, browsers, emulators, releases and credentials can have
   different owners. Use the specific handover, not a blanket freeze.
-- Do not compact, respawn or switch models mid feature check. At a safe pause,
-  save task/source/evidence, then use the lifecycle commands.
-- At a stage boundary (a release, a finished brief) over about 80k tokens,
-  write quotes, numbers and decisions to files, then run
-  `amux compact --self --continue-file HANDOFF` in your own pane. Save the
-  remaining task first; the verified compact queues that exact handoff once.
-  Use `--no-resume` for maintenance only. It waits for the turn and background
-  work to end, at most once per 30 minutes. A refusal means: go on.
+- Do not compact, respawn or switch models in the middle of a feature check.
+  Compaction follows the amux layer's context rules. Before your own
+  `amux compact --self --continue-file HANDOFF` at a stage boundary, write
+  quotes, numbers and decisions to files. A refusal means: go on.
 - Ordinary coordination adds no second test suite, reviewer, benchmark or
   approval hop. An old memory note is not a new approval gate.
 
 ### Handoff stall rule
 
-For a requested queue/role/provider migration, read [the handoff checklist](references/handoff.md). Ordinary fleet checks do not need it.
+For a requested queue, role or provider migration, follow
+[the handoff checklist](references/handoff.md). Ordinary fleet checks do not
+need it.
 
-- `enqueued`, `pending`, retry counts = transport state, not a started worker.
-- Received = target acknowledgement plus live owner/process check.
-- Pre-submit job (`pending`, `pasting`, `drafted`): two failed attempts or ten
-  minutes without acknowledgement, plus a stopped target, identity/checkout
-  refusal or no fresh activity, is a stall. Stop retries, cancel pre-submit,
-  pick one verified idle owner or take it yourself, send once, record receipt.
-  The 30-minute checkpoint starts at that receipt.
-- `submitted` has left the composer: never duplicate because the receipt is
-  late. Check live process and journal. Keep the at-most-once fence until a
-  durable not-sent outcome exists.
+- `enqueued`, `pending` and retry counts are transport state, not a started
+  worker. Received means the target acknowledged it and a live check of the
+  owner and its process agrees.
+- A job before submit (`pending`, `pasting`, `drafted`) has stalled after two
+  failed attempts or ten minutes without acknowledgement, when the target is
+  also stopped, refuses on identity or checkout, or shows no fresh activity.
+  Then stop retrying, cancel the job, pick one verified idle owner or take it
+  yourself, send once and record the receipt. The 30-minute checkpoint starts
+  at that receipt.
+- A `submitted` job has left the composer. Never send it again because the
+  receipt is late: check the live process and journal, and keep the
+  at-most-once fence until a durable not-sent outcome exists.
 - Escalate to the human only for a product decision, physical access or a
-  missing permission. Not for routine recovery.
-- Enqueue acknowledgement is not delivery. Verify via queue and owner journal.
+  missing permission, never for routine recovery.
 
-## 4. Reconsider the plan, briefly
+## 5. Review the plan, briefly
 
-- Once per active hour at a safe checkpoint, two minutes by default.
-  Up to ten only for a blocked critical path or a human asking why work
-  stalled. Include reviewer time; never interrupt productive work.
-- Per bottleneck, compare receipts: keep, adjust or drop. Missing proof
-  is unproven; do not stack experiments on that bottleneck.
-- Rank delays, including external blockers. Split ready-to-verified cycles
-  into machine, agent, waiting and unknown; cite times, count overlaps once.
-  Check stalls, cheaper probes, overhead, fallback triggers and scope.
-- Assign authorised ready work lacking an available owner to suitable idle
-  capacity, never duplicate an owner or wake for status.
-- One small authorised change per bottleneck; at most two independent ones
-  within budget. Preserve risk requirements and delivery ownership.
-  After two unchanged reviews of the same bottleneck, surface a human
-  decision or fallback with a trigger. Reuse an existing pending decision.
-- Protect orchestration time too: park off-scope design. List human decisions
-  early: recommendation, deadline, consequence. No tooling without measured need.
-- First review, then every fourth active hour: fresh eyes sample one
-  assumption without your score. Keep the shared budget; absent or late proof
-  stays unproven, never an approval hop. Update existing rows; notify only
-  after a change or for a decision. Stop at plan conditions.
+- When: once per active hour, at a safe checkpoint. Two minutes; up to ten
+  only when the critical path is blocked or the human asks why work stalled.
+  Reviewer time counts toward the budget. Never interrupt productive work.
+- Find the delays: rank what held up outcomes, external blockers included.
+  Split each item's time from ready to verified into machine, agent, waiting
+  and unknown, citing times and counting overlaps once. Look for stalls,
+  cheaper checks, overhead, missing fallback triggers and scope creep.
+- Judge earlier changes by receipts: per bottleneck, compare before and after
+  and keep, adjust or drop the change. No receipt means unproven; do not stack
+  a new experiment on the same bottleneck.
+- Change little: one small authorized change per bottleneck, at most two per
+  review. Keep risk requirements and delivery owners. When a bottleneck is
+  unchanged after two reviews, put a decision to the human or set a fallback
+  with a trigger; reuse a pending decision rather than asking again.
+- Fill idle capacity: authorized ready work without an available owner goes
+  to a suitable idle pane. Never give work a second owner, and never wake a
+  pane for status.
+- Protect your own time: park design work outside the scope. Raise human
+  decisions early with a recommendation, a deadline and the consequence of no
+  answer. Build no tooling without a measured need.
+- Fresh eyes: at the first review and every fourth active hour after it, a
+  fresh subagent with a short brief tests one assumption of the plan without
+  seeing your score. It shares the review's budget; a missing or late answer
+  leaves the assumption unproven and blocks nothing.
+- Afterwards, update existing rows. Tell the human only about a change or a
+  decision. Stop when the plan's stop conditions hold.
 
-## 5. Inspect AMUX transport only when relevant
+## 6. Inspect AMUX transport only when relevant
 
-The bridge moves Discord/CLI input through a durable queue to the addressed
-engine. Journals are receipts, not the transport.
+The bridge moves Discord and CLI input through a durable queue to the
+addressed engine. Journals are receipts, not the transport.
 
-- `amux queue`: pending/submitted/receipt for one delivery. Submitted with
-  unknown outcome is not proof of non-execution.
+- `amux queue`: pending, submitted and receipt state for one delivery.
+  Submitted with an unknown outcome is not proof of non-execution.
 - `amux doctor`: heartbeat, runtime, release, queue, workspace. Classify each
-  finding. Do not start disabled services for green. Healthy bridge and
-  offline native target can coexist.
-- `amux log PROJECT -p N --tmux -s 60`: live TUI only for a modal or engine
-  state. History uses the journal view.
-- `amux --help` first. No new poller, registry, status DB or recovery script.
+  finding. Do not start disabled services for green. A healthy bridge and an
+  offline native runtime target can coexist.
+- `amux log PROJECT -p N --tmux -s 60`: the live TUI, only for a modal or
+  engine state. History uses the journal view.
+- `amux --help` first. No new poller, registry, status database or recovery
+  script.
 - Merged source, installed CLI and running bridge can be three revisions.
-  Compare before deciding a commit needs install or restart. A bridge restart
-  does not prove a model switch. Never retry a prompt by editing its journal
-  or deleting its receipt fence.
+  Compare them before deciding a commit needs an install or restart. A bridge
+  restart does not prove a model switch. Never retry a prompt by editing its
+  journal or deleting its receipt fence.
 
-## 6. Close with an honest overview
+## 7. Close with an honest overview
 
-- Spoken request: answer spoken, as the amux layer's speech rule says.
+- When the request asked for speech, answer with `amux say` as the amux layer
+  describes.
 - Report in four buckets: available, banked, in progress, blocked.
-- Link the owner's proof. Do not copy logs. State only interventions actually
-  made and real remaining limits. A bounded visual check certifies nothing more.
-- ETA for a named delivery = its remaining implementation plus proof. Do not
-  sum overlapping work or turn a roadmap range into today's bug ETA. Say when
+- Link the owner's proof; do not copy logs. State only interventions actually
+  made and the real remaining limits. A bounded visual check certifies
+  nothing more than what it showed.
+- An ETA for a named delivery is its remaining implementation plus proof. Do
+  not sum overlapping work or turn a roadmap range into a bug's ETA. Say when
   there is no measured progress.
-- Supervision while away: a running mechanism (section 7), never a claim.
-  Idle and finished agents stay idle until a real task targets them.
+- Supervision while the human is away is a running mechanism (section 8),
+  never a claim. Idle and finished agents stay idle until a real task targets
+  them.
 
-## 7. Watch by script, wake on a named deviation, off when drained
+## 8. Watch by script, wake on a named deviation, stop when drained
 
-When a plan spans hours and the human is away, the orchestrator does not
-re-read the fleet every tick. Pattern, in force from 2026-09-17:
+When a plan spans hours and the human is away, do not re-read the fleet on
+every wake.
 
-- Write the deviations first, as rules a script can test, each with its
-  number: a pane quiet N minutes with unclosed rows in its lane; a pane's last
-  turn naming a row outside its lane; a release with no smoke result; a PR
-  older than N minutes waiting on a read; a row open past twice its box.
+- Write the deviations first, as rules a script can test, each with a number:
+  a pane quiet N minutes with open rows in its lane; a pane's last turn naming
+  a row outside its lane; a release with no smoke result; a PR waiting more
+  than N minutes on a review; a row open past twice its time box.
 - One read-only script composes existing views (`amux done`, the ledger,
-  `git tag`, `gh pr list`, the smoke folder) and prints either named
-  deviation lines or a single ON TRACK line. No new state, no daemon, no
-  poller: it runs only when the wake fires.
-- The wake is a session cron (or the engine's loop command) at the coarsest
-  interval the human accepts (hourly is enough when boxes are hours), whose
-  prompt says: run the script; no deviation, reply one line; a deviation,
-  read only what the line points at, act by the written rule, tell the human
-  in one line.
-- In a run to stop conditions (section 9) the round fires every 30 minutes at
-  off-minutes (`13,43 * * * *`) and its prompt opens with section 9's
-  reminders. Cron has no even 50-minute interval: round to one that divides
-  the hour and say so.
-- The script prints DRAINED when every lane is empty, and the prompt deletes
-  its own cron on that word. A watch that outlives its work is a cost and a
-  false signal.
+  `git tag`, `gh pr list`, the smoke folder) and prints either the named
+  deviation lines or a single ON TRACK line. No new state, daemon or poller:
+  it runs only when the wake fires.
+- The wake is your own recurring check, paced as the amux layer requires:
+  Claude through Claude Code's self-paced `/loop`, each wait under 50 minutes;
+  Codex under 25 minutes; never an hourly cron. Its prompt says: run the
+  script; no deviation, reply in one line; a deviation, read only what the
+  line points at, act by the written rule and tell the human in one line.
+- In a run to stop conditions (section 10) a round fires about every 30
+  minutes, and its prompt opens with section 10's reminders.
+- The script prints DRAINED when every lane is empty, and the wake ends its
+  own loop on that word. A watch that outlives its work is a cost and a false
+  signal.
 - Never wake a pane from the watch to ask for status; commits and the ledger
-  are the status. Example: `skydive-altimeter/.agents/0/fleet-check.py`.
+  are the status.
 
-## 8. The ledger: one list of rows, closed one by one
+## 9. Keep one ledger, close rows one by one
 
-Sections 1 and 7 speak of rows and the ledger. This is what they are. Use it
-whenever work spans more than one reply or more than one agent. Pattern in
-force from 2026-09-14 (`skydive-altimeter/TASKS.md`), written down 2026-09-19.
+Sections 1 and 8 speak of rows and the ledger. Use one whenever work spans
+more than one reply or more than one agent. A project with a configured work
+board uses the board instead of a second list.
 
-- One file in the repo the work belongs to: `TASKS.md` (or `docs/TASKS.md`).
-  One table. Columns: row number, what (one outcome), owner, done when (the
-  proof, as something that can be run or looked at), state, closed on (commit
-  or release plus the numbers the proof gave).
-- Numbers are never reused. A finding made while working a row becomes a NEW
+- One file in the repo the work belongs to: `TASKS.md` or `docs/TASKS.md`,
+  holding one table. Columns: row number, what (one outcome), owner, done when
+  (the proof, as something that can be run or looked at), state, closed on (a
+  commit or release plus the numbers the proof gave).
+- Numbers are never reused. A finding made while working a row becomes a new
   row; it does not grow the old one.
-- One "done for every row" block above the table (release or merge, picture
+- One "done for every row" block above the table: release or merge, a picture
   for anything visible, the test that fails before and passes after, nothing
-  silent). A row's own line adds to it, never replaces it.
-- The orchestrator closes a row after checking the proof himself. A worker's
+  silent. A row's own line adds to it and never replaces it.
+- The orchestrator closes a row only after checking the proof. A worker's
   "done" moves the row to review, not to closed.
-- Closing WITHOUT a code change is a valid outcome when a measurement says
-  so. The closing note says what was measured.
+- Closing without a code change is valid when a measurement shows none is
+  needed. The closing note says what was measured.
 - A row the human must act on is a row too (owner: the human), so waiting on
-  him is visible and everything else keeps moving.
-- The human's words live verbatim in their own file next to the ledger
-  (`MATTIAS-FIXLIST.md`, `PLAN-*.md`), each with your reading marked as yours.
-  The ledger holds outcomes, not quotes.
-- The top of the file is the table. History is `git log` and the closing
+  the human is visible and everything else keeps moving.
+- The human's words live verbatim in their own file next to the ledger (for
+  example `PLAN-*.md`), with your reading of each marked as yours. The ledger
+  holds outcomes, not quotes.
+- The table is at the top of the file. History is `git log` and the closing
   notes; when the header grows into paragraphs, move them to an archive file
-  with the same format and unique numbers across both.
-- Report from the ledger: closed today with their release, open with their
-  state, the decisions that are the human's. The watch in section 7 reads the
-  same file.
+  in the same format, with numbers unique across both.
+- Report from the ledger: rows closed today with their release, open rows
+  with their state, and the decisions that are the human's. The watch in
+  section 8 reads the same file.
 
-## 9. Run a plan to done, through restarts
+## 10. Run a plan to done, through restarts
 
 For an outcome with stop conditions that the human wants carried on until
-done. The ledger (section 8) holds the rows, the round (section 7) moves them,
-the review (section 4) corrects the plan. Pattern from the Cutkit run, written
-down 2026-10-10.
+done. The ledger (section 9) holds the rows, the round (section 8) moves them,
+and the review (section 5) corrects the plan.
 
-- Before the run: a plan that changes architecture goes back and forth with
-  one peer until both rate it at least 9/10, criteria and evidence named. A
-  diagram is an explanatory render, labelled as not the source, until it is
-  generated from the declarations the code consumes. A parked plan carries a
-  measured trigger, never a date.
+- Before the run, a plan that changes architecture goes back and forth with
+  one peer until both rate it at least 9/10, with criteria and evidence named.
+  Label a hand-made diagram as an illustration; it becomes a source only when
+  it is generated from the declarations the code reads. A parked plan carries
+  a measured trigger, never a date.
 - Every round opens with these reminders, before any reading:
   1. Anti-churn: no rewrite without a measured problem for a person (a number
      with a start and an end). Smallest fix first, and a written reason
@@ -224,22 +249,23 @@ down 2026-10-10.
      Timestamps come from `date`, never from memory.
   4. Scope: every active row serves a stop condition or a direct request.
   5. Restart: the checklist below.
-- Session crons die with their process. The lead keeps one waker that survives
-  a reboot: a systemd user timer from real unit files in
+- A session's loop dies with its process. The lead keeps one waker that
+  survives a reboot: a systemd user timer from real unit files in
   `~/.config/systemd/user` (enabled, `Persistent=true`, lingering on), never a
   `systemd-run` transient, which a reboot removes. Money guards likewise.
 - On every session start or resume:
-  1. `CronList` (or the engine's loop command): re-create a missing round or
-     review.
-  2. `uptime -s` against the last round.
+  1. Start the round's loop again if it is gone.
+  2. Compare `uptime -s` with the last round.
   3. After a reboot: `amux revive --dry`, then `amux revive`.
   4. Owners with open rows: `amux wake PROJECT -p N` for a stopped pane (it
      resumes the recorded session, or refuses without release identity and
-     memory headroom), then one short resume note each (a file, `--stdin`).
+     memory headroom), then one short resume note each that points to its
+     handoff file (a file, `--stdin`).
   5. `find <repo>/.git/objects -type f -empty`: move empty files aside, never
      delete them, then `git fetch origin` and `git fsck --connectivity-only`.
   6. Each money guard: `systemctl --user is-enabled <guard>.timer` and
      `systemctl --user show <guard>.service -p Result -p ExecMainStatus`
      (success, 0).
-- Stop when the stop conditions hold: delete both crons, report in section 6's
-  four buckets with images, and leave the reboot waker to its owner.
+- Stop when the stop conditions hold: end the round and review loops, report
+  in section 7's four buckets with images, and leave the reboot waker to its
+  owner.
