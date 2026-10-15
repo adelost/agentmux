@@ -66,7 +66,16 @@ describe("on-demand Dream deadline and artifact guard", () => {
     ]) {
       writeFileSync(reportPath, JSON.stringify({ ...completion, ...invalid }));
       expect(observeDreamHealth(fx.workspace, fx.options).status).toBe("warn");
+      expect(readDreamSuccess(fx.workspace, "2026-09-05", { home: fx.home, now }).ok).toBe(true);
     }
+    writeFileSync(reportPath, JSON.stringify({ ...completion, unresolved: 2 }));
+    writeFileSync(join(dirname(reportPath), "newer.json"), JSON.stringify({ ...completion, observedAt: "2026-09-05T03:00:00Z" }));
+    expect(observeDreamHealth(fx.workspace, fx.options).state).toBe("healthy");
+    expect(readFileSync(path, "utf8")).toBe(original);
+    writeFileSync(join(dirname(reportPath), "newest-failure.json"), JSON.stringify({ ...completion,
+      observedAt: "2026-09-05T03:30:00Z", unresolved: 1 }));
+    expect(observeDreamHealth(fx.workspace, fx.options).status).toBe("warn");
+    expect(readDreamSuccess(fx.workspace, "2026-09-05", { home: fx.home, now }).ok).toBe(true);
   });
   it("warns about a missing run without needing a failure marker", () => {
     const fx = fixture(), health = observeDreamHealth(fx.workspace, fx.options);

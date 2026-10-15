@@ -8,9 +8,15 @@ export function readDreamCompletion({ home, dateKey, runId, sourceSha256, create
   let names;
   try { names = readdirSync(directory); }
   catch (error) { if (error.code === "ENOENT") return null; throw error; }
-  for (const name of names.filter(name => name.endsWith(".json"))) {
-    const path = join(directory, name), record = JSON.parse(readFileSync(path, "utf8"));
-    if (record.dream?.runId !== runId) continue;
+  const passes = names.filter(name => name.endsWith(".json")).map(name => {
+    const path = join(directory, name);
+    return { path, record: JSON.parse(readFileSync(path, "utf8")) };
+  }).filter(({ record }) => record.dream?.runId === runId);
+  const time = pass => Number.isFinite(Date.parse(pass.record.observedAt)) ? Date.parse(pass.record.observedAt) : Infinity;
+  // A later genuine pass can resolve an earlier uncertain observation. Never
+  // choose an arbitrary directory entry, or revive an older green pass.
+  passes.sort((a, b) => time(b) - time(a));
+  for (const { path, record } of passes.slice(0, 1)) {
     const finishedMs = Date.parse(record.observedAt);
     if (record.dateKey !== dateKey || record.dream.sourceSha256 !== sourceSha256
         || record.unresolved !== 0 || !Array.isArray(record.rows) || !record.policy

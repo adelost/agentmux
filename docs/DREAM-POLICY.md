@@ -165,6 +165,9 @@ and sentinel does it bind that run/source to the existing nightly-compact
 report. Health accepts a later zero-unresolved pass for that exact product
 while preserving the original failed schedule receipt unchanged. Recovering
 an old summary alone never creates this maintenance proof.
+The newest matching maintenance report controls health; an earlier failed
+observation does not override a later verified pass. Digest validation remains
+independent, so uncertain maintenance never makes a valid summary unrecoverable.
 
 ## Finish an interrupted controller without another model turn
 
