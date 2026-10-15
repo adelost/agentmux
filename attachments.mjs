@@ -119,6 +119,7 @@ export function createAttachmentHandler({
     } catch (err) {
       if (att.durablePath) {
         err.retryable = true;
+        err.voiceFailure = { attachmentId: att.id, path: att.durablePath };
         throw err;
       }
       // exec's message is just "Command failed: <cmd>" — the actionable

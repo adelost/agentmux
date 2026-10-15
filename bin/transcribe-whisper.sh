@@ -44,22 +44,75 @@ fi
 # 3090:n (cuda) och en automatisk fallback kan inte invänta GPU-clearance.
 # API keys auto-load from ~/.env inside transcribe.
 
-try_backend() { # $1=backend $2=wall-clock-cap
-  timeout "$2" "$HOME/bin/transcribe" --backend "$1" --stdout --lang "$LANG" "$AUDIO_FILE"
+try_backend() { # $1=backend $2=wall-clock-cap $3=clip
+  timeout "$2" "$HOME/bin/transcribe" --backend "$1" --stdout --lang "$LANG" "$3"
 }
 
-for attempt in 1 2; do
-  if TEXT=$(try_backend gemini 100s); then
-    printf '%s\n' "$TEXT"
-    exit 0
+transcribe_clip() {
+  local clip="$1" attempt TEXT rc
+  for attempt in 1 2; do
+    if TEXT=$(try_backend gemini 100s "$clip"); then
+      printf '%s\n' "$TEXT"
+      return 0
+    else
+      rc=$?
+    fi
+    echo "[stt] gemini attempt $attempt/2 failed (exit $rc)" >&2
+  done
+  if TEXT=$(try_backend whisper1 60s "$clip"); then
+    printf '[stt-fallback:whisper1] %s\n' "$TEXT"
+    return 0
   fi
-  rc=$?
-  echo "[stt] gemini attempt $attempt/2 failed (exit $rc)" >&2
-done
+  echo "[stt] gemini x2 + whisper1 all failed for $clip" >&2
+  return 1
+}
 
-if TEXT=$(try_backend whisper1 60s); then
-  printf '[stt-fallback:whisper1] %s\n' "$TEXT"
-  exit 0
+# A 110-second voice note repeatedly hit DEADLINE_EXCEEDED; its 50-second
+# parts worked. The client deadline is 90 seconds; server causality is unknown.
+# Keep the same transcriber and quality; bound clip duration instead of hiding
+# failures behind a larger deadline. WAV parts retain their source order and
+# independent duration headers, unlike segmented FLAC's shared stream length.
+DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO_FILE") || exit 1
+if ! awk -v duration="$DURATION" 'BEGIN { exit !(duration > 60) }'; then
+  transcribe_clip "$AUDIO_FILE"
+  exit $?
 fi
-echo "[stt] gemini x2 + whisper1 all failed for $AUDIO_FILE" >&2
-exit 1
+
+PARTS=$(mktemp -d /tmp/amux-stt.XXXXXX) || exit 1
+trap 'rm -rf "$PARTS"' EXIT
+ffmpeg -nostdin -loglevel error -i "$AUDIO_FILE" -map 0:a:0 -vn -c:a pcm_s16le \
+  -f segment -segment_time 50 -reset_timestamps 1 "$PARTS/part-%04d.wav" || exit 1
+
+pids=()
+failed=0
+wait_batch() {
+  local pid
+  for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+  pids=()
+}
+for clip in "$PARTS"/part-*.wav; do
+  [ -f "$clip" ] || { echo "[stt] audio split produced no parts" >&2; exit 1; }
+  transcribe_clip "$clip" > "$clip.txt" 2> "$clip.log" &
+  pids+=("$!")
+  if [ "${#pids[@]}" -eq 3 ]; then wait_batch; fi
+done
+wait_batch
+for log in "$PARTS"/*.log; do cat "$log" >&2; done
+[ "$failed" -eq 0 ] || exit 1
+
+fallback=false
+joined=""
+for result in "$PARTS"/part-*.wav.txt; do
+  TEXT=$(< "$result")
+  if [[ "$TEXT" == '[stt-fallback:whisper1] '* ]]; then
+    fallback=true
+    TEXT="${TEXT#'[stt-fallback:whisper1] '}"
+  fi
+  [ -n "$TEXT" ] || { echo "[stt] empty segment transcript" >&2; exit 1; }
+  joined="${joined}${joined:+ }${TEXT}"
+done
+if $fallback; then
+  printf '[stt-fallback:whisper1] %s\n' "$joined"
+else
+  printf '%s\n' "$joined"
+fi

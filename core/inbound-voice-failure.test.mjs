@@ -1,0 +1,56 @@
+import { describe, it, expect } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createDiscordInboundStore } from "./discord-inbound-store.mjs";
+import { createInboundReconciler } from "./inbound-reconciler.mjs";
+import { createAttachmentHandler } from "../attachments.mjs";
+
+describe("voice failure is still delivered", () => {
+  it("delivers the 15 October deadline failure once, drains later text, then delivers the retried transcript", async () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-deadline-"));
+    let now = 1792040133471, fail = true;
+    const store = createDiscordInboundStore({ rootDir: root, now: () => now,
+      downloadBuffer: async () => Buffer.from("durable voice bytes") });
+    const target = { agentName: "claw", pane: 0, dir: "/workspace" };
+    const voice = { id: "1560154140976488498", channelId: "channel", authorId: "human", text: "", createdTimestamp: now,
+      attachments: [{ id: "audio", name: "voice-message.ogg", contentType: "audio/ogg", url: "fixture" }] };
+    const handler = createAttachmentHandler({ transcribeScript: "/transcribe", run: async () => {
+      if (fail) throw Object.assign(new Error("Gemini 504 DEADLINE_EXCEEDED"), { stderr: "504 DEADLINE_EXCEEDED" });
+      return { stdout: "My top two games are A and B." };
+    } });
+    const accepted = new Map(), notices = new Map();
+    let lostNoticeAck = false;
+    const channel = { async send(_id, payload) {
+      notices.set(payload.nonce, payload);
+      if (!lostNoticeAck) { lostNoticeAck = true; throw new Error("Discord accepted notice but acknowledgement was lost"); }
+    },
+      async findMessageByNonce(_id, nonce) { return notices.has(nonce); } };
+    const reconciler = createInboundReconciler({ store, resolveTarget: () => target,
+      onMessage: async msg => {
+        const prompt = await handler.buildPrompt(msg, []);
+        if (!accepted.has(msg.id)) accepted.set(msg.id, prompt);
+        return { delivered: true };
+      } });
+    try {
+      // Real record shape: privately downloaded bytes, no transcript, retryable provider error.
+      const record = store.observe(voice, target);
+      await store.prepareAttachments(record);
+      store.observe({ ...voice, id: "later", text: "Did you read my voice message?", attachments: [] }, target);
+      await reconciler.drain(channel, voice.channelId).catch(() => {});
+      expect([...accepted.values()]).toEqual([expect.stringContaining("DEADLINE_EXCEEDED"), "Did you read my voice message?"]);
+      expect([...accepted.values()][0]).toContain(store.read("channel", voice.id).attachments[0].durablePath);
+      expect(store.read("channel", voice.id).status).not.toBe("completed");
+      now += 31_000;
+      await reconciler.drain(channel, "channel").catch(() => {});
+      expect(accepted.size).toBe(2);
+      expect(store.read("channel", voice.id).lastError).toContain("DEADLINE_EXCEEDED");
+      fail = false; now += 31_000;
+      await reconciler.drain(channel, "channel");
+      expect(accepted.size).toBe(3);
+      expect(accepted.get(voice.id)).toContain("My top two games are A and B.");
+      expect(store.read("channel", voice.id).status).toBe("completed");
+      expect([...notices.values()].filter(payload => payload.content?.includes("Transcription unavailable"))).toHaveLength(1);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});

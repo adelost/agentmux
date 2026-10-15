@@ -195,7 +195,6 @@ export function createDiscordInboundStore({
       status: "assets_ready",
       attachmentsReadyAt: now(),
       nextAttemptAt: now(),
-      lastError: null,
     });
   }
 

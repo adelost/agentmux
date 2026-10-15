@@ -3,6 +3,7 @@
 
 import { legacyTranscriptPayload, transcriptPayload } from "./discord-transcript-effect.mjs";
 import { sendInactiveChannelNotice } from "./inactive-channel.mjs";
+import { deliverVoiceFailure } from "./inbound-voice-failure.mjs";
 
 const TYPING_INTERVAL_MS = 8_000;
 
@@ -13,7 +14,7 @@ export function formatRecoveredNotice(count) {
 }
 
 function transcriptSender(record, store, channel, baseMessage) {
-  return async (attachmentId, chunks) => {
+  return async (attachmentId, chunks, { kind = "mirror" } = {}) => {
     const effect = `transcript-reply:${attachmentId}`;
     const current = store.read(record.channelId, record.messageId) || record;
     const firstAudio = (current.attachments || [])
@@ -37,7 +38,7 @@ function transcriptSender(record, store, channel, baseMessage) {
         continue;
       }
       // A transcript mirrors the person's own words; the ask row holds them too.
-      const post = { kind: "mirror" };
+      const post = { kind };
       if (index === 0 && typeof baseMessage?.reply === "function") {
         await baseMessage.reply(payload, post);
       } else if (index === 0 && typeof channel.replyTo === "function") {
@@ -51,8 +52,8 @@ function transcriptSender(record, store, channel, baseMessage) {
   };
 }
 
-/** WHAT: Rehydrates one journal record as a channel message. WHY: Attachment and handler retries must keep the original Discord identity and one-shot transcript effect. */
-function durableMessage(record, store, channel, baseMessage = null) {
+/** WHAT: Builds one channel message from its journal record. WHY: Keeps attachment and handler retries bound to their original Discord identity and one-shot transcript effect. */
+export function durableMessage(record, store, channel, baseMessage = null) {
   const send = (content) => channel.send(record.channelId, content);
   const reply = typeof baseMessage?.reply === "function"
     ? (content) => baseMessage.reply(content)
@@ -147,6 +148,15 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
       return { delivered: true };
     } catch (error) {
       store.fail(current, error);
+      if (error.voiceFailure) {
+        try {
+          await deliverVoiceFailure({ record: current, error, store, onMessage,
+            message: durableMessage(current, store, channel, baseMessage) });
+        } catch (noticeError) {
+          store.fail(current, `${error.message}; voice notice failed: ${noticeError.message}`);
+        }
+        return { delivered: false, retryable: true };
+      }
       throw error;
     }
   }

@@ -255,6 +255,15 @@ Manual and intentionally stopped bridges stay user-owned. Rate-limited, logged t
 - Agent-generated image attachments through `[image: /absolute/path.png]`.
 - Optional Voice PWA endpoint for trusted local or tailnet clients.
 
+Discord voice notes are stored privately before transcription. If STT fails,
+the pane receives one separate notice with the error and audio path; the
+original stays pending for transcript retries. The notice and transcript have
+different durable identities, so a notice cannot suppress the eventual words.
+Later text messages can pass a failed voice note. Clips over 60 seconds are
+split into ordered 50-second WAV parts by the existing wrapper, with at most
+three concurrent calls to `~/bin/transcribe`. All parts must succeed; any
+Whisper fallback is labelled in both the pane and Discord transcript.
+
 ### Suggestions human-comment relay
 
 An optional one-minute poller routes unanswered human comments from private
