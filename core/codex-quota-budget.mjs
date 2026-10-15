@@ -12,7 +12,7 @@ const readEntry = path => {
   catch (error) { if (error.code === "ENOENT") return null; throw error; }
 };
 const accountIdentity = profile => {
-  try { return JSON.parse(readFileSync(profile.credentialsPath, "utf8"))?.tokens?.account_id || ""; }
+  try { return JSON.parse(readFileSync(profile.credentialsPath || join(profile.home, "auth.json"), "utf8"))?.tokens?.account_id || ""; }
   catch { return ""; }
 };
 

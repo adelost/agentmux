@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { feature, unit, expect } from "bdd-vitest";
@@ -6,6 +6,24 @@ import { vi } from "vitest";
 import { readCodexQuotaBudgeted } from "./codex-quota-budget.mjs";
 
 feature("Codex dashboard quota budget", () => {
+  unit("native and dashboard profile shapes share the authenticated quota cache", {
+    given: ["one fake account, with and without the dashboard credentialsPath field", () => {
+      const home = mkdtempSync(join(tmpdir(), "codex-quota-identity-"));
+      const credentialsPath = join(home, "auth.json");
+      writeFileSync(credentialsPath, JSON.stringify({ tokens: { account_id: "fake-provider-account" } }));
+      return { home, credentialsPath, budgetDir: join(home, "budget"), read: vi.fn(async () => ({ ok: true, limits: [{ limitId: "codex",
+        windows: [{ windowMinutes: 10080, usedPercent: 100 }] }] })) };
+    }],
+    when: ["the dashboard writes and delivery checks the native profile without refreshing", async fx => {
+      const dashboard = await readCodexQuotaBudgeted({ id: "2", home: fx.home, credentialsPath: fx.credentialsPath }, fx);
+      const delivery = await readCodexQuotaBudgeted({ id: "2", home: fx.home }, { ...fx, cacheOnly: true });
+      return { fx, dashboard, delivery };
+    }],
+    then: ["the verified exhausted observation is shared without another provider call", ({ fx, dashboard, delivery }) => {
+      expect(delivery).toEqual(dashboard); expect(fx.read).toHaveBeenCalledTimes(1);
+    }],
+    cleanup: fx => rmSync(fx.home, { recursive: true, force: true }),
+  });
   unit("a reminder reuses the dashboard reading and never refreshes the provider", {
     given: ["a dashboard reader and a separate persisted cache", () => ({
       profile: { provider: "codex", id: "1", home: "/example/codex" },
