@@ -341,7 +341,7 @@ const autoCompact = createAutoCompact({
   config: autoCompactConfig,
   contextMaintenance,
   pauseCompact: createPauseCompact({ contextMaintenance, state: appState, modes: readPauseCompactModes(),
-    log: message => console.log(`pause-compact | ${message}`), selfRequests: selfCompactRequests, notify: postSelfCompactNotice }),
+    log: message => console.log(`pause-compact | ${message}`), selfRequests: selfCompactRequests, notify: contextMaintenance.notify }),
 });
 autoCompact.start();
 
