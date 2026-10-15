@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { observationFromCodexEntry } from "./native-model-observation.mjs";
 import { readSearchRecords } from "./search-jsonl.mjs";
+import { readCodexRecordPrefix } from "./codex-record-prefix.mjs";
 
 const readings = new Map();
 
@@ -14,13 +15,8 @@ function modelRecord(entry) {
     ?? settings?.reasoning_effort ?? settings?.effort ?? null } : null;
 }
 
-function ignorableOversized(fd, offset) {
-  const bytes = Buffer.alloc(512);
-  const length = fs.readSync(fd, bytes, 0, bytes.length, offset);
-  const head = bytes.toString("utf8", 0, length);
-  const prefix = /^\{\s*(?:"timestamp"\s*:\s*"[^"\\]*"\s*,\s*)?(?:"ordinal"\s*:\s*\d+\s*,\s*)?"type"\s*:\s*"(compacted|response_item|world_state|token_usage_record|event_msg)"\s*,/u.exec(head);
-  return !!prefix && (prefix[1] !== "event_msg"
-    || /^\s*"payload"\s*:\s*\{\s*"type"\s*:\s*"tool_output"\s*,/u.test(head.slice(prefix[0].length)));
+function needsModelRecord({ type, payloadType }) {
+  return type === "turn_context" || (type === "event_msg" && payloadType === "thread_settings_applied");
 }
 
 /** WHAT: Reads the last model from one already-owned rollout. WHY: A long tool tail can hide turn_context beyond the bounded status scan. */
@@ -37,7 +33,8 @@ export async function readCodexRolloutModel(path, sessionId) {
     for (const record of readSearchRecords(path, { byteOffset: incompleteStart, endByteOffset: stat.size })) {
       incompleteStart = record.byteOffset;
       if (record.skippedBytes) {
-        if (!ignorableOversized(fd, record.byteOffset)) throw new Error(`Codex model evidence exceeds the record limit at byte ${record.byteOffset}`);
+        const prefix = readCodexRecordPrefix(fd, record.byteOffset);
+        if (!prefix || needsModelRecord(prefix)) throw new Error(`Codex model evidence exceeds the record limit at byte ${record.byteOffset}`);
         continue;
       }
       const line = record.raw;

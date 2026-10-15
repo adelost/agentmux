@@ -13,6 +13,15 @@ function withJournal(events, test) {
 }
 
 describe("bounded cold-path Dream history", () => {
+  it("skips a new oversized image event while retaining the following human prompt", () => {
+    withJournal([
+      { timestamp: "2026-10-14T15:55:59.217Z", type: "event_msg",
+        payload: { type: "image_generation_end", result: "x".repeat(4 * 1024 * 1024) } },
+      { type: "event_msg", payload: { type: "user_message", message: "Behåll mitt uppdrag åäö" } },
+    ], file => expect(readCodexDreamEvents(file).map(event => event.payload.message))
+      .toEqual(["Behåll mitt uppdrag åäö"]));
+  });
+
   it("refuses oversized authored text even when it quotes an ignorable type", () => {
     withJournal([{ type: "event_msg", payload: { type: "user_message",
       message: '{"type":"compacted",' + "x".repeat(4 * 1024 * 1024) } }], (file) => {
@@ -35,6 +44,16 @@ describe("bounded cold-path Dream history", () => {
   it("still refuses oversized authored text that follows an ordinal", () => {
     withJournal([{ timestamp: "2026-09-25T08:50:28.860Z", ordinal: 7, type: "event_msg",
       payload: { type: "user_message", message: '{"type":"compacted",' + "x".repeat(4 * 1024 * 1024) } }], (file) => {
+      expect(() => readCodexDreamEvents(file)).toThrow("dream-history-record-exhausted");
+    });
+  });
+
+  it.each([
+    { type: "turn_context", payload: { turn_id: "t1" } },
+    ...["task_started", "task_complete", "turn_aborted"].map(type => ({ type: "event_msg", payload: { type } })),
+    ...["message", "function_call", "custom_tool_call"].map(type => ({ type: "response_item", payload: { type, role: "user" } })),
+  ])("refuses an oversized consumed record: $type/$payload.type", event => {
+    withJournal([{ ...event, padding: "x".repeat(4 * 1024 * 1024) }], file => {
       expect(() => readCodexDreamEvents(file)).toThrow("dream-history-record-exhausted");
     });
   });

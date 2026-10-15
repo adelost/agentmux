@@ -3,36 +3,31 @@ import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { readSearchRecords } from "./search-jsonl.mjs";
 import { codexUserPrompt } from "./codex-user-events.mjs";
+import { readCodexRecordPrefix } from "./codex-record-prefix.mjs";
 
 /** WHAT: Defines the cold history scan ceiling. WHY: Prevents nightly recovery from scanning unbounded journals. */
 export const CODEX_DREAM_SCAN_BYTES = 64 * 1024 * 1024;
 const MAX_KEPT_BYTES = 8 * 1024 * 1024;
 
-function headerAt(fd, offset) {
-  const bytes = Buffer.alloc(512);
-  return bytes.toString("utf8", 0, readSync(fd, bytes, 0, bytes.length, offset));
-}
+const LIFECYCLE_TYPES = new Set(["task_started", "task_complete", "turn_aborted"]);
+const TOOL_CALL_TYPES = new Set(["function_call", "custom_tool_call"]);
 
-function ignorableOversized(header) {
-  // Recognize only the writer's top-level prefix, never a quoted type inside
-  // user text. An oversized unknown/authored record remains an explicit gap.
-  // Codex 0.16x writes an integer ordinal between timestamp and type; without it
-  // a 5.7 MB tool output in skyvw:3 stopped Dream on 2026-10-11.
-  const prefix = /^\{\s*(?:"timestamp"\s*:\s*"[^"\\]*"\s*,\s*)?(?:"ordinal"\s*:\s*\d+\s*,\s*)?"type"\s*:\s*"(compacted|response_item)"\s*,\s*/u.exec(header);
-  if (!prefix) return false;
-  if (prefix[1] === "compacted") return true;
-  return /^"payload"\s*:\s*\{\s*"type"\s*:\s*"(?:function_call_output|custom_tool_call_output)"\s*[,}]/u
-    .test(header.slice(prefix[0].length));
+function needsHistoryRecord({ type, payloadType }) {
+  // user_message and response_item/message are codexUserPrompt's two inputs.
+  // The remaining types are exactly historyEvent's lifecycle/tool boundaries.
+  return type === "turn_context"
+    || (type === "event_msg" && (payloadType === "user_message" || LIFECYCLE_TYPES.has(payloadType)))
+    || (type === "response_item" && (payloadType === "message" || TOOL_CALL_TYPES.has(payloadType)));
 }
 
 function historyEvent(event) {
   if (codexUserPrompt(event) !== null) return event;
-  if (event.type === "event_msg" && ["task_started", "task_complete", "turn_aborted"].includes(event.payload?.type)) return event;
+  if (event.type === "event_msg" && LIFECYCLE_TYPES.has(event.payload?.type)) return event;
   if (event.type === "turn_context") return { ...event, payload: { turn_id: event.payload?.turn_id } };
   if (event.type !== "response_item") return null;
   const payload = event.payload;
   if (payload?.type === "message" && payload.role === "assistant") return event;
-  if (["function_call", "custom_tool_call"].includes(payload?.type)) {
+  if (TOOL_CALL_TYPES.has(payload?.type)) {
     // Preserve the actual tool boundary: merging all commentary into the final
     // answer would make Dream's bounded latest-text selection lose that answer.
     return { ...event, payload: { type: payload.type, name: payload.name, arguments: "", input: "" } };
@@ -53,7 +48,8 @@ export function readCodexDreamEvents(file, { maxBytes = CODEX_DREAM_SCAN_BYTES, 
     for (const record of readSearchRecords(file, { byteOffset: start, endByteOffset: size })) {
       if (partial && record.byteOffset === start) continue;
       if (record.skippedBytes) {
-        if (ignorableOversized(headerAt(fd, record.byteOffset))) continue;
+        const prefix = readCodexRecordPrefix(fd, record.byteOffset);
+        if (prefix && !needsHistoryRecord(prefix)) continue;
         throw new Error(`dream-history-record-exhausted: oversized unclassified record at byte ${record.byteOffset}`);
       }
       let parsed;

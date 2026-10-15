@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { dreamAttemptPath } from "./dream-schedule-state.mjs";
 import { tmpdir } from "node:os";
@@ -43,6 +43,30 @@ describe("on-demand Dream deadline and artifact guard", () => {
     expect(health.success.ok).toBe(true);
     expect(health.status).toBe("warn");
     expect(health.detail).toContain(`maintenance ${state}`);
+  });
+  it("accepts a new complete run without rewriting the older failed scheduled attempt", () => {
+    const fx = fixture(), base = success(fx);
+    const path = dreamAttemptPath(fx.workspace, fx.home, "2026-09-05");
+    mkdirSync(dirname(path), { recursive: true });
+    const original = JSON.stringify({ schemaVersion: 1, workspace: fx.workspace, dateKey: "2026-09-05",
+      state: "unresolved", exitCode: 1, finishedAt: "2026-09-05T02:05:00Z" });
+    writeFileSync(path, original);
+    const reportPath = join(fx.home, ".agentmux", "nightly-compact", "2026-09-05", "runs", "pass.json");
+    mkdirSync(dirname(reportPath), { recursive: true });
+    const completion = { dateKey: "2026-09-05", dream: { runId: base.split("2026-09-05-")[1],
+      sourceSha256: createHash("sha256").update(readFileSync(`${base}.json`)).digest("hex") },
+      observedAt: "2026-09-05T02:30:00Z", unresolved: 0, rows: [], policy: { maxTokens: 210000 } };
+    writeFileSync(reportPath, JSON.stringify(completion));
+    expect(observeDreamHealth(fx.workspace, fx.options).state).toBe("healthy");
+    expect(readFileSync(path, "utf8")).toBe(original);
+    for (const invalid of [
+      { unresolved: 1 }, { rows: [{ status: "failed" }] },
+      { dream: { ...completion.dream, sourceSha256: "0".repeat(64) } },
+      { dream: { ...completion.dream, runId: "wrong-run" } }, { observedAt: "2026-09-05T23:30:00Z" },
+    ]) {
+      writeFileSync(reportPath, JSON.stringify({ ...completion, ...invalid }));
+      expect(observeDreamHealth(fx.workspace, fx.options).status).toBe("warn");
+    }
   });
   it("warns about a missing run without needing a failure marker", () => {
     const fx = fixture(), health = observeDreamHealth(fx.workspace, fx.options);

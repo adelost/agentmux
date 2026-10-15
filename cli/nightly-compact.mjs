@@ -232,7 +232,9 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
   }
   const reportPath = join(path, "runs", `${randomUUID()}.json`);
   const unresolved = nightlyUnresolvedCount(rows, policy);
-  if (!flags.dry && targets.length) writeReport(reportPath, { dateKey, policy, rows, unresolved, observedAt: new Date(now()).toISOString() });
+  if (!flags.dry && targets.length) writeReport(reportPath, { dateKey, policy, rows, unresolved,
+    ...(dependencies.dreamInput ? { dream: { runId: dependencies.dreamInput.runId, sourceSha256: dependencies.dreamInput.sha256 } } : {}),
+    observedAt: new Date(now()).toISOString() });
   const count = (status) => rows.filter((row) => row.status === status).length;
   console.log(`${label}: ${flags.dry ? `${count("eligible")} eligible` : `${count("within-budget")} verified within budget`}; ${count("already-compacted")} already compacted; ${unresolved} unresolved; ${count("skipped")} skipped. ${flags.dry ? "No receipt written" : `Report ${reportPath}`}`);
   return { policy, rows, unresolved, path: reportPath, dryRun: !!flags.dry };

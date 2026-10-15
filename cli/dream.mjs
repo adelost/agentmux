@@ -239,6 +239,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   const lock = acquireDreamLock();
   if (!lock.acquired) return { skipped: "lock-held" };
   let runMaintenance = true;
+  let committedInput = null;
   try {
     if (process.env.AMUX_SCHEDULED_DREAM_DATE) {
       // Recheck under the manual controller's lock, not just before spawn.
@@ -377,6 +378,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
         console.warn(`Dream: ${observed.unreadable.length} pane journal(s) unreadable; receipts unchanged.`);
         process.exitCode = 1;
       }
+      if (!observed.unreadable.length && !flags.deferSentinel && !flags["defer-sentinel"]) committedInput = input;
       return {
         included: batch.included,
         omitted: batch.omitted,
@@ -398,7 +400,8 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     throw error;
   } finally {
     try {
-      const maintenance = runMaintenance && await (dependencies.nightlyCompact || runNightlyCompact)(ctx, flags, { agents, runtimeConfig });
+      const maintenance = runMaintenance && await (dependencies.nightlyCompact || runNightlyCompact)(ctx, flags,
+        { agents, runtimeConfig, dreamInput: committedInput });
       if (maintenance?.unresolved) { console.error(`Nightly compact unresolved: ${maintenance.unresolved}`); process.exitCode = 1; }
     }
     catch (error) { console.error(`Nightly compact failed: ${error.message}`); process.exitCode = 1; }

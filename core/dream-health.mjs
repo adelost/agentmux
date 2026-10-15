@@ -9,6 +9,7 @@ import { localDateKey } from "./memory-policy.mjs";
 import { readDreamOwnerResult } from "./dream-owner.mjs";
 import { dreamSnapshotReference, verifyDreamSnapshot } from "./dream-snapshot.mjs";
 import { readDreamAttempt } from "./dream-schedule-state.mjs";
+import { readDreamCompletion } from "./dream-completion.mjs";
 
 const result = (state, detail, extra = {}) => ({ state, status: state === "warn" ? "warn" : "ok", detail, ...extra });
 
@@ -92,13 +93,15 @@ export function readDreamSuccess(workspace, dateKey, { home, now = new Date(), d
     }
     const product = readDreamOwnerResult(`${path}.summary.md`, dateKey, receipt[1], input.owner, receipt[2]);
     if (!product.ok) return { ok: false, reason: product.reason };
+    const completion = readDreamCompletion({ home, dateKey, runId: receipt[1], sourceSha256: receipt[2],
+      createdAt: input.createdAt, now });
     if (snapshot) {
       const snapshotPath = verifyDreamSnapshot(workspace, dateKey, snapshot, product.content);
-      return snapshotPath ? { ok: true, time: run[2], runId: receipt[1], panes: +run[3], snapshotPath }
+      return snapshotPath ? { ok: true, time: run[2], runId: receipt[1], panes: +run[3], snapshotPath, completion }
         : { ok: false, reason: "committed snapshot mismatch" };
     }
     if (!block.includes(product.content)) return { ok: false, reason: "committed product mismatch" };
-    return { ok: true, time: run[2], runId: receipt[1], panes: +run[3] };
+    return { ok: true, time: run[2], runId: receipt[1], panes: +run[3], completion };
   } catch (error) { return { ok: false, reason: `result artifacts unreadable: ${error.code || error.message}` }; }
 }
 
@@ -140,7 +143,9 @@ export function observeDreamHealth(workspace, {
     const success = readDreamSuccess(workspace, dateKey, { home, now });
     const health = assessDreamHealth({ now, schedule, success });
     const maintenance = readDreamAttempt(workspace, home, dateKey);
-    if (success.ok && maintenance && (maintenance.state !== "completed" || maintenance.exitCode !== 0)) {
+    const repaired = success.completion && Date.parse(success.completion.finishedAt)
+      >= Date.parse(maintenance?.finishedAt || maintenance?.startedAt || "1970-01-01T00:00:00Z");
+    if (success.ok && maintenance && !repaired && (maintenance.state !== "completed" || maintenance.exitCode !== 0)) {
       return { ...health, state: "warn", status: "warn", maintenance,
         detail: `${health.detail}; nightly maintenance ${maintenance.state} (exit ${maintenance.exitCode ?? "unknown"})` };
     }

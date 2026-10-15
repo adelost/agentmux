@@ -53,8 +53,12 @@ Only the selected, exactly receipted product can enter memory.
    skyvw:5's 21 turns. Claude reads up to 64 MiB in each of at most six rotated
    sessions. Codex grows to 8 MiB, then reuses the search JSONL stream over at
    most 64 MiB of disk history, retaining at most 8 MiB of authored/lifecycle
-   events. Known oversized compact/tool-output records are not conversation
-   input. An oversized unclassified record fails the pane only when the tail
+   events. A shared bounded writer-prefix classifier identifies the top-level
+   and first payload type, never quoted types inside text. Oversized records
+   unused by the reader are skipped, including future image/tool result types.
+   Oversized human/assistant messages, lifecycle/context and tool calls remain
+   explicit gaps rather than silently disappearing. An unclassifiable prefix
+   also fails closed. An oversized required/unclassified record fails the pane only when the tail
    holds no attributable work; otherwise the tail's turns are used and the
    unread earlier history is marked `historyComplete: false`, because a
    journal only grows and a failed pane would never be read again. No journal
@@ -152,7 +156,12 @@ writes without contacting the curator again. The existing block and snapshot
 must match exactly; later notes outside the block are preserved. Missing old
 commit intents still require the original session proof and pre-write hash.
 Health exposes digest validation and the scheduled maintenance outcome
-separately. A saved digest never clears an unresolved compact pass.
+separately. A saved digest never clears an unresolved compact pass. A new
+ordinary controller run can repair the day: only after its verified product
+and sentinel does it bind that run/source to the existing nightly-compact
+report. Health accepts a later zero-unresolved pass for that exact product
+while preserving the original failed schedule receipt unchanged. Recovering
+an old summary alone never creates this maintenance proof.
 
 ## Finish an interrupted controller without another model turn
 

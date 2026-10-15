@@ -37,6 +37,23 @@ function fixture() {
 }
 
 feature("nightly context budget", () => {
+  component("binds an existing maintenance report to the verified Dream run", {
+    when: ["Dream finishes and its maintenance observes a pane already within budget", async () => {
+      const fx = fixture();
+      fx.change({ tokens: 20_000 });
+      fx.deps.dreamInput = { runId: "current-dream", sha256: "a".repeat(64) };
+      try {
+        const result = await runNightlyCompact(fx.ctx, {}, fx.deps);
+        return { report: JSON.parse(readFileSync(result.path)), calls: fx.calls() };
+      } finally { fx.clean(); }
+    }],
+    then: ["the normal report proves this run's maintenance without another model call", ({ report, calls }) => {
+      expect(report.dream).toEqual({ runId: "current-dream", sourceSha256: "a".repeat(64) });
+      expect(report.unresolved).toBe(0);
+      expect(calls).toBe(0);
+    }],
+  });
+
   unit("nightly maintenance also waits one quiet hour", {
     when: ["a large pane has been quiet for 31 minutes", () =>
       nightlyCompactDecision({ ...facts(), idleMs: 31 * 60_000 }, policy)],

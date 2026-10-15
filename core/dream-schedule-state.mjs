@@ -17,5 +17,6 @@ export function readDreamAttempt(workspace, home, dateKey) {
       || !["started", "completed", "maintenance-unresolved", "unresolved"].includes(record.state)) {
     throw new Error("scheduled Dream attempt identity/state invalid");
   }
-  return { state: record.state, exitCode: record.exitCode ?? null, finishedAt: record.finishedAt ?? null };
+  return { state: record.state, exitCode: record.exitCode ?? null,
+    startedAt: record.startedAt ?? null, finishedAt: record.finishedAt ?? null };
 }
