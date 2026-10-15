@@ -61,7 +61,7 @@ export function dreamShadow({ agents, sinceMs, receipts, readHistory, current, d
   };
 }
 
-/** WHAT: Renders the comparison as a few lines. WHY: Keeps `amux dream --dry` and the nightly log readable. */
+/** WHAT: Formats the comparison as a few lines. WHY: Keeps `amux dream --dry` and the nightly log readable. */
 export function formatDreamShadow(report) {
   const { current, conversation, answered } = report;
   const share = answered.share == null ? "no settled human asks yet" : `${(answered.share * 100).toFixed(1)} %`;
@@ -70,7 +70,7 @@ export function formatDreamShadow(report) {
     `- current packet: ${current.bytes} bytes, ${current.included.length} pane(s), omitted ${current.omitted.length}, unreadable ${current.unreadable.length}`,
     `- log packet: ${conversation.bytes} bytes, ${conversation.included.length} pane(s), ${conversation.fromLog.length} from the log`
       + ` (${conversation.partialWindow.length} with a window older than the log), omitted ${conversation.omitted.length}, unreadable ${conversation.unreadable.length}`,
-    `- human asks answered by a post: ${answered.answered} of ${answered.asked} (${share}; the switch needs 95 %)`,
+    `- human asks answered by a post: ${answered.answered} of ${answered.asked} (${share}; health only, not a source-switch gate)`,
   ];
 }
 

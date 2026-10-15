@@ -324,7 +324,7 @@ export function mergePassageHits(original, passages) {
     ...original.filter(hit => hit.layer !== "L1"), ...passages.slice(3)];
   const seen = new Set();
   return ordered.filter(hit => {
-    const key = `${hit.path}:${hit.line}`;
+    const key = hit.dedupeKey || `${hit.path}:${hit.line}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

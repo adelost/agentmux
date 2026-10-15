@@ -9,6 +9,17 @@ const NOW = Date.parse("2026-10-11T12:00:00Z");
 const at = (hoursAgo) => NOW - hoursAgo * 3_600_000;
 
 feature("conversation log health in memory status", () => {
+  component("new input without any recorded output raises a stale-log warning", {
+    given: ["an actual input older than the ten-minute output grace", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-log-stale-")), path = join(root, "ledger.jsonl");
+      appendAskLedger({ ts: at(1), agent: "lsrc", pane: 0, source: "discord", verbatim: "Kan du svara?" }, { path });
+      return { root, path };
+    }],
+    when: ["checking normal memory health", fx => conversationLogHealth({ path: fx.path, nowMs: NOW })],
+    then: ["the gap is visible without claiming whether delivery or logging failed", health => {
+      expect(health.stale).toBe(true); expect(formatConversationLogHealth(health)).toContain("WARNING");
+    }], cleanup: fx => rmSync(fx.root, { recursive: true, force: true }),
+  });
   component("status shows size, posting panes, failed sends and answered asks", {
     given: ["a day with two human asks, one answered, and one failed send", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-log-health-"));
@@ -31,7 +42,8 @@ feature("conversation log health in memory status", () => {
         expect(health).toMatchObject({ archives: 0, posts: 3, failed: 1,
           latestPostByPane: { "lsrc:0": new Date(at(4.9)).toISOString() }, answered: { asked: 2, answered: 1 } });
         expect(health.currentBytes).toBeGreaterThan(0);
-        expect(line).toMatch(/^Conversation log: 0\.0 MB current \+ 0 archive\(s\) 0\.0 MB; last 24 h 3 post\(s\) from 1 pane\(s\), 1 failed; human asks answered by a post: 1 of 2 \(50\.0 %\)$/u);
+        expect(line).toMatch(/^Conversation log: 0\.0 MB current \+ 0 archive\(s\) 0\.0 MB; last 24 h 3 post\(s\) from 1 pane\(s\), 1 failed; human asks answered by a post: 1 of 2 \(50\.0 %\)/u);
+        expect(line).toContain("WARNING");
       } finally { rmSync(root, { recursive: true, force: true }); }
     }],
   });

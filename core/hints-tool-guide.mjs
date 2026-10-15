@@ -9,8 +9,8 @@ an alias. Load only the skills needed for the current task.
 
 - \`amux done\`: current work and your own pane's recovery entry point.
   Follow More commands; inspect an owner's work before intervening.
-- \`amux log PROJECT -p N -n 3\`: journal history. Narrow with \`--grep\` or
-  \`--since\`. Use \`--tmux -s 60\` for live TUI/modal inspection.
+- \`amux log PROJECT -p N -n 3\`: conversation history. Narrow with \`--grep\`
+  or \`--since\`; \`--raw\` reads engine journals, \`--tmux -s 60\` the live TUI.
   **Never use raw \`tmux ... capture-pane\`.**
 - \`amux asks --open\`: candidate unresolved requests. Read original human
   instructions and later replies before reviving a waiter. Unverified does not

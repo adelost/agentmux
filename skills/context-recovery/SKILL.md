@@ -13,9 +13,11 @@ search rank does not establish current permission, ownership or completion.
 ## Resume an interrupted task
 
 1. Use the supplied compaction summary and the current human request. In AMUX,
-   `amux done` identifies the current pane and the next journal command.
+   `amux done` identifies the current pane and the next conversation command.
 2. Resolve the specific gap with that pane's relevant turns, using
    `amux log PROJECT -p N --since T` or `--grep` when a receipt is already known.
+   This reads canonical input and posted output; add `--raw` only for engine-only
+   tools or native receipts. An outgoing post is not proof of provider ingestion.
    Use the last three turns when there is no narrower anchor; do not read a
    different engine's global "last session".
 3. Recover the minimum state: outcome; latest decision with source/time;

@@ -19,6 +19,37 @@ function workspace() {
 }
 
 feature("every Discord send point records what it posted", () => {
+  component("successful posts retain Discord's accepted text rather than the attempted payload", {
+    given: ["Discord removed a trailing newline but kept the attachment", workspace],
+    when: ["recording the actual successful response", ws => {
+      recordDiscordPost({ channelId: "c-1", payload: { content: "Exakt åäö.\n", files: ["/tmp/proof.png"] },
+        message: { id: "normalized-message", content: "Exakt åäö." }, kind: "reply", via: "bridge" },
+      { configPath: ws.configPath, record: entry => appendPost(entry, { path: ws.path }) });
+      return readWindow({ path: ws.path }).posts;
+    }],
+    then: ["the stored output is exactly what the recipient sees", rows => expect(rows[0]).toMatchObject({
+      text: "Exakt åäö.", files: ["/tmp/proof.png"], messageId: "normalized-message",
+    })], cleanup: ws => ws.cleanup(),
+  });
+  component("an edited delivery notice records the content that is now visible", {
+    given: ["the real adapter with one existing bot message", () => {
+      const ws = workspace();
+      const edited = { id: "edited-message" };
+      const client = { channels: { fetch: async () => ({ messages: { fetch: async () => ({ edit: async () => edited }) } }) } };
+      const discord = createDiscordChannel({ token: "test", client,
+        onSent: (channelId, entry) => recordDiscordPost({ ...entry, channelId, via: "bridge" },
+          { configPath: ws.configPath, record: entry => appendPost(entry, { path: ws.path }) }) });
+      return { ws, discord };
+    }],
+    when: ["the waiting notice changes to delivered", async fx => {
+      await fx.discord.editMessage("c-1", "edited-message", "Mottaget, leveransen är kvitterad.");
+      return readWindow({ path: fx.ws.path }).posts;
+    }],
+    then: ["the actual message id and exact updated text are readable", rows => expect(rows).toEqual([
+      expect.objectContaining({ messageId: "edited-message", text: "Mottaget, leveransen är kvitterad.", status: "sent" }),
+    ])],
+    cleanup: fx => fx.ws.cleanup(),
+  });
   component("the bridge adapter records send, replyTo and a reply to a person's message", {
     given: ["a bridge adapter over a fake Discord client", () => {
       const ws = workspace();

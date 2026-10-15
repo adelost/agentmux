@@ -21,10 +21,11 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), "amux-dream-command-"));
   const previousHome = process.env.HOME;
   const previousJanitor = process.env.AMUX_JANITOR_ENABLED;
+  const previousDreamSource = process.env.AMUX_DREAM_SOURCE;
   process.env.HOME = root;
   process.env.AMUX_JANITOR_ENABLED = "false";
   return {
-    root, previousHome, previousJanitor,
+    root, previousHome, previousJanitor, previousDreamSource,
     workspace: join(root, "workspace"), receiptPath: join(root, "receipts.json"),
     receipts: { schemaVersion: 1, panes: {} },
   };
@@ -66,10 +67,30 @@ function cleanup(fx) {
   process.env.HOME = fx.previousHome;
   if (fx.previousJanitor === undefined) delete process.env.AMUX_JANITOR_ENABLED;
   else process.env.AMUX_JANITOR_ENABLED = fx.previousJanitor;
+  if (fx.previousDreamSource === undefined) delete process.env.AMUX_DREAM_SOURCE;
+  else process.env.AMUX_DREAM_SOURCE = fx.previousDreamSource;
   rmSync(fx.root, { recursive: true, force: true });
 }
 
 feature("amux dream configured-pane orchestration", () => {
+  for (const source of ["conversation-log", "raw"]) component(`Dream source ${source} is explicit and the default uses canonical posts`, {
+    given: ["a dry controller with isolated source readers", () => fixture()],
+    when: ["building the actual controller packet", async fx => {
+      if (source === "raw") process.env.AMUX_DREAM_SOURCE = "raw"; else delete process.env.AMUX_DREAM_SOURCE;
+      let reads = 0, options;
+      await cmdDream({ configPath: "unused", agent: {} }, { dry: true, workspace: fx.workspace }, {
+        agents: [], owner, receiptPath: fx.receiptPath, readReceipts: () => fx.receipts,
+        readConversation: () => { reads++; return { asks: [], posts: [], coverageStartMs: 0 }; },
+        collectSources: (_agents, _since, value) => { options = value; return { sources: [activeSource()], unreadable: [] }; },
+        nightlyCompact: async () => {},
+      });
+      return { reads, options };
+    }],
+    then: ["the canonical reader is used only outside the documented raw retreat", ({ reads, options }) => {
+      expect(reads).toBe(source === "raw" ? 0 : 1);
+      expect(Boolean(options.conversation)).toBe(source !== "raw");
+    }], cleanup,
+  });
   component("dry-run measures the real batch without compacting, sending, or writing", {
     given: ["one active source", () => fixture()],
     when: ["previewing", async (fx) => {

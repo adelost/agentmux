@@ -68,7 +68,14 @@ export function createDiscordChannel({ token, onSent, client = new Client({
       if (!ch?.messages) throw new Error(`channel ${channelId} cannot fetch messages`);
       const message = await ch.messages.fetch(messageId);
       if (!message) throw new Error(`message ${channelId}:${messageId} not found`);
-      return message.edit(text);
+      try {
+        const result = await message.edit(text);
+        stamp(channelId, { payload: text, message: result, kind: "notice", status: "sent" });
+        return result;
+      } catch (error) {
+        stamp(channelId, { payload: text, kind: "notice", status: "failed", error });
+        throw error;
+      }
     },
 
     /** WHAT: Fetches every Discord message after one durable cursor. WHY: Gateway reconnects do not replay history and a one-page scan can skip busy outage windows. */

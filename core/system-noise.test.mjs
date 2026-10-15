@@ -2,6 +2,13 @@ import { unit, feature, expect } from "bdd-vitest";
 import { isSystemNoiseDirective, isWorkDirective } from "./system-noise.mjs";
 
 feature("isSystemNoiseDirective", () => {
+  unit("engine artifact summaries are not open human requests", {
+    when: ["classifying the actual compaction wrapper and a human question about it", () => [
+      isSystemNoiseDirective('<artifact-content-authored-by-others/> The summarized conversation below is context from before compaction.'),
+      isSystemNoiseDirective('Vad betyder <artifact-content-authored-by-others/> The summarized conversation i loggen?'),
+    ]],
+    then: ["only the engine-generated preamble is excluded", results => expect(results).toEqual([true, false])],
+  });
   unit("slash-command wrappers are noise", {
     given: ["the live-repro wrapper turns", () => ([
       "<command-name>/compact</command-name>",

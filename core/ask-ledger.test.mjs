@@ -1,4 +1,4 @@
-import { expect, feature, unit } from "bdd-vitest";
+import { expect, feature, unit, component } from "bdd-vitest";
 import {
   mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync,
 } from "node:fs";
@@ -325,7 +325,7 @@ feature("durable ask ledger", () => {
     }],
   });
 
-  unit("a fleet-sized ledger coalesces in time proportional to its rows, not rows squared", {
+  component("a fleet-sized ledger coalesces in time proportional to its rows, not rows squared", {
     given: ["4,000 delivered asks with hook echoes and 4,000 typed prompts", () => fleetLedger(4_000)],
     when: ["the ledger rows are coalesced", (rows) => cpuMsOf(() => coalesceAskLedger(rows))],
     then: ["every echo folds into its delivery and the pass stays far below a pairwise scan", ({ result, cpuMs }) => {

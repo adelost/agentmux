@@ -14,8 +14,8 @@ AGENTS.md/CLAUDE.md (source: `core/hints-fleet-process.mjs`) and
 ## 1. Orient on evidence
 
 - Overview or unclear owner: `amux done` for the window, then
-  `amux log PROJECT -p N -n 3` for the owner.
-- Follow-up: start from the existing ledger row and the owner's journal since
+  `amux log PROJECT -p N -n 3` for the owner's canonical conversation.
+- Follow-up: start from the existing ledger row and the owner's conversation since
   the last receipt. Look wider only when scope, owner or evidence changed.
   A timer tick is not a reason for a new fleet census.
 - `amux asks`: to check one suspected dropped request, not as an inventory.
@@ -153,7 +153,8 @@ addressed engine. Journals are receipts, not the transport.
   finding. Do not start disabled services for green. A healthy bridge and an
   offline native runtime target can coexist.
 - `amux log PROJECT -p N --tmux -s 60`: the live TUI, only for a modal or
-  engine state. History uses the journal view.
+  engine state. Normal history uses the conversation log; `--raw` is for
+  engine-only tool evidence and delivery receipts, not ordinary orientation.
 - `amux --help` first. No new poller, registry, status database or recovery
   script.
 - Merged source, installed CLI and running bridge can be three revisions.

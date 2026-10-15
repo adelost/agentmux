@@ -25,6 +25,7 @@ const NOISE_PATTERNS = [
   /^Caveat:/,
   // Post-compact continuation preamble injected by the harness, not typed.
   /^This session is being continued from a previous conversation/,
+  /^<artifact-content-authored-by-others\s*\/>\s*The summarized conversation\b/iu,
   // Hook/system banners that arrive on the user channel (<system-reminder> etc).
   /^<system-/i,
   /^<task-notification\b/i,

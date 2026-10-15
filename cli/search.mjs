@@ -3,6 +3,7 @@
 
 import { loadConfig } from "./config.mjs";
 import { eventsPath } from "../core/events.mjs";
+import { searchConversationLog, expandConversationHit } from "../core/search-conversation.mjs";
 import {
   loadSearchRoots,
   withEventLedgerRoot,
@@ -55,7 +56,8 @@ Validated memory/topics pages provide compact orientation alongside original sou
 --raw disables these layers. Topic/paragraph expansion rechecks source hashes; use
 amux memory topics --json to inspect states and decision cells. Topic text is
 derived, not a new instruction or proof that no later correction exists.
-Lexical search over memory and the durable AMUX delivery ledger remains available.
+Lexical search includes the canonical conversation log (last30days) and delivery events.
+Use --source conversation for exact posted words; --show expands the immutable row id.
 --deep adds large raw session archives.
 
 Journal hits show event time (unknown if absent), role and exact source line.
@@ -88,8 +90,8 @@ function showResults(last, show, context) {
       console.error(`#${n} finns inte (sökningen gav ${last.hits.length} träffar).`);
       continue;
     }
-    console.log(`── #${n} ${hit.path}:${hit.line}  (sökning: "${last.query}")`);
-    console.log(hit.topic ? expandMemoryTopic(hit) : hit.passage ? expandPassage(hit) : expandHit(hit, { context: context ?? 10 }));
+    console.log(`── #${n} ${hit.path}${hit.conversationId ? `#${hit.conversationId}` : `:${hit.line}`}  (sökning: "${last.query}")`);
+    console.log(hit.conversationId ? expandConversationHit(hit) : hit.topic ? expandMemoryTopic(hit) : hit.passage ? expandPassage(hit) : expandHit(hit, { context: context ?? 10 }));
     console.log("");
   }
 }
@@ -113,7 +115,8 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   const lap = (stage) => { const now = performance.now(); timing[stage] = (timing[stage] || 0) + now - clock; clock = now; };
   const { query: content, dates } = temporalIntent(query, flags.now ? new Date(flags.now) : new Date());
   const ledgerRoot = roots.find((root) => root.kind === "event-ledger");
-  const ledgerHits = ledgerRoot ? searchEventLedger(content, ledgerRoot.path) : [];
+  const ledgerHits = [...(ledgerRoot ? searchEventLedger(content, ledgerRoot.path) : []),
+    ...(!flags.source || "conversation".includes(flags.source) ? searchConversationLog(content) : [])];
   lap("ledger");
   // A relevant per-event receipt is higher-quality than file-level AND over
   // giant transcripts, and avoids a multi-second scan through unrelated
@@ -243,6 +246,7 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
 
 /** WHAT: Renders what an agent sees after expanding a hit. WHY: Scores answers that are actually in view, per layer. */
 function expandedView(hit) {
+  if (hit.conversationId) return expandConversationHit(hit);
   if (hit.topic) return expandMemoryTopic(hit);
   if (hit.passage) return expandPassage(hit);
   if (hit.path.endsWith(".jsonl")) return expandHit(hit, { context: 0 });
@@ -374,9 +378,7 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
     return;
   }
   if (!roots.length) {
-    console.error("Inga sökrötter kunde läsas. Kontrollera agentmux.yaml och ~/.agentmux/events.jsonl.");
-    process.exitCode = 1;
-    return;
+    console.warn("No configured note/session roots; searching the canonical conversation log only.");
   }
   const { top, total, elapsedMs } = await collectSearchHits(query, roots, workspace, flags, { semantic });
   if (!top.length) {

@@ -40,7 +40,7 @@ function shellQuote(value) {
 }
 
 /** WHAT: Formats one durable ask with optional live/session provenance. WHY: Keeps CLI orchestration separate from row formatting. */
-export function formatAskEntry(entry) {
+export function formatAskEntry(entry, { fullReply = false } = {}) {
   const ts = entry.timestamp
     ? new Date(entry.tsMs).toISOString().slice(5, 16).replace("T", " ")
     : "-- --:--";
@@ -56,7 +56,8 @@ export function formatAskEntry(entry) {
     `${status}  ${ts}  ${entry.key.padEnd(10)}  ${age}  [${origin}]`,
     `    > ${entry.promptPreview}`,
   ];
-  if (entry.replyPreview) lines.push(`    → ${entry.replyPreview}`);
+  if (fullReply && entry.reply) lines.push(`    Posted answer:\n${entry.reply}`);
+  else if (entry.replyPreview) lines.push(`    → ${entry.replyPreview}`);
   if (entry.jsonlFile) {
     const location = entry.jsonlLine
       ? `${entry.jsonlFile}:${entry.jsonlLine}`

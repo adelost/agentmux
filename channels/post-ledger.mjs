@@ -19,6 +19,9 @@ export function recordDiscordPost({ channelId, payload, message = null, kind, vi
 } = {}) {
   try {
     const owner = paneForChannel(loadConfig(configPath), String(channelId));
+    if (status === "sent" && typeof message?.content === "string") {
+      payload = typeof payload === "string" ? message.content : { ...payload, content: message.content };
+    }
     return record({ agent: owner?.name ?? null, pane: owner?.pane ?? null, channelId, via, kind, payload, status,
       ...(status === "failed" ? { error: failureText(error) } : { messageId: message?.id ?? null }) });
   } catch (error) {

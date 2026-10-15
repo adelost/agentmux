@@ -56,13 +56,15 @@ Usage:
     --drop-shells                 Explicitly discard configured shell panes
     --allow-empty                 Fresh sessions only for proven-empty panes
     --rollback RECEIPT            Byte-exact config restore + tmux restart
-  agent log <name|:nr> [-n N]     Show agent output (default: last 3 turns from jsonl)
-    -n N                          Number of turns (jsonl) or lines (--tmux)
+  agent log <name|:nr> [-n N]     Canonical received input and posted output, including stopped panes
+    -n N                          Conversation groups (default3), or lines with --tmux
     -p <pane>                     Target pane
-    --since T                     jsonl: only turns at/after T (ISO or '30min')
-    --grep PAT                    jsonl: only turns matching regex PAT (case-insensitive)
+    --since T                     Read window (default7d; ISO or '30min')
+    --grep PAT                    Match input or posted text (case-insensitive)
+    --raw                         Explicit provider-journal diagnostic, never the default
+    --max-bytes N                 Conversation display budget (default65536, max1048576)
     --tmux [-s N]                 Raw tmux capture, scrollback depth N (default 200)
-    --full                        Both jsonl history AND current tmux state
+    --raw --full                  Provider journal and current tmux state
     --text                        [legacy] Filtered tmux extract (pre-jsonl default)
   agent wait <name|:nr> [-t S]    Wait until agent is ready
   agent select <name|:nr> [-p N] <N> Select menu option N
@@ -83,12 +85,13 @@ Usage:
     --follow, -f                  Live-tail (like tail -f)
   agent watch [--agent] [--pane]  Shortcut for 'timeline --follow'
     [--grep PAT]
-  agent asks [-n N]               Recent human asks/directives with status + jsonl location
+  agent asks [-n N]               Human asks with canonical posted answers and source ids
     --open                        Only open-ish asks (open/working/partial/needs-you)
     --since T                     Window (default 7d; ISO or '30min')
     --agent NAME --pane N         Filter to one pane
     --grep PAT                    Regex filter over ask/reply text
-    --full                        Exact older scan (slower); default is bounded tail
+    --full                        Complete canonical posted answer text
+    --raw                         Explicit legacy provider status/anchor diagnostic
     --all-repos                   Include archived agents outside active config
     --summary                     Group matching durable asks by repository
   agent done                      Attention-first fleet overview (default: last 1h)

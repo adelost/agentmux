@@ -187,11 +187,18 @@ export function appendPost(entry, {
     ...(status === "failed" ? { error: String(entry.error || "unknown").slice(0, 500) } : {}),
     messageId: entry.messageId ? String(entry.messageId) : null,
     deliveryId: entry.deliveryId ? String(entry.deliveryId) : null,
+    ...(entry.recoveredAt ? { recoveredAt: iso(entry.recoveredAt) } : {}),
   };
   row.id = createHash("sha256").update([row.ts, row.channelId, row.messageId || "", status, row.text, ...files, randomUUID()]
     .join("\u0000")).digest("hex");
   appendLedgerRow(row, { path, nowMs, maxBytes });
   return row;
+}
+
+/** WHAT: Builds a canonical archive path for verified historical post observations. WHY: Keeps recovery append-only and chronological without editing the live log or old archives. */
+export function postRecoveryArchivePath(path = defaultAskLedgerPath(), nowMs = Date.now()) {
+  const stamp = new Date(nowMs).toISOString().replace(/[:.]/gu, "-");
+  return join(dirname(path), `${basename(path, ".jsonl")}.${stamp}.recovered.${randomUUID()}.jsonl`);
 }
 
 /** WHAT: Stores a provider's exact submitted prompt. WHY: Keeps event classification from discarding ask identity. */
@@ -344,7 +351,7 @@ export function readWindow({ path = defaultAskLedgerPath(), since = null, until 
       if (isPost) coverageStartMs = Math.min(coverageStartMs, ms);
       if (!(ms > sinceMs && ms <= untilMs) || (wanted && !wanted.has(row.agent))) continue;
       if (row.event === "ask" && typeof row.verbatim === "string") asks.push({ ...row, ledgerPath: span.file });
-      else if (isPost) posts.push(row);
+      else if (isPost) posts.push({ ...row, ledgerPath: span.file });
     }
   }
   return { asks: coalesceAskLedger(asks), posts: posts.sort(byTimeThenId), coverageStartMs, files };

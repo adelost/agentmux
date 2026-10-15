@@ -68,8 +68,8 @@ export function conversationForPane(log, agent, pane, windowStartMs) {
 }
 
 /**
- * WHAT: Measures how many settled human-facing asks got an answer posted on their pane.
- * WHY: The switch waits until the log answers at least 95 % of them.
+ * WHAT: Returns how many settled human-facing asks got an answer posted on their pane.
+ * WHY: Keeps unanswered requests visible as health without treating that share as cutover authority.
  */
 export function answeredShare(log, { sinceMs = log.coverageStartMs, nowMs = Date.now() } = {}) {
   const byPane = new Map();

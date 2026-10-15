@@ -240,12 +240,14 @@ const QUERY_STOP_WORDS = new Set([
   "a", "an", "and", "for", "in", "of", "on", "the", "to",
 ]);
 
-function searchTokens(text) {
+/** WHAT: Returns normalized query words. WHY: Keeps event and conversation lookup on the same language rules. */
+export function searchTokens(text) {
   return String(text).toLocaleLowerCase("sv-SE")
     .match(/[\p{L}\p{N}]+/gu)?.filter((word) => word.length >= 3 && !QUERY_STOP_WORDS.has(word)) || [];
 }
 
-function tokenMatches(queryToken, candidateToken) {
+/** WHAT: Checks an exact word or bounded inflection prefix. WHY: Keeps word matching consistent across canonical event sources. */
+export function tokenMatches(queryToken, candidateToken) {
   if (queryToken === candidateToken) return true;
   const shortest = Math.min(queryToken.length, candidateToken.length);
   return shortest >= 4 && (queryToken.startsWith(candidateToken) || candidateToken.startsWith(queryToken));
@@ -381,6 +383,7 @@ export function formatHits(hits) {
   return hits.map((h, i) => {
     const shortPath = h.path.replace(HOME_RE(), "~/");
     const layer = h.layer === "topic" ? "topic" : h.layer === "sem" ? "≈" : h.layer === "L2" ? "&" : "=";
-    return `#${String(i + 1).padStart(2)} ${(h.date || "unknown time").padEnd(10)} ${h.root.padEnd(9)} ${layer} ${shortPath}:${h.line}\n     ${h.snippet.slice(0, 160)}`;
+    const anchor = h.conversationId ? `#${h.conversationId}` : `:${h.line}`;
+    return `#${String(i + 1).padStart(2)} ${(h.date || "unknown time").padEnd(10)} ${h.root.padEnd(9)} ${layer} ${shortPath}${anchor}\n     ${h.snippet.slice(0, 160)}`;
   }).join("\n");
 }

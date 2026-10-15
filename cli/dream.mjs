@@ -33,6 +33,8 @@ import { judgeDreamMemory, protectedDreamBlocks } from "../core/dream-memory-gua
 import { readDreamCurationProof } from "../core/dream-curation-proof.mjs";
 import { readDreamPaneHistory } from "../core/dream-history.mjs";
 import { dreamShadow, formatDreamShadow, memoizeHistory, writeDreamShadow } from "../core/dream-shadow.mjs";
+import { readWindow } from "../core/ask-ledger.mjs";
+import { DREAM_CATCH_UP_MS } from "../core/dream-turn-selection.mjs";
 export { commitDreamProduct } from "../core/dream-commit.mjs";
 export { isPidAlive } from "../core/dream-lock.mjs";
 export { waitForDreamOwnerResult } from "../core/dream-result.mjs";
@@ -178,11 +180,16 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   const candidates = dependencies.candidates
     || (dependencies.owner ? [dependencies.owner] : resolveDreamCandidates(runtimeConfig));
   let owner = candidates[0];
+  const primarySource = process.env.AMUX_DREAM_SOURCE || "conversation-log";
+  if (!["conversation-log", "raw"].includes(primarySource)) throw Error(`Unknown AMUX_DREAM_SOURCE '${primarySource}'; use conversation-log or raw`);
+  const readConversation = dependencies.readConversation || (dependencies.collectSources
+    ? () => ({ asks: [], posts: [], coverageStartMs: Infinity }) : readWindow);
   // Production reads are cached so the shadow's journal fallback reuses them.
   const readHistory = dependencies.collectSources ? null : memoizeHistory(readDreamPaneHistory);
   const collect = () => {
     const receipts = readReceipts(receiptPath);
-    const observed = collectSources(agents, since.getTime(), { receipts, ...(readHistory ? { readHistory } : {}) });
+    const observed = collectSources(agents, since.getTime(), { receipts, ...(readHistory ? { readHistory } : {}),
+      ...(primarySource === "raw" ? {} : { conversation: { log: readConversation({ since: since.getTime() - DREAM_CATCH_UP_MS }) } }) });
     for (const skipped of observed.skipped || []) {
       if (skipped.reason === "active-turn-deferred") {
         console.log(`Dream: ${skipped.agent}:${skipped.pane} has ${skipped.deferredTurns} active turn(s) deferred; cursor unchanged.`);
@@ -195,7 +202,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     const run = dependencies.shadow || (readHistory && dreamShadow);
     if (!run) return null;
     try {
-      return run({ agents, sinceMs: since.getTime(), receipts, readHistory, current: { observed, batch }, dateKey, nowMs: now.getTime() });
+      return { ...run({ agents, sinceMs: since.getTime(), receipts, readHistory, current: { observed, batch }, dateKey, nowMs: now.getTime() }), primarySource };
     } catch (error) {
       console.warn(`Dream shadow on the conversation log failed: ${error.message}`);
       return null;
@@ -207,6 +214,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     const shadowReport = shadow({ receipts, observed, batch });
     await (dependencies.nightlyCompact || runNightlyCompact)(ctx, flags, { agents, runtimeConfig });
     console.log(`Dream owner: ${owner.agent}:${owner.pane} (${owner.engine}).`);
+    console.log(`Dream source: ${primarySource}. Raw retreat: AMUX_DREAM_SOURCE=raw.`);
     if (candidates.length > 1) {
       console.log(`Configured fallbacks, tried in order: ${candidates.slice(1)
         .map((candidate) => `${candidate.agent}:${candidate.pane} (${candidate.engine})`).join(", ")}.`);
