@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { buildChannelMap } from "./lib.mjs";
 import { createInboundReconciler, formatRecoveredNotice } from "./core/inbound-reconciler.mjs";
 import { resolveConfiguredInboundTarget } from "./core/inbound-target.mjs";
+import { createUnmappedChannelAnswer } from "./core/unmapped-channel.mjs";
 import { FLEET_RESTART_RESULT_KEY, formatFleetRestartResult } from "./core/fleet-restart.mjs";
 
 const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
@@ -106,9 +107,13 @@ export function startBot({
     const inactive = state.get("sync", {})?.inactiveChannels?.[msg?.channelId];
     return inactive ? { ...inactive, kind: "inactive" } : null;
   };
+  const answerUnmappedChannel = createUnmappedChannelAnswer({
+    syncedChannels: () => state.get("sync", {})?.channels,
+  });
   const inbound = channels.length
     ? createInboundReconciler({
       onMessage, state, store: inboundStore, resolveTarget: resolveInboundTarget,
+      onUnroutable: answerUnmappedChannel,
     })
     : null;
 

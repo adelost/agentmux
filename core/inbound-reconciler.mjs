@@ -89,7 +89,7 @@ function durableMessage(record, store, channel, baseMessage = null) {
  * WHAT: Builds one journaled dispatcher for live or REST-recovered Discord messages.
  * WHY: Keeps attachment, STT, and pane work behind a durable human-message identity.
  */
-export function createInboundReconciler({ onMessage, state, store, resolveTarget }) {
+export function createInboundReconciler({ onMessage, state, store, resolveTarget, onUnroutable = null }) {
   if (!store) throw new Error("Discord inbound reconciler requires a durable store");
   if (typeof resolveTarget !== "function") {
     throw new Error("Discord inbound reconciler requires a target resolver");
@@ -167,6 +167,12 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
   /** WHAT: Accepts one Gateway event through a synchronous durable observation. WHY: Expensive attachment and STT work may never precede crash-safe identity. */
   function enqueue(msg, channel) {
     const record = observe(msg);
+    if (!record && msg && !msg.isBot && onUnroutable) {
+      // The caller decides whether this channel deserves an answer; no record
+      // is kept, so a later mapping still recovers the message from the cursor.
+      return Promise.resolve(onUnroutable(msg, channel))
+        .then((notified) => ({ ignored: "unmapped", notified: Boolean(notified) }));
+    }
     if (!record) return Promise.resolve({ ignored: msg?.isBot ? "bot" : "unmapped" });
     if (record.status === "completed") return Promise.resolve({ duplicate: true });
     const prepared = prepare(record);
