@@ -50,6 +50,20 @@ const pausedGoalMenu = `
   Press enter to confirm or esc to go back
 `;
 
+// Codex 0.162.1, skydive:3 on the second account, 2026-10-15.
+const folderAccessMenu = `
+  Folder access
+  /project/.agents/3
+  Note: You’re in a subdirectory of a Git project. Trusting will apply to the repository root:
+  /project
+  Trust this folder? Codex can read, edit, and run files here, subject to your permission settings.
+  Folder settings can run code automatically, even without a model request.
+  Continue only if you trust these files. Your trust decision will be saved.
+› 1. Trust and continue
+  2. Quit
+  enter continue · esc quit
+`;
+
 // Captured from lsrc:3 on 2026-10-11 (Codex 0.162.1), goal text replaced.
 // The menu is an overlay above the composer: transcript text bleeds into its
 // left margin, and the hint sits above the composer instead of at the bottom.
@@ -80,6 +94,26 @@ more c  Finish the remaining safe work and the customer trial, verify the
 `;
 
 feature("blocking prompt recognition", () => {
+  component("the current Codex folder menu accepts its selected trust option", {
+    when: ["the configured folder's trust menu is the active screen", () => findBlockingPrompt(folderAccessMenu)],
+    then: ["only Enter is sent, never the quitting Escape", prompt =>
+      expect(prompt).toMatchObject({ name: "trust-directory", keys: "Enter" })],
+  });
+  component("the current Codex folder menu moves off Quit before accepting", {
+    when: ["Quit is selected", () => findBlockingPrompt(folderAccessMenu
+      .replace("› 1.", "  1.").replace("  2.", "› 2."))],
+    then: ["trust is selected before Enter", prompt =>
+      expect(prompt).toMatchObject({ name: "trust-directory", keys: "Up Enter" })],
+  });
+  component("historical folder access text receives no trust action", {
+    when: ["a composer or shell follows the old menu", () => [
+      `${folderAccessMenu}\n› Ask Codex to do anything\n`,
+      `${folderAccessMenu}\nuser@host:~/project$\n`,
+      folderAccessMenu.replace("› 1.", "  1."),
+    ].map(findBlockingPrompt)],
+    then: ["the recognizer requires an active menu and a known selection", prompts =>
+      expect(prompts).toEqual([null, null, null])],
+  });
   component("Codex 0.162's overlay goal menu is left paused", {
     when: ["the overlay menu sits above the composer", () => findBlockingPrompt(pausedGoalOverlay)],
     then: ["Leave paused is selected", prompt =>

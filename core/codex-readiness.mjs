@@ -17,8 +17,6 @@ export async function waitForCodexUiReady({
   now = Date.now,
   logger = console,
 }) {
-  let nextRevealAt = now() + 2500;
-  let reveals = 0;
   const ready = await waitForProgressingUi({
     capture: () => tmux.captureScreen(target),
     inspect: async (content) => {
@@ -32,11 +30,8 @@ export async function waitForCodexUiReady({
         return { waitMs: 300 };
       }
       if (codexComposerText(content) === "") return true;
-      if (now() >= nextRevealAt && reveals < 3) {
-        await tmux.sendEscape(target).catch(() => {});
-        reveals++;
-        nextRevealAt = now() + 2500;
-      }
+      // Unknown startup screens are not neutral composers. Escape can quit a
+      // trust dialog or cancel replay, so only recognized menus receive keys.
       return false;
     },
     delay,

@@ -2,6 +2,29 @@ import { feature, unit, expect } from "bdd-vitest";
 import { waitForCodexUiReady } from "./codex-readiness.mjs";
 
 feature("Codex startup readiness", () => {
+  unit("accepts the configured folder instead of quitting at the new trust menu", {
+    given: ["Codex 0.162.1's live skydive:3 folder menu and a fake clock", () => ({
+      clock: 0, keys: [], exited: false, trusted: false,
+    })],
+    when: ["waiting through the actual startup dialog", async ctx => waitForCodexUiReady({
+      tmux: {
+        captureScreen: async () => ctx.exited ? "user@host:~/project/.agents/3$"
+          : ctx.trusted ? "› Ask Codex to do anything\n  GPT-6.1-Sol xhigh · ~/project/.agents/3"
+            : "Folder access\n/project/.agents/3\nTrust this folder? Codex can read, edit, and run files here.\n› 1. Trust and continue\n  2. Quit\nenter continue · esc quit\n",
+        sendKeys: async (_target, keys) => { ctx.keys.push(keys); ctx.trusted = keys === "Enter"; },
+        sendLiteral: async () => {}, sendEscape: async () => { ctx.exited = true; },
+      },
+      target: "skydive:.3", agentName: "skydive", pane: 3,
+      delay: async ms => { ctx.clock += ms; }, now: () => ctx.clock,
+      hardTimeoutMs: 10_000, logger: { warn: () => {} },
+    })],
+    then: ["the trust choice reaches the composer without cancelling startup", (ready, ctx) => {
+      expect(ready).toBe(true);
+      expect(ctx.exited).toBe(false);
+      expect(ctx.keys).toEqual(["Enter"]);
+    }],
+  });
+
   unit("accepts a replay that progresses for more than twenty seconds", {
     given: ["a slow Codex replay and a fake clock", () => ({ clock: 0, escapes: 0 })],
     when: ["the pane eventually paints an empty composer", async (ctx) => ({
@@ -24,10 +47,29 @@ feature("Codex startup readiness", () => {
       clock: ctx.clock,
       escapes: ctx.escapes,
     })],
-    then: ["readiness succeeds instead of applying the old hard cutoff", ({ ready, clock, escapes }) => {
+    then: ["readiness waits for replay without sending cancellation keys", ({ ready, clock, escapes }) => {
       expect(ready).toBe(true);
       expect(clock).toBeGreaterThanOrEqual(25_000);
-      expect(escapes).toBe(3);
+      expect(escapes).toBe(0);
+    }],
+  });
+
+  unit("leaves an unrecognized startup dialog untouched", {
+    given: ["a new dialog with no known safe choice", () => ({ clock: 0, keys: [] })],
+    when: ["startup reaches its time bound", async ctx => waitForCodexUiReady({
+      tmux: {
+        captureScreen: async () => "New provider confirmation\nenter accept · esc quit",
+        sendKeys: async (_target, keys) => { ctx.keys.push(keys); },
+        sendLiteral: async (_target, text) => { ctx.keys.push(text); },
+        sendEscape: async () => { ctx.keys.push("Escape"); },
+      },
+      target: "skydive:.3", agentName: "skydive", pane: 3,
+      delay: async ms => { ctx.clock += ms; }, now: () => ctx.clock,
+      hardTimeoutMs: 5_000, logger: { warn: () => {} },
+    })],
+    then: ["failure is reported without accepting or quitting an unknown dialog", (ready, ctx) => {
+      expect(ready).toBe(false);
+      expect(ctx.keys).toEqual([]);
     }],
   });
 

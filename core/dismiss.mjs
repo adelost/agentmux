@@ -87,6 +87,12 @@ const PAUSED_GOAL_MENU = {
   second: /(?:^|[\s›❯])\s*2\.\s*Leave paused\b/u,
   footer: /^Press enter to confirm or esc to go back$/iu,
 };
+const FOLDER_ACCESS_MENU = {
+  header: /^\s*Trust this folder\?/u,
+  first: /(?:^|[\s›❯])\s*1\.\s*Trust and continue\s*$/u,
+  second: /(?:^|[\s›❯])\s*2\.\s*Quit\s*$/u,
+  footer: /^enter continue\s*·\s*esc quit$/iu,
+};
 
 /** WHAT: Maps active TUI menus to safe choices. WHY: Keeps startup from updating Codex or resuming unrelated work. */
 export const BLOCKING_PROMPTS = [
@@ -122,6 +128,7 @@ export const BLOCKING_PROMPTS = [
     // Keep the bottom-line requirement: stale trust text followed by a shell or
     // composer must never receive an unsolicited Enter.
     match: (text) => {
+      if (activeCodexChoice(text, FOLDER_ACCESS_MENU) === "first") return true;
       const last = tailLines(text, 1)[0] || "";
       const last8 = tailLines(text, 8).join("\n");
       return /press enter to continue/i.test(last)
@@ -129,6 +136,12 @@ export const BLOCKING_PROMPTS = [
           && /1\.\s*yes,\s*continue/i.test(last8);
     },
     keys: "Enter",
+    waitMs: 2000,
+  },
+  {
+    name: "trust-directory",
+    match: text => activeCodexChoice(text, FOLDER_ACCESS_MENU) === "second",
+    keys: "Up Enter",
     waitMs: 2000,
   },
   {
