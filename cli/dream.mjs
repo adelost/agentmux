@@ -10,7 +10,6 @@ import { notifyUser, sendToChannelId } from "./send-notify.mjs";
 import { getPaneStatus, sendToPane } from "./tmux.mjs";
 import { parseSinceArg } from "../core/jsonl-reader.mjs";
 import { formatJanitorResult, trimAgedSessions } from "../core/janitor.mjs";
-import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import {
   defaultDreamReceiptPath, readDreamReceipts, recordDreamReceipts,
 } from "../core/dream-eligibility.mjs";
@@ -18,10 +17,11 @@ import {
   buildDreamBatch, collectDreamSources,
 } from "../core/dream-summarizer.mjs";
 import {
-  dreamOwnerPrompt, readDreamOwnerQuality, resolveDreamCandidates,
+  dreamOwnerPrompt, resolveDreamCandidates,
   writeDreamOwnerInput,
 } from "../core/dream-owner.mjs";
-import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
+import { prepareDreamOwner, selectIdleOwner } from "./dream-curator.mjs";
+export { dreamCandidateBlocker } from "./dream-curator.mjs";
 import { defaultWorkspace } from "../core/runtime-defaults.mjs";
 import { runNightlyCompact } from "./nightly-compact.mjs";
 import { waitForDreamOwnerResult } from "../core/dream-result.mjs";
@@ -29,7 +29,8 @@ import { recoverDreamRun } from "../core/dream-recovery.mjs";
 import { acquireDreamLock } from "../core/dream-lock.mjs";
 import { claimScheduledDream } from "../core/dream-schedule.mjs";
 import { commitDreamProduct, writeDreamAtomic } from "../core/dream-commit.mjs";
-import { concurrentNotesJudge } from "../core/dream-memory-race.mjs";
+import { judgeDreamMemory, protectedDreamBlocks } from "../core/dream-memory-guard.mjs";
+import { readDreamCurationProof } from "../core/dream-curation-proof.mjs";
 import { readDreamPaneHistory } from "../core/dream-history.mjs";
 import { dreamShadow, formatDreamShadow, memoizeHistory, writeDreamShadow } from "../core/dream-shadow.mjs";
 export { commitDreamProduct } from "../core/dream-commit.mjs";
@@ -71,7 +72,8 @@ function atomicWrite(path, content) {
 
 function upsertDailyMarker(memPath, dateKey, block, blockRe) {
   ensureDreamDailyFile(memPath, dateKey);
-  let content = readFileSync(memPath, "utf8").replace(blockRe, "\n");
+  const failed = new RegExp(String.raw`\n?<!-- amux-dream-failed:${escapeRegExp(dateKey)} [^\n]*-->\n(?:> DIGEST SAKNAS[^\n]*\n)?`, "g");
+  let content = readFileSync(memPath, "utf8").replace(blockRe, "\n").replace(failed, "\n");
   const heading = `# ${dateKey}`;
   const lineEnd = content.indexOf("\n", content.indexOf(heading));
   const at = lineEnd >= 0 ? lineEnd + 1 : content.length;
@@ -108,8 +110,6 @@ export function writeDreamGapMarker(memPath, dateKey, timeStr, reason) {
   );
 }
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 function previousDateKey(dateKey) {
   const atNoonUtc = new Date(`${dateKey}T12:00:00Z`);
   atNoonUtc.setUTCDate(atNoonUtc.getUTCDate() - 1);
@@ -129,115 +129,6 @@ export async function mirrorDreamOwnerPrompt(ctx, owner, prompt, {
   return { channelId, messages: receipts.length };
 }
 
-// A pane in one of these states cannot curate tonight no matter how long Dream
-// waits: the quota is spent, or a human has to clear something first. Every
-// other non-idle state is a pane that is merely busy and will come back.
-const CANNOT_CURATE = Object.freeze({
-  limited: "quota or rate limited",
-  permission: "waiting on a human permission prompt",
-  menu: "sitting in a modal menu",
-});
-
-/** WHAT: Says why a candidate cannot curate at all, or null if it merely might be busy. WHY: Falling through must follow capability, never momentary load. */
-export function dreamCandidateBlocker(status) {
-  return CANNOT_CURATE[status] ?? null;
-}
-
-/**
- * WHAT: Picks the first configured candidate that can curate, waiting out a busy one.
- * WHY: The list exists because a quota-dead curator cost a whole night, and
- * that is the only thing it may skip for. A candidate that is merely busy keeps
- * the night: handing the digest onward because a pane happened to be mid-turn
- * at 04:00 would make the curator whoever was free, and the memory would wander
- * between panes from night to night. So an incapable candidate is skipped on
- * its first poll, a capable one gets the whole grace period, and a capable one
- * that never settles ends the walk instead of passing the night along.
- */
-async function selectIdleOwner(ctx, candidates, { ensureReady, prepare, attempts, ...idleOptions } = {}) {
-  const skipped = [];
-  const reasons = [];
-  let lastError = null;
-  for (const candidate of candidates) {
-    try { await ensureReady(candidate.agent, candidate.pane); }
-    catch (error) {
-      lastError = error;
-      skipped.push(`${candidate.agent}:${candidate.pane}`);
-      reasons.push(`${candidate.agent}:${candidate.pane} startup failed: ${error.message}`);
-      continue;
-    }
-    const outcome = await waitForOwnerIdle(ctx, candidate, { ...idleOptions, attempts });
-    if (outcome.idle) {
-      try { return { owner: candidate, ...(await prepare(candidate)), skipped, reasons }; }
-      catch (error) {
-        lastError = error;
-        skipped.push(`${candidate.agent}:${candidate.pane}`);
-        reasons.push(`${candidate.agent}:${candidate.pane} preparation failed: ${error.message}`);
-        continue;
-      }
-    }
-    skipped.push(`${candidate.agent}:${candidate.pane}`);
-    reasons.push(`${candidate.agent}:${candidate.pane} ${outcome.blocked || "stayed busy for the whole grace period"}`);
-    if (!outcome.blocked) break;
-  }
-  return { owner: null, skipped, reasons, lastError };
-}
-
-async function waitForOwnerIdle(ctx, owner, {
-  attempts = 120, pollMs = 5_000, sleep = wait, getStatus = getPaneStatus,
-} = {}) {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const status = await getStatus(ctx, owner.agent, owner.pane).catch(() => "unknown");
-    if (status === "idle") return { idle: true, blocked: null };
-    // Incapacity is visible on the first poll, so giving every candidate the
-    // full grace costs a quota-dead pane nothing.
-    const blocked = dreamCandidateBlocker(status);
-    if (blocked) return { idle: false, blocked };
-    if (attempt + 1 < attempts) await sleep(pollMs);
-  }
-  return { idle: false, blocked: null };
-}
-
-function verifyOwnerQuality(owner, context) {
-  if (!context?.model || !context?.effort) {
-    throw new Error(`dream-owner-quality-unverified:${owner.agent}:${owner.pane}`);
-  }
-  if (/haiku/iu.test(context.model) || String(context.effort || "").toLowerCase() === "low") {
-    throw new Error(`dream-owner-quality-blocked:${context.model}:${context.effort || "unknown-effort"}`);
-  }
-  return {
-    model: String(context.model), effort: String(context.effort),
-    sessionId: context.sessionId || null, source: context.source || null,
-  };
-}
-
-function ownerQuality(ctx, owner, dependencies) {
-  return dependencies.getContext
-    ? dependencies.getContext(owner.paneDir, owner.engine)
-    : (dependencies.getQuality || readDreamOwnerQuality)(owner, {
-        captureScreen: (agent, pane) => ctx.agent.captureScreen(agent, pane),
-      });
-}
-
-/** WHAT: Prepares one configured curator before assigning editorial work. WHY: A failed quality or compact check must not bypass the configured fallback list. */
-async function prepareDreamOwner(ctx, owner, dependencies) {
-  const before = verifyOwnerQuality(owner, await ownerQuality(ctx, owner, dependencies));
-  const compact = owner.engine === "codex"
-    ? await (dependencies.compactCodex || verifiedCodexCompact)({
-        agent: ctx.agent, agentName: owner.agent, pane: owner.pane, paneDir: owner.paneDir,
-        sleep: dependencies.sleep,
-      })
-    : await (dependencies.compactClaude || verifiedClaudeCompact)({
-        agent: ctx.agent, agentName: owner.agent, pane: owner.pane, paneDir: owner.paneDir,
-        latestIdentity: latestClaudeSessionIdentity, sleep: dependencies.sleep,
-      });
-  if (!compact.ok) throw new Error(`dream-owner-compact-failed:${compact.reason}`);
-  const quality = verifyOwnerQuality(owner, await ownerQuality(ctx, owner, dependencies));
-  if ((before.sessionId && before.sessionId !== compact.sessionId)
-      || (quality.sessionId && quality.sessionId !== compact.sessionId)) {
-    throw new Error("dream-owner-quality-session-mismatch");
-  }
-  return { compact, quality };
-}
 
 /** WHAT: Builds one fleet summary. WHY: Keeps editorial judgment visible while AMUX owns the memory write. */
 export async function cmdDream(ctx, flags = {}, dependencies = {}) {
@@ -375,106 +266,128 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       return { included: [], omitted: batch.omitted, unreadable: observed.unreadable };
     }
 
-    const selection = await selectIdleOwner(ctx, candidates, {
-      ensureReady: (agent, pane) => ctx.agent.ensureReady(agent, pane),
-      prepare: (candidate) => prepareDreamOwner(ctx, candidate, dependencies),
-      attempts: dependencies.idleAttempts,
-      pollMs: dependencies.idlePollMs,
-      sleep: dependencies.sleep,
-      getStatus: dependencies.getStatus,
-    });
-    if (!selection.owner) throw selection.lastError || new Error(`dream-owner-not-idle:${selection.skipped.join(",")}`);
-    if (selection.skipped.length) {
-      const message = `Dream: curator ${selection.reasons.join("; ")};`
-        + ` curating with configured fallback ${selection.owner.agent}:${selection.owner.pane}.`;
-      console.warn(message);
-      try {
-        await (dependencies.notifyUser || notifyUser)(message, { level: "warn", title: "amux dream" });
-      } catch (error) {
-        console.error(`Dream: fallback notification failed: ${error.message}`);
+    const previousSkipped = [], previousReasons = [];
+    let available = candidates;
+    while (available.length) {
+      const selection = await selectIdleOwner(ctx, available, {
+        ensureReady: (agent, pane) => ctx.agent.ensureReady(agent, pane),
+        prepare: (candidate) => prepareDreamOwner(ctx, candidate, dependencies),
+        attempts: dependencies.idleAttempts,
+        pollMs: dependencies.idlePollMs,
+        sleep: dependencies.sleep,
+        getStatus: dependencies.getStatus,
+      });
+      if (!selection.owner) throw selection.lastError || new Error(`dream-owner-not-idle:${selection.skipped.join(",")}`);
+      selection.skipped.unshift(...previousSkipped);
+      selection.reasons.unshift(...previousReasons);
+      if (selection.skipped.length) {
+        const message = `Dream: curator ${selection.reasons.join("; ")};`
+          + ` curating with configured fallback ${selection.owner.agent}:${selection.owner.pane}.`;
+        console.warn(message);
+        try {
+          await (dependencies.notifyUser || notifyUser)(message, { level: "warn", title: "amux dream" });
+        } catch (error) {
+          console.error(`Dream: fallback notification failed: ${error.message}`);
+        }
       }
-    }
-    owner = selection.owner;
-    const { compact, quality } = selection;
+      owner = selection.owner;
+      const { compact, quality } = selection;
 
-    ensureDreamDailyFile(memPath, dateKey);
-    const memoryBefore = readFileSync(memPath, "utf8");
-    const memoryReadAt = Date.now();
-    const input = (dependencies.writeInput || writeDreamOwnerInput)({
-      schemaVersion: 1,
-      memoryFormat: 2,
-      dateKey,
-      createdAt: now.toISOString(),
-      workspace: workspaceDir,
-      memoryBeforeSha256: createHash("sha256").update(memoryBefore).digest("hex"),
-      owner: { agent: owner.agent, pane: owner.pane, engine: owner.engine },
-      compact: {
-        sessionId: compact.sessionId, boundary: compact.compactBoundary,
-        model: quality.model, effort: quality.effort, qualitySource: quality.source,
-      },
-      payload: batch.payload,
-      omitted: batch.omitted.map(({ agent, pane, engine, omitReason }) => ({ agent, pane, engine, omitReason })),
-      unreadable: observed.unreadable,
-      skipped: observed.skipped || [],
-    });
-    const prompt = dreamOwnerPrompt({
-      owner,
-      input,
-      memPath,
-      previousMemPath: join(workspaceDir, "memory", `${previousDateKey(dateKey)}.md`),
-      dateKey,
-      included: batch.included.length,
-      omitted: batch.omitted.length,
-      unreadable: observed.unreadable.length,
-    });
-    const visibleMirror = await (dependencies.mirrorPrompt || mirrorDreamOwnerPrompt)(
-      ctx, owner, prompt,
-    );
-    if (!flags.quiet && !flags.q) console.log(prompt);
-    const sent = await (dependencies.send || sendToPane)(ctx, owner.agent, owner.pane, prompt, {
-      source: "dream",
-      idempotencyKey: `dream:${dateKey}:${input.runId}`,
-      waitMs: 30_000,
-      mirror: false,
-    });
-    // Enqueue/submit is not completion, but a late transport receipt must not
-    // discard a curator already working. The exact final product below is
-    // still mandatory; wait for it without sending or compacting again.
-    if (!sent?.delivered || sent.unverified) {
-      throw new Error(`dream-owner-prompt-unverified:${sent?.reason || sent?.queueState || "unknown"}`);
-    }
-    const product = await (dependencies.waitForResult || waitForDreamOwnerResult)({
-      ctx, owner, prompt, outputPath: input.outputPath, dateKey, runId: input.runId,
-      sourceSha256: input.sha256,
-      attempts: dependencies.resultAttempts,
-      pollMs: dependencies.resultPollMs,
-      sleep: dependencies.sleep,
-    });
-    if (!product.ok) throw new Error(`dream-owner-product-invalid:${product.reason}`);
-    const judgeConcurrentNotes = (dependencies.concurrentNotesJudge || concurrentNotesJudge)({
-      agents, owner, ownerSessionId: compact.sessionId, sinceMs: memoryReadAt });
-    commitDreamProduct({ memPath, memoryBefore, product, dateKey, included: batch.included,
-      omitted: batch.omitted, receipts, receiptPath, now, recordReceipts, input, unreadable: observed.unreadable,
-      judgeConcurrentNotes });
+      ensureDreamDailyFile(memPath, dateKey);
+      const memoryBefore = readFileSync(memPath, "utf8");
+      const memoryReadAt = Date.now();
+      const input = (dependencies.writeInput || writeDreamOwnerInput)({
+        schemaVersion: 1,
+        memoryFormat: 2,
+        dateKey,
+        createdAt: now.toISOString(),
+        workspace: workspaceDir,
+        memoryBeforeSha256: createHash("sha256").update(memoryBefore).digest("hex"),
+        memoryGuard: { readAt: new Date(memoryReadAt).toISOString(), blocks: protectedDreamBlocks(memoryBefore) },
+        owner: { agent: owner.agent, pane: owner.pane, engine: owner.engine },
+        compact: {
+          sessionId: compact.sessionId, boundary: compact.compactBoundary,
+          model: quality.model, effort: quality.effort, qualitySource: quality.source,
+        },
+        payload: batch.payload,
+        omitted: batch.omitted.map(({ agent, pane, engine, omitReason }) => ({ agent, pane, engine, omitReason })),
+        unreadable: observed.unreadable,
+        skipped: observed.skipped || [],
+      });
+      const prompt = dreamOwnerPrompt({
+        owner,
+        input,
+        memPath,
+        previousMemPath: join(workspaceDir, "memory", `${previousDateKey(dateKey)}.md`),
+        dateKey,
+        included: batch.included.length,
+        omitted: batch.omitted.length,
+        unreadable: observed.unreadable.length,
+      });
+      const visibleMirror = await (dependencies.mirrorPrompt || mirrorDreamOwnerPrompt)(
+        ctx, owner, prompt,
+      );
+      if (!flags.quiet && !flags.q) console.log(prompt);
+      const sent = await (dependencies.send || sendToPane)(ctx, owner.agent, owner.pane, prompt, {
+        source: "dream",
+        idempotencyKey: `dream:${dateKey}:${input.runId}`,
+        waitMs: 30_000,
+        mirror: false,
+      });
+      // Enqueue/submit is not completion, but a late transport receipt must not
+      // discard a curator already working. The exact final product below is
+      // still mandatory; wait for it without sending or compacting again.
+      if (!sent?.delivered || sent.unverified) {
+        throw new Error(`dream-owner-prompt-unverified:${sent?.reason || sent?.queueState || "unknown"}`);
+      }
+      const product = await (dependencies.waitForResult || waitForDreamOwnerResult)({
+        ctx, owner, prompt, outputPath: input.outputPath, dateKey, runId: input.runId,
+        sourceSha256: input.sha256,
+        attempts: dependencies.resultAttempts,
+        pollMs: dependencies.resultPollMs,
+        sleep: dependencies.sleep,
+        getStatus: async candidate => (dependencies.getStatus || getPaneStatus)(ctx, candidate.agent, candidate.pane),
+      });
+      if (!product.ok) {
+        const next = available.slice(available.indexOf(owner) + 1);
+        const retryable = ["dream-owner-limited", "dream-output-missing", "dream-owner-response-missing"].includes(product.reason);
+        const status = retryable && await (dependencies.getStatus || getPaneStatus)(ctx, owner.agent, owner.pane).catch(() => "unknown");
+        if (next.length && retryable && ["idle", "limited"].includes(status)) {
+          previousSkipped.push(`${owner.agent}:${owner.pane}`);
+          previousReasons.push(`${owner.agent}:${owner.pane} response unavailable: ${product.reason}`);
+          available = next;
+          continue;
+        }
+        throw new Error(`dream-owner-product-invalid:${product.reason}`);
+      }
+      const proof = await (dependencies.getProof || readDreamCurationProof)({
+        owner, sessionId: compact.sessionId, prompt, dateKey, runId: input.runId, memPath, quality });
+      const judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryBefore, current,
+        { ownerTexts: proof.ownerTexts, memPath });
+      commitDreamProduct({ memPath, memoryBefore, product, dateKey, included: batch.included,
+        memoryGuardBlocks: protectedDreamBlocks(memoryBefore),
+        omitted: batch.omitted, receipts, receiptPath, now, recordReceipts, input, unreadable: observed.unreadable,
+        judgeConcurrentNotes });
 
-    if (!flags.deferSentinel && !flags["defer-sentinel"]) {
-      writeDreamRunSentinel(memPath, dateKey, timeStr, batch.included.length, observed.unreadable.length);
+      if (!flags.deferSentinel && !flags["defer-sentinel"]) {
+        writeDreamRunSentinel(memPath, dateKey, timeStr, batch.included.length, observed.unreadable.length);
+      }
+      if (batch.omitted.length) console.warn(`Dream: ${batch.omitted.length} pane(s) omitted by fixed limits; receipts unchanged.`);
+      if (observed.unreadable.length) {
+        console.warn(`Dream: ${observed.unreadable.length} pane journal(s) unreadable; receipts unchanged.`);
+        process.exitCode = 1;
+      }
+      return {
+        included: batch.included,
+        omitted: batch.omitted,
+        unreadable: observed.unreadable,
+        owner,
+        compact,
+        visibleMirror,
+        input,
+        path: memPath,
+      };
     }
-    if (batch.omitted.length) console.warn(`Dream: ${batch.omitted.length} pane(s) omitted by fixed limits; receipts unchanged.`);
-    if (observed.unreadable.length) {
-      console.warn(`Dream: ${observed.unreadable.length} pane journal(s) unreadable; receipts unchanged.`);
-      process.exitCode = 1;
-    }
-    return {
-      included: batch.included,
-      omitted: batch.omitted,
-      unreadable: observed.unreadable,
-      owner,
-      compact,
-      visibleMirror,
-      input,
-      path: memPath,
-    };
   } catch (error) {
     // The run is still hard-failed and rethrown: no hidden pane may take over
     // curation. Only the record of the gap is added, by the controller itself.

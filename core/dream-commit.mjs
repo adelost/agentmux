@@ -6,6 +6,7 @@ import { defaultDreamReceiptPath, isDreamActivityTurn, readDreamReceipts, record
 import { readDreamOwnerResult } from "./dream-owner.mjs";
 import { dreamSnapshotReference, publishDreamSnapshot, verifyDreamSnapshot } from "./dream-snapshot.mjs";
 import { upsertDreamSummary } from "./dream-summarizer.mjs";
+import { protectedDreamBlocks } from "./dream-memory-guard.mjs";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
 const intentPath = input => input.replace(/\.json$/u, ".commit.json");
@@ -33,15 +34,16 @@ export function writeDreamAtomic(path, content, { immutable = false } = {}) {
 }
 
 /** WHAT: Stores the verified commit intent before changing daily memory. WHY: Preserves terminal proof across the block/cursor/sentinel crash gaps without another model turn. */
-export function commitDreamProduct({ memPath, memoryBefore, product, dateKey, included, omitted,
+export function commitDreamProduct({ memPath, memoryBefore, memoryBeforeSha256 = hash(memoryBefore), memoryGuardBlocks,
+  product, dateKey, included, omitted,
   receipts, receiptTargets = included, receiptPath = defaultDreamReceiptPath(), now,
   recordReceipts = recordDreamReceipts, input, unreadable = [], judgeConcurrentNotes = null }) {
   // The block goes into the file as it is now. Without a judge (recovery, old
   // callers) any change since the controller's read still refuses the commit.
   const check = () => {
     const current = readFileSync(memPath, "utf8");
-    if (current === memoryBefore) return current;
-    const verdict = judgeConcurrentNotes?.(memoryBefore, current) ?? { ok: false, reason: "changed" };
+    const verdict = judgeConcurrentNotes?.(memoryBefore, current)
+      ?? { ok: current === memoryBefore, reason: "changed" };
     if (!verdict.ok) throw new Error(`daily-memory-changed-during-dream:${verdict.reason}`);
     return current;
   };
@@ -51,7 +53,8 @@ export function commitDreamProduct({ memPath, memoryBefore, product, dateKey, in
     if (hash(readFileSync(input.path)) !== input.sha256 || input.runId !== snapshot.runId
         || input.sha256 !== snapshot.sourceSha) throw new Error("dream-commit-input-mismatch");
     const record = { version: 1, dateKey, runId: input.runId, sourceSha256: input.sha256,
-      memPath: resolve(memPath), memoryBeforeSha256: hash(memoryBefore), block: snapshot.block,
+      memPath: resolve(memPath), memoryBeforeSha256, block: snapshot.block,
+      ...(memoryGuardBlocks && { memoryGuardBlocks }),
       productSha256: hash(product.content.trim()), receiptPath: resolve(receiptPath),
       receiptTargets: receiptTargets.map(({ agent, pane, turns, activityCursor }) => ({ agent, pane, turns, activityCursor })),
       included: included.length, unreadable: unreadable.length, committedAt: now.toISOString() };
@@ -99,7 +102,12 @@ export function resumeDreamCommit({ path, sha256, document, workspace, memPath, 
   const at = before.indexOf(start), until = before.indexOf(end, at);
   const alreadyWritten = at >= 0 && until >= at && before.slice(at, until + end.length) === record.block
     && before.indexOf(start, at + start.length) < 0;
-  if (!alreadyWritten && hash(before) !== record.memoryBeforeSha256) throw new Error("dream-recovery-memory-changed");
+  if (!alreadyWritten && hash(before) !== record.memoryBeforeSha256) {
+    if (!Array.isArray(record.memoryGuardBlocks)
+        || JSON.stringify(protectedDreamBlocks(before)) !== JSON.stringify(record.memoryGuardBlocks)) {
+      throw new Error("dream-recovery-memory-changed");
+    }
+  }
   if (!dry) {
     if (!alreadyWritten) writeDreamAtomic(memPath, upsertDreamSummary(before, dateKey, record.block));
     recordDreamReceipts(receipts, record.receiptTargets, { path: record.receiptPath, dateKey, now: new Date(record.committedAt) });

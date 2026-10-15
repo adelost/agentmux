@@ -43,6 +43,7 @@ function ownerDependencies(fx, events = []) {
     readReceipts: () => fx.receipts,
     collectSources: () => ({ sources: [activeSource()], unreadable: [], skipped: [] }),
     getStatus: async () => "idle",
+    getProof: async () => ({ sessionId: "session-1", ownerTexts: [] }),
     getContext: () => ({ model: "gpt-5.6-sol", effort: "max" }),
     compactCodex: async () => {
       events.push("compact");

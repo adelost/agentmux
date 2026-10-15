@@ -201,10 +201,11 @@ feature("Dream receipts never pass work the digest did not show", () => {
   });
 
   unit("a busy pane shows its decisions and reports and counts the rest", {
-    given: ["thirty finished turns, mostly background-task notifications", () => Array.from({ length: 30 }, (_, index) => {
+    given: ["thirty finished work briefs, with one direct human decision", () => Array.from({ length: 30 }, (_, index) => {
       const at = new Date(sinceMs + minutes(10 * (index + 1))).toISOString();
       if (index === 2) return complete(at, "skyvw 0 ska ta över som orkestrerare");
-      const notification = { ...complete(at, `<task-notification>\ntask ${index} finished`) };
+      // System task-notifications are excluded by the activity policy; actual worker briefs exercise ranking.
+      const notification = { ...complete(at, `[from worker:0] task ${index} finished`) };
       const report = index === 9 ? "SUMMARY: row 47 released in v0.5.1351" : `checked task ${index}`;
       return { ...notification, items: [{ type: "text", content: report }] };
     })],
@@ -216,8 +217,8 @@ feature("Dream receipts never pass work the digest did not show", () => {
       const shown = source.entries.map((item) => item.userPrompt);
       expect(shown).toHaveLength(24);
       expect(shown[0]).toBe("skyvw 0 ska ta över som orkestrerare");
-      expect(shown).toContain("<task-notification>\ntask 9 finished");
-      expect(shown).not.toContain("<task-notification>\ntask 0 finished");
+      expect(shown).toContain("[from worker:0] task 9 finished");
+      expect(shown).not.toContain("[from worker:0] task 0 finished");
       expect(source.omittedTurns).toBe(6);
       expect(source.activityCursor).toBe(new Date(sinceMs + minutes(300)).toISOString());
     }],

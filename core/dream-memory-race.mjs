@@ -1,15 +1,14 @@
 // Fleet panes log to today's daily file whenever they finish something, so a
 // note can land while the Dream curator works (2026-10-08 04:01:42: lsrc:0's
 // `cat >>` while claw:1 curated, and the whole night's digest was refused).
-// The curator itself must not write memory: its input is untrusted journal
-// text. A change is therefore accepted only when it is a pure append whose
-// every line another pane typed in one of its own tool calls, and the curator
-// typed none of them. Anything else keeps the old refusal.
+// The curator may write only its isolated product. Other panes can edit their
+// notes anywhere; the protected Dream block, not the whole daily hash, is the fence.
 
 import { statSync } from "node:fs";
 import { panePathFor, readTailWindow } from "./jsonl-reader.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
 import { dreamPaneEngine } from "./dream-summarizer.mjs";
+import { judgeDreamMemory } from "./dream-memory-guard.mjs";
 
 // The curator's own summary file shares short lines ("- KLART", headings)
 // with fleet notes by chance; only a line this long proves it wrote the note.
@@ -39,63 +38,69 @@ const decoded = (value) => {
 };
 
 /** WHAT: Returns the text one journal event typed into tools. WHY: Keeps a pane that merely read the daily file from counting as its writer. */
-export function toolCallTexts(event) {
+export function toolCallTexts(event, { includeCalls = false } = {}) {
   const blocks = event?.type === "assistant" && Array.isArray(event.message?.content) ? event.message.content : [];
   const claude = blocks.filter((block) => block?.type === "tool_use").flatMap((block) => strings(block.input));
   const payload = event?.type === "response_item" ? event.payload : null;
   const codex = ["function_call", "custom_tool_call", "local_shell_call"].includes(payload?.type)
     ? strings([decoded(payload.arguments), payload.input, payload.action]) : [];
-  return [...claude, ...codex];
+  if (!includeCalls) return [...claude, ...codex];
+  const calls = blocks.filter(block => block?.type === "tool_use")
+    .map(block => ({ tool: block.name || "unknown", input: block.input }));
+  if (["function_call", "custom_tool_call", "local_shell_call"].includes(payload?.type)) {
+    calls.push({ tool: payload.name || payload.type, input: decoded(payload.arguments ?? payload.input ?? payload.action) });
+  }
+  return calls.map(call => JSON.stringify(call));
 }
 
 /** WHAT: Reads the tool text a journal typed since a time. WHY: Keeps the read inside the curation window of a possibly huge journal. */
-export function readToolCallTextsSince(path, sinceMs, { maxBytes = JOURNAL_TAIL_BYTES } = {}) {
+export function readToolCallTextsSince(path, sinceMs, { maxBytes = JOURNAL_TAIL_BYTES, untilMs = Infinity, includeCalls = false } = {}) {
   if (!path || !(modifiedAtMs(path) >= sinceMs)) return [];
   const texts = [];
   for (const line of readTailWindow(path, maxBytes).text.split("\n")) {
     if (!line.includes("tool_use") && !line.includes("_call")) continue;
     let event;
     try { event = JSON.parse(line); } catch { continue; }
-    if (!(Date.parse(event.timestamp) >= sinceMs)) continue;
-    texts.push(...toolCallTexts(event));
+    if (!(Date.parse(event.timestamp) >= sinceMs && Date.parse(event.timestamp) <= untilMs)) continue;
+    texts.push(...toolCallTexts(event, { includeCalls }));
   }
   return texts;
 }
 
 /** WHAT: Checks whether a daily-file change came only from other panes. WHY: Keeps fleet notes from costing the night's digest without letting the curator write memory. */
-export function concurrentNotesVerdict(before, now, { ownerTexts, otherTexts }) {
-  const lines = appendedNoteLines(before, now);
-  if (lines === null) return { ok: false, reason: "edited" };
-  if (lines.some((line) => line.includes("<!-- amux-dream"))) return { ok: false, reason: "dream-marker" };
+export function concurrentNotesVerdict(before, now, { ownerTexts, memPath }) {
+  const verdict = judgeDreamMemory(before, now, { ownerTexts, memPath });
+  if (!verdict.ok) return verdict;
+  const lines = appendedNoteLines(before, now) ?? [];
   const typedBy = (texts, line) => texts.some((text) => text.includes(line));
-  if (lines.some((line) => line.length >= OWNER_LINE_MIN && typedBy(ownerTexts, line))) {
+  if (!memPath && lines.some((line) => line.length >= OWNER_LINE_MIN && typedBy(ownerTexts, line))) {
     return { ok: false, reason: "curator-wrote" };
   }
-  if (!lines.every((line) => typedBy(otherTexts, line))) return { ok: false, reason: "unattributed" };
   return { ok: true, lines: lines.length };
 }
 
 /**
- * WHAT: Builds the commit's judge from every coding pane's journal since the controller read the file.
+ * WHAT: Builds the commit's judge from the curator's exact journal since the controller read the file.
  * WHY: Keeps the curator's exact session as the one writer that may not have typed a note.
  */
-export function concurrentNotesJudge({ agents, owner, ownerSessionId, sinceMs,
+export function concurrentNotesJudge({ agents, owner, ownerSessionId, sinceMs, memPath,
   identityFor = latestPaneSessionIdentity, readTexts = readToolCallTextsSince }) {
   return (before, now) => {
     let ownerTexts = null;
-    const otherTexts = [];
     for (const agent of agents) {
       if (agent.backend === "native") continue;
+      if (agent.name !== owner.agent) continue;
       (agent.panes || []).forEach((config, pane) => {
+        if (pane !== owner.pane) return;
         const engine = dreamPaneEngine(config);
         if (!["claude", "codex"].includes(engine)) return;
         const identity = identityFor(engine, panePathFor(agent, pane));
         if (agent.name === owner.agent && pane === owner.pane) {
-          if (identity?.sessionId === ownerSessionId) ownerTexts = readTexts(identity.path, sinceMs);
-        } else otherTexts.push(...readTexts(identity?.path, sinceMs));
+          if (identity?.sessionId === ownerSessionId) ownerTexts = readTexts(identity.path, sinceMs, { includeCalls: !!memPath });
+        }
       });
     }
     if (!ownerTexts) return { ok: false, reason: "curator-journal-unknown" };
-    return concurrentNotesVerdict(before, now, { ownerTexts, otherTexts });
+    return concurrentNotesVerdict(before, now, { ownerTexts, memPath });
   };
 }

@@ -5,16 +5,17 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { loadConfig } from "../cli/config.mjs";
 import { defaultWorkspace } from "./runtime-defaults.mjs";
-import { dreamOwnerPrompt, readDreamOwnerQuality, resolveDreamCandidates } from "./dream-owner.mjs";
+import { dreamOwnerPrompt, readDreamOwnerResult, resolveDreamCandidates } from "./dream-owner.mjs";
 import { defaultDreamReceiptPath, isDreamActivityTurn, readDreamReceipts } from "./dream-eligibility.mjs";
 import { readDreamSuccess } from "./dream-health.mjs";
-import { waitForDreamOwnerResult } from "./dream-result.mjs";
 import { resumeDreamCommit } from "./dream-commit.mjs";
+import { readDreamCurationProof } from "./dream-curation-proof.mjs";
+import { judgeDreamMemory, protectedDreamBlocks } from "./dream-memory-guard.mjs";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
 /** WHAT: Checks and finishes an existing Dream run. WHY: Preserves exact input, session, final reply and pre-write memory fences without buying another model turn. */
-export async function recoverDreamRun(ctx, flags, { commit, getQuality = readDreamOwnerQuality } = {}) {
+export async function recoverDreamRun(ctx, flags, { commit, getProof = readDreamCurationProof } = {}) {
   const path = resolve(String(flags.recover));
   const name = /^(\d{4}-\d{2}-\d{2})-([0-9a-f-]{36})\.json$/u.exec(basename(path));
   if (!name || statSync(path).size > 256 * 1024) throw new Error("dream-recovery-invalid-input");
@@ -43,17 +44,13 @@ export async function recoverDreamRun(ctx, flags, { commit, getQuality = readDre
     expectedMemory, dry: !!flags.dry });
   if (resumed) return resumed;
   const memoryBefore = readFileSync(memPath, "utf8");
-  if (hash(memoryBefore) !== expectedMemory) throw new Error("dream-recovery-memory-changed");
+  // Old format-one packets have no scoped memory contract and retain their hash fence.
+  if (!document.memoryGuard && document.memoryFormat !== 2 && hash(memoryBefore) !== expectedMemory) {
+    throw new Error("dream-recovery-memory-changed");
+  }
   const owner = resolveDreamCandidates(loadConfig(ctx.configPath)).find(candidate =>
     candidate.agent === document.owner?.agent && candidate.pane === document.owner.pane && candidate.engine === document.owner.engine);
   if (!owner) throw new Error("dream-recovery-owner-not-configured");
-  const verifySession = async () => {
-    const quality = await getQuality(owner, { captureScreen: (agent, pane) => ctx.agent.captureScreen(agent, pane) });
-    if (quality?.sessionId !== document.compact.sessionId || quality?.model !== document.compact.model
-        || quality?.effort !== document.compact.effort || /haiku/iu.test(quality?.model || "")
-        || !quality?.effort || quality.effort.toLowerCase() === "low") throw new Error("dream-recovery-session-quality-mismatch");
-  };
-  await verifySession();
   const input = { path, outputPath: path.replace(/\.json$/u, ".summary.md"), runId, sha256, bytes: bytes.length,
     memoryFormat: document.memoryFormat };
   const previous = new Date(`${dateKey}T12:00:00Z`);
@@ -61,9 +58,25 @@ export async function recoverDreamRun(ctx, flags, { commit, getQuality = readDre
   const prompt = dreamOwnerPrompt({ owner, input, memPath,
     previousMemPath: join(workspace, "memory", `${previous.toISOString().slice(0, 10)}.md`), dateKey,
     included: document.payload.panes.length, omitted: document.omitted.length, unreadable: document.unreadable.length });
-  const product = await waitForDreamOwnerResult({ ctx, owner, prompt, outputPath: input.outputPath, dateKey, runId,
-    sourceSha256: sha256, attempts: 1 });
+  const product = readDreamOwnerResult(input.outputPath, dateKey, runId, owner, sha256);
   if (!product.ok) throw new Error(`dream-recovery-product-invalid:${product.reason}`);
+  const proof = await getProof({ owner, prompt, dateKey, runId, memPath, sessionId: document.compact.sessionId, quality: document.compact });
+  if (proof.sessionId !== document.compact.sessionId || /haiku/iu.test(document.compact.model || "")
+      || !document.compact.effort || document.compact.effort.toLowerCase() === "low") {
+    throw new Error("dream-recovery-session-quality-mismatch");
+  }
+  const memoryGuardBlocks = document.memoryGuard?.blocks ?? protectedDreamBlocks(
+    hash(memoryBefore) === expectedMemory ? memoryBefore : "");
+  if (!Array.isArray(memoryGuardBlocks) || memoryGuardBlocks.some(block => typeof block !== "string")) {
+    throw new Error("dream-recovery-memory-guard-invalid");
+  }
+  const judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryGuardBlocks.join("\n"), current,
+    { ownerTexts: proof.ownerTexts, memPath });
+  const verifyMemory = () => {
+    const verdict = judgeConcurrentNotes(memoryBefore, readFileSync(memPath, "utf8"));
+    if (!verdict.ok) throw new Error(`dream-recovery-memory-changed:${verdict.reason}`);
+  };
+  verifyMemory();
   const included = document.payload.panes.map(source => {
     const ref = /^([a-zA-Z0-9_-]+):(\d+)$/u.exec(source.pane);
     if (!ref || !Array.isArray(source.turns)) throw new Error("dream-recovery-invalid-source");
@@ -77,9 +90,9 @@ export async function recoverDreamRun(ctx, flags, { commit, getQuality = readDre
     const previousCursor = receipts.panes[`${source.agent}:${source.pane}`]?.activityCursor;
     if (previousCursor && Date.parse(previousCursor) > Date.parse(source.activityCursor)) throw new Error("dream-recovery-newer-receipt-exists");
   }
-  await verifySession();
-  if (hash(readFileSync(memPath)) !== expectedMemory) throw new Error("dream-recovery-memory-changed");
+  verifyMemory();
   if (!flags.dry) commit({ memPath, memoryBefore, product, dateKey, included, omitted: document.omitted,
+    memoryBeforeSha256: expectedMemory, memoryGuardBlocks, judgeConcurrentNotes,
     receipts, receiptTargets, receiptPath, now, input, unreadable: document.unreadable });
   return { recovered: !flags.dry, dryRun: !!flags.dry, dateKey, runId, path: memPath,
     included: included.length, receipts: receiptTargets.length, unreadable: document.unreadable.length };

@@ -10,9 +10,9 @@ The source of truth is `~/.agentmux/agentmux.yaml`:
 
 ```yaml
 dream:
-  agent: claw
-  pane: 3
-  candidates: [claw:3, claw:1]   # optional, ordered, tried in turn
+  agent: sandman
+  pane: 0
+  candidates: [sandman:1]   # Claude primary, Codex fallback, separate dedicated panes
 ```
 
 `amux sync` validates that the address exists and denotes a tmux Claude or
@@ -28,6 +28,17 @@ and no hidden model process can be selected. Entries accept `agent:pane` or
 `{agent, pane}`; a candidate that does not resolve is an error rather than a
 silent omission, because a quietly dropped entry would remove the resilience
 the list exists to provide.
+
+Reserve these panes for Dream rather than product work. `dream` is a reserved
+runtime configuration key, so use an agent name such as `sandman` and label
+its panes Dream. New panes use their existing default account profile 1;
+creating them does not rotate any existing pane or log in another account.
+Startup, quality and compact failures can try the next configured candidate.
+After dispatch, a confirmed limit or a timed-out missing answer can use the
+next candidate only when the first is idle or limited. It gets a separate
+run/input/output identity. Busy or unknown states, unknown submission,
+invalid products and failed memory guards never authorize this fallback.
+Only the selected, exactly receipted product can enter memory.
 
 ## Exact algorithm
 
@@ -80,13 +91,14 @@ the list exists to provide.
 8. Require all three receipts: bounded valid output, exact final journal-text
    `DREAM_OK` for this run, and idle completion. Earlier working commentary is
    not part of the final reply; a later action or screen-only match is not a
-   completion receipt. Also prove the curator did not write today's memory:
-   the file is unchanged since the controller read it, or every change is a
-   pure append whose every line another pane typed in its own tool call since
-   that read and the curator's exact session typed none of them. Fleet panes
-   log to the daily file at any hour (2026-10-08 lost its digest to lsrc:0's
-   04:01 note). Any other change refuses the commit as
-   `daily-memory-changed-during-dream:<reason>`.
+   completion receipt. Audit tool invocations from the exact original native
+   prompt through its terminal reply, not later independent turns or read
+   results. Refuse curator memory writes, including writes later restored.
+   Preserve current notes outside the Dream block, including inserts and
+   corrections in the middle of the file. The exact protected block must
+   remain unchanged; malformed, duplicated or changed markers refuse commit.
+   New packets pin the block baseline and actual read time alongside the
+   original whole-file hash. Other panes' legitimate edits are not hash conflicts.
 9. The controller publishes the validated result without replacement as a
    read-only `memory/dream/DATE-RUN.md` snapshot, then atomically inserts its
    hash-bound link into the one marked daily Dream block. Only then are pane
@@ -154,17 +166,24 @@ amux dream --recover /absolute/path/DATE-RUN.json --source-sha256 SHA --dry
 Removing `--dry` finishes through the normal compare-before-write, atomic block
 and receipt path. It never starts a pane, compacts, sends a prompt, runs nightly
 maintenance or buys another model turn. It requires the original input hash,
-same configured owner/session/model/effort, valid isolated output, exact final
-journal reply to the original prompt, idle completion and unchanged daily
-memory, unless a durable controller commit intent already proves completion.
+same configured original owner/session/model/effort, valid isolated output and
+the original exact native terminal reply. Today's busy state and later work
+are not evidence against that already completed task. The protected block
+baseline and curator-write audit apply just as in normal commit, unless a
+durable controller commit intent already proves completion.
 A newer activity receipt blocks recovery; a validated same-run result
 is already complete and is not written again.
 
 New input packets pin the original workspace and pre-run daily-memory SHA.
 Older packets require `--workspace PATH --memory-sha256 PRE_RUN_SHA`. That hash
 must come from evidence captured before curation, never from hashing whatever
-the memory file contains now. Missing original evidence or a changed daily
-file means stop; do not rebase the proof onto newer notes or overwrite them.
+the memory file contains now. Existing format-two packets without a stored
+block baseline can recover only into an absent Dream block after the original
+native task and curator-write audit succeed. They cannot replace an existing
+block. Older format-one packets keep their whole-file hash fence. Missing
+original evidence means stop. Recovery never fabricates a preimage hash or
+queue acknowledgement and never reruns nightly maintenance. Original unreadable
+sources and maintenance failures remain separate from a recovered digest.
 
 ## Other memory maintenance
 

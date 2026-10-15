@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { cmdDream } from '../cli/dream.mjs';
 
 describe('Dream candidate preparation', () => {
-  for (const failure of ['start', 'quality', 'compact', 'post-compact-quality']) {
-    it(`uses only the configured fallback after ${failure} failure, before editorial dispatch`, async () => {
+  for (const failure of ['start', 'quality', 'compact', 'post-compact-quality', 'response-limit']) {
+    it(`uses only the configured fallback after ${failure} failure`, async () => {
       const root = mkdtempSync(join(tmpdir(), 'dream-fallback-'));
       const previousHome = process.env.HOME;
       const previousJanitor = process.env.AMUX_JANITOR_ENABLED;
@@ -27,6 +27,7 @@ describe('Dream candidate preparation', () => {
             entries: [{ timestamp: '2026-09-04T20:00:00Z', userPrompt: 'Fix DSL', items: [{ type: 'text', content: 'Shipped fix.' }] }],
           }], omitted: [], unreadable: [], skipped: [] }),
           getStatus: async () => 'idle',
+          getProof: async () => ({ sessionId: 'session-2', ownerTexts: [] }),
           getContext: (dir) => {
             if (dir === '/pane/1') {
               primaryQualityReads++;
@@ -44,8 +45,9 @@ describe('Dream candidate preparation', () => {
           mirrorPrompt: async (_ctx, selected) => { calls.push(`mirror:${selected.pane}`); return { channelId: 'visible', messages: 1 }; },
           send: async (_ctx, _a, p) => { calls.push(`send:${p}`); return { delivered: true }; },
           // A curator product opens with the run identity Dream checks before writing memory.
-          waitForResult: async ({ runId, sourceSha256 }) => ({ ok: true,
-            content: `> Kuraterad av claw:2 · run \`${runId}\` · source \`${sourceSha256}\`.\n- A genuine source-backed digest.` }),
+          waitForResult: async ({ owner, runId, sourceSha256 }) => owner.pane === 1 && failure === 'response-limit'
+            ? { ok: false, reason: 'dream-owner-limited' }
+            : { ok: true, content: `> Kuraterad av claw:2 · run \`${runId}\` · source \`${sourceSha256}\`.\n- A genuine source-backed digest.` },
           // The daily block links the verified snapshot, which holds the digest (#340).
           recordReceipts: () => {
             calls.push('receipt');
@@ -55,8 +57,9 @@ describe('Dream candidate preparation', () => {
           },
         });
         expect(result.owner.pane).toBe(2);
-        expect(calls.filter((c) => c.startsWith('send:'))).toEqual(['send:2']);
-        expect(calls).not.toContain('mirror:1');
+        expect(calls.filter((c) => c.startsWith('send:'))).toEqual(failure === 'response-limit' ? ['send:1', 'send:2'] : ['send:2']);
+        if (failure !== 'response-limit') expect(calls).not.toContain('mirror:1');
+        else expect(readdirSync(join(root, '.agentmux/dream-input')).filter(name => name.endsWith('.json') && !name.endsWith('.commit.json'))).toHaveLength(2);
         expect(calls.at(-1)).toBe('receipt');
         expect(notices.join(' ')).toContain('claw:1');
         expect(notices.join(' ')).toContain('claw:2');

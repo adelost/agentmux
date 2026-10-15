@@ -12,7 +12,7 @@ function terminalReceipt(response, owner, expected) {
 /** WHAT: Checks the exact final reply, valid product and idle state. WHY: Prevents commentary from blocking completion or a quoted/screen-only receipt from authorizing it. */
 export async function waitForDreamOwnerResult({
   ctx, owner, prompt, outputPath, dateKey, runId, sourceSha256,
-  attempts = 450, pollMs = 2_000, sleep = wait,
+  attempts = 450, pollMs = 2_000, sleep = wait, getStatus = null,
 }) {
   const expected = `DREAM_OK ${dateKey} ${runId}`;
   let last = { ok: false, reason: "dream-output-missing" };
@@ -22,6 +22,10 @@ export async function waitForDreamOwnerResult({
       const busy = await ctx.agent.isBusy(owner.agent, owner.pane).catch(() => true);
       const response = await ctx.agent.getResponseStreamWithRaw(owner.agent, owner.pane, prompt).catch(() => null);
       if (!busy && terminalReceipt(response, owner, expected)) return last;
+    }
+    if (getStatus && await getStatus(owner).catch(() => "unknown") === "limited"
+        && !await ctx.agent.isBusy(owner.agent, owner.pane).catch(() => true)) {
+      return { ok: false, reason: "dream-owner-limited" };
     }
     if (attempt + 1 < attempts) await sleep(pollMs);
   }

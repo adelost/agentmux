@@ -49,12 +49,23 @@ function fixture({ legacy = false, memoryFormat } = {}) {
     send: vi.fn(() => { throw new Error("must not prompt a model"); }),
   } };
   const flags = { recover: input.path, "source-sha256": input.sha256, workspace };
-  const commit = vi.fn(commitDreamProduct), getQuality = vi.fn(async () => quality);
-  return { root, memPath, memoryBefore, input, output, flags, ctx, quality, commit, getQuality,
-    run: extra => recoverDreamRun(ctx, { ...flags, ...extra }, { commit, getQuality }) };
+  const commit = vi.fn(commitDreamProduct), getProof = vi.fn(async () => ({ sessionId: quality.sessionId, ownerTexts: [] }));
+  return { root, memPath, memoryBefore, input, output, flags, ctx, quality, commit, getProof,
+    run: extra => recoverDreamRun(ctx, { ...flags, ...extra }, { commit, getProof }) };
 }
 
 describe("no-model Dream completion", () => {
+  it("recovers format-two output after an independent insertion in the middle, preserving every note", async () => {
+    const fx = fixture({ memoryFormat: 2 });
+    const changed = fx.memoryBefore.replace("Manual note", "New note under the existing heading.\nManual note");
+    writeFileSync(fx.memPath, changed);
+    expect(await fx.run({ dry: true })).toMatchObject({ dryRun: true });
+    expect(readFileSync(fx.memPath, "utf8")).toBe(changed);
+    expect(await fx.run()).toMatchObject({ recovered: true });
+    expect(readFileSync(fx.memPath, "utf8")).toContain(changed.trimEnd());
+    expect(fx.ctx.agent.send).not.toHaveBeenCalled();
+    expect(fx.ctx.agent.ensureReady).not.toHaveBeenCalled();
+  });
   it("finishes after the daily write, preserving later notes without contacting the curator again", async () => {
     const fx = fixture({ memoryFormat: 2 });
     fx.commit.mockImplementation(options => commitDreamProduct({ ...options,
@@ -64,13 +75,13 @@ describe("no-model Dream completion", () => {
     expect(afterBlock).toContain(`dream/2026-09-08-${fx.input.runId}.md`);
     expect(readDreamReceipts().panes).toEqual({});
     writeFileSync(fx.memPath, afterBlock + "\nA later decision from another owner.\n");
-    fx.getQuality.mockClear(); fx.ctx.agent.getResponseStreamWithRaw.mockClear();
+    fx.getProof.mockClear(); fx.ctx.agent.getResponseStreamWithRaw.mockClear();
     expect(await fx.run({ dry: true })).toMatchObject({ commitReceipt: true, dryRun: true });
     expect(readDreamReceipts().panes).toEqual({});
     expect(await fx.run()).toMatchObject({ recovered: true, commitReceipt: true });
     expect(readFileSync(fx.memPath, "utf8")).toBe(afterBlock + "\nA later decision from another owner.\n");
     expect(Object.keys(readDreamReceipts().panes)).toEqual(["source:2"]);
-    expect(fx.getQuality).not.toHaveBeenCalled();
+    expect(fx.getProof).not.toHaveBeenCalled();
     expect(fx.ctx.agent.getResponseStreamWithRaw).not.toHaveBeenCalled();
   });
   it("can repeat post-cursor recovery idempotently before the sentinel is written", async () => {
@@ -114,9 +125,9 @@ describe("no-model Dream completion", () => {
     await expect(fx.run({ "memory-sha256": hash(fx.memoryBefore) })).rejects.toThrow("memory-changed");
     expect(fx.commit).not.toHaveBeenCalled();
   });
-  it("rejects a session change during verification without advancing cursors", async () => {
+  it("rejects proof from a different original session without advancing cursors", async () => {
     const fx = fixture();
-    fx.getQuality.mockResolvedValueOnce(fx.quality).mockResolvedValueOnce({ ...fx.quality, sessionId: "replacement" });
+    fx.getProof.mockResolvedValue({ sessionId: "replacement", ownerTexts: [] });
     await expect(fx.run()).rejects.toThrow("session-quality-mismatch");
     expect(readFileSync(fx.memPath, "utf8")).toBe(fx.memoryBefore);
     expect(readDreamReceipts().panes).toEqual({});

@@ -15,21 +15,44 @@ const heredoc = `cat >> /ws/memory/2026-10-08.md <<'EOF'\n${note}EOF`;
 const curatorSummary = "> Kuraterad av claw:1 efter verifierad kompaktering · run `r`.\n- KLART";
 
 feature("Dream commit beside fleet notes", () => {
+  unit("accepts the 15 October insertion under another pane's existing heading", {
+    given: ["the controller's file and another pane's bounded patch", () => ({
+      before: "# 2026-10-15\n\n## lsrc:8\n- Existing decision.\n\n## claw:0\n- Existing release.\n",
+      patch: "*** Update File: /ws/memory/2026-10-15.md\n@@\n - Existing decision.\n+- Follow-up verified.\n",
+    })],
+    when: ["a new bullet appears in the middle while the curator writes only its summary", (fx) =>
+      concurrentNotesVerdict(fx.before, fx.before.replace("- Existing decision.", "- Existing decision.\n- Follow-up verified."),
+        { ownerTexts: [curatorSummary], otherTexts: [fx.patch], memPath: "/ws/memory/2026-10-15.md" })],
+    then: ["the independent note is not an edited-memory failure", (verdict) => expect(verdict.ok).toBe(true)],
+  });
+  unit("refuses a curator memory edit even if a later writer restored all original bytes", {
+    when: ["judging an unchanged daily file after a curator write", () =>
+      concurrentNotesVerdict(before, before, { memPath: "/ws/memory/2026-10-08.md",
+        ownerTexts: [JSON.stringify({ tool: "Edit", input: { file_path: "/ws/memory/2026-10-08.md", old_string: "Tidigare", new_string: "Ändrad" } })], otherTexts: [] })],
+    then: ["restoring bytes does not erase the prohibited action", (verdict) => expect(verdict.reason).toBe("curator-wrote")],
+  });
+  unit("refuses edits, deletion and malformed boundaries of a protected Dream block", {
+    given: ["a daily file with its protected block", () => before + "<!-- amux-dream-summary:2026-10-08 -->\nVerified original.\n<!-- /amux-dream-summary:2026-10-08 -->\n"],
+    when: ["another writer changes the block, removes it or breaks its ending", (memory) => [
+      memory.replace("Verified original", "Changed claim"), before, memory.replace("<!-- /amux-dream-summary:2026-10-08 -->", ""),
+    ].map(current => concurrentNotesVerdict(memory, current, { memPath: "/ws/memory/2026-10-08.md", ownerTexts: [] }).ok)],
+    then: ["none can be accepted as an unrelated note", (accepted) => expect(accepted).toEqual([false, false, false])],
+  });
   unit("accepts a note another pane appended in its own tool call", {
     when: ["judging the 04:01 append", () =>
       concurrentNotesVerdict(before, before + note, { ownerTexts: [curatorSummary], otherTexts: [heredoc] })],
     then: ["it is the fleet's note", (verdict) => expect(verdict).toEqual({ ok: true, lines: 2 })],
   });
-  unit("refuses what the curator typed, what nobody typed and anything but an append", {
+  unit("refuses curator notes and Dream markers but allows other edits without a fleet-wide attribution gate", {
     when: ["judging each change", () => [
       concurrentNotesVerdict(before, before + note, { ownerTexts: [heredoc], otherTexts: [heredoc] }),
       concurrentNotesVerdict(before, before + note, { ownerTexts: [], otherTexts: [] }),
       concurrentNotesVerdict(before, before.replace("Tidigare", "Ändrad") + note, { ownerTexts: [], otherTexts: [heredoc] }),
       concurrentNotesVerdict(before, `${before}<!-- amux-dream-summary:2026-10-08 -->\n`,
         { ownerTexts: [], otherTexts: ["<!-- amux-dream-summary:2026-10-08 -->"] }),
-    ].map((verdict) => verdict.reason)],
+    ].map((verdict) => verdict.reason || "accepted")],
     then: ["the refusal says which", (reasons) =>
-      expect(reasons).toEqual(["curator-wrote", "unattributed", "edited", "dream-marker"])],
+      expect(reasons).toEqual(["curator-wrote", "accepted", "accepted", "dream-marker"])],
   });
   unit("counts only text typed into tools, from Claude and Codex journals", {
     given: ["three journals written after the controller read the file", () => {
