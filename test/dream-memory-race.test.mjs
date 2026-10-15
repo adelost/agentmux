@@ -31,6 +31,19 @@ feature("Dream commit beside fleet notes", () => {
         ownerTexts: [JSON.stringify({ tool: "Edit", input: { file_path: "/ws/memory/2026-10-08.md", old_string: "Tidigare", new_string: "Ändrad" } })], otherTexts: [] })],
     then: ["restoring bytes does not erase the prohibited action", (verdict) => expect(verdict.reason).toBe("curator-wrote")],
   });
+  unit("refuses a relative shell write after changing into the memory directory", {
+    when: ["the curator appends from inside memory rather than naming an absolute target", () =>
+      concurrentNotesVerdict(before, before, { memPath: "/ws/memory/2026-10-08.md", ownerTexts: [
+        JSON.stringify({ tool: "Bash", input: { command: "cd /ws/memory && cat >> 2026-10-08.md <<'EOF'\nChanged by curator.\nEOF" } }),
+      ] })],
+    then: ["relative targets cannot bypass the same write boundary", verdict => expect(verdict.reason).toBe("curator-wrote")],
+  });
+  unit("refuses relative memory paths and the long-term memory index in native write tools", {
+    when: ["the curator names a memory target without the daily file's absolute prefix", () =>
+      ["../../memory/2026-10-08.md", "/ws/MEMORY.md"].map(file_path => concurrentNotesVerdict(before, before,
+        { memPath: "/ws/memory/2026-10-08.md", ownerTexts: [JSON.stringify({ tool: "Write", input: { file_path, content: "Changed by curator." } })] }).reason)],
+    then: ["both target forms share the same restriction", reasons => expect(reasons).toEqual(["curator-wrote", "curator-wrote"])],
+  });
   unit("refuses edits, deletion and malformed boundaries of a protected Dream block", {
     given: ["a daily file with its protected block", () => before + "<!-- amux-dream-summary:2026-10-08 -->\nVerified original.\n<!-- /amux-dream-summary:2026-10-08 -->\n"],
     when: ["another writer changes the block, removes it or breaks its ending", (memory) => [

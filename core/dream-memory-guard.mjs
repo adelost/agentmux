@@ -22,11 +22,15 @@ export function curatorMemoryWrite(text, memPath) {
     if (["read", "glob", "grep", "websearch", "webfetch"].includes(name)) return false;
     if (["write", "edit", "multiedit"].includes(name)) {
       const path = call.input?.file_path ?? call.input?.path;
-      return !!path && (String(path).startsWith("memory/") || resolve(path).startsWith(`${dirname(resolve(memPath))}/`));
+      return !!path && (String(path).toLowerCase().split(/[\\/]/u).some(part => ["memory", "memory.md"].includes(part))
+        || resolve(path).startsWith(`${dirname(resolve(memPath))}/`));
     }
     text = values(call.input).join("\n");
   }
-  const memory = String(text).includes(dirname(resolve(memPath))) || /(?:^|[\s/'"=])memory\//u.test(String(text));
+  const inMemory = /\bcd\s+["']?(?:[^\s"';&|]*\/)?memory(?:\/[^\s"';&|]*)?["']?\s*(?:&&|;|\n)/iu.test(String(text));
+  const relativeWrite = inMemory && /(?<!=)>{1,2}(?:\||&(?!\d))?\s*["']?(?![\/~])[\w.$]/u.test(String(text));
+  if (relativeWrite) return true;
+  const memory = inMemory || String(text).includes(dirname(resolve(memPath))) || /(?:^|[\s/'"=])memory\//u.test(String(text));
   return memory && /(?:\*\*\* (?:Update|Add|Delete) File:|(?:^|\s)(?:tee|cp|mv|rm)\s|\b(?:sed|perl)\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*i|\b(?:writeFile(?:Sync)?|appendFile(?:Sync)?|write_text|write_bytes|unlink|rmtree)\s*\(|\bopen\([^\n]*["'][wax][b+]?["']|>>?\s*["']?(?:[^\s"']*memory\/|\$)|\.write\s*\()/u.test(String(text));
 }
 
