@@ -27,12 +27,12 @@ function fixture(provider = "claude") {
 const percents = fx => fx.notify.mock.calls.map(([text]) => [...text.matchAll(/(?:Claude|Codex) 1 1@example\.test: (\d+) % av veckan/gu)].map(m => m[1]));
 
 const today = () => ({ accounts: [
-  account("codex", "1", 47, ["lsrc:8", "lsrc:3"], "adelost@gmail.com"),
-  account("codex", "2", 100, ["skybar:4"], "mattias.wetterlind@gmail.com"),
-  account("claude", "1", 85, ["skybar:2", "claw:2"], "adelost@gmail.com"),
-  account("claude", "wetterlind", 97, [], "mattias.wetterlind@gmail.com"),
-  { ok: false, provider: "claude", profile: { id: "2" }, account: { email: "attrois@gmail.com" }, error: "login_expired", inUse: [] },
-  { ok: false, provider: "kimi", profile: { id: "1", label: "mattias.wetterlind@gmail.com" }, error: "credentials_expired", inUse: [] },
+  account("codex", "1", 47, ["lsrc:8", "lsrc:3"], "adelost@example.test"),
+  account("codex", "2", 100, ["skybar:4"], "wetterlind@example.test"),
+  account("claude", "1", 85, ["skybar:2", "claw:2"], "adelost@example.test"),
+  account("claude", "wetterlind", 97, [], "wetterlind@example.test"),
+  { ok: false, provider: "claude", profile: { id: "2" }, account: { email: "other@example.test" }, error: "login_expired", inUse: [] },
+  { ok: false, provider: "kimi", profile: { id: "1", label: "wetterlind@example.test" }, error: "credentials_expired", inUse: [] },
 ] });
 
 feature("complete quota warning, Mattias 2026-10-16", () => {
@@ -49,14 +49,14 @@ feature("complete quota warning, Mattias 2026-10-16", () => {
     then: ["the action is first, followed only by one line per account and one logged-out line", text => {
       const lines = text.split("\n");
       expect(lines).toHaveLength(6);
-      expect(lines[0]).toMatch(/^skybar:4.*`\/\/switch 1`.*bara skybar:4.*Codex 1 adelost@gmail\.com \(47 %\)/u);
+      expect(lines[0]).toMatch(/^skybar:4.*`\/\/switch 1`.*bara skybar:4.*Codex 1 adelost@example\.test \(47 %\)/u);
       expect(lines[0]).toContain("Övriga paneler behåller sina konton");
       expect(lines[0]).toContain("olika konton samtidigt");
-      expect(lines[1]).toMatch(/^Codex 1 adelost@gmail\.com: 47 % av veckan, reset .*; paneler lsrc:3,8\.$/u);
-      expect(lines[2]).toMatch(/^Codex 2 mattias\.wetterlind@gmail\.com: 100 % av veckan, reset .*; paneler skybar:4\.$/u);
-      expect(lines[3]).toMatch(/^Claude 1 adelost@gmail\.com: 85 % av veckan, reset .*; paneler claw:2, skybar:2\.$/u);
-      expect(lines[4]).toMatch(/^Claude wetterlind mattias\.wetterlind@gmail\.com: 97 % av veckan, reset .*; ingen panel\.$/u);
-      expect(lines[5]).toBe("Utloggade: Claude attrois@gmail.com · Kimi mattias.wetterlind@gmail.com");
+      expect(lines[1]).toMatch(/^Codex 1 adelost@example\.test: 47 % av veckan, reset .*; paneler lsrc:3,8\.$/u);
+      expect(lines[2]).toMatch(/^Codex 2 wetterlind@example\.test: 100 % av veckan, reset .*; paneler skybar:4\.$/u);
+      expect(lines[3]).toMatch(/^Claude 1 adelost@example\.test: 85 % av veckan, reset .*; paneler claw:2, skybar:2\.$/u);
+      expect(lines[4]).toMatch(/^Claude wetterlind wetterlind@example\.test: 97 % av veckan, reset .*; ingen panel\.$/u);
+      expect(lines[5]).toBe("Utloggade: Claude other@example.test · Kimi wetterlind@example.test");
     }],
   });
   for (const [name, changes] of [
