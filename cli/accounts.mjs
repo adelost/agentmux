@@ -26,7 +26,7 @@ rotate --dry prints the plan per pane and changes nothing; Discord: /byt <login>
 Codex switch compacts running panes first and preserves model/effort and the exact session when portable.
 Busy panes keep a durable request for the existing watcher; dormant panes are selected for their next start, never woken.
 --continue-file is single-pane only and queues that continuation once after a verified switch.
-Reserve reminder: AMUX_QUOTA_RESERVE_PERCENT (default 90 % weekly used), at most hourly while usage grows; amux never switches by itself.
+Quota warning: answers the human in the channel he writes in, from AMUX_QUOTA_WARN_PERCENT (default 80 %) every 6 h, from AMUX_QUOTA_RESERVE_PERCENT (default 90 %) every 3 h; amux never switches by itself.
 Warnings never switch accounts; explicit operator requests use the guarded path above.
 Codex automatic switch: only after a reached weekly limit, spare account quota and exact-session continuity.
 Disable with AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false. Predictions never switch accounts.`;

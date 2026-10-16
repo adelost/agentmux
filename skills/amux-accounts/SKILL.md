@@ -23,8 +23,10 @@ first, recommend the cheapest action, switch only on his word.
    under Settings, Usage. No cache is lost. amux cannot see free resets.
 3. Only then a switch, to the account with the most room before its reset.
 
-amux warns once per account and week when an account panes run on passes
-`AMUX_QUOTA_WARN_PERCENT` (default 80 % weekly used). Forecasts never switch.
+When Mattias writes in a pane channel, amux answers there for each account
+panes run on at `AMUX_QUOTA_WARN_PERCENT` (default 80 % weekly used) or more:
+at most every 6 h below 90 %, every 3 h from 90 %. Warnings and forecasts
+never switch.
 Mattias authorized Codex automatic recovery on 2026-10-12: an actual usage
 refusal plus reached weekly quota and verified spare capacity may switch that
 one pane. Transfer its exact session, or save its task and replies before a

@@ -1,36 +1,22 @@
-// The reminder loop consumes the same cached observations as amux quota.
+// Checks quota when the human writes and answers in that channel with the warning that is due.
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { notifyUser } from "../cli/send-notify.mjs";
 import { readQuotaSnapshotWithPanes } from "../core/quota-in-use.mjs";
 import { readQuotaSnapshot } from "../core/quota-usage.mjs";
 import { quotaAccountCatalog } from "../core/quota-profiles.mjs";
-import { createQuotaWarningLoop, createSentNoticeStore, parseQuotaWarningConfig, runQuotaWarningTick } from "./quota-warning.mjs";
+import { createSentNoticeStore, parseQuotaWarningConfig, postDueQuotaWarnings } from "./quota-warning.mjs";
 
-const LOOP_KEY = Symbol.for("agentmux.quotaWarningLoop");
-
-/** WHAT: Reads cached quota through the dashboard's snapshot path. WHY: Prevents reminders from adding provider calls. */
-export function readReminderSnapshot() {
+/**
+ * WHAT: Reads Claude and Codex quota, with the panes on each account, through the dashboard's shared budget.
+ * WHY: Prevents a cold cache from silencing the warning whenever nobody ran amux quota recently.
+ */
+export function readWarningSnapshot() {
   const profiles = quotaAccountCatalog().filter(profile => ["claude", "codex"].includes(profile.provider));
-  return readQuotaSnapshotWithPanes({ profiles, readSnapshot: () => readQuotaSnapshot({ profiles,
-    claude: { cacheOnly: true }, codex: { cacheOnly: true } }) });
+  return readQuotaSnapshotWithPanes({ profiles, readSnapshot: () => readQuotaSnapshot({ profiles }) });
 }
 
-/** WHAT: Builds a human-only tick with replaceable read and notification boundaries. WHY: Allows real-quota previews without sending or changing state. */
-export function createQuotaWarningRuntimeTick({ env = process.env, notify = notifyUser,
-  sent = createSentNoticeStore(), readSnapshot = readReminderSnapshot, observe = () => {} } = {}) {
-  const config = parseQuotaWarningConfig(env);
-  return async () => {
-    const snapshot = await readSnapshot();
-    const notices = await runQuotaWarningTick({ snapshot, notify, sent, config });
-    observe({ mode: "human-only-hourly-growth", cacheOnly: true, reservePercent: config.reservePercent,
-      accounts: snapshot.accounts?.length || 0, notices: notices.length });
-    return notices;
-  };
-}
-
-/** WHAT: Records the running reminder loop after each tick. WHY: Keeps live-code verification independent of terminal output. */
+/** WHAT: Records the last warning check. WHY: Keeps live-code verification independent of terminal output. */
 function writeWarningHeartbeat(beat) {
   const dir = join(homedir(), ".agentmux"), path = join(dir, "quota-warning-heartbeat.json");
   mkdirSync(dir, { recursive: true });
@@ -39,12 +25,29 @@ function writeWarningHeartbeat(beat) {
   renameSync(temporary, path);
 }
 
-/** WHAT: Schedules one reminder loop per bridge process. WHY: Prevents duplicate loops on repeated preloads. */
-export function startQuotaWarning(env = process.env) {
-  const config = parseQuotaWarningConfig(env);
-  if (!config.enabled || globalThis[LOOP_KEY]) return globalThis[LOOP_KEY] || null;
-  const loop = createQuotaWarningLoop({ config, tick: createQuotaWarningRuntimeTick({ env, observe: writeWarningHeartbeat }) });
-  globalThis[LOOP_KEY] = loop;
-  loop.start();
-  return loop;
+// Mattias 2026-10-16: the warning comes in the window he writes in, when he writes.
+/**
+ * WHAT: Builds the hook that checks quota for one human message and answers in its channel.
+ * WHY: Keeps two quick messages from warning twice by running one check at a time.
+ */
+export function createQuotaWarningOnWrite({ env = process.env, sent = createSentNoticeStore(), readSnapshot = readWarningSnapshot,
+  observe = writeWarningHeartbeat, log = message => console.warn(`quota-warning | ${message}`) } = {}) {
+  let previous = Promise.resolve();
+  return (msg) => {
+    const check = previous.then(async () => {
+      const config = parseQuotaWarningConfig(env);
+      if (!config.enabled) return [];
+      const snapshot = await readSnapshot();
+      const notices = await postDueQuotaWarnings({ snapshot, sent, config,
+        notify: text => msg.send(text, { kind: "notice" }) });
+      observe({ mode: "on-human-message", warnPercent: config.warnPercent, reservePercent: config.reservePercent,
+        accounts: snapshot?.accounts?.length || 0, notices: notices.length });
+      return notices;
+    }).catch((error) => { log(`check failed: ${error.message}`); return []; });
+    previous = check;
+    return check;
+  };
 }
+
+/** WHAT: Names the bridge's single warning hook, which bot.mjs calls for each human message. WHY: Keeps one check queue per bridge from splitting across callers. */
+export const warnQuotaOnHumanMessage = createQuotaWarningOnWrite();

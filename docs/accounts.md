@@ -108,27 +108,28 @@ account switching have their own adapters; this command does not provision
 native sessions or rewrite their configured identity. Repeated profile names
 or equal usage numbers do not prove two different accounts.
 
-## Reserve reminders
+## Quota warnings
 
-The bridge checks cached Claude and Codex weekly observations every 15 minutes.
-At `AMUX_QUOTA_RESERVE_PERCENT` (default 90 %), it sends a quiet suggestion to
-the human through `notifyUser`, Discord DM with the existing #notify fallback.
-There are no panel deliveries or automatic account changes from reminders.
+When the human writes in a pane's Discord channel, the bridge checks Claude and
+Codex weekly quota after his message is handled and answers in that channel.
+The check never delays his delivery, never posts before the catch-up notice and
+never wakes a pane.
 
-A running pane must use the account, and usage must have grown since its last
-reminder. A durable sent-store enforces at least one hour between reminders
-per account, including across bridge restarts. The first observation establishes
-a baseline; a stationary account never prompts. Upgrading an old reserve record
-also establishes a one-hour cooldown. Weekly resets start a new baseline.
+An account warns when a running pane uses it and its weekly use is at least
+`AMUX_QUOTA_WARN_PERCENT` (default 80 %). Between two warnings for one account
+it waits 6 hours below `AMUX_QUOTA_RESERVE_PERCENT` (default 90 %) and 3 hours
+from there, as Mattias set on 2026-10-16. A durable sent-store keeps the wait
+across bridge restarts, and checks run one at a time, so two quick messages
+warn once. Several due accounts arrive in one message.
 
-The two-line suggestion includes account, usage, reset, and the least-used
-verified alternative below reserve. Claude uses `/byt <email>` for a plan and
-`/byt <email> ok` to confirm. Codex uses `//switch <1|2>` in Discord. Without
-spare capacity, one line explains that no alternative has room.
+Each account line gives usage and reset, and the least-used account of the
+same provider below the warning level. Claude uses `/byt <email>` for a plan
+and `/byt <email> ok` to confirm. Codex uses `//switch <1|2>` in the channel of the pane it names.
+Without such an account, one line says that none has room.
 
-The warning loop only reads cache through the same quota snapshot as
-`amux quota`. Normal dashboard reads share Claude's existing five-minute budget
-and Codex's fifteen-minute app-server budget. Cold or expired cache produces no
-warning and no extra provider request. Codex limit recovery keeps its fresh
-reader and existing behavior. amux never switches by itself on a reminder.
+The check reads the same snapshot as `amux quota`, through Claude's five-minute
+and Codex's fifteen-minute shared budget, so it adds at most one usage read per
+account and budget window, and only when he writes. A cache-only read would be
+cold whenever nobody ran `amux quota` in the last minutes. A failed read posts
+nothing. amux never switches by itself on a warning.
 `AMUX_QUOTA_WARNING_ENABLED=false` turns it off.
