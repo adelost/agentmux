@@ -47,7 +47,7 @@ export async function switchCodexAccount({ agent, state, name, pane, current, ta
     : previousOverride || (context?.model ? { model: context.model, effort: context.effort ?? null } : null);
   if ((continuity || freshHandover) && (!beforeStatus.ok || !effective?.model || !beforeDirectory
       || !beforeStatus.status.session || (continuity && beforeStatus.status.session !== continuity.sessionId))) {
-    return { kind: "failed", error: "current model/session could not be verified before the account switch" };
+    return { kind: "failed", error: "Kontot är oförändrat: panelens modell och session kunde inte bekräftas. Kontrollera /status. För en tom panel: avsluta den och välj konto före en ny Sol-start. Spara pågående arbete först." };
   }
   setCodexProfile(state, name, pane, target.id);
   if (effective?.model) setCodexModelOverride(state, name, pane, effective.model, effective.effort);

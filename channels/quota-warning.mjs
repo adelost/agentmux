@@ -59,16 +59,51 @@ export function weeklyQuotaOf(account) {
   return null;
 }
 
-/** WHAT: Builds a concise account-switch suggestion. WHY: Keeps account changes an explicit human choice. */
-export function formatReserveReminder(account, weekly, alternatives, freeBelowPercent) {
-  const provider = account.provider === "claude" ? "Claude" : "Codex";
-  const headline = `${provider} ${account.account.email}: ${weekly.usedPercent} % av veckan, ${formatReset(weekly.resetsAt)}.`;
-  const best = alternatives[0];
-  if (!best) return `${headline} Inget annat ${provider}-konto har plats under ${freeBelowPercent} %.`;
-  const command = account.provider === "claude"
-    ? `\`/byt ${best.account.email}\` visar planen, \`/byt ${best.account.email} ok\` byter.`
-    : `\`//switch ${best.profile.id}\` i kanalen för ${compactPaneList(account.inUse)}.`;
-  return `${headline}\nDu kan byta till ${best.account.email} (${weeklyQuotaOf(best).usedPercent} %): ${command}`;
+const providerName = account => ({ claude: "Claude", codex: "Codex", kimi: "Kimi" })[account.provider] || account.provider;
+const emailOf = account => account.account?.email || account.profile?.label || "okänd inloggning";
+const loggedOut = account => !account.ok && !account.inUse?.length && [
+  "login_expired", "credentials_expired", "credentials_unavailable", "login_required",
+].includes(account.error);
+const spareAccounts = (accounts, account, config, now) => accounts.filter(other => other.provider === account.provider
+  && other.account?.email && other.account.email.toLowerCase() !== emailOf(account).toLowerCase()
+  && (other.provider !== "codex" || /^[12]$/u.test(String(other.profile?.id)))
+  && Number.isFinite(weeklyQuotaOf(other)?.usedPercent) && Date.parse(weeklyQuotaOf(other)?.resetsAt) > now
+  && weeklyQuotaOf(other).usedPercent < config.warnPercent)
+  .sort((a, b) => weeklyQuotaOf(a).usedPercent - weeklyQuotaOf(b).usedPercent);
+
+function actionLine(accounts, config, now) {
+  for (const account of [...accounts].sort((a, b) => (weeklyQuotaOf(b)?.usedPercent || 0) - (weeklyQuotaOf(a)?.usedPercent || 0))) {
+    const weekly = weeklyQuotaOf(account);
+    if (!account.inUse?.length || !(weekly?.usedPercent >= config.warnPercent) || !(Date.parse(weekly.resetsAt) > now)) continue;
+    const best = spareAccounts(accounts, account, config, now)[0];
+    if (!best) continue;
+    const target = `${providerName(best)} ${best.profile.id} ${emailOf(best)} (${weeklyQuotaOf(best).usedPercent} %)`;
+    const scope = "Övriga paneler behåller sina konton; paneler kan använda olika konton samtidigt.";
+    if (account.provider === "codex") {
+      const pane = account.inUse[0];
+      const state = weekly.usedPercent >= 100 ? "har fullt konto" : `har använt ${weekly.usedPercent} %`;
+      return `${pane} ${state}: \`//switch ${best.profile.id}\` i ${pane} flyttar bara ${pane} till ${target}. ${scope}`;
+    }
+    // /byt is a fleet plan, never a pane-local switch.
+    const panes = accounts.filter(other => other.provider === "claude" && emailOf(other) !== emailOf(best)).flatMap(other => other.inUse || []);
+    return `\`/byt ${emailOf(best)}\` visar planen för ${compactPaneList(panes)} till ${target}; \`/byt ${emailOf(best)} ok\` flyttar dessa paneler när de är lediga. ${scope}`;
+  }
+  return "Ingen åtgärd.";
+}
+
+/** WHAT: Formats one scoped action and every account with its panes. WHY: Lets the human see unused logins and which pane a switch would move. */
+export function formatQuotaWarning(snapshot, { config = parseQuotaWarningConfig(), now = Date.now() } = {}) {
+  const accounts = snapshot?.accounts || [], active = accounts.filter(account => !loggedOut(account));
+  const lines = active.map(account => {
+    const weekly = weeklyQuotaOf(account) || account.limits?.find(limit => limit.kind === "weekly");
+    const slots = account.sharedBy?.filter(member => member.source !== "login").map(member => member.id);
+    const id = slots?.length ? slots.join("+") : account.profile?.id;
+    const usage = weekly ? `${weekly.usedPercent} % av veckan, ${formatReset(weekly.resetsAt) || "reset okänd"}` : "veckokvot okänd, reset okänd";
+    const panes = account.inUse?.length ? `paneler ${compactPaneList(account.inUse)}` : "ingen panel";
+    return `${providerName(account)}${id ? ` ${id}` : ""} ${emailOf(account)}: ${usage}; ${panes}.`;
+  });
+  const out = accounts.filter(loggedOut).map(account => `${providerName(account)} ${emailOf(account)}`);
+  return [actionLine(accounts, config, now), ...lines, ...(out.length ? [`Utloggade: ${out.join(" · ")}`] : [])].join("\n");
 }
 
 /**
@@ -86,17 +121,10 @@ export async function postDueQuotaWarnings({ snapshot, notify, sent, config = pa
     const key = weeklyWindowKey(identity, weekly.resetsAt), accountKey = weeklyWindowKey(identity, "1970-01-01T00:00:00Z");
     const lastAt = Math.max(sent.entry(key)?.reminder?.at ?? -Infinity, sent.entry(accountKey)?.reminder?.at ?? -Infinity);
     if (now - lastAt < cooldownMs) continue;
-    const alternatives = accounts.filter(other => other.provider === account.provider && other.account?.email
-      && other.account.email.toLowerCase() !== email.toLowerCase()
-      && (other.provider !== "codex" || /^[12]$/u.test(String(other.profile?.id)))
-      && Number.isFinite(weeklyQuotaOf(other)?.usedPercent) && Date.parse(weeklyQuotaOf(other)?.resetsAt) > now
-      && weeklyQuotaOf(other).usedPercent < config.warnPercent)
-      .sort((a, b) => weeklyQuotaOf(a).usedPercent - weeklyQuotaOf(b).usedPercent);
-    due.push({ provider: account.provider, email, usedPercent: weekly.usedPercent, key, accountKey, resetAt,
-      text: formatReserveReminder(account, weekly, alternatives, config.warnPercent) });
+    due.push({ provider: account.provider, email, usedPercent: weekly.usedPercent, key, accountKey, resetAt });
   }
   if (!due.length) return due;
-  await notify(`⚠️ **Kontokvot**\n${due.map(notice => notice.text).join("\n")}`);
+  await notify(formatQuotaWarning(snapshot, { config, now }));
   for (const notice of due) {
     sent.record(notice.accountKey, notice.usedPercent, { now, resetAt: notice.resetAt });
     sent.record(notice.key, notice.usedPercent, { now, resetAt: notice.resetAt });

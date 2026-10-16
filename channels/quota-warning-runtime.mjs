@@ -8,11 +8,11 @@ import { quotaAccountCatalog } from "../core/quota-profiles.mjs";
 import { createSentNoticeStore, parseQuotaWarningConfig, postDueQuotaWarnings } from "./quota-warning.mjs";
 
 /**
- * WHAT: Reads Claude and Codex quota, with the panes on each account, through the dashboard's shared budget.
+ * WHAT: Reads every account and its panes through the dashboard's shared quota budget.
  * WHY: Prevents a cold cache from silencing the warning whenever nobody ran amux quota recently.
  */
 export function readWarningSnapshot() {
-  const profiles = quotaAccountCatalog().filter(profile => ["claude", "codex"].includes(profile.provider));
+  const profiles = quotaAccountCatalog();
   return readQuotaSnapshotWithPanes({ profiles, readSnapshot: () => readQuotaSnapshot({ profiles }) });
 }
 

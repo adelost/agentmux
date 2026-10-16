@@ -24,8 +24,8 @@ function hook(readSnapshot = async () => due, env = {}) {
 feature("the quota warning answers the human message", () => {
   unit("the snapshot reads through the shared quota budget, not a cold cache", {
     when: ["reading the warning snapshot", () => readWarningSnapshot()],
-    then: ["Claude and Codex share the dashboard budget and other providers are left out", () => {
-      expect(readQuotaSnapshot).toHaveBeenCalledWith({ profiles: [{ provider: "claude" }, { provider: "codex" }] });
+    then: ["every provider is included in the complete account warning", () => {
+      expect(readQuotaSnapshot).toHaveBeenCalledWith({ profiles: [{ provider: "claude" }, { provider: "codex" }, { provider: "kimi" }] });
     }],
   });
 
@@ -34,7 +34,7 @@ feature("the quota warning answers the human message", () => {
     when: ["two messages arrive together", async fx => { await Promise.all([fx.warn(fx.first), fx.warn(fx.second)]); return fx; }],
     then: ["only the first channel gets the notice", fx => {
       expect(fx.first.send).toHaveBeenCalledTimes(1);
-      expect(fx.first.send.mock.calls[0]).toEqual([expect.stringMatching(/^⚠️ \*\*Kontokvot\*\*\nClaude a@example\.test: 85 %/u), { kind: "notice" }]);
+      expect(fx.first.send.mock.calls[0]).toEqual([expect.stringMatching(/^Ingen åtgärd\.\nClaude 1 a@example\.test: 85 %/u), { kind: "notice" }]);
       expect(fx.second.send).not.toHaveBeenCalled();
     }],
   });

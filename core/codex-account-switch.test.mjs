@@ -19,6 +19,23 @@ function setup({ continuity = true, wrongSession = false } = {}) {
 }
 
 feature("manual and automatic Codex account transitions share continuity verification", () => {
+  component("an unverified native session explains how an empty pane can be switched safely", {
+    given: ["an idle pane whose status cannot prove its session", () => {
+      const fx = setup();
+      fx.options.statusDriver = async () => ({ ok: false, stage: "parse", error: "no complete status box" });
+      return fx;
+    }],
+    when: ["the account switch refuses before changing anything", async fx => ({ fx, result: await switchCodexAccount(fx.options) })],
+    then: ["the account is unchanged and the message names the safe next step", ({ fx, result }) => {
+      expect(result.kind).toBe("failed");
+      expect(result.error).toContain("Kontot är oförändrat");
+      expect(result.error).toContain("modell och session");
+      expect(result.error).toContain("tom panel");
+      expect(result.error).toContain("välj konto före en ny Sol-start");
+      expect(fx.calls).toHaveLength(0);
+      expect(fx.data).toEqual({});
+    }],
+  });
   for (const composer of ["empty-idle", "foreign"]) component(`a torn native status repaint retries only with ${composer} composer`, {
     given: ["the target starts correctly but its first native status frame is incomplete", () => {
       const fx = setup(), read = fx.options.statusDriver;
