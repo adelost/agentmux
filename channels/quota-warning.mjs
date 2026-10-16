@@ -85,8 +85,7 @@ function actionLine(accounts, config, now) {
       return `${pane} ${state}: \`//switch ${best.profile.id}\` i ${pane} flyttar bara ${pane} till ${target}. ${scope}`;
     }
     // /byt is a fleet plan, never a pane-local switch.
-    const panes = accounts.filter(other => other.provider === "claude" && emailOf(other) !== emailOf(best)).flatMap(other => other.inUse || []);
-    return `\`/byt ${emailOf(best)}\` visar planen för ${compactPaneList(panes)} till ${target}; \`/byt ${emailOf(best)} ok\` flyttar dessa paneler när de är lediga. ${scope}`;
+    return `Alla Claude-paneler: \`/byt ${emailOf(best)}\` visar planen till ${target}; \`/byt ${emailOf(best)} ok\` flyttar bara panelerna planen godkänner. ${scope}`;
   }
   return "Ingen åtgärd.";
 }

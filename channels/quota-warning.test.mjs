@@ -79,8 +79,8 @@ feature("quota warnings shown where the human writes", () => {
     }],
     then: ["two warnings, each with the plan and the confirm command", fx => {
       expect(percents(fx)).toEqual([["80"], ["86"]]);
-      expect(fx.notify.mock.calls[0][0]).toContain("`/byt 2@example.test` visar planen för test:0");
-      expect(fx.notify.mock.calls[0][0]).toContain("`/byt 2@example.test ok` flyttar dessa paneler när de är lediga");
+      expect(fx.notify.mock.calls[0][0]).toContain("Alla Claude-paneler: `/byt 2@example.test` visar planen till");
+      expect(fx.notify.mock.calls[0][0]).toContain("`/byt 2@example.test ok` flyttar bara panelerna planen godkänner");
     }],
   });
 
