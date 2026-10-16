@@ -44,6 +44,11 @@ Read each view for what it is:
 - Quote the human verbatim only when the wording is the decision (a GO, a
   price, a name). Provenance in one line: who and when. The full quote goes
   to the decision log.
+- Bad brief: "Mattias, verbatim: 'men förstå ni? ska ju helst vara
+  generistk...' Fix the rig." Good brief: "1. Use Haunt's rig format
+  (rig.js) as the shared rig. 2. Place the joints from the doll's own
+  proportions. 3. Report to claw:0." His full words go to the decision
+  log, never into the brief.
 - Also name the new evidence, the bounded outcome, what is already done and
   the boundary that must stay untouched.
 - Test before sending: could the worker execute this blind? If not, rewrite.

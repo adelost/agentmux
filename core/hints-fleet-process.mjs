@@ -74,12 +74,11 @@ AMUX never authorizes extra checkouts against that policy.
 2. **Resolve conflicts with fresh proof:** follow staffing rule 6 below.
    The owner inspects conflict-resolved hunks, including code they did not
    write, and flags them in the handoff or an explicitly requested review.
-3. **Version bumps must be unique:** before \`package.json\` bump, check
-   \`git log --oneline -3\`: the version you're picking must NOT
-   already exist there.
+3. **Version bumps must be unique:** the new version must not already
+   appear in \`git log --oneline -3\`.
 
-Commit + push within 30 min of starting an edit. Long-running WIP that
-isn't in git is invisible to other agents.
+Commit + push within 30 min of starting an edit; WIP outside git is
+invisible to other agents.
 
 Missing dependencies: follow the repo's setup (\`amux --help\`: \`worktree-deps\`).
 A bootstrap does not replace staffing rule 6's verification.
@@ -89,7 +88,7 @@ A bootstrap does not replace staffing rule 6's verification.
 Never fork or copy a session into a subagent (Mattias 2026-10-10: "vi borde
 väl förbjuda det helt"). AMUX blocks Claude forks; in Codex call
 \`spawn_agent\` only with \`fork_turns="none"\`. Start a fresh subagent with a
-short written brief. Cache facts: see below.
+short written brief.
 
 ## Context and compaction
 
@@ -103,8 +102,8 @@ short written brief. Cache facts: see below.
 - Bounded tasks go to a fresh subagent with a brief; continue your own work after a compact.
 - Write what a compact loses to files as you work: quotes, numbers, decisions.
 
-Varför och belägg: \`~/.openclaw/workspace/memory/references/claude-subagent-cache-2026-10-10.md\`,
-avsnittet "Kompaktering: valen och varför". Ändra en regel bara med nya mätningar mot de där.
+Belägg: \`~/.openclaw/workspace/memory/references/claude-subagent-cache-2026-10-10.md\`
+("Kompaktering: valen och varför"). Ändra en regel bara med nya mätningar mot de där.
 
 ## Hotspot reflection
 
@@ -123,17 +122,17 @@ function's own branching or state. Do a small split in the same change.
    feedback/beslut, eller (c) något blockerar mottagaren.** Inga "klar med X,
    fortsätter med Y"-status, inga kvittenser, inga artighetsfraser.
    Commits + ledger ÄR statuskommunikationen.
-2. **Review och verifiering:** följ staffing-reglerna 6 och 7 nedan.
-3. **Delade träd fryses i KORTA koordinerade gate-fönster** (en utsedd
+2. **Delade träd fryses i KORTA koordinerade gate-fönster** (en utsedd
    koordinator äger fönstret), aldrig dagar-långa blanket-fences av en
    annan panels yta.
 
 ## Staffing and review economics
 
 1. **One owner per feature, end to end.** The direct recipient owns it;
-   a capable idle agent may self-claim an explicitly claimable board ticket.
-   The owner plans, builds, verifies, rebases, self-merges, deploys when needed
-   and records the completion commit. Scope follows the full root-fix seam.
+   a capable idle agent may also self-claim one READY or explicitly
+   claimable board ticket. The owner plans, builds, verifies, rebases,
+   self-merges, deploys when needed and records the completion commit.
+   Scope follows the full root-fix seam.
 2. **Managers are sidecars, not gateways.** They act on a stall, collision,
    delivery failure or idle-capacity gap. Work, decisions, merge and delivery
    need no manager round-trip.
@@ -144,7 +143,7 @@ function's own branching or state. Do a small split in the same change.
    natural turn and contact only an owner who needs an action or
    handoff. An idle panel or unused provider is not permission to activate it.
    A pane back after 7+ days first re-anchors with
-   \`amux done --week\`, \`amux asks --open\`, this policy and the repository's
+   \`amux done --week\`, \`amux asks --open\`, this policy and the repo's
    instructions. \`amux reconcile\` repairs service/shell panes; it is not a
    staffing command and never wakes coding agents. Delivery is proven by the recipient's durable
    receipt, not enqueue time; the owner-response clock starts at that receipt.
@@ -152,15 +151,12 @@ function's own branching or state. Do a small split in the same change.
    Codex models (Mattias, 2026-09-20 and 2026-10-11): default
    \`gpt-6.1-sol\`, never Astra; Claude and Kimi keep theirs. A pane
    choice survives restart. Change models only with Discord \`/model sol\` or
-   \`amux model PROJECT -p N sol\`: it compacts that exact session first and
-   verifies the live model; a raw \`/model\` is refused. A failed compact blocks
-   ordinary changes; explicit \`sol xhigh --new-session\` on a stopped pane
-   preserves its old journal and starts fresh. Dormant panes switch at their
-   next work prompt, never by a fleet wake-up. Read model, tokens and receipts
-   from the exact pane. Quota is paid capacity.
+   \`amux model PROJECT -p N sol\` (see its help); a raw \`/model\` is refused.
+   Dormant panes switch at their next work prompt, never by a fleet wake-up.
+   Read model, tokens and receipts from the exact pane. Quota is paid capacity.
    Codex account recovery switches only after a reached weekly limit, with
    verified room and exact-session transfer, or a saved fresh-session handover.
-   Forecasts never switch accounts. \`AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false\` disables it.
+   Forecasts never switch accounts.
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, in a modal, or between tool calls.
    A blocked task does not reserve its pane indefinitely:
@@ -178,33 +174,37 @@ function's own branching or state. Do a small split in the same change.
    one relevant local smoke lasting at most 5 minutes. Heavy CI,
    full-repo suites, browser matrices and perf sweeps run only on explicit
    human request or scheduled/manual infrastructure. A green pre-rebase check
-   proves nothing. For visual work, exercise the smallest relevant visual
-   scenario and attach one representative screenshot when useful. Preserve
+   proves nothing. Visual work: the smallest relevant scenario, one screenshot
+   when useful. Preserve
    repo correctness and security requirements: never hide a real failure or
    add file-size exceptions to make a gate green. If a required check cannot
    fit this budget, report the constraint rather than claim unverified success.
    GitHub-hosted CI is optional evidence, never release authority; do not add
-   a remote-CI or PR ceremony to a clean locally verified change. For deployment,
-   follow the repo's existing local-first release contract for exact source SHA,
-   rollback SHA, relevant build and live verification. Do not duplicate gates.
+   a remote-CI or PR ceremony to a clean locally verified change. Deploy by
+   the repo's local-first release contract (exact source and rollback SHA,
+   build, live check). Do not duplicate gates.
 7. **Owners self-merge and self-deliver.** A normal green change does not need
    peer review. Human-requested review is welcome; a red gate or high-risk seam
    needs resolution, not an automatic peer-review loop.
    A merged-but-undeployed feature remains open when
    deployment is part of the task. Irreversible or money-spending actions still
    require human approval.
-8. **Report only terminal outcomes.** Inter-agent messages are for a real
-   blocker, collision, handoff or final DONE report, not acknowledgements,
-   progress chatter or routine status. Commits, the board and the ask ledger
-   carry normal progress.
-9. **Record blockers where work is tracked.** Use a concrete reason and the
-   dependency/evidence needed to clear it. Do not keep blockers only in a
-   manager's memory, and do not call silence or an unstarted owner clock a
-   worker failure. With a board, use its typed states, not prose in a private note.
+8. **Report only terminal outcomes** (Kommunikationsdisciplin): a real
+   blocker, collision, handoff or final DONE report. The board and the ask
+   ledger also carry progress.
+9. **Record blockers where work is tracked:** a concrete reason and the
+   dependency or evidence that clears it, in the board's typed states when
+   there is one, never only in a manager's memory or a private note. Silence
+   or an unstarted owner clock is not a worker failure.
 10. **Human direction is authoritative and remains direct.** A decision relayed
     as authority (a GO, a price, a name) keeps the human quote byte-for-byte with
     provenance. A work brief is the orchestrator's interpretation: numbered
     executable steps, not the human's text (see the amux-orchestrator skill).
+    Bad brief: "Mattias, verbatim: 'men förstå ni? ska ju helst vara
+    generistk...' Fix the rig." Good brief: "1. Use Haunt's rig format
+    (rig.js) as the shared rig. 2. Place the joints from the doll's own
+    proportions. 3. Report to claw:0." His full words go to the decision
+    log, never into the brief.
     No manager, memory note or older topology rule may narrow,
     delay or override a current direct instruction. Human language stays UTF-8
     end to end: preserve literal \`åäö\` and quoted text byte-for-byte. Board
@@ -228,8 +228,7 @@ function's own branching or state. Do a small split in the same change.
   återanvändbara how-tos till \`memory/references/\`, persondetaljer till
   \`memory/people/\`, och länka därifrån.
 - Skriv allt viktigt, men duplicera inte samma status i flera sektioner.
-  \`amux dream\` använder den synliga, konfigurerade kuratorpanelen, högst en
-  kuratortur per natt. Modellen föreslår bara i resultatfilen. Kontrollanten
-  tillämpar validerade rättningar i varningspekade minnesfiler; dagfiler,
-  Dream-filer och journaler förblir orörda av rättningsvägen. Osäkra fakta blir frågor.
+  \`amux dream\` kör i den synliga kuratorpanelen, högst en tur per natt, och
+  rättar bara varningspekade minnesfiler, aldrig dagfiler, Dream-filer eller
+  journaler. Osäkra fakta blir frågor.
 `;
