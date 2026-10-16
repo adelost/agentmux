@@ -1,6 +1,5 @@
-// Dream's shadow run on the conversation log: the same windows and fair packing
-// as the real packet, compared side by side before Dream switches its source
-// (docs/CONVERSATION-LOG.md). It never sends anything or moves a receipt.
+// Dream's source comparison uses the same windows and fair packing as the
+// primary packet (docs/CONVERSATION-LOG.md). It never sends or moves a receipt.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -38,7 +37,7 @@ function packetFacts(batch, observed) {
 
 /**
  * WHAT: Builds the conversation-log packet beside the real one and compares them.
- * WHY: The source switch waits for evidence: bytes, panes, and how many human asks the log answers.
+ * WHY: Keeps packet size, pane inclusion and unanswered-input health observable after the source switch.
  */
 export function dreamShadow({ agents, sinceMs, receipts, readHistory, current, dateKey, nowMs = Date.now(), logPath }) {
   const log = readWindow({ path: logPath, since: sinceMs - DREAM_CATCH_UP_MS });

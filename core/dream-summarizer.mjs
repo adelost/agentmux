@@ -41,7 +41,7 @@ function conversationHistory(conversation, agent, pane, cutoffMs) {
   // only the shadow accepts that, marked as an incomplete history.
   if (!partialWindow && log.coverageStartMs > cutoffMs) return null;
   const found = conversationForPane(log, agent, pane, cutoffMs);
-  // Answers whose ask predates the window cannot form a turn: keep the journal.
+  // Without attributable posted work the provider journal remains necessary.
   if (!found.answered || !found.turns.length) return null;
   return { turns: found.turns, lastWriteMs: found.lastWriteMs, reachedSince: log.coverageStartMs <= cutoffMs, fromLog: true };
 }

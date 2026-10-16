@@ -1,8 +1,8 @@
 // Dream's conversation-log source: asks in, posts out, one format for every
 // engine (docs/CONVERSATION-LOG.md). It works on rows from readWindow in
-// core/ask-ledger.mjs, the only module that parses the file. Until the switch
-// it only runs as a shadow; the journal stays the fallback for a pane that
-// posted nothing in its window.
+// core/ask-ledger.mjs, the only module that parses the file. The journal stays
+// an explicit source retreat and a fallback for incomplete pre-log windows
+// or panes without posted work.
 
 import { DREAM_SETTLE_MS } from "./dream-turn-selection.mjs";
 import { inferAskOrigin } from "./ask-origin.mjs";
@@ -62,6 +62,19 @@ export function conversationForPane(log, agent, pane, windowStartMs) {
   const dreamRuns = asks.filter((ask) => ask.source === "dream").map(tsMs);
   const posts = log.posts.filter((post) => paneKey(post) === key && tsMs(post) > windowStartMs);
   const turns = conversationPaneTurns(asks, posts).filter((turn) => !dreamRuns.includes(Date.parse(turn.timestamp)));
+  const firstInput = Math.min(Infinity, ...asks.map(tsMs));
+  const prior = log.asks.filter(ask => paneKey(ask) === key && tsMs(ask) <= windowStartMs
+    && !isSystemNoiseDirective(ask.verbatim)).sort(byTime).at(-1);
+  const continued = posts.filter(post => tsMs(post) < firstInput && post.status !== "failed" && DREAM_ANSWER_KINDS.has(post.kind)).sort(byTime);
+  if (continued.length && prior?.source !== "dream") {
+    // This is posted work, not a newly authored input. Its real post time
+    // advances the cursor; the older prompt is quoted only as context.
+    turns.unshift({ timestamp: continued.at(-1).ts, isComplete: false, logIds: [],
+      userPrompt: `[amux posted continuation; original input ${prior ? `at ${prior.ts}, quoted for context` : "outside this log window"}]`
+        + (prior ? `\n${prior.verbatim}` : ""),
+      items: continued.map(post => ({ type: "text", content: postedText(post) })),
+    });
+  }
   const answered = posts.some((post) => post.status !== "failed" && DREAM_ANSWER_KINDS.has(post.kind));
   const lastWriteMs = Math.max(-Infinity, ...asks.map(tsMs), ...posts.map(tsMs));
   return { turns, answered, lastWriteMs };

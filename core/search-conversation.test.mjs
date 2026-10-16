@@ -6,7 +6,7 @@ import { appendPost } from "./ask-ledger.mjs";
 import { collectSearchHits } from "../cli/search.mjs";
 
 feature("search includes exact posted conversation, not only the event ledger", () => {
-  component("a phrase posted only to Discord is a source-bound lexical hit", {
+  for (const raw of [true, false]) component(`a phrase posted only to Discord is source-bound without neural readers, raw=${raw}`, {
     given: ["a canonical post that never appeared in memory or a provider journal", () => {
       const root = mkdtempSync(join(tmpdir(), "search-conversation-")), path = join(root, "ledger.jsonl");
       const previous = process.env.AMUX_ASK_LEDGER_PATH;
@@ -15,7 +15,9 @@ feature("search includes exact posted conversation, not only the event ledger", 
         payload: "Hirohiko som tecknar Jojo, ett exakt åäö-citat.", ts: Date.now() - 60000 }, { path });
       return { root, path, previous, row };
     }],
-    when: ["searching the actual CLI collector without semantic or journal roots", fx => collectSearchHits("Hirohiko som tecknar Jojo", [], fx.root, { raw: true, lexical: true })],
+    when: ["searching the actual CLI collector without note or journal roots", fx => collectSearchHits("Hirohiko som tecknar Jojo", [], fx.root, { raw, lexical: true }, {
+      semantic: { passages: () => { throw Error("No note roots, no neural or passage reader needed"); } },
+    })],
     then: ["the complete canonical row is identified by its stable id and real timestamp", (result, fx) => {
       expect(result.top).toHaveLength(1);
       expect(result.top[0]).toMatchObject({ conversationId: fx.row.id, timestamp: fx.row.ts, messageId: "real-message" });

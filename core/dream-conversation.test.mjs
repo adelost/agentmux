@@ -36,6 +36,21 @@ const log = {
 };
 
 feature("Dream reads the conversation log before any journal", () => {
+  unit("new posted work whose input predates the cursor never needs a raw journal", {
+    given: ["a genuine prior input and an actual answer after the cursor", () => ({ coverageStartMs: SINCE - 3600000,
+      asks: [ask("old-input", 0, at(1), "mitt äldre uppdrag")], posts: [post(0, at(3), "reply", "SUMMARY: arbetet fortsatte efter markören")],
+    })],
+    when: ["collecting the new window with raw access forbidden", data => collectDreamSources(agents.slice(0, 1).map(agent => ({ ...agent, panes: [agent.panes[0]] })), Date.parse(at(2)), {
+      now: NOW, conversation: { log: data }, readHistory: () => { throw Error("raw journal must not be needed"); },
+    })],
+    then: ["the actual post supplies work, with the prior input explicitly quoted for context", result => {
+      expect(result.unreadable).toEqual([]); expect(result.sources).toHaveLength(1);
+      expect(result.sources[0].source).toBe("conversation-log");
+      expect(result.sources[0].entries[0].userPrompt).toContain("[amux posted continuation");
+      expect(result.sources[0].entries[0].userPrompt).toContain("mitt äldre uppdrag");
+      expect(result.sources[0].entries[0].timestamp).toBe(at(3));
+    }],
+  });
   component("nightly coverage uses the requested day, not the catch-up history", {
     given: ["an older input plus one answered input in this day", () => {
       const root = mkdtempSync(join(tmpdir(), "dream-shadow-day-")), path = join(root, "ledger.jsonl");
@@ -153,12 +168,14 @@ feature("Dream reads the conversation log before any journal", () => {
       readHistory: (_engine, dir) => ({ turns: [{ timestamp: at(2), userPrompt: `journal work in ${dir}`, isComplete: true,
         items: [{ type: "text", content: "done" }] }] }),
     })],
-    then: ["lsrc:0 keeps its answer from the log, lsrc:1 falls back to its journal", ({ sources }) => {
+    then: ["both panes retain their actual posts; the missing input is explicit, not invented", ({ sources }) => {
       const byPane = Object.fromEntries(sources.map((item) => [`${item.agent}:${item.pane}`, item]));
       expect(byPane["lsrc:0"].source).toBe("conversation-log");
       expect(byPane["lsrc:0"].entries[0].items[0].content).toBe("SUMMARY: paret byggt");
       expect(byPane["lsrc:0"].historyComplete).toBe(false);
-      expect(byPane["lsrc:1"].source).toBe("journal");
+      expect(byPane["lsrc:1"].source).toBe("conversation-log");
+      expect(byPane["lsrc:1"].entries[0].userPrompt).toContain("outside this log window");
+      expect(byPane["lsrc:1"].entries[0].items[0].content).toBe("SUMMARY: utan fråga i loggen");
     }],
   });
 

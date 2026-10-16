@@ -13,7 +13,7 @@ function fixture() {
   process.env.AMUX_ASK_LEDGER_PATH = path;
   writeFileSync(configPath, `test:\n  dir: ${root}\n  panes:\n    - cmd: codex\n`);
   const options = { path }, now = Date.now();
-  appendAskLedger({ agent: "test", pane: 0, source: "discord", ts: now - 600000, verbatim: "Hittar du mitt riktiga uppdrag?" }, options);
+  appendAskLedger({ agent: "test", pane: 0, source: "discord", ts: now - 600000, verbatim: "Hittar du mitt riktiga uppdrag?", sessionFile: "/old/provider/history.jsonl" }, options);
   appendPost({ agent: "test", pane: 0, channelId: "channel", via: "bridge", kind: "reply", ts: now - 590000,
     messageId: "actual-discord-id", payload: ANSWER }, options);
   appendAskLedger({ agent: "test", pane: 0, source: "pane-hook", ts: now - 580000,
@@ -47,6 +47,7 @@ feature("the normal CLI reads what actually passed through AMUX", () => {
       expect(text).toContain("Ett helt svar med åäö");
       expect(text).toContain("Slutet är också bevarat.");
       expect(text).not.toContain("unverified");
+      expect(text).not.toContain("no matching completion found");
       expect(text).not.toContain("artifact-content-authored-by-others");
     }], cleanup,
   });

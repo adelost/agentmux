@@ -64,7 +64,8 @@ export function formatAskEntry(entry, { fullReply = false } = {}) {
       : entry.jsonlFile;
     lines.push(`    jsonl: ${location}${entry.timestamp ? ` @ ${entry.timestamp}` : ""}`);
   }
-  if (!entry.jsonlFile && entry.sessionFile) {
+  if (entry.replySource === "conversation-log") lines.push(`    conversation: ${entry.ledgerId}`);
+  if (!entry.jsonlFile && entry.sessionFile && entry.replySource !== "conversation-log") {
     lines.push(`    session: ${entry.sessionFile} (no matching completion found)`);
   }
   if (entry.status === "unverified") {

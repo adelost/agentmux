@@ -152,7 +152,7 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   const exactDocument = hits.some(hit => hit.layer === "L1" && !hit.path.endsWith(".jsonl"));
   let semanticHits = [];
   let reranker = null;
-  const useSemantic = !flags.raw && !flags.lexical && !flags.fast && (flags.semantic || classifyQuery(content) === "natural");
+  const useSemantic = lexicalRoots.length > 0 && !flags.raw && !flags.lexical && !flags.fast && (flags.semantic || classifyQuery(content) === "natural");
   if (useSemantic) {
     const allowedRoots = new Set(roots.map(root => root.name));
     const result = await semantic.query(content, { k: SEMANTIC_K_MAX, roots: lexicalRoots, waitMs: flags.semanticWaitMs ?? 0 });
@@ -169,7 +169,7 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   // better-worded neighbour (golden r11, r28, r35).
   const perFile = reranker?.perFile || 2;
   const passageMax = Math.max(flags.max ?? 12, reranker?.candidates || 30);
-  const passages = flags.raw || exactDocument ? []
+  const passages = flags.raw || exactDocument || !lexicalRoots.length ? []
     : await semantic.passages(content, lexicalRoots, { max: passageMax, workspace, dates, perFile })
       ?? searchPassages(content, lexicalRoots, { max: passageMax, dates, perFile, excludePath: path => isTopicPath(path, workspace) });
   Object.assign(timing, passages.timing || {});
