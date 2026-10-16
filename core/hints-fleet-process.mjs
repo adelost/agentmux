@@ -228,6 +228,8 @@ function's own branching or state. Do a small split in the same change.
   återanvändbara how-tos till \`memory/references/\`, persondetaljer till
   \`memory/people/\`, och länka därifrån.
 - Skriv allt viktigt, men duplicera inte samma status i flera sektioner.
-  \`amux dream\` använder den synliga, konfigurerade kuratorpanelen. Gamla
-  dagfiler mäts av lint men skrivs aldrig om av en dold modellprocess.
+  \`amux dream\` använder den synliga, konfigurerade kuratorpanelen, högst en
+  kuratortur per natt. Modellen föreslår bara i resultatfilen. Kontrollanten
+  tillämpar validerade rättningar i varningspekade minnesfiler; dagfiler,
+  Dream-filer och journaler förblir orörda av rättningsvägen. Osäkra fakta blir frågor.
 `;

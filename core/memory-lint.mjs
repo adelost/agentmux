@@ -93,7 +93,8 @@ export function longSections(text, maxLines) {
 }
 
 /** WHAT: Checks workspace memory against policy and optional Dream evidence. WHY: Keeps missing runs visible alongside existing content warnings. */
-export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy, home = process.env.HOME, dreamHealth = null } = {}) {
+export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy, home = process.env.HOME, dreamHealth = null,
+  readText = path => readFileSync(path, "utf-8") } = {}) {
   const root = workspace;
   const memoryDir = join(root, "memory");
   if (!existsSync(memoryDir)) throw new Error(`${memoryDir}: memory directory not found`);
@@ -115,7 +116,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
   // Template tags and required headings.
   for (const file of allMemoryMd) {
     if (basename(file).includes("TEMPLATE")) continue;
-    const text = readFileSync(file, "utf-8");
+    const text = readText(file);
     const tag = linesOf(text).slice(0, 5).join("\n").match(/<!-- template: ([a-z-]+) -->/)?.[1];
     if (!tag) continue;
     const templateRel = TEMPLATE_BY_TAG[tag];
@@ -147,7 +148,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
   // and nothing should rewrite those days before the archive takes them.
   const dailyRequired = requiredHeadings(join(memoryDir, "TEMPLATE.md"));
   for (const file of dailyFiles) {
-    const text = readFileSync(file, "utf-8");
+    const text = readText(file);
     const lineCount = linesOf(text).length;
     const stub = parseArchiveStub(text);
     if (stub) {
@@ -206,7 +207,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
     ...markdownFiles(root), ...immediateMemoryMd, ...referenceMd, ...peopleMd,
   ];
   for (const file of linkSources) {
-    const text = readFileSync(file, "utf-8");
+    const text = readText(file);
     if (DAILY_RE.test(basename(file))) continue;
     for (const match of text.matchAll(/`(memory\/[^`]*\.md)`/g)) {
       const ref = match[1];
@@ -217,7 +218,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
 
   const memoryIndex = join(root, "MEMORY.md");
   if (existsSync(memoryIndex)) {
-    const bytes = statSync(memoryIndex).size;
+    const bytes = Buffer.byteLength(readText(memoryIndex));
     if (bytes > policy.memoryMaxBytes) {
       add("warning", "memory_size", memoryIndex, `${bytes} bytes exceeds ${policy.memoryMaxBytes}; curate manually`);
     } else if (bytes > policy.memoryMaxBytes * 0.75) {
@@ -227,7 +228,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
 
   const peopleIndex = join(memoryDir, "people.md");
   if (existsSync(peopleIndex)) {
-    const peopleIndexText = readFileSync(peopleIndex, "utf-8");
+    const peopleIndexText = readText(peopleIndex);
     const count = linesOf(peopleIndexText).length;
     if (count > policy.peopleIndexMaxLines) add("warning", "people_index_size", peopleIndex, `${count} lines exceeds ${policy.peopleIndexMaxLines}`);
 
@@ -258,11 +259,11 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
   }
   for (const file of referenceMd) {
     if (basename(file).includes("TEMPLATE")) continue;
-    const count = linesOf(readFileSync(file, "utf-8")).length;
+    const count = linesOf(readText(file)).length;
     if (count > policy.referenceMaxLines) add("warning", "reference_size", file, `${count} lines exceeds ${policy.referenceMaxLines}; split manually`);
   }
   for (const file of peopleMd) {
-    const count = linesOf(readFileSync(file, "utf-8")).length;
+    const count = linesOf(readText(file)).length;
     if (count > policy.peopleDetailMaxLines) add("warning", "people_size", file, `${count} lines exceeds ${policy.peopleDetailMaxLines}; review manually`);
   }
 
@@ -295,7 +296,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
   for (const file of new Set(summaryFiles)) {
     const rel = relative(root, file);
     if (ignores.has(`summary:${rel}`)) continue;
-    const lines = linesOf(readFileSync(file, "utf-8"));
+    const lines = linesOf(readText(file));
     if (lines[0] === "---") {
       if (!hasFrontmatterDescription(lines)) add("warning", "summary_missing", file, "frontmatter lacks description");
       continue;
@@ -312,7 +313,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
   const tasksPath = join(memoryDir, "tasks.md");
   if (existsSync(tasksPath)) {
     let parked = false;
-    for (const line of linesOf(readFileSync(tasksPath, "utf-8"))) {
+    for (const line of linesOf(readText(tasksPath))) {
       if (line.startsWith("## ")) parked = line.startsWith("## Parkerat");
       if (!line.startsWith("- [ ] ") || parked) continue;
       const deadline = line.match(/deadline: (\d{4}-\d{2}-\d{2})/)?.[1];
@@ -324,13 +325,13 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
   const forgottenKey = localDateKey(forgottenCutoff);
   for (const file of dailyFiles) {
     if (basename(file, ".md") >= forgottenKey) continue;
-    const todos = linesOf(readFileSync(file, "utf-8")).filter((line) => line.startsWith("- [ ] "));
+    const todos = linesOf(readText(file)).filter((line) => line.startsWith("- [ ] "));
     if (todos.length) add("warning", "forgotten_todo", file, `${todos.length} unchecked todo(s)`);
   }
 
   // Reference-table and orphan checks.
-  const memoryText = existsSync(memoryIndex) ? readFileSync(memoryIndex, "utf-8") : "";
-  const peopleText = existsSync(peopleIndex) ? readFileSync(peopleIndex, "utf-8") : "";
+  const memoryText = existsSync(memoryIndex) ? readText(memoryIndex) : "";
+  const peopleText = existsSync(peopleIndex) ? readText(peopleIndex) : "";
   for (const file of peopleMd) {
     const name = basename(file);
     const relKey = `ref-table:people/${name}`;
@@ -341,7 +342,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
   const allReachabilityText = [
     ...markdownFiles(root), ...immediateMemoryMd, ...referenceMd, ...peopleMd,
     ...markdownFiles(join(memoryDir, "archive", "daily")),
-  ].map((file) => ({ file, text: readFileSync(file, "utf-8") }));
+  ].map((file) => ({ file, text: readText(file) }));
   for (const file of referenceMd) {
     if (basename(file).includes("TEMPLATE")) continue;
     const name = basename(file);
@@ -351,7 +352,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
 
   // Empathy radar essentials.
   for (const file of peopleMd) {
-    const text = readFileSync(file, "utf-8");
+    const text = readText(file);
     if (!text.includes("<!-- template: empathy-radar -->")) continue;
     if (!/verktyg för självförståelse|fingervisning|inte en diagnos/i.test(text)) add("warning", "radar_disclaimer", file, "missing empathy-radar disclaimer");
     if (!/mappning:/i.test(text)) add("warning", "radar_mapping", file, "missing empathy-radar mapping");
@@ -362,7 +363,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
   }
 
   const todayPath = join(memoryDir, `${today}.md`);
-  const todayText = existsSync(todayPath) ? readFileSync(todayPath, "utf-8") : null;
+  const todayText = existsSync(todayPath) ? readText(todayPath) : null;
   const dream = todayText === null ? null : latestDreamSentinel(todayText);
   const dreamGap = todayText === null ? null : latestDreamGap(todayText);
   // A recorded failure with no successful run for the same day means the night

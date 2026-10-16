@@ -75,7 +75,9 @@ export function readDreamSuccess(workspace, dateKey, { home, now = new Date(), d
     { timeZone: "Europe/Stockholm", hour: +run[2].slice(0, 2), minute: +run[2].slice(3) });
   if (startMs > now.getTime()) return { ok: false, reason: "run sentinel is in the future" };
   if (+run[4] > 0) return { ok: false, reason: `${run[4]} pane journals failed` };
-  if (+run[3] === 0) return { ok: true, reason: "controller verified no new work", time: run[2] };
+  if (+run[3] === 0 && !text.includes(`<!-- amux-dream-summary:${dateKey} -->`)) {
+    return { ok: true, reason: "controller verified no new work", time: run[2] };
+  }
   const start = text.indexOf(`<!-- amux-dream-summary:${dateKey} -->`);
   const end = text.indexOf(`<!-- /amux-dream-summary:${dateKey} -->`, start);
   if (start < 0 || end < start) return { ok: false, reason: "committed summary block missing" };

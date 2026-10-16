@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import {
-  chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync,
+  chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
 import { readClaudeScreenQuality } from "./claude-statusline.mjs";
 import { latestCodexModelObservation } from "./native-model-observation.mjs";
+import { decodeDreamRepairOutput } from "./dream-repair-plan.mjs";
 
 const CODING_ENGINE = /(?:^|[\s/])(claude|codex)(?:\s|$)/u;
 const CODEX_QUALITY_TAIL_BYTES = 8 * 1024 * 1024;
@@ -155,6 +156,7 @@ export function writeDreamOwnerInput(document, {
     sha256: createHash("sha256").update(content).digest("hex"),
     bytes: Buffer.byteLength(content),
     memoryFormat: document.memoryFormat,
+    ...(document.payload?.memoryRepair && { memoryRepair: true }),
   };
 }
 
@@ -180,6 +182,11 @@ export function dreamOwnerPrompt({
     "- Slå ihop relaterat arbete men behåll pane-ID när proveniens behövs. Utelämna småprat och repetitiv status.",
     "- Om paneler motsäger varandra, skriv att uppgifterna går isär och ange båda källorna. Redovisa dem aldrig som två fakta.",
     "- Upprepa inte det som dagsfilens manuella avsnitt redan säger. Ange datum för arbete från ett tidigare dygn.",
+    ...(input.memoryRepair ? [
+      "- Minnesvarningarna i payload.memoryRepair ingår i SAMMA kuratortur. Läs bara filerna; skriv aldrig minne direkt.",
+      "- Föreslå endast säkra metadata-/länkrättningar för editable-fynd. Hitta aldrig på en saknad lärdom; kontrollanten gör olösta fynd till frågor.",
+      "- Håll sammanfattningen inom30rader/4KiB. Lägg sist en fence som börjar med ```amux-memory-repairs på egen rad, sedan JSON {\"version\":1,\"repairs\":[{\"warningId\":\"id ur underlaget\",\"before\":\"exakt unikt textstycke\",\"after\":\"ny text\"}]}. Avsluta med ``` på egen rad. Använd repairs:[] när inget kan rättas ärligt.",
+    ] : []),
     "",
     "Skriv inga reserverade amux-markörer i resultatet. AMUX validerar filen och skriver själv det enda tillåtna Dream-blocket atomiskt i dagens minne.",
     `När ${input.memoryFormat === 2 ? "resultatfilen är durabelt skriven" : "blocket är durabelt skrivet"}: svara exakt \`DREAM_OK ${dateKey} ${input.runId}\` och inget mer.`,
@@ -189,12 +196,18 @@ export function dreamOwnerPrompt({
 /** WHAT: Reads and validates the configured pane's isolated product. WHY: Prevents the model from gaining authority to rewrite memory. */
 export function readDreamOwnerResult(outputPath, dateKey, runId, owner, sourceSha256) {
   let content;
-  try { content = readFileSync(outputPath, "utf8").trim(); }
+  try {
+    if (statSync(outputPath).size > 48 * 1024) return { ok: false, reason: "summary-byte-limit" };
+    content = readFileSync(outputPath, "utf8").trim();
+  }
   catch { return { ok: false, reason: "dream-output-missing" }; }
   const receipt = `> Kuraterad av ${owner.agent}:${owner.pane} efter verifierad kompaktering · run \`${runId}\` · source \`${sourceSha256}\`.`;
   if (content.split(/\r?\n/u)[0] !== receipt) {
     return { ok: false, reason: "dream-run-receipt-missing" };
   }
-  const valid = validateDreamSummary(content);
-  return valid.ok ? { ...valid, dateKey, outputPath } : valid;
+  let decoded;
+  try { decoded = decodeDreamRepairOutput(content); }
+  catch (error) { return { ok: false, reason: error.message }; }
+  const valid = validateDreamSummary(decoded.content);
+  return valid.ok ? { ...decoded, ...valid, dateKey, outputPath } : valid;
 }

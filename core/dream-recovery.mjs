@@ -11,6 +11,7 @@ import { readDreamSuccess } from "./dream-health.mjs";
 import { resumeDreamCommit } from "./dream-commit.mjs";
 import { readDreamCurationProof } from "./dream-curation-proof.mjs";
 import { judgeDreamMemory, protectedDreamBlocks } from "./dream-memory-guard.mjs";
+import { finishDreamMemoryRepairs } from "./dream-memory-repairs.mjs";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -28,7 +29,7 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   if (document.schemaVersion !== 1 || document.dateKey !== dateKey
       || !Number.isFinite(Date.parse(document.createdAt)) || Date.parse(document.createdAt) > now.getTime()
       || document.compact?.boundary !== true || !document.compact.sessionId
-      || !Array.isArray(document.payload?.panes) || !document.payload.panes.length
+      || !Array.isArray(document.payload?.panes) || (!document.payload.panes.length && !document.payload.memoryRepair?.warnings?.length && !document.payload.memoryRepair?.omitted)
       || !Array.isArray(document.omitted) || !Array.isArray(document.unreadable)) throw new Error("dream-recovery-invalid-input");
   const workspace = resolve(flags.workspace || process.env.OPENCLAW_WORKSPACE || defaultWorkspace());
   if (document.workspace && resolve(document.workspace) !== workspace) throw new Error("dream-recovery-workspace-mismatch");
@@ -52,13 +53,13 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
     candidate.agent === document.owner?.agent && candidate.pane === document.owner.pane && candidate.engine === document.owner.engine);
   if (!owner) throw new Error("dream-recovery-owner-not-configured");
   const input = { path, outputPath: path.replace(/\.json$/u, ".summary.md"), runId, sha256, bytes: bytes.length,
-    memoryFormat: document.memoryFormat };
+    memoryFormat: document.memoryFormat, memoryRepair: !!document.payload.memoryRepair };
   const previous = new Date(`${dateKey}T12:00:00Z`);
   previous.setUTCDate(previous.getUTCDate() - 1);
   const prompt = dreamOwnerPrompt({ owner, input, memPath,
     previousMemPath: join(workspace, "memory", `${previous.toISOString().slice(0, 10)}.md`), dateKey,
     included: document.payload.panes.length, omitted: document.omitted.length, unreadable: document.unreadable.length });
-  const product = readDreamOwnerResult(input.outputPath, dateKey, runId, owner, sha256);
+  let product = readDreamOwnerResult(input.outputPath, dateKey, runId, owner, sha256);
   if (!product.ok) throw new Error(`dream-recovery-product-invalid:${product.reason}`);
   const proof = await getProof({ owner, prompt, dateKey, runId, memPath, sessionId: document.compact.sessionId, quality: document.compact });
   if (proof.sessionId !== document.compact.sessionId || /haiku/iu.test(document.compact.model || "")
@@ -91,6 +92,7 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
     if (previousCursor && Date.parse(previousCursor) > Date.parse(source.activityCursor)) throw new Error("dream-recovery-newer-receipt-exists");
   }
   verifyMemory();
+  product = finishDreamMemoryRepairs({ workspace, input, product, dry: !!flags.dry });
   if (!flags.dry) commit({ memPath, memoryBefore, product, dateKey, included, omitted: document.omitted,
     memoryBeforeSha256: expectedMemory, memoryGuardBlocks, judgeConcurrentNotes,
     receipts, receiptTargets, receiptPath, now, input, unreadable: document.unreadable });

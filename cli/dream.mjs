@@ -14,7 +14,7 @@ import {
   defaultDreamReceiptPath, readDreamReceipts, recordDreamReceipts,
 } from "../core/dream-eligibility.mjs";
 import {
-  buildDreamBatch, collectDreamSources,
+  buildDreamBatch, collectDreamSources, DREAM_PROMPT_BYTES,
 } from "../core/dream-summarizer.mjs";
 import {
   dreamOwnerPrompt, resolveDreamCandidates,
@@ -35,6 +35,8 @@ import { readDreamPaneHistory } from "../core/dream-history.mjs";
 import { dreamShadow, formatDreamShadow, memoizeHistory, writeDreamShadow } from "../core/dream-shadow.mjs";
 import { readWindow } from "../core/ask-ledger.mjs";
 import { DREAM_CATCH_UP_MS } from "../core/dream-turn-selection.mjs";
+import { readDreamMemoryWarnings } from "../core/dream-repair-plan.mjs";
+import { finishDreamMemoryRepairs } from "../core/dream-memory-repairs.mjs";
 export { commitDreamProduct } from "../core/dream-commit.mjs";
 export { isPidAlive } from "../core/dream-lock.mjs";
 export { waitForDreamOwnerResult } from "../core/dream-result.mjs";
@@ -195,7 +197,12 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
         console.log(`Dream: ${skipped.agent}:${skipped.pane} has ${skipped.deferredTurns} active turn(s) deferred; cursor unchanged.`);
       }
     }
-    return { receipts, observed, batch: buildDreamBatch(observed.sources, dateKey, dependencies.batchOptions) };
+    const memoryRepair = (dependencies.readMemoryWarnings || readDreamMemoryWarnings)(workspaceDir, { now });
+    const repairBytes = memoryRepair.warnings.length || memoryRepair.omitted ? Buffer.byteLength(JSON.stringify({ memoryRepair })) + 1 : 0;
+    const batch = buildDreamBatch(observed.sources, dateKey, { ...dependencies.batchOptions,
+      maxPromptBytes: (dependencies.batchOptions?.maxPromptBytes || DREAM_PROMPT_BYTES) - repairBytes });
+    if (repairBytes) { batch.payload.memoryRepair = memoryRepair; batch.sourceText = JSON.stringify(batch.payload); }
+    return { receipts, observed, batch };
   };
   // The conversation-log shadow only compares; a failure never stops Dream.
   const shadow = ({ receipts, observed, batch }) => {
@@ -221,6 +228,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     }
     console.log(`Dream would verify /compact, then send one visible prompt for ${batch.included.length} pane(s).`);
     console.log(`Input packet: ${Buffer.byteLength(JSON.stringify(batch.payload))} bytes; no hidden model process.`);
+    if (batch.payload.memoryRepair) console.log(`Memory repair: ${batch.payload.memoryRepair.warnings.length} warning(s), ${batch.payload.memoryRepair.warnings.filter(row => row.editable).length} eligible; proposals only, no memory writes.`);
     for (const source of batch.included) {
       const waiting = `${source.omittedTurns ? `, ${source.omittedTurns} omitted` : ""}${source.deferredTurns ? ", 1 still running" : ""}`;
       const gap = source.historyComplete === false ? ", history before the window start unread" : "";
@@ -237,6 +245,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
         path: "<durable-local-input>", outputPath: "<isolated-summary-output>",
         sha256: "<sha256>", bytes: 0, runId: "<run-id>",
         memoryFormat: 2,
+        memoryRepair: !!batch.payload.memoryRepair,
       },
       memPath,
       previousMemPath: join(workspaceDir, "memory", `${previousDateKey(dateKey)}.md`),
@@ -271,7 +280,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       try { console.log(`${formatDreamShadow(shadowReport).join("\n")}\nShadow report: ${writeDreamShadow(shadowReport)}`); }
       catch (error) { console.warn(`Dream shadow report not saved: ${error.message}`); }
     }
-    if (!batch.included.length) {
+    if (!batch.included.length && !batch.payload.memoryRepair) {
       if (!flags.quiet && !flags.q) console.log("Dream: no new journal-backed work; owner pane untouched.");
       if (!flags.deferSentinel && !flags["defer-sentinel"]) {
         writeDreamRunSentinel(memPath, dateKey, timeStr, 0, observed.unreadable.length);
@@ -280,10 +289,8 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       return { included: [], omitted: batch.omitted, unreadable: observed.unreadable };
     }
 
-    const previousSkipped = [], previousReasons = [];
-    let available = candidates;
-    while (available.length) {
-      const selection = await selectIdleOwner(ctx, available, {
+    {
+      const selection = await selectIdleOwner(ctx, candidates, {
         ensureReady: (agent, pane) => ctx.agent.ensureReady(agent, pane),
         prepare: (candidate) => prepareDreamOwner(ctx, candidate, dependencies),
         attempts: dependencies.idleAttempts,
@@ -292,8 +299,6 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
         getStatus: dependencies.getStatus,
       });
       if (!selection.owner) throw selection.lastError || new Error(`dream-owner-not-idle:${selection.skipped.join(",")}`);
-      selection.skipped.unshift(...previousSkipped);
-      selection.reasons.unshift(...previousReasons);
       if (selection.skipped.length) {
         const message = `Dream: curator ${selection.reasons.join("; ")};`
           + ` curating with configured fallback ${selection.owner.agent}:${selection.owner.pane}.`;
@@ -354,7 +359,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       if (!sent?.delivered || sent.unverified) {
         throw new Error(`dream-owner-prompt-unverified:${sent?.reason || sent?.queueState || "unknown"}`);
       }
-      const product = await (dependencies.waitForResult || waitForDreamOwnerResult)({
+      let product = await (dependencies.waitForResult || waitForDreamOwnerResult)({
         ctx, owner, prompt, outputPath: input.outputPath, dateKey, runId: input.runId,
         sourceSha256: input.sha256,
         attempts: dependencies.resultAttempts,
@@ -363,21 +368,17 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
         getStatus: async candidate => (dependencies.getStatus || getPaneStatus)(ctx, candidate.agent, candidate.pane),
       });
       if (!product.ok) {
-        const next = available.slice(available.indexOf(owner) + 1);
-        const retryable = ["dream-owner-limited", "dream-output-missing", "dream-owner-response-missing"].includes(product.reason);
-        const status = retryable && await (dependencies.getStatus || getPaneStatus)(ctx, owner.agent, owner.pane).catch(() => "unknown");
-        if (next.length && retryable && ["idle", "limited"].includes(status)) {
-          previousSkipped.push(`${owner.agent}:${owner.pane}`);
-          previousReasons.push(`${owner.agent}:${owner.pane} response unavailable: ${product.reason}`);
-          available = next;
-          continue;
-        }
+        // Candidate fallback is preparation-only. One dispatched curation is
+        // the nightly limit, even if that model cannot finish its response.
         throw new Error(`dream-owner-product-invalid:${product.reason}`);
       }
       const proof = await (dependencies.getProof || readDreamCurationProof)({
         owner, sessionId: compact.sessionId, prompt, dateKey, runId: input.runId, memPath, quality });
       const judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryBefore, current,
         { ownerTexts: proof.ownerTexts, memPath });
+      const verdict = judgeConcurrentNotes(memoryBefore, readFileSync(memPath, "utf8"));
+      if (!verdict.ok) throw Error(`daily-memory-changed-during-dream:${verdict.reason}`);
+      product = finishDreamMemoryRepairs({ workspace: workspaceDir, input, product });
       commitDreamProduct({ memPath, memoryBefore, product, dateKey, included: batch.included,
         memoryGuardBlocks: protectedDreamBlocks(memoryBefore),
         omitted: batch.omitted, receipts, receiptPath, now, recordReceipts, input, unreadable: observed.unreadable,

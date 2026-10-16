@@ -14,7 +14,7 @@ const values = value => typeof value === "string" ? [value]
   : Array.isArray(value) ? value.flatMap(values)
     : value && typeof value === "object" ? Object.values(value).flatMap(values) : [];
 
-const memoryTarget = (path, memPath) => !!path && (String(path).toLowerCase().split(/[\\/]/u)
+const memoryTarget = (path, memPath) => !!path && (/\.(?:curator\.md|memory-repair\.json)$/u.test(String(path)) || String(path).toLowerCase().split(/[\\/]/u)
   .some(part => ["memory", "memory.md"].includes(part)) || resolve(path).startsWith(`${dirname(resolve(memPath))}/`));
 
 /** WHAT: Checks whether a curator tool can write memory. WHY: Prevents read results or restored bytes from hiding a curator's memory write. */
@@ -46,7 +46,7 @@ export function curatorMemoryWrite(text, memPath) {
     const path = target?.[1] ?? target?.[2] ?? target?.[3];
     return path && (memoryTarget(path, memPath) || inMemory && !path.startsWith("/") && !path.startsWith("&"));
   })) return true;
-  const memory = inMemory || String(text).includes(dirname(resolve(memPath))) || /(?:^|[\s/'"=])memory\//u.test(String(text));
+  const memory = inMemory || String(text).includes(dirname(resolve(memPath))) || /(?:^|[\s/'"=])memory\/|\.(?:curator\.md|memory-repair\.json)/u.test(String(text));
   return memory && /(?:\*\*\* (?:Update|Add|Delete) File:|(?:^|\s)(?:tee|cp|mv|rm)\s|\b(?:sed|perl)\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*i|\b(?:writeFile(?:Sync)?|appendFile(?:Sync)?|write_text|write_bytes|unlink|rmtree)\s*\(|\bopen\([^\n]*["'][wax][b+]?["']|\.write\s*\()/u.test(String(text));
 }
 

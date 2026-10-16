@@ -34,15 +34,17 @@ runtime configuration key, so use an agent name such as `sandman` and label
 its panes Dream. New panes use their existing default account profile 1;
 creating them does not rotate any existing pane or log in another account.
 Startup, quality and compact failures can try the next configured candidate.
-After dispatch, a confirmed limit or a timed-out missing answer can use the
-next candidate only when the first is idle or limited. It gets a separate
-run/input/output identity. Busy or unknown states, unknown submission,
-invalid products and failed memory guards never authorize this fallback.
+Fallback is preparation-only. After one dispatched curation, a limit, missing
+answer or invalid product ends that attempt honestly; it never purchases a
+second curator turn that night. Recovery reuses the original output and proof.
 Only the selected, exactly receipted product can enter memory.
 
 ## Exact algorithm
 
-1. Read configured Claude, Codex and Kimi journals back to each pane's window
+1. Read the [canonical conversation log](CONVERSATION-LOG.md) first. The raw
+   journal path below remains the explicit `AMUX_DREAM_SOURCE=raw` retreat
+   and the fallback for panes without posted work or complete pre-log windows.
+   In that path, read configured Claude, Codex and Kimi journals to each pane's window
    start: its successful Dream receipt, or 24 hours before the scheduled
    invocation when it has none. A receipt older than seven days before that
    point starts the window at seven days, so a failed night's work reaches the
@@ -119,6 +121,55 @@ Only the selected, exactly receipted product can enter memory.
    hash-bound link into the one marked daily Dream block. Only then are pane
    cursors advanced and the run sentinel added. Later manual notes belong
    outside that block; the verified product is never a live status scratchpad.
+
+## Memory-warning repairs in the same curator turn
+
+The controller reads actual `amux memory lint` findings into
+`payload.memoryRepair`, with stable finding ids and exact writable-file hashes.
+At most24 findings/4KiB enter this packet; remaining counts are explicit and
+point to lint, never silently discarded. These bytes share the96KiB input
+budget. Warnings alone can justify the one ordinary curator turn; clean lint
+and no new work leave the curator untouched.
+
+The model still writes only its isolated result, not memory or controller
+receipts. It may finish the same result with an optional footer:
+
+````text
+```amux-memory-repairs
+{"version":1,"repairs":[{"warningId":"id from input","before":"unique exact text","after":"candidate text"}]}
+```
+````
+
+Only warning-targeted existing `MEMORY.md`, `memory/people.md` and immediate
+people/reference Markdown files are eligible. Daily files, Dream snapshots,
+archives, journals, templates, policy and symlink targets are not. Initial
+automatic edits are conservative metadata additions and exact in-place
+rebindings of a reported broken link to an existing file. Every non-metadata
+line and its order must remain unchanged. Factual rewrites, cross-file moves
+and missing semantic facts are questions, not automatic edits.
+
+Before any write, the existing linter evaluates the candidate through a text
+overlay. The target warning must disappear with no new warnings. Exact hashes
+are checked again before atomic replacement; lint runs after it too. A failed
+post-write check restores only the controller's own unchanged candidate;
+unexpected concurrent content refuses rollback rather than destroying it.
+No hidden rewrite of daily history is part of this path.
+
+The controller preserves the raw model product as `.curator.md`, its repair
+plan/outcomes as `.memory-repair.json`, and normalizes the final `.summary.md`
+to human text. Both artifacts remain beside the original Dream input. The
+normalized hash makes crash recovery idempotent without another model turn.
+Curator writes to these controller artifacts are refused by the existing
+tool-write audit. The human product, including unresolved questions, remains
+subject to the ordinary60-line/12KiB snapshot limit; the curator uses30lines/
+4KiB to reserve space. A missing lesson, such as Isabella's, becomes an
+explicit question to Mattias. Known archive/bank findings retain their existing
+maintenance actor instead of asking him to manage those jobs.
+
+`amux dream --dry` prints the actual warning count and eligibility, but writes
+neither candidate files, repair artifacts, receipts nor summaries. Original
+products without the footer remain valid. A warning-only product still gets
+its normal verified snapshot; zero fleet panes is never fabricated activity.
 
 Failure before commit leaves Dream receipts unchanged. Partial-commit recovery
 has the explicit boundary described below. `amux dream --dry` performs source
