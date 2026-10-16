@@ -1,8 +1,11 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { feature, unit, expect } from "bdd-vitest";
-import { vi } from "vitest";
+import { afterAll, vi } from "vitest";
+
+vi.stubEnv("TZ", "Europe/Stockholm");
+afterAll(() => vi.unstubAllEnvs());
 import { createSentNoticeStore, formatQuotaWarning, parseQuotaWarningConfig, postDueQuotaWarnings } from "./quota-warning.mjs";
 
 const NOW = Date.parse("2026-10-16T12:00:00Z"), HOUR = 3_600_000;
@@ -24,7 +27,7 @@ function fixture(provider = "claude") {
   return { check, notify };
 }
 // Mattias's complete-account view includes the spare too; cooldown checks follow the warned account only.
-const percents = fx => fx.notify.mock.calls.map(([text]) => [...text.matchAll(/(?:Claude|Codex) 1 1@example\.test: (\d+) % av veckan/gu)].map(m => m[1]));
+const percents = fx => fx.notify.mock.calls.map(([text]) => [...text.matchAll(/\*\*(?:Claude|Codex) 1\*\* · 1@example\.test · \*\*(\d+)%\*\* used/gu)].map(m => m[1]));
 
 const today = () => ({ accounts: [
   account("codex", "1", 47, ["lsrc:8", "lsrc:3"], "adelost@example.test"),
@@ -35,6 +38,56 @@ const today = () => ({ accounts: [
   { ok: false, provider: "kimi", profile: { id: "1", label: "wetterlind@example.test" }, error: "credentials_expired", inUse: [] },
 ] });
 
+const liveSnapshot = () => JSON.parse(readFileSync(new URL("./fixtures/quota-warning-20261016.json", import.meta.url), "utf8"));
+const LIVE_WARNING = `**Weekly quota** · no action needed
+🟢 **Codex 1** · adelost@example.test · **47%** used · resets Oct 22 08:13
+↳ api:4, claw:6, lsrc:3–5,8, skybar:4, skydive:3, skyvw:3
+🔴 **Codex 2** · wetterlind@example.test · **100%** used · resets Oct 22 11:28
+↳ no panes
+⚠️ **Claude 1+2** · adelost@example.test · **85%** used · resets Oct 21 02:00
+↳ api:0,1, claw:0–2, lsrc:0–2, skybar:0,2, skydive:0,2, skyvw:0,2
+🔴 **Claude wetterlind** · wetterlind@example.test · **97%** used · resets Oct 21 09:00
+↳ no panes
+Logged out: Claude other@example.test · Kimi wetterlind@example.test · Kimi adelost@example.test`;
+
+feature("English Discord quota warning, Mattias 2026-10-16", () => {
+  unit("the anonymized 14:18Z snapshot has the requested account blocks in Stockholm local time", {
+    when: ["rendering the snapshot with example.test identities", () => formatQuotaWarning(liveSnapshot(), { now: NOW })],
+    then: ["the whole message matches the approved shape", text => expect(text).toBe(LIVE_WARNING)],
+  });
+  unit("Claude action names the plan and limits its approved moves", {
+    when: ["the occupied Claude account is at 85% and a spare is below the warning level", () => formatQuotaWarning({ accounts: [
+      account("claude", "1", 85), account("claude", "2", 47, [], "adelost@example.test"),
+    ] }, { now: NOW })],
+    then: ["the first line gives the existing plan and confirmation commands", text => expect(text.split("\n")[0]).toBe(
+      "**Weekly quota** · Claude panes are at 85%. `/byt adelost@example.test` shows the plan to Claude 2 adelost@example.test (47%); `/byt adelost@example.test ok` moves only the panes the plan approves. Other panes keep their accounts.")],
+  });
+  for (const [used, icon] of [[59, "🟢"], [60, "⚠️"], [74, "⚠️"], [75, "🔴"], [null, "⚪"], [undefined, "⚪"]]) {
+    unit(`the configured levels render ${String(used)} as ${icon}`, {
+      when: ["formatting the configured warning and reserve thresholds", () => formatQuotaWarning({ accounts: [
+        account("codex", "1", used, []),
+      ] }, { now: NOW, config: parseQuotaWarningConfig({ AMUX_QUOTA_WARN_PERCENT: "60", AMUX_QUOTA_RESERVE_PERCENT: "75" }) })],
+      then: ["only a known weekly reading has a severity", text => {
+        expect(text.split("\n")[1]).toMatch(new RegExp(`^${icon} `, "u"));
+        if (used == null) expect(text).toContain("weekly unknown");
+      }],
+    });
+  }
+  unit("all warning fixtures and missing identity or reset fallbacks use English without em dashes", {
+    when: ["rendering live, action, unavailable and missing-reading accounts", () => [
+      liveSnapshot(), today(), { accounts: [] },
+      { accounts: [account("claude", "1", 85), account("claude", "2", 17, [])] },
+      { accounts: [{ ok: false, provider: "codex", profile: { id: "1" }, inUse: ["test:0"] }] },
+      { accounts: [{ ...account("codex", "1", 20), limits: [{ windows: [{ windowMinutes: 10080, usedPercent: 20, resetsAt: "invalid" }] }] }] },
+    ].map(snapshot => formatQuotaWarning(snapshot, { now: NOW }))],
+    then: ["no Swedish copy remains and unknown values are explicit", warnings => {
+      for (const warning of warnings) expect(warning).not.toMatch(/[åäöÅÄÖ\u2014]/u);
+      expect(warnings[4]).toContain("unknown login · weekly unknown · reset unknown");
+      expect(warnings[5]).toContain("reset unknown");
+    }],
+  });
+});
+
 feature("complete quota warning, Mattias 2026-10-16", () => {
   unit("a logged-in Kimi account keeps its known weekly reading", {
     when: ["formatting the provider's normalized weekly window", () => formatQuotaWarning({ accounts: [{ ok: true,
@@ -42,21 +95,23 @@ feature("complete quota warning, Mattias 2026-10-16", () => {
       limits: [{ kind: "weekly", usedPercent: 21, resetsAt: RESET }],
     }] }, { now: NOW })],
     then: ["the account row shows the reading rather than inventing an unknown quota", text =>
-      expect(text).toMatch(/Kimi 1 a@example\.test: 21 % av veckan, reset .*; ingen panel\./u)],
+      expect(text).toContain("🟢 **Kimi 1** · a@example.test · **21%** used · resets Oct 21 02:00\n↳ no panes")],
   });
   unit("today's warning names one pane-local action, every account and unused or logged-out logins", {
     when: ["formatting today's account and pane readings", () => formatQuotaWarning(today(), { now: NOW })],
     then: ["the action is first, followed only by one line per account and one logged-out line", text => {
       const lines = text.split("\n");
-      expect(lines).toHaveLength(6);
-      expect(lines[0]).toMatch(/^skybar:4.*`\/\/switch 1`.*bara skybar:4.*Codex 1 adelost@example\.test \(47 %\)/u);
-      expect(lines[0]).toContain("Övriga paneler behåller sina konton");
-      expect(lines[0]).toContain("olika konton samtidigt");
-      expect(lines[1]).toMatch(/^Codex 1 adelost@example\.test: 47 % av veckan, reset .*; paneler lsrc:3,8\.$/u);
-      expect(lines[2]).toMatch(/^Codex 2 wetterlind@example\.test: 100 % av veckan, reset .*; paneler skybar:4\.$/u);
-      expect(lines[3]).toMatch(/^Claude 1 adelost@example\.test: 85 % av veckan, reset .*; paneler claw:2, skybar:2\.$/u);
-      expect(lines[4]).toMatch(/^Claude wetterlind wetterlind@example\.test: 97 % av veckan, reset .*; ingen panel\.$/u);
-      expect(lines[5]).toBe("Utloggade: Claude other@example.test · Kimi wetterlind@example.test");
+      expect(lines).toHaveLength(10);
+      expect(lines[0]).toBe("**Weekly quota** · **skybar:4** is full. Write `//switch 1` in skybar:4 to move only skybar:4 to Codex 1 adelost@example.test (47%). Other panes keep their accounts.");
+      expect(lines[1]).toBe("🟢 **Codex 1** · adelost@example.test · **47%** used · resets Oct 21 02:00");
+      expect(lines[2]).toBe("↳ lsrc:3,8");
+      expect(lines[3]).toBe("🔴 **Codex 2** · wetterlind@example.test · **100%** used · resets Oct 21 02:00");
+      expect(lines[4]).toBe("↳ skybar:4");
+      expect(lines[5]).toBe("⚠️ **Claude 1** · adelost@example.test · **85%** used · resets Oct 21 02:00");
+      expect(lines[6]).toBe("↳ claw:2, skybar:2");
+      expect(lines[7]).toBe("🔴 **Claude wetterlind** · wetterlind@example.test · **97%** used · resets Oct 21 02:00");
+      expect(lines[8]).toBe("↳ no panes");
+      expect(lines[9]).toBe("Logged out: Claude other@example.test · Kimi wetterlind@example.test");
     }],
   });
   for (const [name, changes] of [
@@ -66,7 +121,7 @@ feature("complete quota warning, Mattias 2026-10-16", () => {
   ]) unit(`no action when ${name}`, {
     given: [name, () => { const snapshot = today(); changes(snapshot); return snapshot; }],
     when: ["formatting the warning", snapshot => formatQuotaWarning(snapshot, { now: NOW })],
-    then: ["the complete account view starts with no action", text => expect(text.split("\n")[0]).toBe("Ingen åtgärd.")],
+    then: ["the complete account view starts with no action", text => expect(text.split("\n")[0]).toBe("**Weekly quota** · no action needed")],
   });
 });
 
@@ -79,8 +134,8 @@ feature("quota warnings shown where the human writes", () => {
     }],
     then: ["two warnings, each with the plan and the confirm command", fx => {
       expect(percents(fx)).toEqual([["80"], ["86"]]);
-      expect(fx.notify.mock.calls[0][0]).toContain("Alla Claude-paneler: `/byt 2@example.test` visar planen till");
-      expect(fx.notify.mock.calls[0][0]).toContain("`/byt 2@example.test ok` flyttar bara panelerna planen godkänner");
+      expect(fx.notify.mock.calls[0][0]).toContain("Claude panes are at 80%. `/byt 2@example.test` shows the plan to");
+      expect(fx.notify.mock.calls[0][0]).toContain("`/byt 2@example.test ok` moves only the panes the plan approves");
     }],
   });
 
@@ -107,8 +162,8 @@ feature("quota warnings shown where the human writes", () => {
     given: ["a Codex account a pane runs on", () => fixture("codex")],
     when: ["it reaches 82 %", fx => fx.check(82).then(() => fx)],
     then: ["the warning gives slot 2's switch command", fx => {
-      expect(fx.notify.mock.calls[0][0]).toMatch(/Codex 1 1@example\.test: 82 % av veckan, reset/u);
-      expect(fx.notify.mock.calls[0][0]).toContain("`//switch 2` i test:0 flyttar bara test:0");
+      expect(fx.notify.mock.calls[0][0]).toMatch(/\*\*Codex 1\*\* · 1@example\.test · \*\*82%\*\* used · resets/u);
+      expect(fx.notify.mock.calls[0][0]).toContain("**test:0** is at 82%. Write `//switch 2` in test:0 to move only test:0");
     }],
   });
 
@@ -117,10 +172,12 @@ feature("quota warnings shown where the human writes", () => {
     when: ["the only other account is at 80 %", fx => fx.check(85, NOW, { spare: 80 }).then(() => fx)],
     then: ["no switch is suggested", fx => {
       const lines = fx.notify.mock.calls[0][0].split("\n");
-      expect(lines).toHaveLength(3);
-      expect(lines[0]).toBe("Ingen åtgärd.");
-      expect(lines[1]).toMatch(/^Claude 1 1@example\.test: 85 %.*paneler test:0\.$/u);
-      expect(lines[2]).toMatch(/^Claude 2 2@example\.test: 80 %.*ingen panel\.$/u);
+      expect(lines).toHaveLength(5);
+      expect(lines[0]).toBe("**Weekly quota** · no action needed");
+      expect(lines[1]).toContain("**Claude 1** · 1@example.test · **85%** used");
+      expect(lines[2]).toBe("↳ test:0");
+      expect(lines[3]).toContain("**Claude 2** · 2@example.test · **80%** used");
+      expect(lines[4]).toBe("↳ no panes");
     }],
   });
 
@@ -134,10 +191,10 @@ feature("quota warnings shown where the human writes", () => {
     then: ["one post carries both", fx => {
       expect(fx.notify).toHaveBeenCalledTimes(1);
       const [action, ...accounts] = fx.notify.mock.calls[0][0].split("\n");
-      expect(action).toMatch(/^skybar:4.*`\/\/switch 2`/u);
-      expect(accounts).toHaveLength(3);
-      expect(accounts[0]).toMatch(/^Claude 1 a@example\.test: 84 %/u);
-      expect(accounts[1]).toMatch(/^Codex 1 b@example\.test: 100 %/u);
+      expect(action).toMatch(/^\*\*Weekly quota\*\* · \*\*skybar:4\*\*.*`\/\/switch 2`/u);
+      expect(accounts).toHaveLength(6);
+      expect(accounts[0]).toMatch(/^⚠️ \*\*Claude 1\*\* · a@example\.test · \*\*84%/u);
+      expect(accounts[2]).toMatch(/^🔴 \*\*Codex 1\*\* · b@example\.test · \*\*100%/u);
     }],
   });
 });

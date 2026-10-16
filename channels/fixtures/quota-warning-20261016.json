@@ -1,0 +1,415 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-16T14:18:49.153Z",
+  "accounts": [
+    {
+      "ok": true,
+      "engine": "codex",
+      "provider": "codex",
+      "profile": {
+        "id": "1",
+        "key": "codex:1",
+        "label": "wetterlind@example.test",
+        "source": "primary"
+      },
+      "account": {
+        "email": "adelost@example.test",
+        "plan": "pro"
+      },
+      "observation": {
+        "schemaVersion": 1,
+        "source": "codex.app_server.rate_limits",
+        "observedAt": "2026-10-16T14:08:31.044Z",
+        "refreshIntervalMs": 900000,
+        "usedPercent": 47,
+        "remainingPercent": 53,
+        "resetsAt": "2026-10-22T06:13:29.000Z"
+      },
+      "limits": [
+        {
+          "capturedAt": "2026-10-16T14:08:31.044Z",
+          "limitId": "codex",
+          "limitName": null,
+          "planType": "pro",
+          "windows": [
+            {
+              "id": "primary",
+              "usedPercent": 47,
+              "windowMinutes": 10080,
+              "resetsAt": "2026-10-22T06:13:29.000Z"
+            }
+          ]
+        }
+      ],
+      "inUse": [
+        "api:4",
+        "claw:6",
+        "lsrc:3",
+        "lsrc:4",
+        "lsrc:5",
+        "lsrc:8",
+        "skybar:4",
+        "skydive:3",
+        "skyvw:3"
+      ]
+    },
+    {
+      "ok": true,
+      "engine": "codex",
+      "provider": "codex",
+      "profile": {
+        "id": "2",
+        "key": "codex:2",
+        "label": "adelost@example.test",
+        "source": "configured"
+      },
+      "account": {
+        "email": "wetterlind@example.test",
+        "plan": "prolite"
+      },
+      "observation": {
+        "schemaVersion": 1,
+        "source": "codex.app_server.rate_limits",
+        "observedAt": "2026-10-16T14:08:31.008Z",
+        "refreshIntervalMs": 900000,
+        "usedPercent": 100,
+        "remainingPercent": 0,
+        "resetsAt": "2026-10-22T09:28:56.000Z"
+      },
+      "limits": [
+        {
+          "capturedAt": "2026-10-16T14:08:31.008Z",
+          "limitId": "codex",
+          "limitName": null,
+          "planType": "prolite",
+          "windows": [
+            {
+              "id": "primary",
+              "usedPercent": 100,
+              "windowMinutes": 10080,
+              "resetsAt": "2026-10-22T09:28:56.000Z"
+            }
+          ]
+        }
+      ],
+      "inUse": []
+    },
+    {
+      "ok": true,
+      "engine": "claude",
+      "provider": "claude",
+      "profile": {
+        "id": "1",
+        "key": "claude:1",
+        "label": "adelost@example.test",
+        "source": "primary"
+      },
+      "account": {
+        "email": "adelost@example.test",
+        "organization": "adelost@example.test's Organization",
+        "plan": "max"
+      },
+      "fetchedAt": "2026-10-16T14:15:53.517Z",
+      "observation": {
+        "schemaVersion": 1,
+        "source": "anthropic.oauth.usage",
+        "observedAt": "2026-10-16T14:15:53.517Z",
+        "refreshIntervalMs": 900000,
+        "usedPercent": 0,
+        "remainingPercent": 100,
+        "resetsAt": "2026-10-21T00:00:00+00:00"
+      },
+      "limits": [
+        {
+          "id": "session",
+          "kind": "session",
+          "scopeName": null,
+          "usedPercent": 8,
+          "resetsAt": "2026-10-16T17:10:00.101716+00:00",
+          "severity": "normal",
+          "isActive": false
+        },
+        {
+          "id": "weekly_all",
+          "kind": "weekly_all",
+          "scopeName": null,
+          "usedPercent": 85,
+          "resetsAt": "2026-10-21T00:00:00.101740+00:00",
+          "severity": "warning",
+          "isActive": true
+        },
+        {
+          "id": "weekly_fable",
+          "kind": "weekly_scoped",
+          "scopeName": "Fable",
+          "usedPercent": 0,
+          "resetsAt": "2026-10-21T00:00:00+00:00",
+          "severity": "normal",
+          "isActive": false
+        }
+      ],
+      "sharedBy": [
+        {
+          "id": "1",
+          "key": "claude:1",
+          "source": "primary"
+        },
+        {
+          "id": "2",
+          "key": "claude:2",
+          "source": "configured"
+        }
+      ],
+      "inUse": [
+        "api:0",
+        "api:1",
+        "claw:0",
+        "claw:1",
+        "claw:2",
+        "lsrc:0",
+        "lsrc:1",
+        "lsrc:2",
+        "skybar:0",
+        "skybar:2",
+        "skydive:0",
+        "skydive:2",
+        "skyvw:0",
+        "skyvw:2"
+      ]
+    },
+    {
+      "ok": false,
+      "engine": "claude",
+      "provider": "claude",
+      "profile": {
+        "id": "2",
+        "key": "claude:login:2",
+        "label": "2",
+        "source": "login"
+      },
+      "error": "login_expired",
+      "account": {
+        "email": "other@example.test",
+        "organization": "other@example.test's Organization",
+        "plan": null
+      },
+      "sharedBy": [
+        {
+          "id": "2",
+          "key": "claude:login:2",
+          "source": "login"
+        }
+      ],
+      "inUse": []
+    },
+    {
+      "ok": true,
+      "engine": "claude",
+      "provider": "claude",
+      "profile": {
+        "id": "wetterlind",
+        "key": "claude:login:wetterlind",
+        "label": "wetterlind",
+        "source": "login"
+      },
+      "account": {
+        "email": "wetterlind@example.test",
+        "organization": "wetterlind@example.test's Organization",
+        "plan": "max"
+      },
+      "fetchedAt": "2026-10-16T14:15:53.578Z",
+      "observation": {
+        "schemaVersion": 1,
+        "source": "anthropic.oauth.usage",
+        "observedAt": "2026-10-16T14:15:53.578Z",
+        "refreshIntervalMs": 900000,
+        "usedPercent": 0,
+        "remainingPercent": 100,
+        "resetsAt": "2026-10-21T07:00:00+00:00"
+      },
+      "limits": [
+        {
+          "id": "session",
+          "kind": "session",
+          "scopeName": null,
+          "usedPercent": 4,
+          "resetsAt": "2026-10-16T15:50:01.203333+00:00",
+          "severity": "normal",
+          "isActive": false
+        },
+        {
+          "id": "weekly_all",
+          "kind": "weekly_all",
+          "scopeName": null,
+          "usedPercent": 97,
+          "resetsAt": "2026-10-21T07:00:00.203354+00:00",
+          "severity": "critical",
+          "isActive": true
+        },
+        {
+          "id": "weekly_fable",
+          "kind": "weekly_scoped",
+          "scopeName": "Fable",
+          "usedPercent": 0,
+          "resetsAt": "2026-10-21T07:00:00+00:00",
+          "severity": "normal",
+          "isActive": false
+        }
+      ],
+      "sharedBy": [
+        {
+          "id": "wetterlind",
+          "key": "claude:login:wetterlind",
+          "source": "login"
+        }
+      ],
+      "inUse": []
+    },
+    {
+      "ok": false,
+      "engine": "kimi",
+      "provider": "kimi",
+      "profile": {
+        "id": "1",
+        "key": "kimi:1",
+        "label": "wetterlind@example.test",
+        "source": "primary"
+      },
+      "error": "credentials_expired",
+      "inUse": []
+    },
+    {
+      "ok": false,
+      "engine": "kimi",
+      "provider": "kimi",
+      "profile": {
+        "id": "2",
+        "key": "kimi:2",
+        "label": "adelost@example.test",
+        "source": "configured"
+      },
+      "error": "credentials_expired",
+      "inUse": []
+    }
+  ],
+  "claude": {
+    "ok": true,
+    "engine": "claude",
+    "provider": "claude",
+    "profile": {
+      "id": "1",
+      "key": "claude:1",
+      "label": "adelost@example.test",
+      "source": "primary"
+    },
+    "account": {
+      "email": "adelost@example.test",
+      "organization": "adelost@example.test's Organization",
+      "plan": "max"
+    },
+    "fetchedAt": "2026-10-16T14:15:53.517Z",
+    "observation": {
+      "schemaVersion": 1,
+      "source": "anthropic.oauth.usage",
+      "observedAt": "2026-10-16T14:15:53.517Z",
+      "refreshIntervalMs": 900000,
+      "usedPercent": 0,
+      "remainingPercent": 100,
+      "resetsAt": "2026-10-21T00:00:00+00:00"
+    },
+    "limits": [
+      {
+        "id": "session",
+        "kind": "session",
+        "scopeName": null,
+        "usedPercent": 8,
+        "resetsAt": "2026-10-16T17:10:00.101716+00:00",
+        "severity": "normal",
+        "isActive": false
+      },
+      {
+        "id": "weekly_all",
+        "kind": "weekly_all",
+        "scopeName": null,
+        "usedPercent": 85,
+        "resetsAt": "2026-10-21T00:00:00.101740+00:00",
+        "severity": "warning",
+        "isActive": true
+      },
+      {
+        "id": "weekly_fable",
+        "kind": "weekly_scoped",
+        "scopeName": "Fable",
+        "usedPercent": 0,
+        "resetsAt": "2026-10-21T00:00:00+00:00",
+        "severity": "normal",
+        "isActive": false
+      }
+    ],
+    "sharedBy": [
+      {
+        "id": "1",
+        "key": "claude:1",
+        "source": "primary"
+      },
+      {
+        "id": "2",
+        "key": "claude:2",
+        "source": "configured"
+      }
+    ]
+  },
+  "codex": {
+    "ok": true,
+    "engine": "codex",
+    "provider": "codex",
+    "profile": {
+      "id": "1",
+      "key": "codex:1",
+      "label": "wetterlind@example.test",
+      "source": "primary"
+    },
+    "account": {
+      "email": "adelost@example.test",
+      "plan": "pro"
+    },
+    "observation": {
+      "schemaVersion": 1,
+      "source": "codex.app_server.rate_limits",
+      "observedAt": "2026-10-16T14:08:31.044Z",
+      "refreshIntervalMs": 900000,
+      "usedPercent": 47,
+      "remainingPercent": 53,
+      "resetsAt": "2026-10-22T06:13:29.000Z"
+    },
+    "limits": [
+      {
+        "capturedAt": "2026-10-16T14:08:31.044Z",
+        "limitId": "codex",
+        "limitName": null,
+        "planType": "pro",
+        "windows": [
+          {
+            "id": "primary",
+            "usedPercent": 47,
+            "windowMinutes": 10080,
+            "resetsAt": "2026-10-22T06:13:29.000Z"
+          }
+        ]
+      }
+    ]
+  },
+  "kimi": {
+    "ok": false,
+    "engine": "kimi",
+    "provider": "kimi",
+    "profile": {
+      "id": "1",
+      "key": "kimi:1",
+      "label": "wetterlind@example.test",
+      "source": "primary"
+    },
+    "error": "credentials_expired"
+  },
+  "panesOnUnknownLogin": []
+}

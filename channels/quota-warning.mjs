@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { compactPaneList, formatReset } from "../core/quota-format.mjs";
+import { compactPaneList } from "../core/quota-format.mjs";
 
 const HOUR = 3_600_000;
 // Mattias 2026-10-16: "en cool down på 6 timmar på 80-90% och sen cooldown på 3 timmar på 90 till 100 %".
@@ -60,7 +60,7 @@ export function weeklyQuotaOf(account) {
 }
 
 const providerName = account => ({ claude: "Claude", codex: "Codex", kimi: "Kimi" })[account.provider] || account.provider;
-const emailOf = account => account.account?.email || account.profile?.label || "okänd inloggning";
+const emailOf = account => account.account?.email || account.profile?.label || "unknown login";
 const loggedOut = account => !account.ok && !account.inUse?.length && [
   "login_expired", "credentials_expired", "credentials_unavailable", "login_required",
 ].includes(account.error);
@@ -77,32 +77,44 @@ function actionLine(accounts, config, now) {
     if (!account.inUse?.length || !(weekly?.usedPercent >= config.warnPercent) || !(Date.parse(weekly.resetsAt) > now)) continue;
     const best = spareAccounts(accounts, account, config, now)[0];
     if (!best) continue;
-    const target = `${providerName(best)} ${best.profile.id} ${emailOf(best)} (${weeklyQuotaOf(best).usedPercent} %)`;
-    const scope = "Övriga paneler behåller sina konton; paneler kan använda olika konton samtidigt.";
+    const target = `${providerName(best)} ${best.profile.id} ${emailOf(best)} (${weeklyQuotaOf(best).usedPercent}%)`;
+    const scope = "Other panes keep their accounts.";
     if (account.provider === "codex") {
       const pane = account.inUse[0];
-      const state = weekly.usedPercent >= 100 ? "har fullt konto" : `har använt ${weekly.usedPercent} %`;
-      return `${pane} ${state}: \`//switch ${best.profile.id}\` i ${pane} flyttar bara ${pane} till ${target}. ${scope}`;
+      const state = weekly.usedPercent >= 100 ? "is full" : `is at ${weekly.usedPercent}%`;
+      return `**${pane}** ${state}. Write \`//switch ${best.profile.id}\` in ${pane} to move only ${pane} to ${target}. ${scope}`;
     }
     // /byt is a fleet plan, never a pane-local switch.
-    return `Alla Claude-paneler: \`/byt ${emailOf(best)}\` visar planen till ${target}; \`/byt ${emailOf(best)} ok\` flyttar bara panelerna planen godkänner. ${scope}`;
+    return `Claude panes are at ${weekly.usedPercent}%. \`/byt ${emailOf(best)}\` shows the plan to ${target}; \`/byt ${emailOf(best)} ok\` moves only the panes the plan approves. ${scope}`;
   }
-  return "Ingen åtgärd.";
+  return "no action needed";
+}
+
+function resetLabel(resetsAt) {
+  const at = new Date(resetsAt);
+  if (!resetsAt || !Number.isFinite(at.getTime())) return "reset unknown";
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(at).map(({ type, value }) => [type, value]));
+  return `resets ${parts.month} ${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
 /** WHAT: Formats one scoped action and every account with its panes. WHY: Lets the human see unused logins and which pane a switch would move. */
 export function formatQuotaWarning(snapshot, { config = parseQuotaWarningConfig(), now = Date.now() } = {}) {
   const accounts = snapshot?.accounts || [], active = accounts.filter(account => !loggedOut(account));
-  const lines = active.map(account => {
+  const lines = active.flatMap(account => {
     const weekly = weeklyQuotaOf(account) || account.limits?.find(limit => limit.kind === "weekly");
     const slots = account.sharedBy?.filter(member => member.source !== "login").map(member => member.id);
     const id = slots?.length ? slots.join("+") : account.profile?.id;
-    const usage = weekly ? `${weekly.usedPercent} % av veckan, ${formatReset(weekly.resetsAt) || "reset okänd"}` : "veckokvot okänd, reset okänd";
-    const panes = account.inUse?.length ? `paneler ${compactPaneList(account.inUse)}` : "ingen panel";
-    return `${providerName(account)}${id ? ` ${id}` : ""} ${emailOf(account)}: ${usage}; ${panes}.`;
+    const known = Number.isFinite(weekly?.usedPercent);
+    const icon = !known ? "⚪" : weekly.usedPercent >= config.reservePercent ? "🔴" : weekly.usedPercent >= config.warnPercent ? "⚠️" : "🟢";
+    const usage = known ? `**${weekly.usedPercent}%** used` : "weekly unknown";
+    const panes = account.inUse?.length ? compactPaneList(account.inUse) : "no panes";
+    return [`${icon} **${providerName(account)}${id ? ` ${id}` : ""}** · ${emailOf(account)} · ${usage} · ${resetLabel(weekly?.resetsAt)}`,
+      `↳ ${panes}`];
   });
   const out = accounts.filter(loggedOut).map(account => `${providerName(account)} ${emailOf(account)}`);
-  return [actionLine(accounts, config, now), ...lines, ...(out.length ? [`Utloggade: ${out.join(" · ")}`] : [])].join("\n");
+  return [`**Weekly quota** · ${actionLine(accounts, config, now)}`, ...lines, ...(out.length ? [`Logged out: ${out.join(" · ")}`] : [])].join("\n");
 }
 
 /**
