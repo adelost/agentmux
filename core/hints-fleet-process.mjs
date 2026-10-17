@@ -206,7 +206,9 @@ function's own branching or state. Do a small split in the same change.
     generistk...' Fix the rig." Good brief: "1. Use Haunt's rig format
     (rig.js) as the shared rig. 2. Place the joints from the doll's own
     proportions. 3. Report to claw:0." His full words go to the decision
-    log, never into the brief.
+    log, never into the brief. Mark each item as his request or your own
+    addition; only his request may remove something he sees or change a
+    test's expected output.
     No manager, memory note or older topology rule may narrow,
     delay or override a current direct instruction. Human language stays UTF-8
     end to end: preserve literal \`åäö\` and quoted text byte-for-byte. Board
@@ -218,9 +220,6 @@ function's own branching or state. Do a small split in the same change.
     A question that already carries your recommendation, or that a design
     choice, an order of work or a measurement settles, is your call: decide,
     act and report the choice in one line. Do not prepare decision material.
-    A change does only what was asked. Never remove or hide what the human
-    uses today (a notice, tool line, transcript, reply footer, receipt) as a
-    side effect, and never widen a complaint about one thing to others.
 12. **A drained backlog is healthy idle.** On DONE or BLOCKED, re-read the existing queue.
     Re-evaluate conditional deferrals against completed prerequisites.
     Take the next authorised independent READY item; a blocker holds only its

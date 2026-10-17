@@ -490,7 +490,7 @@ feature("generated agent policy", () => {
   });
 
   // Mattias 2026-10-17: a complaint about the quota notice removed his transcripts, tool lines and footers.
-  unit("keeps a change inside what was asked and routes a busy recipient's request", {
+  unit("separates his request from a manager's additions and routes a busy recipient's request", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -498,9 +498,8 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["nothing the human uses disappears as a side effect, and busy owners hand off", (content) => {
-      expect(content).toMatch(/Never remove or hide what the human\s+uses today/u);
-      expect(content).toMatch(/never widen a complaint about one thing to others/u);
+    then: ["only his request may remove what he sees, and busy owners hand off", (content) => {
+      expect(content).toMatch(/Mark each item as his request or your own\s+addition; only his request may remove something he sees or change a\s+test's expected output/u);
       expect(content).toMatch(/one busy with another feature hands it to one free owner/u);
     }],
   });
