@@ -35,7 +35,7 @@ const TEST_ALIASES = {
     "core/unmapped-channel.test.mjs"],
   "bot.mjs": ["channels/quota-warning-runtime.test.mjs"],
   "channels/fixtures/quota-warning-20261016.json": ["channels/quota-warning.test.mjs"],
-  "agent.mjs": ["core/tui-stall-recovery.test.mjs"],
+  "agent.mjs": ["core/tui-stall-recovery.test.mjs", "core/claude-reboot-idle.test.mjs"],
   "index.mjs": ["core/delivery-notices.test.mjs"],
   "bin/agent-cli.mjs": ["cli/restart-ready.test.mjs"],
   "cli/commands.mjs": ["cli.test/commands.test.mjs"],

@@ -141,9 +141,10 @@ export function createTmuxAdapter({ socket, exec }) {
       await raw(`resize-pane -Z -t ${q(target)}`);
     },
 
-    /** Listed pane count. Empty output is 0, never a default; callers decide what 0 means. */
+    /** Listed pane count. Recheck one empty response after restore; a second empty stays 0 for the caller's layout refusal. */
     async paneCount(name) {
-      const { stdout } = await raw(`list-panes -t ${q(name)}`);
+      let { stdout } = await raw(`list-panes -t ${q(name)}`);
+      if (!stdout.trim()) ({ stdout } = await raw(`list-panes -t ${q(name)}`));
       return stdout.split("\n").filter((line) => line.trim()).length;
     },
 

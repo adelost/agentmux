@@ -37,6 +37,7 @@ import { createKimiIngestProbe } from "./core/kimi-ingest-probe.mjs";
 import { createPromptEcho } from "./core/prompt-echo.mjs";
 import { createPaneMemorySnapshot, resolveMemoryResponsePrompt } from "./core/delivery-memory-context.mjs";
 import { createClaudeSubmitRescue } from "./core/claude-submit-rescue.mjs";
+import { rebootedClaudeIsIdle } from "./core/claude-reboot-idle.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { claudeProjectDir, classifyHistoryRead } from "./core/claude-paths.mjs";
@@ -749,10 +750,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         const r = qwenJournal.isBusy(dir); if (r !== null) return r;
       } else if (dialect === "claude") {
         const r = isBusyFromJsonl(dir, promptText);
-        if (r !== null) return r;
-        // jsonl exists but our prompt isn't there yet. Claude hasn't
-        // written it. Assume busy so we keep polling. workMaxMs is the
-        // safety escape if this never resolves.
+        if (r !== null) return r && !await rebootedClaudeIsIdle({ dir, procRoot,
+          capture: () => captureScreen(agentName, pane), wait });
+        // A matching prompt is not written yet. Keep polling; workMaxMs bounds that wait.
         return true;
       }
     } catch (err) {

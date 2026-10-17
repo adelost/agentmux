@@ -257,6 +257,29 @@ feature("tmux adapter: parsed reads", () => {
     then: ["0", (n) => expect(n).toBe(0)],
   });
 
+  unit("paneCount rechecks one empty post-reboot listing without guessing a layout", {
+    given: ["an empty successful response followed by nine real pane rows", () => {
+      let reads = 0;
+      return createTmuxAdapter({ socket: "/tmp/amux.sock", exec: async () => ({
+        stdout: reads++ === 0 ? "" : Array.from({ length: 9 }, (_, i) => `${i}: pane`).join("\n"),
+      }) });
+    }],
+    when: ["counting the restored window", t => t.paneCount("claw")],
+    then: ["nine observed panes, never zero or an assumed default", count => expect(count).toBe(9)],
+  });
+
+  unit("paneCount preserves a failed empty-listing recheck", {
+    given: ["an empty response followed by a lost socket", () => {
+      let reads = 0;
+      return createTmuxAdapter({ socket: "/tmp/amux.sock", exec: async () => {
+        if (reads++ > 0) throw new Error("socket unavailable");
+        return { stdout: "" };
+      } });
+    }],
+    when: ["counting the window", t => t.paneCount("claw").catch(error => error)],
+    then: ["the socket failure still refuses layout changes", error => expect(error.message).toBe("socket unavailable")],
+  });
+
   unit("paneRows reads stable ids, process and a path containing a pipe", {
     given: ["two listed rows", () => fakeTmux({ stdout: "1|%9|0|bash|/repo/.agents/1\n0|%4|0|claude|/re|po/.agents/0\n" })],
     when: ["listing rows", async ({ t, calls }) => ({ rows: await t.paneRows("claw"), calls })],
