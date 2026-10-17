@@ -308,7 +308,7 @@ describe("Discord inbound reconciliation", () => {
     expect(store.read("100", "107")).toMatchObject({ status: "completed" });
   });
 
-  it("retries a one-shot voice notice with the same nonce after an accepted send loses its acknowledgement", async () => {
+  it("retries a transcript with the same Discord nonce after an accepted send loses its acknowledgement", async () => {
     const root = tempRoot();
     let clock = 1_000;
     const store = createDiscordInboundStore({
@@ -342,9 +342,7 @@ describe("Discord inbound reconciliation", () => {
     });
     const prompts = [];
     const onMessage = async (msg) => {
-      const prompt = await attachmentHandler.buildPrompt(msg, []);
-      await msg.sendTranscriptOnce("610", ["Rösten gick inte att skriva ut. Skriv meddelandet så länge."]);
-      prompts.push(prompt);
+      prompts.push(await attachmentHandler.buildPrompt(msg, []));
       return { delivered: true };
     };
     const reconciler = createInboundReconciler({ onMessage, state: state(), store,
@@ -373,7 +371,7 @@ describe("Discord inbound reconciliation", () => {
     });
   });
 
-  it("keeps two audio transcripts in the pane without public transcript effects", async () => {
+  it("keeps two audio attachments as separate transcript effects", async () => {
     const root = tempRoot();
     const store = createDiscordInboundStore({ rootDir: root,
       downloadBuffer: async (url) => Buffer.from(`bytes:${url}`) });
@@ -402,13 +400,14 @@ describe("Discord inbound reconciliation", () => {
 
     expect(await reconciler.reconcile(channel, "200")).toEqual({ replayed: 1, pending: 0 });
     expect(transcribe).toHaveBeenCalledTimes(2);
-    expect(channel.transcriptReplies).toHaveLength(0);
+    expect(channel.transcriptReplies).toHaveLength(2);
+    expect(new Set(channel.transcriptReplies.map(({ content }) => content.nonce)).size).toBe(2);
     expect(prompts[0]).toContain("first voice");
     expect(prompts[0]).toContain("second voice");
-    expect(store.read("200", "211").attachments).toEqual([
-      expect.objectContaining({ id: "611", transcript: "first voice" }),
-      expect.objectContaining({ id: "612", transcript: "second voice" }),
-    ]);
+    expect(store.read("200", "211").effects).toMatchObject({
+      "transcript-reply:611": { status: "sent" },
+      "transcript-reply:612": { status: "sent" },
+    });
   });
 
   it("recovers text, image, and audio across channels once, then a second restart is a no-op", async () => {
@@ -487,7 +486,7 @@ describe("Discord inbound reconciliation", () => {
     expect(prompts).toHaveLength(3);
     expect(prompts[1].prompt).toMatch(/\[image attached: .*511\.png\]/u);
     expect(prompts[2].prompt).toContain("[transcribed voice");
-    expect(channel.transcriptReplies).toHaveLength(0);
+    expect(channel.transcriptReplies).toHaveLength(1);
     expect(transcribe).toHaveBeenCalledOnce();
     expect(firstStore.cursor("100")).toBe("111");
     expect(firstStore.cursor("200")).toBe("210");
@@ -506,7 +505,7 @@ describe("Discord inbound reconciliation", () => {
     expect(await second.reconcile(channel, "100")).toMatchObject({ replayed: 0, pending: 0 });
     expect(await second.reconcile(channel, "200")).toMatchObject({ replayed: 0, pending: 0 });
     expect(prompts).toHaveLength(3);
-    expect(channel.transcriptReplies).toHaveLength(0);
+    expect(channel.transcriptReplies).toHaveLength(1);
     expect(transcribe).toHaveBeenCalledOnce();
     expect(queue.list("skybar", 3)).toHaveLength(2);
     expect(queue.list("lsrc", 5)).toHaveLength(1);

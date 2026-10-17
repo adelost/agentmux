@@ -30,7 +30,7 @@ function fixture(status) {
 }
 
 describe("Discord transcript journal compatibility", () => {
-  it.each(["sending", "sent"])("keeps a legacy %s one-shot notice idempotent without reposting", async (status) => {
+  it.each(["sending", "sent"])("resumes a legacy %s first reply without reposting", async (status) => {
     const { store } = await fixture(status);
     const replyTo = vi.fn(async () => { throw new Error("duplicate transcript reply"); });
     const findMessageByNonce = vi.fn(async (_channelId, nonce) =>
@@ -43,11 +43,7 @@ describe("Discord transcript journal compatibility", () => {
     const reconciler = createInboundReconciler({ store, state: null,
       resolveTarget: () => null,
       onMessage: async (msg) => {
-        const prompt = await attachmentHandler.buildPrompt(msg, []);
-        // Successful STT no longer posts a copy. Exercise the retained one-shot
-        // transport directly, also used by short voice failure notices.
-        await msg.sendTranscriptOnce("610", ["Rösten gick inte att skriva ut. Skriv meddelandet så länge."]);
-        prompts.push(prompt);
+        prompts.push(await attachmentHandler.buildPrompt(msg, []));
         return { delivered: true };
       } });
 
