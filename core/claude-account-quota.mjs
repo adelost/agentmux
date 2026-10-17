@@ -31,6 +31,9 @@ export const CLAUDE_QUOTA_SOURCE = "anthropic.oauth.usage";
 /** WHAT: Defines Claude Code 2.1's refresh-lock stale window. WHY: Keeps a dead holder's lock from blocking refresh forever. */
 export const CLAUDE_REFRESH_LOCK_STALE_MS = 60_000;
 
+/** WHAT: Names why a request got no answer, "TimeoutError" or "TypeError:ECONNRESET". WHY: Keeps a network failure diagnosable instead of a bare label. */
+export const networkCause = (error) => [error?.name || "Error", error?.cause?.code].filter(Boolean).join(":");
+
 const typedFailure = (error, profile = null) => ({
   ok: false,
   engine: "claude",
@@ -134,8 +137,8 @@ export async function refreshClaudeCredentials(document, {
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch {
-    return { ok: false, error: "network_error" };
+  } catch (error) {
+    return { ok: false, error: "network_error", cause: networkCause(error) };
   }
   if (!response.ok) {
     return { ok: false, error: response.status === 400 || response.status === 401
@@ -225,7 +228,7 @@ export async function readClaudeQuota({
     const refreshed = await renewUnderLock(credentialsPath, credentials.accessToken, {
       lock, fetchImpl, timeoutMs, now, ...(persist ? { persist } : {}),
     });
-    if (!refreshed.ok) return typedFailure(refreshed.error, profile);
+    if (!refreshed.ok) return { ...typedFailure(refreshed.error, profile), ...(refreshed.cause ? { cause: refreshed.cause } : {}) };
     document = refreshed.document;
     credentials = document.claudeAiOauth;
   }
@@ -240,8 +243,8 @@ export async function readClaudeQuota({
       },
       signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch {
-    return typedFailure("network_error", profile);
+  } catch (error) {
+    return { ...typedFailure("network_error", profile), cause: networkCause(error) };
   }
   if (!response.ok) {
     const error = response.status === 401 && profile ? "login_required" : `http_${response.status}`;

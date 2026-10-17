@@ -82,6 +82,22 @@ feature("Claude Code account quota", () => {
       expect(ctx.fetchImpl).toHaveBeenCalledTimes(1);
     }],
   });
+
+  // 2026-10-17: Claude W's network_error said nothing about why the request got no answer.
+  unit("a request that gets no answer keeps its cause", {
+    given: ["a valid login and a usage request that times out", () => {
+      const credentialsPath = join(mkdtempSync(join(tmpdir(), "amux-claude-timeout-")), ".credentials.json");
+      writeFileSync(credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: "fresh", expiresAt: NOW + 3_600_000 } }));
+      const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+      const reset = Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }) });
+      return { credentialsPath, failures: [timeout, reset] };
+    }],
+    when: ["collecting twice", ({ credentialsPath, failures }) => Promise.all(failures.map(failure =>
+      readClaudeQuota({ profile: { ...PROFILE, credentialsPath }, credentialsPath, fetchImpl: async () => { throw failure; }, now: () => NOW })))],
+    then: ["both are network errors that name their cause", (results) => {
+      expect(results.map(result => [result.error, result.cause])).toEqual([["network_error", "TimeoutError"], ["network_error", "TypeError:ECONNRESET"]]);
+    }],
+  });
 });
 
 feature("Claude token refresh shares Claude Code's lock", () => {

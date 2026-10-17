@@ -13,6 +13,11 @@ import { tryLockDir } from "./dir-lock.mjs";
 
 /** WHAT: Defines the minimum time between usage calls for one account. WHY: Keeps all readers inside the provider's per-account budget. */
 export const CLAUDE_USAGE_MIN_INTERVAL_MS = 5 * 60_000;
+// 2026-10-17 11:00-13:40Z both Claude accounts lost about every other reading to network_error, and each one
+// stood for five minutes in every reader, so the stats push, every 10.5 minutes, showed none for Claude W.
+// A request that got no answer is tried again after a minute: at most one more usage call per failure.
+/** WHAT: Defines how long a reading that got no answer stands. WHY: Keeps one dropped request from blanking every reader for five minutes. */
+export const CLAUDE_NETWORK_RETRY_MS = 60_000;
 // One read is at most a 10 s refresh plus a 10 s usage request.
 const READ_LOCK_STALE_MS = 30_000;
 const WAIT_STEP_MS = 250;
@@ -37,7 +42,7 @@ const windowResetSince = (result, now) => result?.ok === true && Array.isArray(r
   && result.limits.some((limit) => Date.parse(limit?.resetsAt) <= now);
 
 const isFresh = (entry, now, notBefore) => Number.isFinite(entry?.attemptedAt)
-  && now - entry.attemptedAt < CLAUDE_USAGE_MIN_INTERVAL_MS
+  && now - entry.attemptedAt < (entry.result?.error === "network_error" ? CLAUDE_NETWORK_RETRY_MS : CLAUDE_USAGE_MIN_INTERVAL_MS)
   && entry.attemptedAt >= notBefore
   && !windowResetSince(entry.result, now);
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { feature, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
 import {
+  CLAUDE_NETWORK_RETRY_MS,
   CLAUDE_USAGE_MIN_INTERVAL_MS,
   claudeQuotaBudgetKey,
   readClaudeQuotaBudgeted,
@@ -130,6 +131,30 @@ feature("one Claude usage call per account per five minutes", () => {
       expect(history.map((point) => [point.at - NOW, point.usedPercent])).toEqual([
         [0, 40], [CLAUDE_USAGE_MIN_INTERVAL_MS, 42],
       ]);
+    }],
+  });
+});
+
+// 2026-10-17: one dropped request stood five minutes in every reader, and the stats push missed Claude W.
+feature("a reading that got no answer stands one minute", () => {
+  unit("a network error is read again after a minute, a provider refusal only after five", {
+    given: ["one account whose reads fail by network, then by a 429", () => {
+      const results = [{ ok: false, error: "network_error", cause: "TimeoutError" }, usage(slot("1")),
+        { ok: false, error: "http_429" }, usage(slot("1"))];
+      return budget({ read: vi.fn(async () => results.shift()) });
+    }],
+    when: ["reading just before and after each window", async (ctx) => {
+      const at = (ms) => readClaudeQuotaBudgeted({ ...ctx, profile: slot("1"), now: () => NOW + ms });
+      const seen = [];
+      for (const ms of [0, CLAUDE_NETWORK_RETRY_MS - 1, CLAUDE_NETWORK_RETRY_MS,
+        10 * 60_000, 10 * 60_000 + CLAUDE_NETWORK_RETRY_MS, 10 * 60_000 + CLAUDE_USAGE_MIN_INTERVAL_MS]) {
+        seen.push((await at(ms)).error ?? "ok");
+      }
+      return { ctx, seen };
+    }],
+    then: ["the network error clears after its minute and the refusal holds its five", ({ ctx, seen }) => {
+      expect(seen).toEqual(["network_error", "network_error", "ok", "http_429", "http_429", "ok"]);
+      expect(ctx.read).toHaveBeenCalledTimes(4);
     }],
   });
 });
