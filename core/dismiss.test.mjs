@@ -1,5 +1,6 @@
 import { component, expect, feature } from "bdd-vitest";
 import { findBlockingPrompt } from "./dismiss.mjs";
+import { readFileSync } from "node:fs";
 
 const activeSafetyReview = `
 Additional safety checks
@@ -190,5 +191,39 @@ feature("blocking prompt recognition", () => {
     then: ["no blocker is inferred", (prompt) => {
       expect(prompt).toBeNull();
     }],
+  });
+});
+
+
+// Codex 0.163.0: composer and option 2 share a row; the hint shares status.
+// The private captured frame can replace this deidentified structural fixture.
+const currentGoalOverlay = process.env.AMUX_PAUSED_GOAL_CAPTURE
+  ? JSON.parse(readFileSync(process.env.AMUX_PAUSED_GOAL_CAPTURE, "utf8")).frame
+  : ["  >_ OpenAI Codex", "  prior text  Resume paused goal?",
+    ...Array.from({ length: 24 }, () => "              Goal: previously paused work"),
+    "                    › 1. Resume goal   Mark it active and continue when idle",
+    "› Ask Codex to do an  2. Leave paused  Keep it paused; use /goal resume later",
+    "  GPT-6.1-Sol xhigh   enter select · esc back                  led (/goal resume)",
+    "  ? for shortcuts                                         ⚠ 2 warnings · f2 to view"].join("\n");
+
+feature("Codex 0.163 mixed startup overlay", () => {
+  component("the captured menu leaves the existing goal paused", {
+    when: ["the composer is before the mixed status hint", () => findBlockingPrompt(currentGoalOverlay)],
+    then: ["only the Leave paused navigation is selected", prompt =>
+      expect(prompt).toMatchObject({ name: "codex-paused-goal", keys: "Down Enter" })],
+  });
+  component("the mixed menu already on Leave paused receives only Enter", {
+    when: ["option two has the selection cursor", () => findBlockingPrompt(currentGoalOverlay
+      .replace("› 1. Resume goal", "  1. Resume goal").replace("2. Leave paused", "› 2. Leave paused"))],
+    then: ["the paused choice is confirmed", prompt => expect(prompt?.keys).toBe("Enter")],
+  });
+  component("a later composer, shell or work row makes the captured menu stale", {
+    when: ["new input follows the old overlay", () => [
+      "› Ask Codex to do anything", "› new user input", "user@host:~/project$", "• Working (2s • esc to interrupt)",
+    ].map(tail => findBlockingPrompt(`${currentGoalOverlay}\n${tail}`)).concat([
+      findBlockingPrompt(currentGoalOverlay.replace("› Ask Codex to do an", "› unsent private input")),
+      findBlockingPrompt(pausedGoalOverlay.replace("› Ask Codex to do anything", "› unsent private input")),
+    ])],
+    then: ["none receives keys", prompts => expect(prompts).toEqual([null, null, null, null, null, null])],
   });
 });

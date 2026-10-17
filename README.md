@@ -752,6 +752,12 @@ See `agentmux.yaml.example` for a fuller project config example.
 
 ## Troubleshooting
 
+If a Codex model change stopped during startup, retry the explicit model
+command, for example `amux model project -p 6 sol xhigh`. It resumes the recorded
+session, keeps compact and input checks, and clears the saved transition block
+only after the selected model is verified. An automatic wake does not erase
+that block or replay a message. Startup goal menus choose Leave paused.
+
 If a pane does not respond:
 
 ```bash

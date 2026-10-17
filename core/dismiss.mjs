@@ -41,11 +41,12 @@ function activeWorkspaceTrustCursor(text) {
   return cursor === exit && trust === exit + 1 ? "exit-above-trust" : null;
 }
 
-// Codex 0.162 draws selection menus as an overlay above the composer with this
-// hint. Only the composer and the status bar may sit below a live one; a newer
-// prompt or turn below it means the menu is history.
-const OVERLAY_HINT = /^enter select\s*·\s*esc back$/iu;
+// Codex overlays put the hint above the composer (0.162), or inside the
+// status row below a composer shared with option 2 (0.163).
+const OVERLAY_HINT = /\benter select\s*·\s*esc back\b/iu;
 const OVERLAY_MAX_LINES_BELOW = 4;
+const emptyCodexComposer = line => /^[›❯]\s*Ask Codex to do anything\s*$/u.test(line.trim());
+const codexStatusLine = line => /^(?:GPT-[\w.-]+(?:\s|$)|\? for shortcuts\b)/iu.test(line.trim());
 // The overlay shows the whole goal text, which ran to eight lines on lsrc:3,
 // so its header can sit far above the options.
 const OVERLAY_MAX_LINES = 40;
@@ -56,7 +57,14 @@ function liveCodexMenuLines(text, footer) {
   if (footer.test(lines.at(-1)?.trim() || "")) return lines.slice(-10);
   const hint = lines.findLastIndex(line => OVERLAY_HINT.test(line.trim()));
   if (hint < 0 || lines.length - 1 - hint > OVERLAY_MAX_LINES_BELOW) return null;
-  if (!/^[›❯]\s/u.test(lines[hint + 1]?.trim() || "")) return null;
+  const below = lines.slice(hint + 1);
+  if (/^enter select/iu.test(lines[hint].trim())) {
+    if (!below.length || !emptyCodexComposer(below[0]) || !below.slice(1).every(codexStatusLine)) return null;
+  } else {
+    const sharedComposer = /^[›❯]\s+Ask Codex to do an(?:ything)?\s+[›❯]?\s*2\.\s/u;
+    if (!codexStatusLine(lines[hint]) || !sharedComposer.test(lines[hint - 1]?.trim() || "")
+        || !below.every(line => /^\? for shortcuts\b/u.test(line.trim()))) return null;
+  }
   return lines.slice(0, hint);
 }
 
