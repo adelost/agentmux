@@ -59,6 +59,8 @@ const TEST_ALIASES = {
   "channels/jsonl-watcher.mjs": ["test/jsonl-watcher.test.mjs"],
   "channels/native-runtime-watcher.mjs": ["test/native-runtime-watcher.test.mjs"],
   "core/mirror-copy.mjs": ["cli/tmux.test.mjs", "cli/composer-control.test.mjs"],
+  "cli/send-notify.mjs": ["cli.test/send-notify.test.mjs"],
+  "core/delivery-notice-copy.mjs": ["core/delivery-notices.test.mjs", "core/concise-notices.test.mjs"],
   "core/user-notification-copy.mjs": ["core/concise-notices.test.mjs", "cli.test/send-notify.test.mjs"],
   "core/compaction-notice.mjs": ["test/jsonl-watcher.test.mjs"],
   "cli/nightly-compact.mjs": ["test/nightly-compact.test.mjs", "cli/stop-compact.test.mjs"],
