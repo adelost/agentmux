@@ -20,10 +20,10 @@ feature("morning digest composition", () => {
     })],
     then: ["one message with all three sections", (result) => {
       expect(result).toContain("God morgon! Din kö:");
-      expect(result).toContain("📋 Todos: 2 aktiva");
-      expect(result).toContain("🎫 Väntar på ditt svar på boarden (2):");
+      expect(result).toContain("\nTodos: 2 aktiva");
+      expect(result).toContain("\nVäntar på ditt svar på boarden (2):");
       expect(result).toContain("SRC-0030 [source] Scoping: close-mekanismen");
-      expect(result).toContain("🙋 Öppna frågor från panes (1):");
+      expect(result).toContain("\nÖppna frågor från panes (1):");
       expect(result).toContain("ai:2 (3h): Färg A eller B?");
     }],
   });
@@ -46,7 +46,7 @@ feature("morning digest composition", () => {
       boardFailures: ["skydive"],
     })],
     then: ["the failure IS the message", (result) => {
-      expect(result).toContain("⚠️ Kunde inte läsa board: skydive");
+      expect(result).toContain("\nKunde inte läsa board: skydive");
       expect(result).toContain("INTE verifierad");
     }],
   });

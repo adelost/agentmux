@@ -847,7 +847,7 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
     then: ["Discord gets one notice that names the refusal", (ctx) => {
       try {
         expect(ctx.discord.sends.map((send) => send.payload)).toEqual([
-          `⚠️ **testagent:0** did not answer a message (${clock("2026-10-02T16:44:05.467Z")}). Codex stopped before any model ran: `
+          `**testagent:0** did not answer a message (${clock("2026-10-02T16:44:05.467Z")}). Codex stopped before any model ran: `
           + "The 'gpt-6.1' model is not supported when using Codex with a ChatGPT account. Nothing was processed, so send it again once this is fixed."]);
       } finally { ctx.cleanup(); }
     }],
@@ -870,7 +870,7 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
       try {
         expect(before).toBe(0);
         expect(ctx.discord.sends.map((send) => send.payload)).toEqual([
-          `⚠️ **testagent:0** did not answer a message (${clock("2026-10-02T16:45:02.224Z")}). Codex stopped before any model ran; `
+          `**testagent:0** did not answer a message (${clock("2026-10-02T16:45:02.224Z")}). Codex stopped before any model ran; `
           + "the pane shows why. Nothing was processed, so send it again once this is fixed."]);
       } finally { ctx.cleanup(); }
     }],

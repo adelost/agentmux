@@ -403,7 +403,7 @@ export function formatActiveList(parsed) {
 export function formatReminderSummary(parsed, maxChars = 180, { today } = {}) {
   const items = listRemindable(parsed, today ? { today } : {});
   if (items.length === 0) return "";
-  const titles = items.map((it) => (it.overdue ? "🔴 " : "") + it.text);
+  const titles = items.map((it) => (it.overdue ? "(försenad) " : "") + it.text);
   let body = `${items.length} aktiva todo${items.length === 1 ? "" : "s"}: `;
   const remaining = maxChars - body.length;
   let included = 0;

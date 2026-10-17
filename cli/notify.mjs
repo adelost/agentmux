@@ -136,7 +136,7 @@ function buildNotifier(channel, session, notifyUser) {
 }
 
 function notifyLevel(message) {
-  return /ERROR|FAILED|STUCK|TIMEOUT|MENU|PERMISSION|CRASH|❌|⚠️|🔐|📋|⏰/.test(message) ? "warn" : "done";
+  return /ERROR|FAILED|STUCK|TIMEOUT|MENU|PERMISSION|CRASH/.test(message) ? "warn" : "done";
 }
 
 async function safeGetStatus(agent, name, pane) {

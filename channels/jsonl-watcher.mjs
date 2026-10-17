@@ -468,7 +468,7 @@ export function createJsonlWatcher({
     for (const p of imagePaths) {
       const result = validateImagePath(p, statSync);
       if (result.ok) validFiles.push(result.path);
-      else failedMarkers.push(`⚠️ image skipped: \`${p}\` (${result.error})`);
+      else failedMarkers.push(`image skipped: \`${p}\` (${result.error})`);
     }
     const fullText = [cleanedText, ...failedMarkers].filter(Boolean).join("\n\n");
     return { fullText, validFiles, hasNarrative };

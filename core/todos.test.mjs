@@ -356,11 +356,11 @@ feature("listRemindable — morgonpingens urval (tjatighets-vakt)", () => {
     then: ["tom lista → cron är tyst", (items) => expect(items).toHaveLength(0)],
   });
 
-  unit("reminder-summary markerar overdue med 🔴 och är tom när inget är remindable", {
+  unit("reminder-summary markerar overdue med (försenad) och är tom när inget är remindable", {
     given: ["listan ovan", () => ({ parsed: parseTodos(FILE) })],
     when: ["formatting", ({ parsed }) => formatReminderSummary(parsed, 180, { today: "2026-07-11" })],
-    then: ["🔴 på deklarera, garaget saknas", (body) => {
-      expect(body).toContain("🔴 deklarera");
+    then: ["(försenad) på deklarera, garaget saknas", (body) => {
+      expect(body).toContain("(försenad) deklarera");
       expect(body).not.toContain("garaget");
     }],
   });

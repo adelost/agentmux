@@ -68,7 +68,7 @@ export function createCodexLimitRecovery({ state, broker, agent, notify, log = c
   }
   async function blocked(key, record, reason) {
     save(key, { ...record, phase: "blocked", reason });
-    await notify(`⚠️ **${key}** reached a Codex usage limit. Automatic account recovery stopped: ${reason}. Use //switch after resolving continuity.`,
+    await notify(`**${key}** reached a Codex usage limit. Automatic account recovery stopped: ${reason}. Use //switch after resolving continuity.`,
       { name: key.slice(0, key.lastIndexOf(":")), pane: Number(key.slice(key.lastIndexOf(":") + 1)) });
     save(key, { ...record, phase: "blocked", reason, notified: true });
   }

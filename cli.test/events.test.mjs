@@ -62,4 +62,20 @@ feature("createEventLogger", () => {
       rmSync(dir, { recursive: true, force: true });
     }],
   });
+  // Mattias 2026-10-17: no emoji in a notification he reads.
+  unit("posts the notification without the log line's symbol", {
+    given: ["a temp log file and a notifier", () => {
+      const dir = mkdtempSync(join(tmpdir(), "agentmux-events-test-"));
+      return { logFile: join(dir, "events.log"), dir, sent: [] };
+    }],
+    when: ["logging a finished turn", ({ logFile, sent }) => {
+      createEventLogger({ logFile, notify: async (text) => { sent.push(text); } })("✅", "ai", 0, "DONE", "finished task");
+      return sent;
+    }],
+    then: ["the notification starts with the pane, the log keeps its symbol", (sent, { logFile, dir }) => {
+      expect(sent).toEqual(["**ai** (pane 0): DONE\nfinished task"]);
+      expect(readFileSync(logFile, "utf-8")).toContain("✅ ai:0 DONE finished task");
+      rmSync(dir, { recursive: true, force: true });
+    }],
+  });
 });

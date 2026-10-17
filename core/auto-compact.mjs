@@ -166,7 +166,7 @@ export const refusalNeedsHeldNotice = (lastActivityMs, now, config) => Number.is
  */
 export function formatCompactHeldMessage(paneKey, reason, contextTokens, coldAtMs) {
   const coldAt = new Date(coldAtMs).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
-  return `⚠ Auto-compact of **${paneKey}** is held: ${reason}. It has ${contextTokens} context tokens and its prompt cache goes cold at ${coldAt}.`;
+  return `Auto-compact of **${paneKey}** is held: ${reason}. It has ${contextTokens} context tokens and its prompt cache goes cold at ${coldAt}.`;
 }
 
 /**
@@ -306,7 +306,7 @@ export function decideAutoCompactAction({
  */
 export function formatWarningMessage(paneKey, contextTokens, graceMs) {
   const secs = Math.round(graceMs / 1000);
-  return `⚠ Auto-compact in ${secs}s: **${paneKey}** has ${contextTokens} context tokens and is idle. Type anything (here or in tmux) to cancel.`;
+  return `Auto-compact in ${secs}s: **${paneKey}** has ${contextTokens} context tokens and is idle. Type anything (here or in tmux) to cancel.`;
 }
 
 // lsrc:2, 2026-09-27: "Auto-compact in 60s", then silence after the refusal.
@@ -315,7 +315,7 @@ export function formatWarningMessage(paneKey, contextTokens, graceMs) {
  * WHY: Keeps a refused compact from looking done after its warning.
  */
 export function formatCompactFailedMessage(paneKey, reason) {
-  return `⚠ Auto-compact of **${paneKey}** did not run: ${reason}. No new attempt until the pane has done new work.`;
+  return `Auto-compact of **${paneKey}** did not run: ${reason}. No new attempt until the pane has done new work.`;
 }
 
 // lsrc:2, 2026-10-02: warned at 09:03, refused before sending, then silence
@@ -325,9 +325,10 @@ export function formatCompactFailedMessage(paneKey, reason) {
  * WHY: Keeps a warning from ending in silence when every retry was refused.
  */
 export function formatCompactPostponedMessage(paneKey, reason) {
-  return `⚠ Auto-compact of **${paneKey}** postponed: ${reason}. The prompt cache has expired, so nothing runs now; the pane's next message decides whether to compact first.`;
+  return `Auto-compact of **${paneKey}** postponed: ${reason}. The prompt cache has expired, so nothing runs now; the pane's next message decides whether to compact first.`;
 }
 
+/** WHAT: Formats the notice that a pane is being compacted. WHY: Keeps the channel told before the pane's context shrinks. */
 export function formatCompactedMessage(paneKey, contextPercent) {
-  return `🗜 Auto-compacting **${paneKey}** (was ${contextPercent}%). Summary preserves recent context.`;
+  return `Auto-compacting **${paneKey}** (was ${contextPercent}%). Summary preserves recent context.`;
 }

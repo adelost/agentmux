@@ -328,7 +328,7 @@ feature("catchup body: count + previews composition (integration)", () => {
     }],
     then: ["count says 4 turns, previews show last 3 readable rows", ({ countLine, previews, ctx }) => {
       // count = 4 real user-turns after the cutoff ("old stuff" pre-dates)
-      expect(countLine).toMatch(/ℹ 4 turns since your last Discord sync/);
+      expect(countLine).toMatch(/^4 turns since your last Discord sync/);
       // previews = last 3 of the 4 turns. Turn 2/3 have assistant text,
       // turn 4 is pending (user-side). Tool-only is N/A here.
       expect(previews.length).toBe(3);

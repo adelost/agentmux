@@ -10,7 +10,7 @@ const TYPING_INTERVAL_MS = 8_000;
 /** WHAT: Formats one batch-level recovery notice. WHY: Keeps rare delivery repair visible without per-message spam. */
 export function formatRecoveredNotice(count) {
   const n = Math.max(0, Number(count) || 0);
-  return `ℹ Recovered ${n} message${n === 1 ? "" : "s"} missed during reconnect.`;
+  return `Recovered ${n} message${n === 1 ? "" : "s"} missed during reconnect.`;
 }
 
 function transcriptSender(record, store, channel, baseMessage) {

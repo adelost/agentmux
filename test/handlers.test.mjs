@@ -281,7 +281,7 @@ feature("/model dialect routing", () => {
     when: ["onMessage is called", async ({ onMessage, msg }) => onMessage(msg)],
     then: ["the reply names gpt-6.1-sol before the switch starts", (_, { msg, path }) => {
       try {
-        expect(msg.reply.mock.calls[0][0]).toMatch(/^🔄 Switching _ai:0 to gpt-6\.1-sol \(the only gpt-6\.1 model\)\./);
+        expect(msg.reply.mock.calls[0][0]).toMatch(/^Switching _ai:0 to gpt-6\.1-sol \(the only gpt-6\.1 model\)\./);
       } finally { unlinkSync(path); }
     }],
   });
@@ -315,7 +315,7 @@ feature("/model dialect routing", () => {
     }],
     then: ["the switch starts instead of refusing", (_, { msg, path, root }) => {
       try {
-        expect(msg.reply.mock.calls[0][0]).toMatch(/^🔄 Switching _ai:0 to gpt-6\.1-sol\./);
+        expect(msg.reply.mock.calls[0][0]).toMatch(/^Switching _ai:0 to gpt-6\.1-sol\./);
       } finally { unlinkSync(path); rmSync(root, { recursive: true, force: true }); }
     }],
   });
@@ -944,7 +944,7 @@ feature("renderCatchupLine: how the catch-up banner looks", () => {
       capped: false,
     })],
     then: ["contains 3 turns + latest", (r) => {
-      expect(r).toContain("ℹ 3 turns since your last Discord sync");
+      expect(r).toContain("3 turns since your last Discord sync");
       expect(r).toContain("latest:");
     }],
   });
@@ -955,7 +955,7 @@ feature("renderCatchupLine: how the catch-up banner looks", () => {
     })],
     then: ["'50+' phrase, busy tone, no timestamp", (r) => {
       expect(r).toContain("50+");
-      expect(r).toContain("you've been busy");
+      expect(r).toContain("You've been busy");
       expect(r).not.toContain("latest:");
     }],
   });
@@ -1083,7 +1083,7 @@ feature("onMessage: loop guard", () => {
       return { m3, attachments: ctx.attachments };
     }],
     then: ["m3.reply got the warning, m3 didn't reach attachments", ({ m3, attachments }) => {
-      const warningCalls = m3.reply.mock.calls.filter((c) => typeof c[0] === "string" && c[0].startsWith("⚠ Loop detected"));
+      const warningCalls = m3.reply.mock.calls.filter((c) => typeof c[0] === "string" && c[0].startsWith("Loop detected"));
       expect(warningCalls.length).toBe(1);
       // The 3rd message should not reach buildPrompt (guard is before attachments)
       // attachments.buildPrompt was called for m1 + m2 only → 2 times
@@ -1112,8 +1112,8 @@ feature("onMessage: loop guard", () => {
       return msgs;
     }],
     then: ["only 3rd posted a warning, 4th silently blocked", (msgs) => {
-      const warnOn3 = msgs[2].reply.mock.calls.some((c) => typeof c[0] === "string" && c[0].startsWith("⚠"));
-      const warnOn4 = msgs[3].reply.mock.calls.some((c) => typeof c[0] === "string" && c[0].startsWith("⚠"));
+      const warnOn3 = msgs[2].reply.mock.calls.some((c) => typeof c[0] === "string" && c[0].startsWith("Loop detected"));
+      const warnOn4 = msgs[3].reply.mock.calls.some((c) => typeof c[0] === "string" && c[0].startsWith("Loop detected"));
       expect(warnOn3).toBe(true);
       expect(warnOn4).toBe(false);
     }],

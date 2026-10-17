@@ -111,8 +111,8 @@ describe("Discord inbound reconciliation", () => {
 
   it("formats one batch-level recovery notice", () => {
     expect([formatRecoveredNotice(1), formatRecoveredNotice(2)]).toEqual([
-      "ℹ Recovered 1 message missed during reconnect.",
-      "ℹ Recovered 2 messages missed during reconnect.",
+      "Recovered 1 message missed during reconnect.",
+      "Recovered 2 messages missed during reconnect.",
     ]);
   });
 

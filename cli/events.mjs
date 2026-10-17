@@ -45,7 +45,8 @@ export function createEventLogger({ logFile = DEFAULT_LOG, notify = null } = {})
 
     // Full notification for done/problem events
     if (cat !== "compact" && notify) {
-      const lines = [`${icon} **${name}** (pane ${pane}): ${event}`, detail];
+      // Mattias 2026-10-17: no emoji in a notification; the icon stays in the local log line.
+      const lines = [`**${name}** (pane ${pane}): ${event}`, detail];
       const actions = buildActions(name, pane, event);
       if (actions.length) lines.push("", "**Actions:**", ...actions.map((a) => `\`${a}\``));
       if (output) lines.push("", "```", output.slice(0, 500), "```");

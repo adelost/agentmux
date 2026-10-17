@@ -19,7 +19,7 @@ describe("restored full notice copy, Mattias 2026-10-17", () => {
   it("answers an unmapped channel in one short line", () => {
     expect(unmappedChannelNotice("test")).toBe("#test is missing from the amux channel map, so no agent has got your message yet. Write in another pane's channel for now.");
   });
-  it("keeps a direct notification to one line and one symbol", () => {
-    expect(formatUserNotification("Behöver svar.\nVälj A.", { level: "error", title: "Fråga" })).toBe("🚨 **Fråga** (error)\nBehöver svar. Välj A.");
+  it("keeps a direct notification to one line, its level in words", () => {
+    expect(formatUserNotification("Behöver svar.\nVälj A.", { level: "error", title: "Fråga" })).toBe("**Fråga** (error)\nBehöver svar. Välj A.");
   });
 });

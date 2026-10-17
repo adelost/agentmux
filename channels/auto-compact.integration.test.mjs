@@ -312,7 +312,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     then: ["one warning, one notice with Claude's reason, and nothing more", (sends) => {
       expect(sends).toHaveLength(2);
       expect(sends[0]).toContain("Auto-compact in");
-      expect(sends[1]).toBe("⚠ Auto-compact of **test:0** did not run: Error during compaction: You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm). No new attempt until the pane has done new work.");
+      expect(sends[1]).toBe("Auto-compact of **test:0** did not run: Error during compaction: You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm). No new attempt until the pane has done new work.");
     }],
   });
 
@@ -378,7 +378,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       expect(state.runs).toBe(1);
       expect(state.sends).toHaveLength(2);
       // The before-delivery rule (channels/pause-compact.mjs) compacts Claude from 80k, not 210k.
-      expect(state.sends[1]).toBe("⚠ Auto-compact of **test:0** postponed: delivery-lease-busy. The prompt cache has expired, so nothing runs now; the pane's next message decides whether to compact first.");
+      expect(state.sends[1]).toBe("Auto-compact of **test:0** postponed: delivery-lease-busy. The prompt cache has expired, so nothing runs now; the pane's next message decides whether to compact first.");
     }],
   });
 
@@ -501,7 +501,7 @@ feature("a quiet pane the compact cannot reach is reported before its cache goes
     }],
     then: ["one warning, then one held notice that names the paste, before the cache is cold", (state) => {
       expect(state.sends).toHaveLength(2);
-      expect(state.sends[1]).toMatch(/^⚠ Auto-compact of \*\*test:0\*\* is held: the compact was refused: context-cost:not-idle:pasting\. It has 1000000 context tokens and its prompt cache goes cold at \d\d:\d\d\.$/u);
+      expect(state.sends[1]).toMatch(/^Auto-compact of \*\*test:0\*\* is held: the compact was refused: context-cost:not-idle:pasting\. It has 1000000 context tokens and its prompt cache goes cold at \d\d:\d\d\.$/u);
     }],
   });
 

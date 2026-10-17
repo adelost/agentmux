@@ -112,7 +112,7 @@ export function loopGuardKey(agentName, pane) {
 export function formatLoopGuardWarning({ text, count, ageSec }) {
   const preview = text.length > 20 ? text.slice(0, 17) + "…" : text;
   return (
-    `⚠ Loop detected: '${preview}' × ${count} in ${ageSec}s. Forwarding paused. ` +
+    `Loop detected: '${preview}' × ${count} in ${ageSec}s. Forwarding paused. ` +
     "Reply something different to resume, or run `amux esc` to clear pane state."
   );
 }

@@ -126,7 +126,7 @@ feature("a pane's own request to be compacted", () => {
         expect(ctx.runs).toEqual([{ pane: "lsrc:0", pauseTokens: 80_000, dry: false, focus: "behåll G4-siffrorna" }]);
         expect(ctx.requests.list()).toEqual([]);
         expect(ctx.lines.at(-1)).toMatchObject({ outcome: "compacted", cell: "self-request" });
-        expect(ctx.notices).toEqual(["lsrc:0 🗜 Self-compact **lsrc:0** at the end of its turn (150000 tokens), focus: behåll G4-siffrorna."]);
+        expect(ctx.notices).toEqual(["lsrc:0 Self-compact **lsrc:0** at the end of its turn (150000 tokens), focus: behåll G4-siffrorna."]);
       } finally { ctx.cleanup(); }
     }],
   });

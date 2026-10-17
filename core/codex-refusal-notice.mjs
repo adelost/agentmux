@@ -99,10 +99,10 @@ export function refusalNoticeText(paneName, refusals, reason, { autoCapacity = f
   const what = refusals.length === 1 ? "a message" : `${refusals.length} messages`;
   if (!autoCapacity && !refusals.some(refusal => refusal.requiresError)) {
     const why = reason ? `Codex stopped before any model ran: ${reason}` : "Codex stopped before any model ran; the pane shows why.";
-    return `⚠️ **${paneName}** did not answer ${what}${when}. ${why} Nothing was processed, so send it again once this is fixed.`;
+    return `**${paneName}** did not answer ${what}${when}. ${why} Nothing was processed, so send it again once this is fixed.`;
   }
   const why = reason ? `Codex stopped: ${reason}` : "Codex stopped before any model ran; the pane shows why.";
   const next = autoCapacity ? "AMUX will wait and continue automatically, up to three attempts, unless new input arrives."
     : "Continue the task once this is fixed.";
-  return `⚠️ **${paneName}** did not finish ${what}${when}. ${why} ${next}`;
+  return `**${paneName}** did not finish ${what}${when}. ${why} ${next}`;
 }

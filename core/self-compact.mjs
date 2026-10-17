@@ -37,9 +37,9 @@ export function selfCompactAdmission({ tokens, lastCompactAt = null, now }, poli
 /** WHAT: Words how a self-request ended for the pane's channel. WHY: Mirrors it like the automatic compactions, from one place. */
 export function formatSelfCompactNotice(paneKey, { outcome, tokens = null, detail = "", focus = "" }) {
   if (outcome === "compacted") {
-    return `🗜 Self-compact **${paneKey}** at the end of its turn${Number.isFinite(tokens) ? ` (${tokens} tokens)` : ""}${focus ? `, focus: ${focus}` : ""}.`;
+    return `Self-compact **${paneKey}** at the end of its turn${Number.isFinite(tokens) ? ` (${tokens} tokens)` : ""}${focus ? `, focus: ${focus}` : ""}.`;
   }
-  return `🗜 Self-compact **${paneKey}** ${outcome}: ${detail}`;
+  return `Self-compact **${paneKey}** ${outcome}: ${detail}`;
 }
 
 /** WHAT: Builds the request store shared by the CLI and the bridge. WHY: Keeps the file format in one place and injectable in tests. */

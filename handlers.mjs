@@ -125,24 +125,24 @@ export function formatCatchupTime(iso) {
 }
 
 /**
- * Decide whether to post a catch-up notice, and return the line to post.
- * Pure function: takes the count result + last-timestamp, returns a string
- * or null. Extracted so unit tests can verify the rendering without
+ * Pure function, extracted so unit tests can verify the rendering without
  * wiring up the full handlers module.
- *
  * @param {{count: number, latest: string|null, capped: boolean}|null} countResult
  * @returns {string|null}  line to post, or null for no-notice (count=0 or null)
+ *
+ * WHAT: Returns the catch-up line to post, or null when no turn was missed.
+ * WHY: Keeps the human from guessing how much happened while Discord was away.
  */
 export function renderCatchupLine(countResult) {
   if (!countResult || countResult.count <= 0) return null;
   const label = countResult.capped ? "50+" : String(countResult.count);
   if (countResult.capped) {
-    return `ℹ ${label} turns since last Discord sync — you've been busy!`;
+    return `${label} turns since last Discord sync. You've been busy!`;
   }
   const latest = countResult.latest ? formatCatchupTime(countResult.latest) : null;
   return latest
-    ? `ℹ ${label} turns since your last Discord sync (latest: ${latest})`
-    : `ℹ ${label} turns since your last Discord sync`;
+    ? `${label} turns since your last Discord sync (latest: ${latest})`
+    : `${label} turns since your last Discord sync`;
 }
 
 /**

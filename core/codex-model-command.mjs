@@ -47,7 +47,7 @@ export async function codexModelRequest({ state, name, pane, requested, models =
   const resolved = resolveCatalogCodexModel(requested, await models(selectedCodexProfile(state, name, pane)));
   if (!resolved.ok) return { ...resolved, reply: `${resolved.reason}. ${name}:${pane} keeps its current model.` };
   const match = resolved.requested ? ` (the only ${resolved.requested} model)` : "";
-  return { ...resolved, reply: `🔄 Switching ${name}:${pane} to ${resolved.model}${match}. This takes seconds, or minutes if a compact has to run first.` };
+  return { ...resolved, reply: `Switching ${name}:${pane} to ${resolved.model}${match}. This takes seconds, or minutes if a compact has to run first.` };
 }
 
 /** WHAT: Returns a shared session lease after bounded waiting. WHY: Prevents unrelated pane maintenance from rejecting an explicit model choice immediately. */

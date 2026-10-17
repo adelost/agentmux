@@ -769,7 +769,7 @@ feature("a self-request before the next delivery", () => {
         expect(ctx.commands).toEqual(["/compact behåll G4-siffrorna"]);
         expect(ctx.requests.list()).toEqual([]);
         await Promise.resolve();
-        expect(ctx.notices).toEqual(["🗜 Self-compact **claw:2** at the end of its turn (120000 tokens), focus: behåll G4-siffrorna."]);
+        expect(ctx.notices).toEqual(["Self-compact **claw:2** at the end of its turn (120000 tokens), focus: behåll G4-siffrorna."]);
       } finally { ctx.cleanup(); rmSync(ctx.dir, { recursive: true, force: true }); }
     }],
   });

@@ -36,19 +36,19 @@ const formatAge = (ageMs) => {
 export function composeMorningDigest({ todoSummary = null, boardDecisions = [],
   openAsks = [], boardFailures = [] } = {}) {
   const sections = [];
-  if (todoSummary) sections.push(`📋 Todos: ${todoSummary}`);
+  if (todoSummary) sections.push(`Todos: ${todoSummary}`);
   if (boardDecisions.length) {
-    sections.push([`🎫 Väntar på ditt svar på boarden (${boardDecisions.length}):`,
+    sections.push([`Väntar på ditt svar på boarden (${boardDecisions.length}):`,
       ...capped(boardDecisions.map((item) =>
         `  ${item.id} [${item.project}] ${item.title}`))].join("\n"));
   }
   if (openAsks.length) {
-    sections.push([`🙋 Öppna frågor från panes (${openAsks.length}):`,
+    sections.push([`Öppna frågor från panes (${openAsks.length}):`,
       ...capped(openAsks.map((ask) =>
         `  ${ask.key} (${formatAge(ask.ageMs)}): ${ask.promptPreview}`))].join("\n"));
   }
   if (boardFailures.length) {
-    sections.push(`⚠️ Kunde inte läsa board: ${boardFailures.join(", ")} — tom kö är INTE verifierad.`);
+    sections.push(`Kunde inte läsa board: ${boardFailures.join(", ")}. Tom kö är INTE verifierad.`);
   }
   if (!sections.length) return null;
   return `God morgon! Din kö:\n${sections.join("\n")}`;

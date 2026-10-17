@@ -192,7 +192,7 @@ function renderTurn(turn) {
   for (const path of paths) {
     const checked = validateImagePath(path, statSync);
     if (checked.ok) files.push(checked.path);
-    else failures.push(`⚠️ image skipped: \`${path}\` (${checked.error})`);
+    else failures.push(`image skipped: \`${path}\` (${checked.error})`);
   }
   return {
     text: [text, ...failures].filter(Boolean).join("\n\n"),
