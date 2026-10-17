@@ -9,6 +9,13 @@ import { downloadDiscordAttachment } from "./core/discord-attachment-download.mj
 // No whitelist needed. All non-audio attachments are downloaded and passed
 // to Claude, which can read most file types (PDF, images, text, archives, etc).
 
+/** WHAT: Dates a transcript that arrives after the pane got a failure notice. WHY: The pane may already have answered the person, so it must see the text is old. */
+function lateVoiceNote(msg) {
+  if (!msg.voiceFailedEarlier || !msg.createdTimestamp) return "";
+  const sent = new Date(Number(msg.createdTimestamp)).toISOString().slice(11, 16);
+  return `; sent ${sent}Z, delivered late after a failed transcription, so it may already be handled`;
+}
+
 /**
  * Dependencies:
  *   run              - promisified exec(`cmd`, timeoutMs) → { stdout, stderr }
@@ -71,8 +78,8 @@ export function createAttachmentHandler({
         // the prompt — anyone seeing it knows this is AI-transcribed and
         // may have word-level errors.
         const tagged = viaFallback
-          ? `[transcribed voice via whisper1 FALLBACK (gemini failed) — extra error-prone on technical terms, interpret intent] ${transcribed}`
-          : `[transcribed voice, may contain speech-to-text errors — interpret intent] ${transcribed}`;
+          ? `[transcribed voice via whisper1 FALLBACK (gemini failed); extra error-prone on technical terms, interpret intent${lateVoiceNote(msg)}] ${transcribed}`
+          : `[transcribed voice, may contain speech-to-text errors; interpret intent${lateVoiceNote(msg)}] ${transcribed}`;
         await replyWithTranscript(msg, att.id, transcribed, viaFallback);
         if (!rawText) rawText = tagged;
         else rawText = `${rawText}\n${tagged}`;

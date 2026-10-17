@@ -40,9 +40,8 @@ is_silent() {
   }'
 }
 
-silence_marker() {
-  local start="$1" end="$2"
-  printf '[tyst %d:%02d–%d:%02d]\n' "$((start / 60))" "$((start % 60))" "$((end / 60))" "$((end % 60))"
+range_marker() { # $1=label $2=start $3=end
+  printf '[%s %d:%02d–%d:%02d]\n' "$1" "$(($2 / 60))" "$(($2 % 60))" "$(($3 / 60))" "$(($3 % 60))"
 }
 
 DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO_FILE") || exit 1
@@ -52,7 +51,7 @@ LEVELS=$(audio_levels "$AUDIO_FILE") || { echo "[stt] audio level check failed" 
 read -r MEAN PEAK <<< "$LEVELS"
 if is_silent "$MEAN" "$PEAK"; then
   echo "[preflight] silent clip, skipping API call" >&2
-  silence_marker 0 "$TOTAL_SECONDS"
+  range_marker tyst 0 "$TOTAL_SECONDS"
   exit 0
 fi
 
@@ -70,21 +69,27 @@ try_backend() { # $1=backend $2=wall-clock-cap $3=clip
   timeout "$2" "$HOME/bin/transcribe" --backend "$1" --stdout --lang "$LANG" "$3"
 }
 
-transcribe_clip() {
-  local clip="$1" attempt TEXT rc
+has_words() { [ -n "${1//[[:space:]]/}" ]; }
+
+# A backend that answers with no words has heard the clip; the same audio
+# gets the same answer, so failing the message only made every retry repeat
+# it (2026-10-17). Mark the range instead. Only an unanswered call fails.
+transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
+  local clip="$1" attempt TEXT rc heard_no_words=false
   for attempt in 1 2; do
     if TEXT=$(try_backend gemini 100s "$clip"); then
-      [ -n "${TEXT//[[:space:]]/}" ] || { echo "[stt] empty segment transcript" >&2; return 1; }
-      printf '%s\n' "$TEXT"
-      return 0
+      if has_words "$TEXT"; then printf '%s\n' "$TEXT"; return 0; fi
+      heard_no_words=true
+      echo "[stt] gemini attempt $attempt/2 heard no words" >&2
+      continue
     else
       rc=$?
     fi
     echo "[stt] gemini attempt $attempt/2 failed (exit $rc)" >&2
   done
+  if $heard_no_words; then range_marker ohörbart "$2" "$3"; return 0; fi
   if TEXT=$(try_backend whisper1 60s "$clip"); then
-    [ -n "${TEXT//[[:space:]]/}" ] || { echo "[stt] empty segment transcript" >&2; return 1; }
-    printf '[stt-fallback:whisper1] %s\n' "$TEXT"
+    if has_words "$TEXT"; then printf '[stt-fallback:whisper1] %s\n' "$TEXT"; else range_marker ohörbart "$2" "$3"; fi
     return 0
   fi
   echo "[stt] gemini x2 + whisper1 all failed for $clip" >&2
@@ -98,7 +103,7 @@ transcribe_clip() {
 # failures behind a larger deadline. Keep Discord Opus compressed, matching the
 # successful incident reproduction. Other codecs use independent WAV headers.
 if ! awk -v duration="$DURATION" 'BEGIN { exit !(duration > 45) }'; then
-  transcribe_clip "$AUDIO_FILE"
+  transcribe_clip "$AUDIO_FILE" 0 "$TOTAL_SECONDS"
   exit $?
 fi
 
@@ -134,13 +139,13 @@ part_index=0
 for clip in "$PARTS"/part-*."$EXT"; do
   [ -f "$clip" ] || { echo "[stt] audio split produced no parts" >&2; exit 1; }
   read -r mean peak < "$clip.levels"
+  start=$((part_index * 25)); end=$((start + 25))
+  [ "$end" -le "$TOTAL_SECONDS" ] || end="$TOTAL_SECONDS"
   if is_silent "$mean" "$peak" "$strongest"; then
-    start=$((part_index * 25)); end=$((start + 25))
-    [ "$end" -le "$TOTAL_SECONDS" ] || end="$TOTAL_SECONDS"
-    silence_marker "$start" "$end" > "$clip.txt"
+    range_marker tyst "$start" "$end" > "$clip.txt"
     echo "[preflight] silent segment, skipping API call" >&2
   else
-    transcribe_clip "$clip" > "$clip.txt" 2> "$clip.log" &
+    transcribe_clip "$clip" "$start" "$end" > "$clip.txt" 2> "$clip.log" &
     pids+=("$!")
   fi
   part_index=$((part_index + 1))

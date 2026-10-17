@@ -67,6 +67,7 @@ export function durableMessage(record, store, channel, baseMessage = null) {
     isBot: false,
     id: record.messageId,
     createdTimestamp: record.createdTimestamp,
+    voiceFailedEarlier: Boolean(record.voiceFailureNotice),
     resolvedTarget: record.target,
     isInboundCompleted: () => store.read(record.channelId, record.messageId)?.status === "completed",
     attachments: (record.attachments || []).map((attachment) => ({ ...attachment })),
@@ -139,6 +140,11 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
         await sendInactiveChannelNotice(current, store, channel);
         store.complete(current, { inactive: true });
         return { delivered: true, inactive: true };
+      }
+      const resent = store.deliveredResendOf(current);
+      if (resent) {
+        store.complete(current, { duplicateOf: resent.messageId });
+        return { duplicate: true };
       }
       const outcome = await onMessage(durableMessage(current, store, channel, baseMessage));
       if (store.read(current.channelId, current.messageId)?.status === "completed") return { duplicate: true };

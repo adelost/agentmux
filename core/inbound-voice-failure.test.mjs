@@ -84,4 +84,36 @@ describe("voice failure is still delivered", () => {
       expect([...notices.values()].filter(payload => payload.content?.includes("Transcription unavailable"))).toHaveLength(1);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
+  // 2026-10-17: skyvw:0 got the 06:32Z voice note and its 06:39Z resend (same bytes) as two
+  // late transcripts with nothing saying they were old. Mattias: "tänk igenom hur staet ska vara".
+  it("delivers a failed voice note and its resend once, marked as late, after transcription recovers", async () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-resend-"));
+    let now = Date.UTC(2026, 9, 17, 6, 32, 59), fail = true;
+    const store = createDiscordInboundStore({ rootDir: root, now: () => now,
+      downloadBuffer: async () => Buffer.from("the same voice note bytes") });
+    const target = { agentName: "skyvw", pane: 0, dir: "/workspace" };
+    const voice = (id, createdTimestamp) => ({ id, channelId: "channel", authorId: "human", text: "", createdTimestamp,
+      attachments: [{ id: `${id}-audio`, name: "voice-message.ogg", contentType: "audio/ogg", url: "fixture" }] });
+    const handler = createAttachmentHandler({ transcribeScript: "/transcribe", run: async () => {
+      if (fail) throw Object.assign(new Error("Command failed"), { stderr: "[stt] gemini x2 + whisper1 all failed" });
+      return { stdout: "Hur lägger man upp exempelfilmen?" };
+    } });
+    const prompts = [];
+    const reconciler = createInboundReconciler({ store, resolveTarget: () => target,
+      onMessage: async msg => { prompts.push(await handler.buildPrompt(msg, [])); return { delivered: true }; } });
+    const channel = { async send() {}, async findMessageByNonce() { return false; } };
+    try {
+      for (const msg of [voice("original", now), voice("resend", now + 408_000)]) {
+        await store.prepareAttachments(store.observe(msg, target));
+      }
+      now += 410_000;
+      await reconciler.drain(channel, "channel").catch(() => {});
+      fail = false; now += 31_000;
+      await reconciler.drain(channel, "channel");
+      const transcripts = prompts.filter(prompt => prompt?.includes("exempelfilmen"));
+      expect(transcripts).toHaveLength(1);
+      expect(transcripts[0]).toMatch(/^\[transcribed voice[^\]]*sent 06:32Z, delivered late after a failed transcription/);
+      expect(store.read("channel", "resend")).toMatchObject({ status: "completed", outcome: { duplicateOf: "original" } });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
 });

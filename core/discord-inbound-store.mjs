@@ -11,6 +11,14 @@ import { downloadDiscordAttachment } from "./discord-attachment-download.mjs";
 
 const STORE_VERSION = 1;
 const RETRY_MS = 30_000;
+// A resend of a failed voice note comes minutes later; a day bounds the lookback.
+const RESEND_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function voiceAudioHashes(record) {
+  const hashes = (record.attachments || [])
+    .filter((attachment) => attachment.contentType?.startsWith("audio/")).map((attachment) => attachment.sha256);
+  return hashes.length && hashes.every(Boolean) ? hashes.sort().join(",") : null;
+}
 
 /** WHAT: Resolves the private Discord intake directory. WHY: Keeps inbound truth outside replaceable packages and temporary process state. */
 export function defaultDiscordInboundDir() {
@@ -263,6 +271,17 @@ export function createDiscordInboundStore({
     });
   }
 
+  /** WHAT: Finds a delivered message in the same channel that carried the same voice audio. WHY: A failed note and its resend must reach the pane once when transcription recovers. */
+  function deliveredResendOf(record) {
+    const audio = voiceAudioHashes(record);
+    if (!audio) return null;
+    return list(record.channelId).find((other) => other.messageId !== record.messageId
+      && other.status === "completed" && other.outcome?.delivered === true
+      && (other.text || "") === (record.text || "")
+      && voiceAudioHashes(other) === audio
+      && Math.abs(Number(other.createdTimestamp) - Number(record.createdTimestamp)) <= RESEND_WINDOW_MS) || null;
+  }
+
   function list(channelId) {
     const dir = channelDir(channelId);
     try {
@@ -311,6 +330,6 @@ export function createDiscordInboundStore({
   return {
     rootDir, observe, read, update, prepareAttachments, transcriptFor, saveTranscript,
     beginEffect, completeEffect,
-    complete, fail, list, pending, channelIds, cursor, advanceCursor,
+    complete, fail, list, pending, channelIds, cursor, advanceCursor, deliveredResendOf,
   };
 }

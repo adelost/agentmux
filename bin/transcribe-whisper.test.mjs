@@ -71,14 +71,26 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
       expect(fx.calls()).toHaveLength(before + 1);
     } finally { fx.close(); }
   });
-  it("keeps empty text from audible audio as an error", () => {
+  // Mattias 2026-10-17: "fixar så inte meddelandena failar på samma sätt igen". Gemini answering
+  // "no words" twice is an answer, not an outage; failing the message made every retry repeat it.
+  it("marks audible audio without words after one more try instead of failing the message", () => {
     const fx = silenceFixture();
     try {
       const audio = join(fx.root, "audible.wav");
       execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", audio]);
       const result = fx.run(audio, { EMPTY_AUDIBLE: "yes" });
-      expect(result.status).toBe(1); expect(result.stdout.trim()).toBe("");
-      expect(result.stderr).toContain("empty segment transcript");
+      expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe("[ohörbart 0:00–0:01]");
+      expect(fx.calls()).toEqual(["audible", "audible"]);
+    } finally { fx.close(); }
+  });
+  it("delivers the rest of a long message around an audible part without words", () => {
+    const fx = silenceFixture();
+    try {
+      const audio = join(fx.root, "noisy.wav");
+      execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=75", audio]);
+      const result = fx.run(audio, { EMPTY_PART: "part-0001" });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("part-0000 [ohörbart 0:25–0:50] part-0002");
     } finally { fx.close(); }
   });
   it("keeps a short audible peak even with a low whole-file mean", () => {
