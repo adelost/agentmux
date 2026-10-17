@@ -511,7 +511,9 @@ The bridge keeps one live work row per turn, edits it as tools run, and removes
 it when the turn ends. Answers and attached files stay unchanged. Agent reports
 show their sender, recipient and first line; `amux log` retains the full text.
 Routine context and compaction details stay in the logs. Quota and delivery
-updates edit their existing notice instead of posting another one.
+updates edit their existing notice instead of posting another one. An active
+account newly reaching 100 percent posts a fresh alert. With unchanged usage,
+its exhaustion forecast refreshes at most once per hour.
 
 Set `AMUX_TOOL_LINES_CHANNELS` in the bridge environment to a comma-separated
 list of pane addresses or Discord channel IDs to restore the old tool rows in

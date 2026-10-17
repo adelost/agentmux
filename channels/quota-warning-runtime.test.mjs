@@ -112,7 +112,7 @@ feature("warning activity and background reached-limit routing", () => {
 });
 
 feature("quota rows are edited, Sky 2026-10-17", () => {
-  unit("changed usage and the reached limit edit the original account row", {
+  unit("usage edits the row and a newly reached limit posts a visible alert", {
     when: ["one human notice is followed by changed usage and a full-limit pulse", async () => {
       let usedPercent = 85;
       const fx = hook(async () => ({ accounts: [{ ...due.accounts[0], limits: [{ ...due.accounts[0].limits[0], usedPercent }] }] }));
@@ -124,9 +124,9 @@ feature("quota rows are edited, Sky 2026-10-17", () => {
         channelMap: () => new Map([["human-channel", { name: "lsrc", pane: 0 }]]) });
       await poll(); await poll(); return { send, editNotice };
     }],
-    then: ["one create and two edits, including the full-limit signal", ({ send, editNotice }) => {
-      expect(send).toHaveBeenCalledTimes(1); expect(editNotice).toHaveBeenCalledTimes(2);
-      expect(editNotice.mock.calls[1]).toEqual([{ channelId: "human-channel", messageId: "notice-1" }, expect.stringContaining("100 %, kvoten är slut")]);
+    then: ["one ordinary edit and one new full-limit signal", ({ send, editNotice }) => {
+      expect(send).toHaveBeenCalledTimes(2); expect(editNotice).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[1][1]).toContain("100 %, kvoten är slut");
     }],
   });
 });
@@ -166,6 +166,27 @@ feature("the account row keeps its current forecast", () => {
       expect(notify).toHaveBeenCalledTimes(1);
       expect(editNotice).toHaveBeenCalledTimes(1);
       expect(editNotice.mock.calls[0][1]).not.toBe(notify.mock.calls[0][0]);
+    }],
+  });
+});
+
+
+feature("stable usage does not churn the forecast row", () => {
+  unit("120 half-minute pulses produce only one hourly forecast edit", {
+    when: ["usage and active panes stay constant for an hour and the human returns after seven hours", async () => {
+      const { postDueQuotaWarnings } = await import("./quota-warning.mjs");
+      const sent = createSentNoticeStore(join(mkdtempSync(join(tmpdir(), "quota-steady-")), "sent.json"));
+      const snapshot = { accounts: [{ ...due.accounts[0], limits: [{ kind: "weekly_all", usedPercent: 85, resetsAt: "2026-10-22T06:13:00Z" }] }] };
+      const notify = vi.fn(async () => ({ channelId: "human", messageId: "notice-1" })), editNotice = vi.fn(async () => {});
+      const now = Date.parse("2026-10-17T09:00:00Z"), hour = 3_600_000;
+      await postDueQuotaWarnings({ snapshot, sent, notify, editNotice, now });
+      for (let t = 30_000; t <= hour; t += 30_000) await postDueQuotaWarnings({ snapshot, sent, notify, editNotice, now: now + t, fullOnly: true });
+      const hourlyEdits = editNotice.mock.calls.length;
+      await postDueQuotaWarnings({ snapshot, sent, notify, editNotice, now: now + 7 * hour });
+      return { notify, editNotice, hourlyEdits };
+    }],
+    then: ["one create, one edit in the first hour and an edit rather than a seven-hour repost", ({ notify, editNotice, hourlyEdits }) => {
+      expect(hourlyEdits).toBe(1); expect(notify).toHaveBeenCalledTimes(1); expect(editNotice).toHaveBeenCalledTimes(2);
     }],
   });
 });

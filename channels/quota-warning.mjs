@@ -118,9 +118,12 @@ export async function postDueQuotaWarnings({ snapshot, notify, sent, config = pa
     const justFull = weekly.usedPercent >= 100 && !(previous?.usedPercent >= 100);
     const candidate = { account, panes: activePanes(account), provider: account.provider, email, usedPercent: weekly.usedPercent, key, accountKey, resetAt };
     const text = formatQuotaWarning(snapshot, { config, now, only: [account] });
-    const fingerprint = text;
-    if (existing?.messageId && editNotice) {
-      if (existing.fingerprint === fingerprint) continue;
+    const spare = account.provider === "claude" && spareAccounts(accounts, account, config, now)[0];
+    const fingerprint = JSON.stringify([weekly.usedPercent, candidate.panes.length, Math.round(resetAt / HOUR), spare?.account?.email]);
+    if (existing?.messageId && editNotice && !justFull) {
+      const changed = existing.fingerprint !== fingerprint;
+      const forecastDue = now - (existing.updatedAt ?? lastAt) >= HOUR && existing.text !== text;
+      if (!changed && !forecastDue) continue;
       try { await editNotice(existing, text); }
       catch (error) {
         if (Number(error.code) !== 10008) throw error;
@@ -130,8 +133,8 @@ export async function postDueQuotaWarnings({ snapshot, notify, sent, config = pa
         sent.record(accountKey, previous?.usedPercent ?? weekly.usedPercent, prior);
       }
       // A deleted row follows the normal cooldown; a newly full account still posts immediately.
-      if (existing.messageId && existing.fingerprint !== fingerprint) {
-        const notice = { ...existing, fingerprint };
+      if (existing.messageId) {
+        const notice = { ...existing, fingerprint, text, updatedAt: now };
         sent.record(accountKey, weekly.usedPercent, { now, resetAt, notice });
         sent.record(key, weekly.usedPercent, { now, resetAt, notice });
         due.push({ ...candidate, edited: true });
@@ -141,7 +144,7 @@ export async function postDueQuotaWarnings({ snapshot, notify, sent, config = pa
     if (fullOnly ? !justFull : !justFull && now - lastAt < cooldownMs) continue;
     const posted = await notify(text, [candidate]);
     const messageId = posted?.messageId || posted?.id;
-    const notice = messageId ? { channelId: posted.channelId || channelId, messageId, fingerprint } : null;
+    const notice = messageId ? { channelId: posted.channelId || channelId, messageId, fingerprint, text, updatedAt: now } : null;
     sent.record(accountKey, weekly.usedPercent, { now, resetAt, notice });
     sent.record(key, weekly.usedPercent, { now, resetAt, notice });
     due.push(candidate);
