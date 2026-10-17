@@ -54,7 +54,7 @@ echo "$part"
 }
 
 describe("silent voice parts, skyvw:0 2026-10-17", () => {
-  it("skips a quiet middle part using the same preflight rule as a quiet file", () => {
+  it("skips a relative quiet middle part but keeps a uniformly quiet file", () => {
     const fx = silenceFixture();
     try {
       const audio = join(fx.root, "mixed.wav");
@@ -67,8 +67,8 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
       const quiet = join(fx.root, "quiet.wav");
       execFileSync("ffmpeg", ["-v", "error", "-i", audio, "-ss", "25", "-t", "25", quiet]);
       const before = fx.calls().length, silent = fx.run(quiet);
-      expect(silent.status, silent.stderr).toBe(0); expect(silent.stdout.trim()).toBe("[tyst 0:00–0:25]");
-      expect(fx.calls()).toHaveLength(before);
+      expect(silent.status, silent.stderr).toBe(0); expect(silent.stdout.trim()).toBe("quiet");
+      expect(fx.calls()).toHaveLength(before + 1);
     } finally { fx.close(); }
   });
   it("keeps empty text from audible audio as an error", () => {
@@ -90,6 +90,31 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
       const result = fx.run(audio);
       expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe("brief");
       expect(fx.calls()).toEqual(["brief"]);
+    } finally { fx.close(); }
+  });
+  it("preserves uniformly quiet audio before and after splitting", () => {
+    const fx = silenceFixture();
+    try {
+      for (const duration of [2, 56]) {
+        const audio = join(fx.root, `quiet-${duration}.wav`);
+        execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `sine=frequency=440:duration=${duration}`,
+          "-af", "volume=-33dB", audio]);
+        const result = fx.run(audio);
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).not.toContain("[tyst");
+        expect(result.stdout.trim()).toBe(duration === 2 ? "quiet-2" : "part-0000 part-0001 part-0002");
+      }
+    } finally { fx.close(); }
+  });
+  it.skipIf(!process.env.AMUX_QUIET_SPEECH_DIR)("keeps the public quiet-speech counterexample at every measured level", () => {
+    const fx = silenceFixture();
+    try {
+      for (const file of ["dialogue.wav", "dialogue-30.wav", "dialogue-33.wav", "dialogue-36.wav", "long-33.wav"]) {
+        const before = fx.calls().length;
+        const result = fx.run(join(process.env.AMUX_QUIET_SPEECH_DIR, file), {}, process.env.AMUX_TRANSCRIBE_SCRIPT || resolve("bin/transcribe-whisper.sh"));
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).not.toContain("[tyst"); expect(fx.calls().length).toBeGreaterThan(before);
+      }
     } finally { fx.close(); }
   });
   for (const [key, emptyPart, count] of [["AMUX_VOICE_FIXTURE", "part-0004", 10], ["AMUX_VOICE_FIXTURE_2", "part-0002", 7]]) {

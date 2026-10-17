@@ -19,17 +19,24 @@ if [ -z "$AUDIO_FILE" ]; then
   exit 1
 fi
 
-# The same conservative silence rule applies to a whole clip and each part.
-# Sky 2026-10-17: mean below -50 dB AND peak below -20 dB. The incident's
-# pauses measured -66.1/-33.7 and -68.4/-31.7; speech measured -21..-26/-0..-3.
-# Requiring both keeps a brief audible peak even when its average is low.
-is_silent() {
-  local levels mean peak
+# Keep the existing -75 dB whole-file floor. A fixed -50 dB rule swallowed
+# genuine quiet speech in the public dialogue counterexample (2026-10-17).
+# Parts also compare with this message's strongest part: at least 30 dB down.
+# A peak at -20 dB or above still reaches STT, preserving brief audible sounds.
+audio_levels() {
+  local levels
   levels=$(ffmpeg -hide_banner -i "$1" -af volumedetect -f null /dev/null 2>&1) || return 1
-  mean=$(awk '/mean_volume/{print $5}' <<< "$levels")
-  peak=$(awk '/max_volume/{print $5}' <<< "$levels")
-  awk -v mean="$mean" -v peak="$peak" 'BEGIN {
-    exit !(mean != "" && peak != "" && (mean == "-inf" || mean+0 < -50) && (peak == "-inf" || peak+0 < -20))
+  awk '/mean_volume/{mean=$5} /max_volume/{peak=$5} END {
+    if (mean == "" || peak == "") exit 1
+    print mean, peak
+  }' <<< "$levels"
+}
+
+is_silent() {
+  awk -v mean="$1" -v peak="$2" -v strongest="${3:-}" 'BEGIN {
+    floor = (mean == "-inf" || mean+0 < -75)
+    relative = (strongest != "" && strongest+0 - mean+0 >= 30 && (peak == "-inf" || peak+0 < -20))
+    exit !(floor || relative)
   }'
 }
 
@@ -41,7 +48,9 @@ silence_marker() {
 DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO_FILE") || exit 1
 TOTAL_SECONDS="${DURATION%.*}"
 [[ "$TOTAL_SECONDS" =~ ^[0-9]+$ ]] || { echo "[stt] invalid audio duration" >&2; exit 1; }
-if is_silent "$AUDIO_FILE"; then
+LEVELS=$(audio_levels "$AUDIO_FILE") || { echo "[stt] audio level check failed" >&2; exit 1; }
+read -r MEAN PEAK <<< "$LEVELS"
+if is_silent "$MEAN" "$PEAK"; then
   echo "[preflight] silent clip, skipping API call" >&2
   silence_marker 0 "$TOTAL_SECONDS"
   exit 0
@@ -105,6 +114,15 @@ fi
 ffmpeg -nostdin -loglevel error -i "$AUDIO_FILE" -map 0:a:0 -vn "${CODEC_ARGS[@]}" \
   -f segment -segment_time 25 -reset_timestamps 1 "$PARTS/part-%04d.$EXT" || exit 1
 
+strongest=-1000
+for clip in "$PARTS"/part-*."$EXT"; do
+  [ -f "$clip" ] || { echo "[stt] audio split produced no parts" >&2; exit 1; }
+  LEVELS=$(audio_levels "$clip") || { echo "[stt] segment level check failed" >&2; exit 1; }
+  printf '%s\n' "$LEVELS" > "$clip.levels"
+  read -r mean peak <<< "$LEVELS"
+  strongest=$(awk -v current="$strongest" -v mean="$mean" 'BEGIN { print (mean != "-inf" && mean+0 > current+0) ? mean : current }')
+done
+
 pids=()
 failed=0
 wait_batch() {
@@ -115,7 +133,8 @@ wait_batch() {
 part_index=0
 for clip in "$PARTS"/part-*."$EXT"; do
   [ -f "$clip" ] || { echo "[stt] audio split produced no parts" >&2; exit 1; }
-  if is_silent "$clip"; then
+  read -r mean peak < "$clip.levels"
+  if is_silent "$mean" "$peak" "$strongest"; then
     start=$((part_index * 25)); end=$((start + 25))
     [ "$end" -le "$TOTAL_SECONDS" ] || end="$TOTAL_SECONDS"
     silence_marker "$start" "$end" > "$clip.txt"
