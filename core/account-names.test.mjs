@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { accountName, loginOfEmail } from "./account-names.mjs";
+import { accountName, loginOfEmail, withAccountEntries } from "./account-names.mjs";
 
 const account = (provider, email, id = "1") => ({ provider, profile: { id }, account: email ? { email } : undefined });
 
@@ -26,5 +26,19 @@ feature("account names by engine and login", () => {
   unit("the login is the address's last dotted name", {
     when: ["reading three addresses", () => ["mattias.wetterlind@example.test", "adelost@example.test", ""].map(loginOfEmail)],
     then: ["wetterlind, adelost and nothing", logins => expect(logins).toEqual(["wetterlind", "adelost", null])],
+  });
+});
+
+feature("each account carries its login's entry", () => {
+  unit("the entry's name and subscription apply, also to a failed reading", {
+    when: ["merging entries into a live-shaped snapshot", () => withAccountEntries([
+      account("claude", "adelost@example.test"),
+      { ...account("claude", "mattias.wetterlind@example.test", "wetterlind"), ok: false, error: "network_error" },
+      { ...account("claude", "attrois@example.test", "2"), ok: false, error: "login_expired" },
+    ], new Map([["claude:wetterlind", { name: "Claude W", subscription: { renewsOn: "2026-11-05" } }]]))],
+    then: ["W keeps its renewal date though unreadable, and the logged-out attrois spells A out by itself", (accounts) => {
+      expect(accounts.map((item) => [item.name, item.subscription ?? null])).toEqual([
+        ["Claude A", null], ["Claude W", { renewsOn: "2026-11-05" }], ["Claude attrois", null]]);
+    }],
   });
 });

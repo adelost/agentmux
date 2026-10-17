@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { profileLoginInstruction, quotaAccountCatalog, quotaProfileCatalog } from "./quota-profiles.mjs";
+import { accountEntries, profileLoginInstruction, quotaAccountCatalog, quotaProfileCatalog } from "./quota-profiles.mjs";
 import { resolveClaudeAccountTarget, resolveRuntimeProfile, runtimeProfileCatalog, runtimeProfileLaunchHome } from "./runtime-account-profiles.mjs";
 
 const ROOT = "/home/matt/.config/agent/account-profiles/claude";
@@ -172,6 +172,51 @@ feature("subscription account profile catalog", () => {
       expect(profileLoginInstruction(primary)).toBe("claude auth login");
       expect(profileLoginInstruction(secondary))
         .toBe("CLAUDE_CONFIG_DIR='/home/matt/.config/agent/account-profiles/claude/2' claude auth login");
+    }],
+  });
+});
+
+// lsrc:0 for Mattias 2026-10-17: one entry per login, the slot homes kept internal.
+feature("account-profiles.json version 2", () => {
+  const file = (document) => ({ readDir: () => [], exists: () => false, readFile: () => JSON.stringify(document) });
+  const version2 = {
+    version: 2,
+    accounts: {
+      "claude:adelost": { name: "Claude A", subscription: { renewsOn: "2026-11-12", freeResetsLeft: 0, freeResetsReadOn: "2026-10-17" } },
+      "codex:wetterlind": { subscription: { renewsOn: "2026-02-30", freeResetsLeft: 2 } },
+      "slot:1": { name: "not a login" },
+    },
+    slots: { "claude:2": { home: "/profiles/claude/adelost" } },
+  };
+  unit("slot homes stay internal and keep resolving", {
+    when: ["building the catalog from a version 2 file", () => quotaProfileCatalog({ HOME: "/home/matt" }, file(version2))],
+    then: ["slot 2 keeps its home and no slot carries a label from the file", (catalog) => {
+      expect(catalog.find((row) => row.key === "claude:2")).toMatchObject({ home: "/profiles/claude/adelost", source: "configured", label: "claude 2" });
+      expect(catalog.find((row) => row.key === "codex:1")?.label).toBe("codex 1");
+    }],
+  });
+  unit("each login's entry is read, and every invalid field is named", {
+    when: ["reading the entries", () => accountEntries({ HOME: "/home/matt" }, file(version2))],
+    then: ["the valid entry is kept whole and the rest is reported", ({ entries, problems }) => {
+      expect(entries.get("claude:adelost")).toEqual({ name: "Claude A",
+        subscription: { renewsOn: "2026-11-12", freeResetsLeft: 0, freeResetsReadOn: "2026-10-17" } });
+      expect(entries.get("codex:wetterlind")).toEqual({});
+      expect(problems).toEqual([
+        "codex:wetterlind: subscription.renewsOn needs YYYY-MM-DD",
+        "codex:wetterlind: subscription.freeResetsLeft and freeResetsReadOn go together",
+        "slot:1: not an engine:login entry",
+      ]);
+    }],
+  });
+  unit("a version 1 file still gives its slot homes and no entries", {
+    when: ["reading a version 1 file", () => {
+      const v1 = file({ version: 1, profiles: { "claude:2": { label: "old", home: "/profiles/claude/adelost" } } });
+      return { catalog: quotaProfileCatalog({ HOME: "/home/matt" }, v1), entries: accountEntries({ HOME: "/home/matt" }, v1) };
+    }],
+    then: ["the home applies and there is nothing to name", ({ catalog, entries }) => {
+      expect(catalog.find((row) => row.key === "claude:2")?.home).toBe("/profiles/claude/adelost");
+      expect(entries.entries.size).toBe(0);
+      expect(entries.problems).toEqual([]);
     }],
   });
 });

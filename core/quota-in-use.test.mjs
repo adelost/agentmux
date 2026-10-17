@@ -71,7 +71,7 @@ feature("which account each running pane spends", () => {
       expect(lines[2]).toBe("  in use: lsrc:3");
       expect(lines[3]).toMatch(/^Claude A · slot 1\+2 · adelost@x/u);
       expect(lines[4]).toBe("  in use: api:0–2, claw:0");
-      expect(lines[5]).toMatch(/^Claude W · no slot · wetterlind@x · max/u);
+      expect(lines[5]).toMatch(/^Claude W · slot wetterlind · wetterlind@x · max/u);
       expect(lines[6]).toBe("  no pane");
       expect(lines.at(-1)).toBe("Logged out: Claude attrois · Kimi 1 · Kimi 2");
       expect(lines.join("\n")).not.toContain("unavailable");

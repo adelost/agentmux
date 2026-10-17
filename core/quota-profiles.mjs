@@ -30,14 +30,23 @@ const windowsProviderHome = (provider, {
 
 const envPrefix = (provider, id) => `AMUX_${provider.toUpperCase()}_PROFILE_${id}`;
 
-const readOperatorProfiles = (env, home, readFile) => {
+const readProfileFile = (env, home, readFile) => {
   const path = resolve(env.AMUX_ACCOUNT_LABELS_FILE
     || join(home, ".agentmux", "account-profiles.json"));
+  try { return JSON.parse(readFile(path, "utf8")); }
+  catch { return null; }
+};
+
+// Version 1 labelled each slot, and the labels drifted from the login a slot runs (codex:1 said
+// wetterlind while it ran adelost, 2026-10-17). Version 2 keeps only slot homes; logins have entries.
+const slotEntries = (document) => (document?.version === 2 ? document.slots
+  : document?.version === 1 ? document.profiles : null);
+
+const readOperatorProfiles = (env, home, readFile) => {
   try {
-    const document = JSON.parse(readFile(path, "utf8"));
-    if (document?.version !== 1 || !document.profiles
-      || typeof document.profiles !== "object" || Array.isArray(document.profiles)) return {};
-    return Object.fromEntries(Object.entries(document.profiles).flatMap(([key, value]) => {
+    const slots = slotEntries(readProfileFile(env, home, readFile));
+    if (!slots || typeof slots !== "object" || Array.isArray(slots)) return {};
+    return Object.fromEntries(Object.entries(slots).flatMap(([key, value]) => {
       const label = typeof value?.label === "string" ? value.label.trim() : "";
       const profileHome = typeof value?.home === "string" ? value.home.trim() : "";
       if ((!label || label.length > 254) && !profileHome) return [];
@@ -129,6 +138,64 @@ export function claudeLoginProfiles(env = process.env, options = {}, slots = quo
 }
 
 const LOGIN_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/iu;
+const ACCOUNT_KEY = /^(?:codex|claude|kimi):[a-z0-9][a-z0-9._-]{0,63}$/u;
+const isDay = (value) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value)
+  && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
+
+// Mattias 2026-10-17: the renewal date and the free resets left, read by hand from the billing and usage pages.
+// The names are the ones stats.v1d.io reads (api:0, 2026-10-17), so the push forwards them unchanged.
+const SUBSCRIPTION_FIELDS = Object.freeze({
+  renewsOn: { valid: isDay, need: "YYYY-MM-DD" },
+  freeResetsLeft: { valid: (value) => Number.isInteger(value) && value >= 0, need: "a whole number" },
+  freeResetsReadOn: { valid: isDay, need: "YYYY-MM-DD" },
+});
+
+/** WHAT: Checks one login's subscription fields. WHY: Keeps a free-reset count from standing without the day it was read. */
+function subscriptionOf(key, value, problems) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    problems.push(`${key}: subscription needs an object`);
+    return null;
+  }
+  const kept = {};
+  for (const [field, rule] of Object.entries(SUBSCRIPTION_FIELDS)) {
+    if (value[field] === undefined) continue;
+    if (rule.valid(value[field])) kept[field] = value[field];
+    else problems.push(`${key}: subscription.${field} needs ${rule.need}`);
+  }
+  if ((kept.freeResetsLeft === undefined) !== (kept.freeResetsReadOn === undefined)) {
+    problems.push(`${key}: subscription.freeResetsLeft and freeResetsReadOn go together`);
+    delete kept.freeResetsLeft;
+    delete kept.freeResetsReadOn;
+  }
+  return Object.keys(kept).length ? kept : null;
+}
+
+/**
+ * WHAT: Reads each login's entry (name, renewal date, free resets) and names every invalid field.
+ * WHY: Keeps what only a billing page shows beside its login, and a typo from vanishing silently.
+ */
+export function accountEntries(env = process.env, options = {}) {
+  const document = readProfileFile(env, resolve(env.HOME || homedir()), options.readFile || readFileSync);
+  const entries = new Map(), problems = [];
+  const accounts = document?.version === 2 ? document.accounts : null;
+  if (!accounts || typeof accounts !== "object" || Array.isArray(accounts)) return { entries, problems };
+  for (const [key, value] of Object.entries(accounts)) {
+    const id = key.toLowerCase();
+    if (!ACCOUNT_KEY.test(id) || !value || typeof value !== "object") {
+      problems.push(`${key}: not an engine:login entry`);
+      continue;
+    }
+    const entry = {};
+    if (value.name !== undefined) {
+      if (typeof value.name === "string" && value.name.trim() && value.name.length <= 40) entry.name = value.name.trim();
+      else problems.push(`${key}: name needs at most 40 characters`);
+    }
+    const subscription = value.subscription === undefined ? null : subscriptionOf(key, value.subscription, problems);
+    if (subscription) entry.subscription = subscription;
+    entries.set(id, entry);
+  }
+  return { entries, problems };
+}
 
 /** WHAT: Names a new Claude login dir under the account-profiles root. WHY: Keeps a second account in its own dir from its first login. */
 export function newClaudeLoginProfile(name, env = process.env) {

@@ -46,11 +46,11 @@ feature("active-account warning with the quota box, 2026-10-17", () => {
     when: ["rendering the original readings with measured inactivity", () => posted(morning())],
     then: ["one box; the idle ai:2 account gets a row but no advice", texts => expect(texts).toEqual([[
       "```",
-      "               week  reset",
-      "● Codex A       19%  Thu 08:13",
-      "○ Codex W        0%  Thu 11:29",
-      "● Claude W (2)  93%  Wed 02:00",
-      "● Claude A (1)   5%  Wed 02:00",
+      "         panes  week  reset",
+      "Codex A      2   19%  Thu 08:13",
+      "Codex W      0    0%  Thu 11:29",
+      "Claude W     2   93%  Wed 02:00",
+      "Claude A     1    5%  Wed 02:00",
       "```",
       "→ Free reset Codex A at 100%",
     ].join("\n")])],
@@ -75,7 +75,7 @@ feature("active-account warning with the quota box, 2026-10-17", () => {
       account("claude", "adelost", 80), account("claude", "spare", 17, []),
     ] }, Date.parse(RESET) - 24 * HOUR)],
     then: ["the week lasts until its reset, so the box ends with the table", ([text]) => expect(text.split("\n").slice(2))
-      .toEqual(["● Claude A  20%  Wed 02:00", "○ Claude S  83%  Wed 02:00", "```"])],
+      .toEqual(["Claude A     1   20%  Wed 02:00", "Claude S     0   83%  Wed 02:00", "```"])],
   });
   unit("a spare at the warning level never receives a switch suggestion", {
     when: ["only the alternate account is at 80 percent", () => posted({ accounts: [
@@ -88,7 +88,7 @@ feature("active-account warning with the quota box, 2026-10-17", () => {
       account("claude", "mattias.wetterlind", 100, Array.from({ length: 16 }, (_, i) => `test:${i}`)),
     ] })],
     then: ["the stop is explicit", ([text]) => expect(text.split("\n").slice(2)).toEqual([
-      "● Claude W   0%  Wed 02:00",
+      "Claude W    16    0%  Wed 02:00",
       "```",
       "→ Free reset Claude W now",
     ])],
@@ -128,7 +128,7 @@ feature("account warning cooldown and reached-limit delivery", () => {
     }],
     then: ["the second post shows both engines", fx => {
       expect(fx.notify).toHaveBeenCalledTimes(2);
-      expect(fx.notify.mock.calls[1][0]).toMatch(/\n● Codex O   15%  Wed 02:00\n● Claude A   5%  Wed 02:00\n/u);
+      expect(fx.notify.mock.calls[1][0]).toMatch(/\nCodex O      1   15%  Wed 02:00\nClaude A     1    5%  Wed 02:00\n/u);
     }],
   });
   unit("disabled, inactive, unknown and expired readings never post", {

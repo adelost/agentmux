@@ -2,12 +2,14 @@
 // Mattias 2026-10-17 11:39Z: "vilket konto har jag valt för Codex just nu och vilket konto är valt för Claude just nu. Och när
 // resetas de och hur många procentare kvar. Och sen hur många, hur, ja, hur ser det ut på de andra kontona?"; 12:03Z: "Undvik
 // emoji..."; 12:04Z: "jag vill nog både ha full restet.. inte bara 5h.. fll reset är vitkigare för plaenring...".
-// Layout from lsrc:0 the same day: the week leads, at most 32 characters a line, ● when panes use the account, ○ when none do.
+// Layout from lsrc:0 the same day: the week leads, at most 32 characters a line. 14:17Z: "en siffra bredvid som säger hur många
+// paneler som kör på den", "här ser man ju inte om man har resets kvar. Man ser inte när subscriptionen tar slut heller".
 import { accountName, loginOfEmail } from "../core/account-names.mjs";
 import { weeklyForecast } from "../core/quota-forecast.mjs";
 import { clockOf, nearestMinute } from "../core/quota-format.mjs";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const LOGGED_OUT = new Set(["login_expired", "credentials_expired", "credentials_unavailable", "login_required"]);
 const codexWindows = account => (account.limits?.find(limit => limit.limitId === "codex") || account.limits?.[0])?.windows || [];
 
@@ -59,13 +61,22 @@ function accountFact(engine, account, shown, context) {
     blockedBy5h: fiveHour?.usedPercent >= 100 && Date.parse(fiveHour.resetsAt) > context.now ? fiveHour : null };
 }
 
-/** WHAT: Phrases one account's week, and its five-hour window when that is what stops it now. WHY: The week is what he plans by. */
-function linesOf(fact, label, width, now) {
-  const head = `${fact.account.inUse?.length ? "●" : "○"} ${label.padEnd(width)}`;
-  if (!fact.week) return [`${head} unreadable`];
+/** WHAT: Phrases the renewal date and free resets the login's entry holds, or nothing. WHY: Keeps a renewal from being forgotten. */
+function subscriptionLine({ renewsOn, freeResetsLeft } = {}) {
+  const day = renewsOn ? new Date(`${renewsOn}T12:00:00Z`) : null;
+  const parts = [...(day ? [`renews ${MONTHS[day.getUTCMonth()]} ${day.getUTCDate()}`] : []),
+    ...(Number.isInteger(freeResetsLeft) ? [`${freeResetsLeft} free reset${freeResetsLeft === 1 ? "" : "s"}`] : [])];
+  return parts.length ? [`  ${parts.join(" · ")}`] : [];
+}
+
+/** WHAT: Phrases one account's panes and week, its blocking five-hour window and its subscription. WHY: The week is what he plans by. */
+function linesOf(fact, width, now) {
+  const head = `${fact.name.padEnd(width)} ${String(fact.account.inUse?.length || 0).padStart(5)}`;
+  if (!fact.week) return [`${head}  unreadable`, ...subscriptionLine(fact.account.subscription)];
   const left = Math.max(0, Math.min(100, Math.round(100 - fact.week.usedPercent)));
-  return [`${head} ${`${left}%`.padStart(4)}  ${dayAndClock(fact.week.resetsAt)}`,
-    ...(fact.blockedBy5h ? [`    5h 0% until ${untilClock(fact.blockedBy5h.resetsAt, now)}`] : [])];
+  return [`${head}  ${`${left}%`.padStart(4)}  ${dayAndClock(fact.week.resetsAt)}`,
+    ...(fact.blockedBy5h ? [`    5h 0% until ${untilClock(fact.blockedBy5h.resetsAt, now)}`] : []),
+    ...subscriptionLine(fact.account.subscription)];
 }
 
 /** WHAT: Finds the engine's other account with the most room that nothing stops now. WHY: A switch is only advice when it helps. */
@@ -98,11 +109,8 @@ export function buildQuotaOverview(snapshot, { config, now = Date.now(), reading
   const shown = ENGINES.flatMap(engine => accounts.filter(account => account.provider === engine.provider)
     .sort((a, b) => (b.inUse?.length || 0) - (a.inUse?.length || 0)));
   const facts = shown.map(account => accountFact(ENGINES.find(engine => engine.provider === account.provider), account, shown, { now, readingsOf }));
-  // Two accounts of one engine in use: the pane counts say which one most of them run on.
-  const split = new Set(ENGINES.filter(engine => facts.filter(fact => fact.engine === engine && fact.account.inUse?.length).length > 1));
-  const labels = facts.map(fact => split.has(fact.engine) && fact.account.inUse?.length ? `${fact.name} (${fact.account.inUse.length})` : fact.name);
-  const width = Math.max(0, ...labels.map(label => label.length));
-  const table = [`${" ".repeat(width + 3)}week  reset`, ...facts.flatMap((fact, index) => linesOf(fact, labels[index], width, now))];
+  const width = Math.max(0, ...facts.map(fact => fact.name.length));
+  const table = [`${" ".repeat(width)} panes  week  reset`, ...facts.flatMap(fact => linesOf(fact, width, now))];
   const action = actionLine(facts, { config, now });
   return { text: ["```", ...table, "```", ...(action ? [action] : [])].join("\n") };
 }

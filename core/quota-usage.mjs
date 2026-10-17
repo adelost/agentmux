@@ -22,7 +22,8 @@ import {
   QUOTA_OBSERVATION_SCHEMA_VERSION,
   QUOTA_REFRESH_INTERVAL_MS,
 } from "./quota-observation.mjs";
-import { quotaAccountCatalog } from "./quota-profiles.mjs";
+import { accountEntries, quotaAccountCatalog } from "./quota-profiles.mjs";
+import { withAccountEntries } from "./account-names.mjs";
 
 export {
   CLAUDE_OAUTH_BETA,
@@ -212,7 +213,7 @@ const providerHeadline = (accounts, provider) =>
   ?? { ok: false, engine: provider, provider, error: "profile_missing" };
 
 /**
- * WHAT: Collects every coding-subscription profile, and each Claude account once.
+ * WHAT: Collects every coding-subscription profile, and each Claude account once, with its login's entry.
  * WHY: Keeps all clients on one account snapshot, including Claude logins that are in no launch slot.
  */
 export async function readQuotaSnapshot({
@@ -220,6 +221,7 @@ export async function readQuotaSnapshot({
   codex,
   kimi,
   profiles = quotaAccountCatalog(),
+  entries = accountEntries(),
   readers = {
     claude: readClaudeQuotaBudgeted,
     codex: readCodexQuotaBudgeted,
@@ -238,11 +240,12 @@ export async function readQuotaSnapshot({
       collectClaudeAccount(members, options, readers, now, identityOf))),
     collectAll("kimi"),
   ]);
-  const accounts = [...codexAccounts, ...claudeAccounts, ...kimiAccounts];
+  const accounts = withAccountEntries([...codexAccounts, ...claudeAccounts, ...kimiAccounts], entries.entries);
   return {
     schemaVersion: 2,
     generatedAt: new Date(now()).toISOString(),
     accounts,
+    ...(entries.problems.length ? { accountFileProblems: entries.problems } : {}),
     claude: providerHeadline(accounts, "claude"),
     codex: providerHeadline(accounts, "codex"),
     kimi: providerHeadline(accounts, "kimi"),

@@ -113,10 +113,17 @@ const kimiLine = (kimi) => {
   return `Kimi    ${cells.join(" · ")}`;
 };
 
-// A Claude account read once for all its logins names the launch slots that use it.
+// A Claude account read once for all its logins names the launch slots that use it. A login dir is one too
+// (amux accounts rotate claude:<login>), unless a numbered slot shadows its name.
 const launchSlotIds = (account) => (Array.isArray(account?.sharedBy)
-  ? account.sharedBy.filter((member) => member.source !== "login").map((member) => member.id)
+  ? account.sharedBy.filter((member) => member.source !== "login" || !/^\d+$/u.test(member.id)).map((member) => member.id)
   : null);
+
+// The renewal date and free resets come from the login's entry in account-profiles.json, read by hand.
+const subscriptionText = ({ renewsOn, freeResetsLeft, freeResetsReadOn } = {}) => [
+  ...(renewsOn ? [`renews ${renewsOn}`] : []),
+  ...(Number.isInteger(freeResetsLeft) ? [`free resets ${freeResetsLeft} (read ${freeResetsReadOn})`] : []),
+];
 
 // The slots a pane can start on, which //switch N and amux accounts name.
 const slotText = (account) => {
@@ -128,7 +135,8 @@ const accountSuffix = (account, duplicate) => {
   const identity = account?.account?.email || account?.profile?.label;
   const plan = account?.account?.plan;
   // Without its login the name already is the slot.
-  const values = [account?.account?.email ? slotText(account) : null, identity, plan].filter(Boolean);
+  const values = [account?.account?.email ? slotText(account) : null, identity, plan,
+    ...subscriptionText(account?.subscription)].filter(Boolean);
   if (duplicate) values.push("same login");
   return values.length ? ` · ${values.join(" · ")}` : "";
 };
@@ -179,6 +187,7 @@ const accountLines = (account, peers, duplicates) => (Array.isArray(account?.inU
 // A logged-out login is named among every login, so one sharing an initial with a live one keeps its whole name.
 const trailingLines = (snapshot, collapsed) => [
   ...(collapsed.length ? [`Logged out: ${collapsed.map((account) => displayName(account, snapshot.accounts)).join(" · ")}`] : []),
+  ...(snapshot.accountFileProblems?.length ? [`account-profiles.json: ${snapshot.accountFileProblems.join("; ")}`] : []),
   ...(snapshot.panesOnUnknownLogin?.length
     ? [`Panes on a login amux does not know: ${snapshot.panesOnUnknownLogin
       .map((pane) => `${pane.key} (${pane.home})`).join(", ")}`] : []),

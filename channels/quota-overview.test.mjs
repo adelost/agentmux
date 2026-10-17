@@ -27,15 +27,15 @@ const render = (accounts, now = NOW) => buildQuotaOverview({ accounts }, { confi
 feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-10-17", () => {
   unit("lsrc:0's example renders as a table and one action", {
     when: ["rendering the example's readings", () => render(example())],
-    then: ["names, week left, reset, the blocking five-hour window and when it is back", lines => expect(lines).toEqual([
+    then: ["names, panes, week left, reset, the blocking five-hour window and when it is back", lines => expect(lines).toEqual([
       "```",
-      "                week  reset",
-      "● Codex A       100%  Sat 13:35",
+      "         panes  week  reset",
+      "Codex A     12  100%  Sat 13:35",
       // 09:28:56Z is shown to the nearest minute.
-      "○ Codex W         0%  Thu 11:29",
-      "● Claude W (12)  64%  Wed 09:00",
+      "Codex W      0    0%  Thu 11:29",
+      "Claude W    12   64%  Wed 09:00",
       "    5h 0% until 14:40",
-      "● Claude A (2)    4%  Wed 02:00",
+      "Claude A     2    4%  Wed 02:00",
       "```",
       "→ Claude W back at 14:40",
     ])],
@@ -61,9 +61,9 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
     when: ["ai:2 works alone on Claude A at 95 percent", () => render([
       claude("adelost", 95, "2026-10-21T00:00:00Z", ["ai:2"]), claude("mattias.wetterlind", 7, "2026-10-21T07:00:00Z", ["skyvw:0", "claw:2"]),
     ])],
-    then: ["both rows carry pane counts and /byt names the login", lines => expect(lines.slice(2)).toEqual([
-      "● Claude W (2)  93%  Wed 09:00",
-      "● Claude A (1)   5%  Wed 02:00",
+    then: ["the pane counts show where the panes run and /byt names the login", lines => expect(lines.slice(2)).toEqual([
+      "Claude W     2   93%  Wed 09:00",
+      "Claude A     1    5%  Wed 02:00",
       "```",
       "→ Use Claude W: /byt wetterlind",
     ])],
@@ -77,7 +77,7 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
   unit("a used-up account with no room elsewhere says to reset now", {
     when: ["16 panes have just reached the weekly limit", () => render([claude("mattias.wetterlind", 100, "2026-10-21T07:00:00Z", panes("test", 16))])],
     then: ["nothing is left and the free reset is now", lines => expect(lines.slice(2)).toEqual([
-      "● Claude W   0%  Wed 09:00",
+      "Claude W    16    0%  Wed 09:00",
       "```",
       "→ Free reset Claude W now",
     ])],
@@ -89,10 +89,32 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
         account: { email: "mattias.wetterlind@example.test" }, inUse: panes("test", 12) },
     ])],
     then: ["it says so, and nothing else is advised", lines => expect(lines.slice(1)).toEqual([
-      "           week  reset",
-      "● Codex A   70%  Sat 13:35",
-      "● Claude W unreadable",
+      "         panes  week  reset",
+      "Codex A      1   70%  Sat 13:35",
+      "Claude W    12  unreadable",
       "```",
     ])],
+  });
+  // Mattias 14:17Z: when the subscription ends and whether resets are left, also when the reading failed.
+  unit("a login's renewal date and free resets get a short second line", {
+    when: ["two logins have entries, one of them unreadable", () => render([
+      { ...codex("1", "adelost", 8, "2026-10-24T11:35:12Z", panes("lsrc", 12)),
+        subscription: { renewsOn: "2026-10-20", freeResetsLeft: 0, freeResetsReadOn: "2026-10-17" } },
+      { ok: false, provider: "claude", profile: { id: "wetterlind" }, error: "network_error",
+        account: { email: "mattias.wetterlind@example.test" }, inUse: panes("api", 15), subscription: { renewsOn: "2026-11-05" } },
+      { ...claude("adelost", 97, "2026-10-21T00:00:00Z"), subscription: { freeResetsLeft: 1, freeResetsReadOn: "2026-10-17" } },
+    ])],
+    then: ["each line fits a phone", lines => {
+      expect(lines.slice(1, -1)).toEqual([
+        "         panes  week  reset",
+        "Codex A     12   92%  Sat 13:35",
+        "  renews Oct 20 · 0 free resets",
+        "Claude W    15  unreadable",
+        "  renews Nov 5",
+        "Claude A     0    3%  Wed 02:00",
+        "  1 free reset",
+      ]);
+      expect(lines.filter(line => [...line].length > 32)).toEqual([]);
+    }],
   });
 });

@@ -12,6 +12,7 @@ export const loginOfEmail = (email) => String(email || "").split("@")[0].split("
  * WHY: Keeps the name from following a slot, since slots drift from the login they run.
  */
 export function accountName(account, accounts = [account]) {
+  if (account?.name) return account.name;
   const engine = ENGINE_NAMES[account?.provider] || String(account?.provider || "Account");
   const login = loginOfEmail(account?.account?.email);
   // Without its login only the slot names it; that is what amux knows about the account.
@@ -19,4 +20,21 @@ export function accountName(account, accounts = [account]) {
   const shared = accounts.some((other) => other?.provider === account.provider
     && loginOfEmail(other?.account?.email)?.[0] === login[0] && loginOfEmail(other.account.email) !== login);
   return `${engine} ${shared ? login : login[0].toUpperCase()}`;
+}
+
+const LOGGED_OUT = new Set(["login_expired", "credentials_expired", "credentials_unavailable", "login_required"]);
+
+/**
+ * WHAT: Returns each account with its name and its login's subscription entry, also when its reading failed.
+ * WHY: Keeps the box, amux quota and the stats board on one name and one renewal date per login.
+ */
+export function withAccountEntries(accounts, entries = new Map()) {
+  // A logged-out login is no reason to spell out a live login that shares its initial.
+  const peers = accounts.filter((account) => account.ok || !LOGGED_OUT.has(account.error));
+  return accounts.map((account) => {
+    const login = loginOfEmail(account.account?.email);
+    const entry = login ? entries.get(`${account.provider}:${login}`) : null;
+    return { ...account, name: entry?.name || accountName(account, peers),
+      ...(entry?.subscription ? { subscription: entry.subscription } : {}) };
+  });
 }
