@@ -51,6 +51,13 @@ Read each view for what it is:
   log, never into the brief.
 - Also name the new evidence, the bounded outcome, what is already done and
   the boundary that must stay untouched.
+- As the human's contact point, relay and delegate; do not author. The brief
+  holds the human's wish in clean words, the constraints, the owner and the
+  check. The pane that knows the product decides the content (design,
+  layout, directions, code). Never fill a gap with your own idea and never
+  send product work to your own subagents. When the wish is ambiguous, ask
+  the human one question. Mattias, 2026-10-17: "låta den agenten som kan
+  [produkten] bäst designa planen utifrån min önskan."
 - Test before sending: could the worker execute this blind? If not, rewrite.
 - Send it as the amux layer says (a file, then `--stdin`); never build the
   text in bash.
@@ -61,8 +68,9 @@ Read each view for what it is:
   its quota allows: visual and UX design, copy, game feel, judging
   screenshots. Technical work goes to Codex: builds, tests, data, releases,
   infrastructure and fixes with a defined proof.
-- When Opus quota is short, keep Opus on the judgment (the design choice, the
-  visual review) and hand the build to Codex with a brief.
+- Opus designs; Codex implements. Opus keeps the judgment (the design
+  choice, the visual review, the merge). Building a finished design goes to
+  free Codex panes with a brief, never to Claude subagents.
 - Read `amux quota` before staffing a long run. Spread the load so every paid
   account is in use instead of draining one; unused weekly quota does not
   carry over. Start fresh sessions on the account with the most room.
