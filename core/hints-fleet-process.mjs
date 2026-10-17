@@ -129,8 +129,7 @@ function's own branching or state. Do a small split in the same change.
 ## Staffing and review economics
 
 1. **One owner per feature, end to end.** The direct recipient owns it;
-   one busy with another feature hands it to one free owner with a brief
-   that keeps its scope.
+   one busy with another feature hands it to one free owner with a brief.
    A capable idle agent may also self-claim one READY or explicitly
    claimable board ticket. The owner plans, builds, verifies, rebases,
    self-merges, deploys when needed and records the completion commit.
@@ -140,20 +139,17 @@ function's own branching or state. Do a small split in the same change.
    need no manager round-trip.
 3. **Do not wake a fleet to look busy.** A durable task wakes its exact owner;
    dormant panes stay dormant. "Sync/check all panels" authorizes reading
-   status and evidence, not prompting them. Even FYI or "no action needed"
-   messages run a model and spend quota: store shared criteria for the next
-   natural turn and contact only an owner who needs an action or
-   handoff. An idle panel or unused provider is not permission to activate it.
+   status and evidence, not prompting them. FYI messages also spend quota:
+   contact only an owner who needs an action or handoff. An idle panel or unused provider is not permission to activate it.
    A pane back after 7+ days first re-anchors with
    \`amux done --week\`, \`amux asks --open\`, this policy and the repo's
    instructions. \`amux reconcile\` repairs service/shell panes; it is not a
-   staffing command and never wakes coding agents. Delivery is proven by the recipient's durable
-   receipt, not enqueue time; the owner-response clock starts at that receipt.
+   staffing command and never wakes coding agents. Delivery is proven by the recipient's
+   receipt, not enqueue time; that receipt starts the owner's clock.
 
-   Engines (Mattias, 2026-10-17): Opus designs; Codex implements. Opus
-   owns architecture, gameplay, UX and new design, reviews the result and
-   merges. Implementing a finished design, from re-skinning many files to
-   tests and renders, goes to free Codex panes with a brief, never Claude
+   Opus designs; Codex implements (Mattias, 2026-10-17): Opus owns
+   architecture, gameplay and UX, reviews and merges; free Codex panes build
+   a finished design from a brief, never Claude
    subagents.
 
    Codex models (Mattias, 2026-09-20 and 2026-10-11): default
@@ -161,7 +157,7 @@ function's own branching or state. Do a small split in the same change.
    choice survives restart. Change models only with Discord \`/model sol\` or
    \`amux model PROJECT -p N sol\` (see its help); a raw \`/model\` is refused.
    Dormant panes switch at their next work prompt, never by a fleet wake-up.
-   Read model, tokens and receipts from the exact pane. Quota is paid capacity.
+   Read model and tokens from the exact pane. Quota is paid capacity.
    Codex account recovery switches only after a reached weekly limit, with
    verified room and exact-session transfer, or a saved fresh-session handover.
    Forecasts never switch accounts.
@@ -169,8 +165,7 @@ function's own branching or state. Do a small split in the same change.
    work on a pane that is working, in a modal, or between tool calls.
    A blocked task does not reserve its pane indefinitely:
    checkpoint it and release its active resources before taking independent work.
-   Honor the project's configured concurrency limit; do not invent extra
-   parallelism. A board lease alone does not prove a pane is free.
+   Honor the project's concurrency limit; invent no extra parallelism. A board lease alone does not prove a pane is free.
 5. **A configured board is a shared work list, not an orchestration ceremony.** Keep the
    minimum durable facts: task, owner, state, blocker/reason, and completion
    commit or PR. Comments route to the current owner. Managers read the
@@ -182,37 +177,33 @@ function's own branching or state. Do a small split in the same change.
    one relevant local smoke lasting at most 5 minutes. Heavy CI,
    full-repo suites, browser matrices and perf sweeps run only on explicit
    human request or scheduled/manual infrastructure. A green pre-rebase check
-   proves nothing. Visual work: the smallest relevant scenario, one screenshot
-   when useful. Preserve
+   proves nothing. Visual work: one smallest scenario and screenshot. Preserve
    repo correctness and security requirements: never hide a real failure or
    add file-size exceptions to make a gate green. If a required check cannot
-   fit this budget, report the constraint rather than claim unverified success.
-   GitHub-hosted CI is optional evidence, never release authority; do not add
-   a remote-CI or PR ceremony to a clean locally verified change. Deploy by
+   fit this budget, report that instead of claiming success.
+   GitHub-hosted CI is optional evidence, never release authority; add no
+   PR ceremony to a clean, locally verified change. Deploy by
    the repo's local-first release contract (exact source and rollback SHA,
    build, live check). Do not duplicate gates.
 7. **Owners self-merge and self-deliver.** A normal green change does not need
    peer review. Human-requested review is welcome; a red gate or high-risk seam
-   needs resolution, not an automatic peer-review loop.
+   needs resolution, not a review loop.
    A merged-but-undeployed feature remains open when
    deployment is part of the task. Irreversible or money-spending actions still
    require human approval.
-8. **Report only terminal outcomes** (Kommunikationsdisciplin): a real
-   blocker, collision, handoff or final DONE report. The board and the ask
+8. **Report only terminal outcomes:** a blocker, collision, handoff or DONE. The board and the ask
    ledger also carry progress.
 9. **Record blockers where work is tracked:** a concrete reason and the
    dependency or evidence that clears it, in the board's typed states when
-   there is one, never only in a manager's memory or a private note. Silence
-   or an unstarted owner clock is not a worker failure.
+   there is one, never only in a private note. Silence
+   is not a worker failure.
 10. **Human direction is authoritative and remains direct.** A decision relayed
     as authority (a GO, a price, a name) keeps the human quote byte-for-byte with
     provenance. A work brief is the orchestrator's interpretation: numbered
     executable steps, not the human's text (see the amux-orchestrator skill).
-    Bad brief: "Mattias, verbatim: 'men förstå ni? ska ju helst vara
-    generistk...' Fix the rig." Good brief: "1. Use Haunt's rig format
-    (rig.js) as the shared rig. 2. Place the joints from the doll's own
-    proportions. 3. Report to claw:0." His full words go to the decision
-    log, never into the brief. Mark each item as his request or your own
+    Bad: "Mattias, verbatim: '...ska ju helst vara generistk...' Fix the
+    rig." Good: "1. Use Haunt's rig.js as the shared rig. 2. Report to
+    claw:0." His words go to the decision log, never into the brief. Mark each item as his request or your own
     addition; only his request may remove something he sees or change a
     test's expected output.
     No manager, memory note or older topology rule may narrow,
