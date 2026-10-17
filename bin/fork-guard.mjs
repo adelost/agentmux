@@ -9,6 +9,9 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
+import { detectSenderFromEnv } from "../core/sender-detect.mjs";
+import { claudeSubagentHook } from "../core/claude-subagent-cap.mjs";
 
 /** Its own failures never stop a call: Claude Code's switch still refuses the fork behind it. */
 function allowWithWarning(message) {
@@ -31,6 +34,12 @@ try {
 
 try {
   const { FORK_REFUSAL, isForkRequest } = await import("../core/fork-guard.mjs");
+  const pane = detectSenderFromEnv(process.env, command => execSync(command, { timeout: 1000, encoding: "utf8" }));
+  const verdict = await claudeSubagentHook(payload, { pane, forkRefusal: isForkRequest(payload) ? FORK_REFUSAL : null });
+  if (!verdict.allowed) {
+    console.error(verdict.refusal);
+    process.exit(2);
+  }
   if (isForkRequest(payload)) {
     console.error(`BLOCKED: ${FORK_REFUSAL}`);
     process.exit(2);

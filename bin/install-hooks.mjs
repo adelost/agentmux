@@ -35,8 +35,8 @@ export const HOTSPOT_GUARD_CMD = `p=$(cat); case "$p" in *commit*) printf '%s' "
 // rm targets Claude Code stops for a person are refused before the call; only payloads naming rm start node.
 const RM_GUARD_CMD = `p=$(cat); case "$p" in *rm*) printf '%s' "$p" | exec node "${join(__dir, "rm-target-guard.mjs")}";; esac`;
 // Forks are banned (Mattias 2026-10-10: "vi borde väl förbjuda det helt"). Claude Code's own switch removes the
-// fork type; the guard names the fresh-subagent alternative. Only payloads naming fork start node.
-const FORK_GUARD_CMD = `p=$(cat); case "$p" in *fork*) printf '%s' "$p" | exec node "${join(__dir, "fork-guard.mjs")}";; esac`;
+// fork type; the same existing Agent/Task guard also serializes fresh subagents (Mattias 2026-10-17).
+const FORK_GUARD_CMD = `exec node "${join(__dir, "fork-guard.mjs")}"`;
 const FORK_GUARD_MATCHER = "Agent|Task";
 const FORK_SWITCH = "CLAUDE_CODE_FORK_SUBAGENT";
 // WHAT: Defines the PostToolUse command for the daily memory section rule.
@@ -171,6 +171,13 @@ function main() {
   }
   if (preToolUse.length) hooks.PreToolUse = preToolUse;
   else delete hooks.PreToolUse;
+  for (const event of ["SubagentStart", "SubagentStop", "PostToolUseFailure", "PostToolUse", "SessionStart"]) {
+    const kept = without(hooks[event], isForkGuard);
+    if (!remove) kept.push({ ...(event.startsWith("PostTool") ? { matcher: FORK_GUARD_MATCHER } : {}),
+      hooks: [{ type: "command", command: FORK_GUARD_CMD, timeout: 10 }] });
+    if (kept.length) hooks[event] = kept;
+    else delete hooks[event];
+  }
   const postToolUse = without(hooks.PostToolUse, isMemorySectionReminder);
   if (!remove) {
     postToolUse.push({ matcher: MEMORY_SECTION_MATCHER, hooks: [{

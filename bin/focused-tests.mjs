@@ -23,6 +23,9 @@ const ZERO_TEST_ALLOWLIST = [
 ];
 
 const TEST_ALIASES = {
+  "core/claude-subagent-cap.mjs": ["test/claude-subagent-cap.test.mjs"],
+  "bin/fork-guard.mjs": ["test/fork-guard.test.mjs", "test/claude-subagent-cap.test.mjs"],
+  "bin/install-hooks.mjs": ["test/install-hooks.test.mjs"],
   "cli/format.mjs": ["cli.test/format.test.mjs", "core/compact-quota-reset.test.mjs"],
   "core/claude-quota-target.mjs": ["core/claude-quota-lifecycle.test.mjs", "core/compact-quota-reset.test.mjs"],
   "core/delivery-wake.mjs": ["core/context-maintenance.test.mjs", "core/compact-quota-reset.test.mjs"],

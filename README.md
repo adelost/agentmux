@@ -364,6 +364,12 @@ MASTER_SHA=$(git rev-parse refs/remotes/origin/master)
 node bin/install-release.mjs --sha "$MASTER_SHA"
 ```
 
+Claude Agent/Task calls use the existing PreToolUse guard. `AMUX_CLAUDE_SUBAGENT_CAP`
+in `~/.agentmux/.env` defaults to `1`; `0` disables the cap. Start/stop and tool
+receipts release the slot, including background agents. Each attempt appends a
+time, pane, decision and description to `~/.agentmux/subagent-spawns.jsonl`, never
+the prompt. An unknown count allows the call and records `countKnown:false`.
+
 The installer builds only `git archive` bytes from that SHA, preserves local
 runtime config without checking out another branch, refreshes the Claude hooks,
 and writes `~/.agentmux/release-receipt.json`. `amux doctor` turns red if the

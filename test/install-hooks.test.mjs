@@ -66,6 +66,10 @@ feature("agentmux hook installer", () => {
         (hook) => hook.command.includes("fork-guard.mjs"),
       ));
       expect(forkGuards.map((row) => row.matcher)).toEqual(["Agent|Task"]);
+      for (const event of ["SubagentStart", "SubagentStop", "PostToolUseFailure", "PostToolUse", "SessionStart"]) {
+        expect(settings.hooks[event].filter(row => row.hooks.some(hook => hook.command.includes("fork-guard.mjs"))))
+          .toHaveLength(1);
+      }
       // 2026-10-10: the daily memory section rule reaches the writer while writing, once per install
       const reminders = settings.hooks.PostToolUse.filter((row) => row.hooks.some(
         (hook) => hook.command.includes("memory-section-reminder.mjs"),
