@@ -118,8 +118,7 @@ export async function postDueQuotaWarnings({ snapshot, notify, sent, config = pa
     const justFull = weekly.usedPercent >= 100 && !(previous?.usedPercent >= 100);
     const candidate = { account, panes: activePanes(account), provider: account.provider, email, usedPercent: weekly.usedPercent, key, accountKey, resetAt };
     const text = formatQuotaWarning(snapshot, { config, now, only: [account] });
-    const spare = account.provider === "claude" && spareAccounts(accounts, account, config, now)[0];
-    const fingerprint = JSON.stringify([weekly.usedPercent, candidate.panes.length, Math.round(resetAt / HOUR), spare?.account?.email]);
+    const fingerprint = text;
     if (existing?.messageId && editNotice) {
       if (existing.fingerprint === fingerprint) continue;
       try { await editNotice(existing, text); }

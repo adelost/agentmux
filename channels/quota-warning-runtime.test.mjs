@@ -149,3 +149,23 @@ feature("an explicitly deleted quota row", () => {
     }],
   });
 });
+
+feature("the account row keeps its current forecast", () => {
+  unit("a changed forecast edits the row even when percentage and active count stay the same", {
+    when: ["the same quota reading is revisited an hour later", async () => {
+      const { postDueQuotaWarnings } = await import("./quota-warning.mjs");
+      const sent = createSentNoticeStore(join(mkdtempSync(join(tmpdir(), "quota-forecast-edit-")), "sent.json"));
+      const snapshot = { accounts: [{ ...due.accounts[0], limits: [{ kind: "weekly_all", usedPercent: 85, resetsAt: "2026-10-22T06:13:00Z" }] }] };
+      const notify = vi.fn(async () => ({ channelId: "human", messageId: "notice-1" })), editNotice = vi.fn(async () => {});
+      const now = Date.parse("2026-10-17T09:00:00Z");
+      await postDueQuotaWarnings({ snapshot, sent, notify, editNotice, now });
+      await postDueQuotaWarnings({ snapshot, sent, notify, editNotice, now: now + 3_600_000 });
+      return { notify, editNotice };
+    }],
+    then: ["one post remains and its forecast is updated", ({ notify, editNotice }) => {
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(editNotice).toHaveBeenCalledTimes(1);
+      expect(editNotice.mock.calls[0][1]).not.toBe(notify.mock.calls[0][0]);
+    }],
+  });
+});
