@@ -22,6 +22,7 @@ import {
   setCodexProfile,
 } from "./codex-profiles.mjs";
 import { claudeLoginProfiles, quotaProfileCatalog } from "./quota-profiles.mjs";
+import { loginOfEmail } from "./account-names.mjs";
 import { readClaudeProfileIdentity } from "./claude-account-quota.mjs";
 
 /** WHAT: Names durable pane-to-profile state. WHY: Keeps runtime selection separate from provider credentials. */
@@ -83,7 +84,7 @@ export function resolveRuntimeProfile(provider, requested, catalog = runtimeProf
 }
 
 /**
- * WHAT: Resolves a Claude rotation target by slot id, login dir name or account email.
+ * WHAT: Resolves a Claude rotation target by slot id, login dir name, account email or its login.
  * WHY: Lets the operator name the account `amux quota` shows instead of a slot number.
  */
 export function resolveClaudeAccountTarget(requested, catalog = runtimeProfileCatalog("claude"), {
@@ -91,10 +92,15 @@ export function resolveClaudeAccountTarget(requested, catalog = runtimeProfileCa
 } = {}) {
   const byId = resolveRuntimeProfile("claude", requested, catalog);
   if (byId) return byId;
-  const email = String(requested || "").trim().toLowerCase();
-  if (!email.includes("@")) return null;
+  const wanted = String(requested || "").trim().toLowerCase();
+  if (!wanted) return null;
+  // `/byt adelost` names a login whose dir is a slot's home, so it is matched on the email's login.
+  const matches = (email) => (wanted.includes("@") ? email === wanted : loginOfEmail(email) === wanted);
   // Two slots can hold one login; the first in catalog order is that same account.
-  return catalog.find((profile) => identityOf(profile)?.email?.toLowerCase() === email) || null;
+  return catalog.find((profile) => {
+    const email = identityOf(profile)?.email?.toLowerCase();
+    return Boolean(email) && matches(email);
+  }) || null;
 }
 
 /**

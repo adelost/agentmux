@@ -58,12 +58,17 @@ feature("Claude logins outside the launch slots", () => {
         wetterlind: resolveClaudeAccountTarget("Wetterlind@example.test", catalog, { identityOf }),
         adelost: resolveClaudeAccountTarget("adelost@example.test", catalog, { identityOf }),
         unknown: resolveClaudeAccountTarget("other@example.test", catalog, { identityOf }),
+        // The box advises "/byt adelost" for Claude A, whose login dir is slot 2's home (2026-10-17).
+        byLogin: resolveClaudeAccountTarget("adelost", catalog, { identityOf }),
+        unknownLogin: resolveClaudeAccountTarget("other", catalog, { identityOf }),
       };
     }],
-    then: ["the email picks that login, a shared login picks its first slot, an absent one nothing", (found) => {
+    then: ["the email or its login picks that account, a shared login its first slot, an absent one nothing", (found) => {
       expect(found.wetterlind.id).toBe("wetterlind");
       expect(found.adelost.id).toBe("1");
       expect(found.unknown).toBeNull();
+      expect(found.byLogin.id).toBe("1");
+      expect(found.unknownLogin).toBeNull();
     }],
   });
 });
