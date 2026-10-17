@@ -19,19 +19,32 @@ if [ -z "$AUDIO_FILE" ]; then
   exit 1
 fi
 
-# Preflight: skip silent clips. STT models hallucinate training-set
-# artifacts ("Undertexter från Amara.org") on near-silent audio, and a
-# skipped call is a free call. Threshold -75 dB rms = effectively digital
-# silence; real Discord voice sits at -53 to -60 dB rms.
-# See memory/references/whisper-benchmark.md.
-RMS=$(ffmpeg -hide_banner -i "$AUDIO_FILE" -af volumedetect -f null /dev/null 2>&1 \
-  | awk '/mean_volume/{print $5}')
-if [ -n "$RMS" ]; then
-  TOO_QUIET=$(awk -v r="$RMS" 'BEGIN{print (r+0 < -75)}')
-  if [ "$TOO_QUIET" = "1" ]; then
-    echo "[preflight] silent clip (rms=${RMS}dB), skipping API call" >&2
-    exit 0
-  fi
+# The same conservative silence rule applies to a whole clip and each part.
+# Sky 2026-10-17: mean below -50 dB AND peak below -20 dB. The incident's
+# pauses measured -66.1/-33.7 and -68.4/-31.7; speech measured -21..-26/-0..-3.
+# Requiring both keeps a brief audible peak even when its average is low.
+is_silent() {
+  local levels mean peak
+  levels=$(ffmpeg -hide_banner -i "$1" -af volumedetect -f null /dev/null 2>&1) || return 1
+  mean=$(awk '/mean_volume/{print $5}' <<< "$levels")
+  peak=$(awk '/max_volume/{print $5}' <<< "$levels")
+  awk -v mean="$mean" -v peak="$peak" 'BEGIN {
+    exit !(mean != "" && peak != "" && (mean == "-inf" || mean+0 < -50) && (peak == "-inf" || peak+0 < -20))
+  }'
+}
+
+silence_marker() {
+  local start="$1" end="$2"
+  printf '[tyst %d:%02d–%d:%02d]\n' "$((start / 60))" "$((start % 60))" "$((end / 60))" "$((end % 60))"
+}
+
+DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO_FILE") || exit 1
+TOTAL_SECONDS="${DURATION%.*}"
+[[ "$TOTAL_SECONDS" =~ ^[0-9]+$ ]] || { echo "[stt] invalid audio duration" >&2; exit 1; }
+if is_silent "$AUDIO_FILE"; then
+  echo "[preflight] silent clip, skipping API call" >&2
+  silence_marker 0 "$TOTAL_SECONDS"
+  exit 0
 fi
 
 # Kedja: gemini (2 försök) → whisper1 (märkt fallback) → ärligt fel.
@@ -52,6 +65,7 @@ transcribe_clip() {
   local clip="$1" attempt TEXT rc
   for attempt in 1 2; do
     if TEXT=$(try_backend gemini 100s "$clip"); then
+      [ -n "${TEXT//[[:space:]]/}" ] || { echo "[stt] empty segment transcript" >&2; return 1; }
       printf '%s\n' "$TEXT"
       return 0
     else
@@ -60,6 +74,7 @@ transcribe_clip() {
     echo "[stt] gemini attempt $attempt/2 failed (exit $rc)" >&2
   done
   if TEXT=$(try_backend whisper1 60s "$clip"); then
+    [ -n "${TEXT//[[:space:]]/}" ] || { echo "[stt] empty segment transcript" >&2; return 1; }
     printf '[stt-fallback:whisper1] %s\n' "$TEXT"
     return 0
   fi
@@ -73,7 +88,6 @@ transcribe_clip() {
 # Keep the same transcriber and quality; bound clip duration instead of hiding
 # failures behind a larger deadline. Keep Discord Opus compressed, matching the
 # successful incident reproduction. Other codecs use independent WAV headers.
-DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO_FILE") || exit 1
 if ! awk -v duration="$DURATION" 'BEGIN { exit !(duration > 45) }'; then
   transcribe_clip "$AUDIO_FILE"
   exit $?
@@ -98,10 +112,19 @@ wait_batch() {
   for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
   pids=()
 }
+part_index=0
 for clip in "$PARTS"/part-*."$EXT"; do
   [ -f "$clip" ] || { echo "[stt] audio split produced no parts" >&2; exit 1; }
-  transcribe_clip "$clip" > "$clip.txt" 2> "$clip.log" &
-  pids+=("$!")
+  if is_silent "$clip"; then
+    start=$((part_index * 25)); end=$((start + 25))
+    [ "$end" -le "$TOTAL_SECONDS" ] || end="$TOTAL_SECONDS"
+    silence_marker "$start" "$end" > "$clip.txt"
+    echo "[preflight] silent segment, skipping API call" >&2
+  else
+    transcribe_clip "$clip" > "$clip.txt" 2> "$clip.log" &
+    pids+=("$!")
+  fi
+  part_index=$((part_index + 1))
   if [ "${#pids[@]}" -eq 3 ]; then wait_batch; fi
 done
 wait_batch
@@ -116,7 +139,7 @@ for result in "$PARTS"/part-*."$EXT".txt; do
     fallback=true
     TEXT="${TEXT#'[stt-fallback:whisper1] '}"
   fi
-  [ -n "$TEXT" ] || { echo "[stt] empty segment transcript" >&2; exit 1; }
+  [ -n "${TEXT//[[:space:]]/}" ] || { echo "[stt] empty segment transcript" >&2; exit 1; }
   joined="${joined}${joined:+ }${TEXT}"
 done
 if $fallback; then

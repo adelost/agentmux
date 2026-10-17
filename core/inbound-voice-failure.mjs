@@ -13,7 +13,7 @@ export async function deliverVoiceFailure({ record, error, store, message, onMes
     ...record.attachments.filter(a => a.contentType?.startsWith("audio/") && a.durablePath && a.durablePath !== path)
       .map(a => `Additional audio: ${a.durablePath}`),
     `Error: ${cause}`,
-    "AMUX will retry transcription and deliver it separately. Do not guess what the person said.",
+    "Check the audio file before replying. No transcript is available. Do not guess what the person said.",
     ...(record.text ? [`Original accompanying text: ${record.text}`] : []),
   ].join("\n");
   if (!current.voiceFailureNotice) {

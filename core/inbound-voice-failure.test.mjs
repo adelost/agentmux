@@ -65,6 +65,8 @@ describe("voice failure is still delivered", () => {
       store.observe({ ...voice, id: "later", text: "Did you read my voice message?", attachments: [] }, target);
       await reconciler.drain(channel, voice.channelId).catch(() => {});
       expect([...accepted.values()]).toEqual([expect.stringContaining("DEADLINE_EXCEEDED"), "Did you read my voice message?"]);
+      expect([...accepted.values()][0]).not.toContain("AMUX will retry");
+      expect([...accepted.values()][0]).toContain("Check the audio file");
       expect([...accepted.values()][0]).toContain(store.read("channel", voice.id).attachments[0].durablePath);
       expect(store.read("channel", voice.id).status).not.toBe("completed");
       now += 31_000;
