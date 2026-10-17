@@ -150,6 +150,12 @@ function's own branching or state. Do a small split in the same change.
    staffing command and never wakes coding agents. Delivery is proven by the recipient's durable
    receipt, not enqueue time; the owner-response clock starts at that receipt.
 
+   Engines (Mattias, 2026-10-17): Opus designs; Codex implements. Opus
+   owns architecture, gameplay, UX and new design, reviews the result and
+   merges. Implementing a finished design, from re-skinning many files to
+   tests and renders, goes to free Codex panes with a brief, never Claude
+   subagents.
+
    Codex models (Mattias, 2026-09-20 and 2026-10-11): default
    \`gpt-6.1-sol\`, never Astra; Claude and Kimi keep theirs. A pane
    choice survives restart. Change models only with Discord \`/model sol\` or

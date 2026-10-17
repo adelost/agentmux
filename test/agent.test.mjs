@@ -504,6 +504,20 @@ feature("generated agent policy", () => {
     }],
   });
 
+  unit("staffs design on Opus and implementation of a finished design on Codex", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["design is Opus work and implementing it is Codex work", (content) => {
+      expect(content).toMatch(/Opus designs; Codex implements/u);
+      expect(content).toMatch(/never Claude\s+subagents/u);
+    }],
+  });
+
   unit("allows idle agents to self-claim without a manager round-trip", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
