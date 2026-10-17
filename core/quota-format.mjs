@@ -7,28 +7,33 @@
 // DOES NOT: fetch anything, cache anything, or decide refresh policy —
 //       callers own how fresh their snapshot is.
 
+import { accountName as displayName } from "./account-names.mjs";
+
+// Mattias 2026-10-17 12:03Z: "Undvik emoji...", so a high row says it in words.
 const WARN_PERCENT = 70;
 const CRITICAL_PERCENT = 90;
 
 const severityMark = (usedPercent) => {
   if (typeof usedPercent !== "number") return "";
-  if (usedPercent >= CRITICAL_PERCENT) return " 🔴";
-  if (usedPercent >= WARN_PERCENT) return " ⚠️";
+  if (usedPercent >= CRITICAL_PERCENT) return " (critical)";
+  if (usedPercent >= WARN_PERCENT) return " (high)";
   return "";
 };
 
-const SHORT_MONTHS = ["jan", "feb", "mar", "apr", "maj", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+const ENGLISH_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/** WHAT: Returns a time rounded to the nearest minute. WHY: Keeps a reset that jitters by seconds from reading 08:59 one time and 09:00 the next. */
+export const nearestMinute = (time) => new Date(Math.round(new Date(time).getTime() / 60_000) * 60_000);
+
+/** WHAT: Formats a reset as "reset Oct 22 08:13". WHY: Keeps the quota detail lines from showing Swedish dates. */
 export const formatReset = (resetsAt) => {
   if (!resetsAt) return "";
-  const at = new Date(resetsAt);
+  const at = nearestMinute(resetsAt);
   if (Number.isNaN(at.getTime())) return "";
   const hh = String(at.getHours()).padStart(2, "0");
   const mm = String(at.getMinutes()).padStart(2, "0");
-  return `reset ${at.getDate()} ${SHORT_MONTHS[at.getMonth()]} ${hh}:${mm}`;
+  return `reset ${ENGLISH_MONTHS[at.getMonth()]} ${at.getDate()} ${hh}:${mm}`;
 };
-
-const ENGLISH_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** WHAT: Formats a local time as "08:13". WHY: Lets a same-day forecast drop its date. */
 export const clockOf = (time) => `${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}`;
@@ -47,11 +52,11 @@ export const formatNoticeTime = (at) => {
 export const formatLimitedAlert = ({ paneKey, resetAt = null, autoResume = false, logCommand }) => {
   const reset = formatReset(resetAt);
   const next = autoResume
-    ? "amux fortsätter själv i samma session när fönstret är tillbaka."
-    : "Knuffa igång den när kvoten är tillbaka.";
+    ? "amux continues it in the same session when the window is back."
+    : "Nudge it when the quota is back.";
   return {
-    discord: `🚫 **${paneKey} står stilla, kvoten är slut${reset ? ` (${reset})` : ""}.** ${next} Panelen: \`${logCommand}\``,
-    push: `🚫 ${paneKey} står stilla på kvot${reset ? `, ${reset}` : ""}. ${autoResume ? "amux fortsätter själv." : "Knuffa igång den."}`,
+    discord: `**${paneKey} has stopped, its quota is used up${reset ? ` (${reset})` : ""}.** ${next} The pane: \`${logCommand}\``,
+    push: `${paneKey} has stopped on quota${reset ? `, ${reset}` : ""}. ${autoResume ? "amux continues it by itself." : "Nudge it."}`,
   };
 };
 
@@ -60,15 +65,15 @@ const percentCell = (label, usedPercent) =>
 
 const claudeLimitLabel = (limit) => {
   if (limit.kind === "session") return "session";
-  if (limit.kind === "weekly_all") return "vecka";
-  if (limit.kind === "weekly_scoped") return `vecka ${limit.scopeName ?? "scoped"}`;
+  if (limit.kind === "weekly_all") return "week";
+  if (limit.kind === "weekly_scoped") return `week ${limit.scopeName ?? "scoped"}`;
   return limit.kind;
 };
 
 // The weekly rows share one reset instant; the session resets on its own
 // clock, so it carries its own suffix instead of the shared one.
 const claudeLine = (claude) => {
-  if (!claude?.ok) return `Claude  otillgänglig (${claude?.error ?? "okänt fel"})`;
+  if (!claude?.ok) return `Claude  unavailable (${claude?.error ?? "unknown error"})`;
   const session = claude.limits.filter((limit) => limit.kind === "session");
   const weekly = claude.limits.filter((limit) => limit.kind !== "session");
   const cells = [
@@ -83,10 +88,10 @@ const claudeLine = (claude) => {
 };
 
 const codexWindowLabel = (window) =>
-  window.windowMinutes === 10_080 ? "vecka" : `${Math.round(window.windowMinutes / 60)}h`;
+  window.windowMinutes === 10_080 ? "week" : `${Math.round(window.windowMinutes / 60)}h`;
 
 const codexLine = (codex) => {
-  if (!codex?.ok) return `Codex   otillgänglig (${codex?.error ?? "okänt fel"})`;
+  if (!codex?.ok) return `Codex   unavailable (${codex?.error ?? "unknown error"})`;
   const cells = codex.limits.flatMap((limit) => limit.windows.map((window) => {
     const reset = formatReset(window.resetsAt);
     const label = [limit.limitName, codexWindowLabel(window)].filter(Boolean).join(" ");
@@ -96,8 +101,8 @@ const codexLine = (codex) => {
 };
 
 const kimiLine = (kimi) => {
-  if (!kimi?.ok) return `Kimi    otillgänglig (${kimi?.error ?? "okänt fel"})`;
-  if (!kimi.limits.length) return "Kimi    otillgänglig (inga kvotgränser)";
+  if (!kimi?.ok) return `Kimi    unavailable (${kimi?.error ?? "unknown error"})`;
+  if (!kimi.limits.length) return "Kimi    unavailable (no quota limits)";
   // Every window, like the Codex line: "· 2 gränser" hid exactly the fact that
   // decides what a stop means — 5h-fönstret läker självt, veckan gör det inte
   // (2026-08-05: tre paneler dömdes som månadsdöda när 5h-fönstret var boven).
@@ -113,29 +118,27 @@ const launchSlotIds = (account) => (Array.isArray(account?.sharedBy)
   ? account.sharedBy.filter((member) => member.source !== "login").map((member) => member.id)
   : null);
 
+// The slots a pane can start on, which //switch N and amux accounts name.
+const slotText = (account) => {
+  const slots = launchSlotIds(account) ?? [account.profile.id];
+  return slots.length ? `slot ${slots.join("+")}` : "no slot";
+};
+
 const accountSuffix = (account, duplicate) => {
   const identity = account?.account?.email || account?.profile?.label;
   const plan = account?.account?.plan;
-  const values = [identity, plan].filter(Boolean);
-  if (launchSlotIds(account)?.length === 0) values.push("ingen plats");
-  if (duplicate) values.push("⚠ samma inloggning");
+  // Without its login the name already is the slot.
+  const values = [account?.account?.email ? slotText(account) : null, identity, plan].filter(Boolean);
+  if (duplicate) values.push("same login");
   return values.length ? ` · ${values.join(" · ")}` : "";
 };
 
-const accountName = (account) => {
-  const providerName = account.provider === "claude" ? "Claude"
-    : account.provider === "kimi" ? "Kimi" : "Codex";
-  const slots = launchSlotIds(account);
-  if (!slots) return `${providerName} ${account.profile.id}`;
-  return slots.length ? `${providerName} ${slots.join("+")}` : providerName;
-};
-
-const accountLine = (account, duplicates = new Set()) => {
+const accountLine = (account, peers, duplicates = new Set()) => {
   const rendered = account?.provider === "claude" ? claudeLine(account)
     : account?.provider === "kimi" ? kimiLine(account)
       : codexLine(account);
   if (!account?.profile?.id) return rendered;
-  return `${accountName(account)}${accountSuffix(account, duplicates.has(account.profile?.key))}  `
+  return `${displayName(account, peers)}${accountSuffix(account, duplicates.has(account.profile?.key))}  `
     + rendered.replace(/^\S+\s+/u, "");
 };
 
@@ -144,10 +147,6 @@ const LOGGED_OUT = new Set(["login_expired", "credentials_expired", "credentials
 const isIdleLoggedOut = (account) => !account?.ok && LOGGED_OUT.has(account?.error)
   && Array.isArray(account.inUse) && account.inUse.length === 0;
 
-const loggedOutName = (account) => {
-  const email = account?.account?.email;
-  return account.provider === "claude" && email ? `Claude ${email.split("@")[0]}` : accountName(account);
-};
 
 const runsOf = (panes) => panes.reduce((runs, pane) => {
   const last = runs.at(-1);
@@ -172,15 +171,16 @@ export const compactPaneList = (keys) => {
 };
 
 const inUseLine = (account) => (account.inUse.length
-  ? `  i bruk: ${compactPaneList(account.inUse)}` : "  ingen panel");
+  ? `  in use: ${compactPaneList(account.inUse)}` : "  no pane");
 
-const accountLines = (account, duplicates) => (Array.isArray(account?.inUse)
-  ? [accountLine(account, duplicates), inUseLine(account)] : [accountLine(account, duplicates)]);
+const accountLines = (account, peers, duplicates) => (Array.isArray(account?.inUse)
+  ? [accountLine(account, peers, duplicates), inUseLine(account)] : [accountLine(account, peers, duplicates)]);
 
+// A logged-out login is named among every login, so one sharing an initial with a live one keeps its whole name.
 const trailingLines = (snapshot, collapsed) => [
-  ...(collapsed.length ? [`Utloggade: ${collapsed.map(loggedOutName).join(" · ")}`] : []),
+  ...(collapsed.length ? [`Logged out: ${collapsed.map((account) => displayName(account, snapshot.accounts)).join(" · ")}`] : []),
   ...(snapshot.panesOnUnknownLogin?.length
-    ? [`Paneler på en inloggning amux inte känner: ${snapshot.panesOnUnknownLogin
+    ? [`Panes on a login amux does not know: ${snapshot.panesOnUnknownLogin
       .map((pane) => `${pane.key} (${pane.home})`).join(", ")}`] : []),
 ];
 
@@ -198,8 +198,9 @@ const snapshotLines = (snapshot) => {
     const duplicates = new Set([...identities.values()]
       .filter((keys) => keys.length > 1).flat());
     const ordered = order.flatMap((provider) => snapshot.accounts.filter((account) => account.provider === provider));
+    const shown = ordered.filter((account) => !isIdleLoggedOut(account));
     return [
-      ...ordered.filter((account) => !isIdleLoggedOut(account)).flatMap((account) => accountLines(account, duplicates)),
+      ...shown.flatMap((account) => accountLines(account, shown, duplicates)),
       ...trailingLines(snapshot, ordered.filter(isIdleLoggedOut)),
     ];
   }
@@ -208,6 +209,6 @@ const snapshotLines = (snapshot) => {
 
 /** WHAT: Builds one shared account view. WHY: Keeps terminal and Discord quota truth identical. */
 export const formatQuotaSnapshot = (snapshot) => [
-  "Kvot (använt, delad per konto):",
+  "Quota (used, shared per account):",
   ...snapshotLines(snapshot),
 ].join("\n");

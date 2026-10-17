@@ -1,103 +1,108 @@
-// The quota overview the human reads: one block per engine, then one recommendation.
-// Mattias 2026-10-17: "varför inte bara ge mig en tydlig över blick med vilken är vald på båda och hur mcyekt är kvar..
-// och hur mycket som vinns på de andra.. sen i sluten ren rekmendation" and "är bättr epå engelska har jag reedan sagt".
+// The quota box the human reads: each account's week, then at most one action.
+// Mattias 2026-10-17 11:39Z: "vilket konto har jag valt för Codex just nu och vilket konto är valt för Claude just nu. Och när
+// resetas de och hur många procentare kvar. Och sen hur många, hur, ja, hur ser det ut på de andra kontona?"; 12:03Z: "Undvik
+// emoji..."; 12:04Z: "jag vill nog både ha full restet.. inte bara 5h.. fll reset är vitkigare för plaenring...".
+// Layout from lsrc:0 the same day: the week leads, at most 32 characters a line, ● when panes use the account, ○ when none do.
+import { accountName, loginOfEmail } from "../core/account-names.mjs";
 import { weeklyForecast } from "../core/quota-forecast.mjs";
-import { clockOf, formatNoticeTime } from "../core/quota-format.mjs";
+import { clockOf, nearestMinute } from "../core/quota-format.mjs";
 
-const HOUR = 3_600_000;
-const PLAN_NAMES = { free: "Free", plus: "Plus", pro: "Pro", prolite: "Pro Lite", max: "Max", team: "Team", enterprise: "Enterprise" };
-const loginOf = account => String(account.account?.email || account.profile?.label || "unknown").split("@")[0].split(".").at(-1);
-const planOf = account => account.account?.plan ? ` (${PLAN_NAMES[account.account.plan] || account.account.plan})` : "";
-const list = panes => panes.join(", ");
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const LOGGED_OUT = new Set(["login_expired", "credentials_expired", "credentials_unavailable", "login_required"]);
+const codexWindows = account => (account.limits?.find(limit => limit.limitId === "codex") || account.limits?.[0])?.windows || [];
 
-// Display order, names, the page that shows a free reset, and the command that moves panes to another account.
-// The usage page is the one Codex 0.163 itself links when the limit is hit.
+// Each engine's five-hour window and the command that moves its panes to another of its accounts.
 const ENGINES = [
-  { provider: "codex", title: "Codex", usagePage: "chatgpt.com/settings/usage",
-    name: account => `Codex ${account.profile?.id} ${loginOf(account)}`,
-    switchable: account => /^[12]$/u.test(String(account.profile?.id)),
-    advise: (target, panes) => `\`//switch ${target.profile.id}\` in the channels of ${list(panes)} moves them to Codex ${target.profile.id} ${loginOf(target)}` },
-  { provider: "claude", title: "Claude", usagePage: "claude.ai/settings/usage",
-    name: account => `Claude ${loginOf(account)}`,
-    switchable: () => true,
-    advise: (target, panes) => `\`/byt ${loginOf(target)}\`, then \`/byt ${loginOf(target)} ok\`, moves ${list(panes)} to Claude ${loginOf(target)}` },
+  { provider: "codex", fiveHour: account => codexWindows(account).find(window => window.windowMinutes === 300) || null,
+    switchCommand: target => `//switch ${target.profile.id}` },
+  { provider: "claude", fiveHour: account => account.limits?.find(limit => limit.kind === "session") || null,
+    switchCommand: target => `/byt ${loginOfEmail(target.account.email)}` },
 ];
 
 /** WHAT: Extracts the account's weekly quota. WHY: Prevents short and scoped windows from triggering warnings. */
 export function weeklyQuotaOf(account) {
   if (!account?.ok) return null;
   if (account.provider === "claude") return account.limits?.find(limit => limit.kind === "weekly_all") || null;
-  if (account.provider === "codex") return (account.limits?.find(limit => limit.limitId === "codex")
-    || account.limits?.[0])?.windows?.find(window => window.windowMinutes === 10080) || null;
+  if (account.provider === "codex") return codexWindows(account).find(window => window.windowMinutes === 10080) || null;
   return null;
 }
 
-const readableWeek = (account, now) => Number.isFinite(weeklyQuotaOf(account)?.usedPercent) && Date.parse(weeklyQuotaOf(account).resetsAt) > now;
-
-/** WHAT: Measures one account's week and when it runs out at the recent pace. WHY: Gives every line the same facts. */
-function weekFacts(account, { now, readingsOf }) {
-  const panes = [...new Set(account.inUse || [])], active = [...new Set(account.activeInUse || [])];
-  // A failed read stays visible on its line; it never counts as room or as running out.
-  if (!readableWeek(account, now)) return { account, unreadable: true, usedPercent: null, resetAt: null, runsOutAt: null, panes, active };
-  const weekly = weeklyQuotaOf(account), resetAt = Date.parse(weekly.resetsAt), usedPercent = Math.round(weekly.usedPercent);
-  const latest = { at: Date.parse(account.observation?.observedAt) || now, usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt };
-  const forecast = usedPercent < 100 && resetAt > now ? weeklyForecast({ history: readingsOf(account), latest, now }) : null;
-  const runsOutAt = usedPercent >= 100 ? now : forecast?.pace && !forecast.lastsUntilReset ? forecast.exhaustAt : null;
-  return { account, usedPercent, resetAt, runsOutAt, panes, active };
+/** WHAT: Formats a reset as "Sat 13:35". WHY: A weekly reset is less than a week away, so its weekday names the day. */
+function dayAndClock(resetsAt) {
+  const at = nearestMinute(resetsAt);
+  return `${WEEKDAYS[at.getDay()]} ${clockOf(at)}`;
 }
 
-const sameDay = (left, right) => left.toDateString() === right.toDateString();
-/** WHAT: Phrases when the week runs out, to the hour. WHY: Keeps a forecast readable and from changing every minute. */
-function runOutPhrase(facts, now) {
-  if (facts.usedPercent >= 100) return "used up";
-  if (facts.runsOutAt === null) return "lasts until reset";
-  const at = new Date(Math.round(facts.runsOutAt / HOUR) * HOUR), tomorrow = new Date(now + 24 * HOUR);
-  if (at.getTime() <= now) return "runs out within the hour";
-  if (sameDay(at, new Date(now))) return `runs out ~${clockOf(at)} today`;
-  return sameDay(at, tomorrow) ? `runs out ~${clockOf(at)} tomorrow` : `runs out ~${formatNoticeTime(at)}`;
+/** WHAT: Formats a time within hours, with its weekday only when it is not today. WHY: Keeps the five-hour line short. */
+function untilClock(resetsAt, now) {
+  const at = nearestMinute(resetsAt);
+  return at.toDateString() === new Date(now).toDateString() ? clockOf(at) : dayAndClock(resetsAt);
 }
 
-/** WHAT: Builds one engine's lines: the account its panes use, then the others. WHY: Shows what is selected and what the rest add. */
-function engineBlock(engine, facts, now) {
-  const busiest = [...facts].sort((a, b) => b.panes.length - a.panes.length)[0];
-  const inUse = busiest?.panes.length ? busiest : null;
-  const usage = (fact, tail) => fact.unreadable ? "usage not readable right now"
-    : `${fact.usedPercent}% · resets ${formatNoticeTime(fact.resetAt)} · ${tail(fact)}`;
-  const head = inUse ? `${engine.title}: in use ${engine.name(inUse.account)}${planOf(inUse.account)} · ${usage(inUse, fact => runOutPhrase(fact, now))}`
-    : `${engine.title}: no panes`;
-  const others = facts.filter(fact => fact !== inUse).map(fact => `  ${engine.name(fact.account)}${planOf(fact.account)} · `
-    + usage(fact, ({ usedPercent }) => `adds ${Math.max(0, 100 - usedPercent)}%`) + (fact.panes.length ? ` · in use by ${list(fact.panes)}` : ""));
-  return { engine, facts, inUse, lines: [head, ...others] };
+const working = account => account.activeInUse ?? account.inUse ?? [];
+const isIdleLoggedOut = account => !account.ok && LOGGED_OUT.has(account.error) && !account.inUse?.length;
+
+// Mattias 2026-10-10: "tänk dock på att inte byta i onödan.. pga cache miss", so only a week that ends before its reset is advised on.
+/** WHAT: Tells whether a week runs out before its reset at the last day's pace. WHY: Keeps a slow 80 % week from being told to switch. */
+function runsOutBeforeReset(account, week, { now, readingsOf }) {
+  const latest = { at: Date.parse(account.observation?.observedAt) || now, usedPercent: week.usedPercent, resetsAt: week.resetsAt };
+  const forecast = weeklyForecast({ history: readingsOf(account), latest, now });
+  return Boolean(forecast.pace) && !forecast.lastsUntilReset;
+}
+
+/** WHAT: Collects what one account's lines and the action need. WHY: Keeps every rule reading the same week and five-hour window. */
+function accountFact(engine, account, shown, context) {
+  const week = weeklyQuotaOf(account), fiveHour = account.ok ? engine.fiveHour(account) : null;
+  const usable = week && Date.parse(week.resetsAt) > context.now ? week : null;
+  return { engine, account, name: accountName(account, shown), week: usable,
+    runsOut: Boolean(usable) && (usable.usedPercent >= 100 || runsOutBeforeReset(account, usable, context)),
+    blockedBy5h: fiveHour?.usedPercent >= 100 && Date.parse(fiveHour.resetsAt) > context.now ? fiveHour : null };
+}
+
+/** WHAT: Phrases one account's week, and its five-hour window when that is what stops it now. WHY: The week is what he plans by. */
+function linesOf(fact, label, width, now) {
+  const head = `${fact.account.inUse?.length ? "●" : "○"} ${label.padEnd(width)}`;
+  if (!fact.week) return [`${head} unreadable`];
+  const left = Math.max(0, Math.min(100, Math.round(100 - fact.week.usedPercent)));
+  return [`${head} ${`${left}%`.padStart(4)}  ${dayAndClock(fact.week.resetsAt)}`,
+    ...(fact.blockedBy5h ? [`    5h 0% until ${untilClock(fact.blockedBy5h.resetsAt, now)}`] : [])];
+}
+
+/** WHAT: Finds the engine's other account with the most room that nothing stops now. WHY: A switch is only advice when it helps. */
+function spareFor(fact, facts, config) {
+  return facts.filter(other => other.engine === fact.engine && other.account !== fact.account && other.week && !other.blockedBy5h
+    && other.week.usedPercent < config.warnPercent).sort((a, b) => a.week.usedPercent - b.week.usedPercent)[0] || null;
+}
+
+/** WHAT: Chooses the one action for the account in use that is stopped now, else the one working nearest a limit it reaches. WHY: Mattias wants a clean recommendation last, or none. */
+function actionLine(facts, { config, now }) {
+  const stopped = facts.filter(fact => fact.account.inUse?.length && (fact.blockedBy5h || fact.week?.usedPercent >= 100));
+  const nearing = facts.filter(fact => working(fact.account).length && fact.week?.usedPercent >= config.warnPercent
+    && fact.week.usedPercent < 100 && fact.runsOut).sort((a, b) => b.week.usedPercent - a.week.usedPercent);
+  const fact = [...stopped, ...nearing][0];
+  if (!fact) return null;
+  const spare = spareFor(fact, facts, config);
+  if (spare) return `→ Use ${spare.name}: ${fact.engine.switchCommand(spare.account)}`;
+  // A free reset clears the week; a five-hour window comes back by itself.
+  if (fact.week?.usedPercent >= 100) return `→ Free reset ${fact.name} now`;
+  if (fact.blockedBy5h) return `→ ${fact.name} back at ${untilClock(fact.blockedBy5h.resetsAt, now)}`;
+  return `→ Free reset ${fact.name} at 100%`;
 }
 
 /**
- * WHAT: Picks the one action for the account with working panes that runs out first.
- * WHY: Mattias wants a single clean recommendation last, never about an account no pane works on (07:18Z).
- */
-function recommendation(blocks, { config, now }) {
-  const urgent = blocks.flatMap(block => block.facts.filter(fact => fact.active.length && fact.runsOutAt != null)
-    .map(fact => ({ ...block, fact }))).sort((a, b) => a.fact.runsOutAt - b.fact.runsOutAt)[0];
-  if (!urgent) return "Recommendation: no action needed.";
-  const { engine, facts, fact } = urgent;
-  const spare = facts.filter(other => other !== fact && engine.switchable(other.account) && other.resetAt > now
-    && other.usedPercent < config.warnPercent).sort((a, b) => a.usedPercent - b.usedPercent)[0];
-  if (spare) return `Recommendation: ${engine.advise(spare.account, fact.panes)}.`;
-  return `Recommendation: free reset for ${engine.name(fact.account)} at ${engine.usagePage} `
-    + `${fact.usedPercent >= 100 ? "now" : "when it hits 100%"}.`;
-}
-
-/**
- * WHAT: Formats the whole overview and the facts that decide whether an edit is worth it.
- * WHY: Keeps one readable notice for both engines, and keeps a minute-by-minute forecast from editing it.
+ * WHAT: Formats the quota box: every account's week as a monospace table, then one action or none.
+ * WHY: Keeps what is left, when it resets and what to do in one view a phone can read.
  */
 export function buildQuotaOverview(snapshot, { config, now = Date.now(), readingsOf = () => [] }) {
-  const accounts = (snapshot?.accounts || []).filter(account => readableWeek(account, now)
-    || (account.account?.email && account.inUse?.length));
-  const blocks = ENGINES.map(engine => accounts.filter(account => account.provider === engine.provider)
-    .map(account => weekFacts(account, { now, readingsOf })).sort((a, b) => engine.name(a.account).localeCompare(engine.name(b.account))))
-    .map((facts, index) => facts.length ? engineBlock(ENGINES[index], facts, now) : null).filter(Boolean);
-  const advice = recommendation(blocks, { config, now });
-  const fingerprint = JSON.stringify([blocks.flatMap(block => block.facts.map(fact => [block.engine.name(fact.account),
-    fact.usedPercent, fact.panes.length, Math.round(fact.resetAt / HOUR)])), advice]);
-  return { text: [...blocks.flatMap(block => block.lines), advice].join("\n"), fingerprint };
+  const accounts = (snapshot?.accounts || []).filter(account => !isIdleLoggedOut(account));
+  const shown = ENGINES.flatMap(engine => accounts.filter(account => account.provider === engine.provider)
+    .sort((a, b) => (b.inUse?.length || 0) - (a.inUse?.length || 0)));
+  const facts = shown.map(account => accountFact(ENGINES.find(engine => engine.provider === account.provider), account, shown, { now, readingsOf }));
+  // Two accounts of one engine in use: the pane counts say which one most of them run on.
+  const split = new Set(ENGINES.filter(engine => facts.filter(fact => fact.engine === engine && fact.account.inUse?.length).length > 1));
+  const labels = facts.map(fact => split.has(fact.engine) && fact.account.inUse?.length ? `${fact.name} (${fact.account.inUse.length})` : fact.name);
+  const width = Math.max(0, ...labels.map(label => label.length));
+  const table = [`${" ".repeat(width + 3)}week  reset`, ...facts.flatMap((fact, index) => linesOf(fact, labels[index], width, now))];
+  const action = actionLine(facts, { config, now });
+  return { text: ["```", ...table, "```", ...(action ? [action] : [])].join("\n") };
 }

@@ -38,22 +38,22 @@ feature("delivery notices a human understands", () => {
   unit("waiting names the panel and the real reason in everyday words", {
     when: ["rendering the lsrc:3 model-guard wait", () => deliveryStateNotice(humanJob({ lastReason: MODEL_GUARD }), "blocked", UTC)],
     then: ["one sentence per part, no machinery", (text) => expect(text).toBe(
-      "⏸️ lsrc:3 har inte fått det här än. Orsak: panelen kör gpt-6-sol men är inställd på gpt-5.6-sol. "
-      + "Det skickas automatiskt när det går.")],
+      "lsrc:3 has not got this yet. Cause: the pane runs gpt-6-sol but is set to gpt-5.6-sol. "
+      + "It is sent automatically when it can be.")],
   });
 
   unit("each known blocker is translated and an unknown one is shown as it is", {
     then: ["memory, identity, context cost and raw reasons", () => {
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "wake-refused:memory-critical" }))
-        .toContain("Orsak: datorn har ont om minne just nu.");
+        .toContain("Cause: the computer is low on memory right now.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "wake-refused:identity-package-content" }))
-        .toContain("Orsak: amux-installationen kan inte verifieras.");
+        .toContain("Cause: the amux installation cannot be verified.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "wake-refused:context-cost:unknown-evidence" }))
-        .toContain("Orsak: panelen är stor och har legat länge, så den compactas först.");
+        .toContain("Cause: the pane is large and has waited long, so it is compacted first.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "probe unavailable" }))
-        .toContain("Orsak: probe unavailable.");
+        .toContain("Cause: probe unavailable.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "prompt has not reached authoritative JSONL yet" }))
-        .toContain("Orsak: panelen har inte bekräftat att den tagit emot det.");
+        .toContain("Cause: the pane has not confirmed that it got it.");
     }],
   });
 
@@ -61,7 +61,7 @@ feature("delivery notices a human understands", () => {
     when: ["rendering an acknowledgement 12 minutes after the message", () =>
       deliveryStateNotice(humanJob({ acknowledgedAt: T }), "recovered", UTC)],
     then: ["the outcome reads as one line", (text) =>
-      expect(text).toBe("✅ lsrc:3 fick det här 15:54, efter 12 minuters väntan.")],
+      expect(text).toBe("lsrc:3 got this at 15:54, after 12 minutes.")],
   });
 
   unit("a single removal says who removed it and why", {
@@ -70,7 +70,7 @@ feature("delivery notices a human understands", () => {
       metadata: { channelId: "c3", messageId: "d1", deliveryOutcome: "not-sent", deliveryCancellation: "sender-request" },
     }), "not-sent")],
     then: ["the actor and the quoted reason are named", (text) =>
-      expect(text).toBe("🚫 Skickades inte till lsrc:3. lsrc:0 tog bort det: ”uppfyllt av lsrc:0”.")],
+      expect(text).toBe("Not sent to lsrc:3. lsrc:0 removed it: “uppfyllt av lsrc:0”.")],
   });
 
   unit("a give-up names attempts, time and what to do", {
@@ -79,14 +79,14 @@ feature("delivery notices a human understands", () => {
       metadata: { deliveryOutcome: "not-sent", deliveryTimeout: "pre-submit" },
     }), "not-sent")],
     then: ["the reader knows when to resend", (text) => expect(text).toBe(
-      "🚫 Skickades inte till lsrc:3 efter 64 försök på 1 h. Orsak: panelen kör gpt-6-sol men är inställd på gpt-5.6-sol. "
-      + "Skicka igen när det är åtgärdat.")],
+      "Not sent to lsrc:3 after 64 attempts in 1 h. Cause: the pane runs gpt-6-sol but is set to gpt-5.6-sol. "
+      + "Send it again once that is fixed.")],
   });
 
   unit("an unconfirmed send explains why it is not resent", {
     when: ["rendering an unverified outcome", () => deliveryStateNotice(humanJob(), "unverified")],
     then: ["no promise, no duplicate", (text) => expect(text).toBe(
-      "❓ lsrc:3 kan ha fått det här, men amux kan inte bekräfta det. Det skickas inte igen, för att inte bli dubbelt. Se svaret ovan.")],
+      "lsrc:3 may have got this, but amux cannot confirm it. It is not sent again, so it is not doubled. See the reply above.")],
   });
 
   const reasons = [MODEL_GUARD, "Codex work blocked: compact not verified", "wake-refused:memory-blocked",
@@ -231,10 +231,10 @@ feature("delivery notices keep one notice per event", () => {
     then: ["exactly one list notice is posted", (posts, world) => {
       expect(posts).toHaveLength(1);
       const lines = posts[0].text.split("\n");
-      expect(lines[0]).toBe("🚫 14 meddelanden till lsrc:3 skickades inte. lsrc:0 tog bort dem: ”uppfyllt”.");
+      expect(lines[0]).toBe("14 messages to lsrc:3 were not sent. lsrc:0 removed them: “uppfyllt”.");
       expect(lines[1]).toBe("• 15:40 Meddelande nummer 1");
       expect(lines).toHaveLength(12);
-      expect(lines[11]).toBe("+4 till");
+      expect(lines[11]).toBe("+4 more");
       world.cleanup();
     }],
   });
@@ -255,7 +255,7 @@ feature("delivery notices keep one notice per event", () => {
     }],
     then: ["a single reply on the original message", (posts, world) => {
       expect(posts).toEqual([expect.objectContaining({ replyTo: "d9",
-        text: "🚫 Skickades inte till lsrc:3. lsrc:0 tog bort det: ”uppfyllt”." })]);
+        text: "Not sent to lsrc:3. lsrc:0 removed it: “uppfyllt”." })]);
       world.cleanup();
     }],
   });
@@ -279,9 +279,9 @@ feature("delivery notices keep one notice per event", () => {
     then: ["one reply, then one edit of that reply", (world) => {
       expect(world.discord.posts).toHaveLength(1);
       expect(world.discord.posts[0]).toMatchObject({ replyTo: "d1" });
-      expect(world.discord.posts[0].text).toContain("⏸️ lsrc:3 har inte fått det här än");
+      expect(world.discord.posts[0].text).toContain("lsrc:3 has not got this yet");
       expect(world.discord.edits).toEqual([{ channelId: "c3", messageId: world.discord.posts[0].id,
-        text: "✅ lsrc:3 fick det här 16:07, efter 13 minuters väntan." }]);
+        text: "lsrc:3 got this at 16:07, after 13 minutes." }]);
       world.cleanup();
     }],
   });

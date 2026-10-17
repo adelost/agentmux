@@ -15,7 +15,7 @@ describe("a single live progress row", () => {
     await next.update({ ...args, turn: turn([tool("1"), tool("2")]) });
     await next.finish("ch");
     expect(f.discord.send).toHaveBeenCalledTimes(1);
-    expect(f.discord.editMessage).toHaveBeenCalledWith("ch", "row-1", "Arbetar · 2 steg · senast: läser cut.ts");
+    expect(f.discord.editMessage).toHaveBeenCalledWith("ch", "row-1", "Working · 2 steps · last: reading cut.ts");
     expect(f.discord.deleteMessage).toHaveBeenCalledWith("ch", "row-1");
   });
   it("a failed edit does not create another post and is retried", async () => {

@@ -162,13 +162,13 @@ export function createDeliveryNotices({
       && String(job.cancelRequestedBy || "") === sender?.key;
     if (!sender || selfCancelled) return markSent(job, sender ? "sender cancelled it" : "not a human message");
     const outcome = kind === "unverified"
-      ? "kan ha kommit fram men kunde inte bekräftas. Skicka inte om utan att läsa mottagarens historik."
-      : notSentNotice(job).replace(/^🚫 /u, "");
+      ? "may have arrived but could not be confirmed. Do not resend without reading the recipient's history."
+      : notSentNotice(job);
     try {
       queue.enqueue({
         agentName: sender.session, pane: sender.pane, source: "delivery-recovery",
-        text: `[AMUX leveransutfall] Ditt meddelande till ${job.agentName}:${job.pane} `
-          + `(jobb ${job.id}, ”${messagePreview(job)}”): ${outcome}`,
+        text: `[AMUX delivery outcome] Your message to ${job.agentName}:${job.pane} `
+          + `(job ${job.id}, “${messagePreview(job)}”): ${outcome}`,
         idempotencyKey: `delivery-outcome:${job.agentName}:${job.pane}:${job.id}`,
       });
       return markSent(job);

@@ -102,7 +102,7 @@ describe("native runtime Discord watcher", () => {
       id: "operation:delivery:denied",
       code: 1,
       permissionDenied: true,
-      items: [{ type: "text", content: "🔒 Behörighet nekad: permission denied: Bash" }],
+      items: [{ type: "text", content: "Permission denied: permission denied: Bash" }],
     })]);
   });
 
@@ -195,7 +195,7 @@ describe("native runtime Discord watcher", () => {
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
     expect(discord.send).toHaveBeenCalledTimes(1);
-    expect(discord.send.mock.calls[0][1]).toContain("Behörighet nekad");
+    expect(discord.send.mock.calls[0][1]).toContain("Permission denied");
   });
 
   it("acknowledges an active turn and mirrors each new tool start once", async () => {
@@ -243,7 +243,7 @@ describe("native runtime Discord watcher", () => {
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
     expect(discord.send.mock.calls.map((call) => call[1])).toEqual([
-      "⏳ **skybar-canary:0 jobbar**, meddelandet är mottaget.",
+      "**skybar-canary:0 is working**, the message was received.",
       "_🔧 npm test_",
     ]);
     expect(discord.sendTyping).toHaveBeenCalledTimes(2);
@@ -392,7 +392,7 @@ describe("native runtime Discord watcher", () => {
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
 
     expect(discord.send).toHaveBeenCalledTimes(1);
-    expect(discord.send.mock.calls[0][1]).toContain("STOPPAS");
+    expect(discord.send.mock.calls[0][1]).toContain("STOPPED");
     expect(park).toHaveBeenCalledWith(expect.objectContaining({ session: "skybar-canary", pane: 0 }));
     expect(unpark).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledTimes(1);
@@ -440,7 +440,7 @@ describe("native runtime Discord watcher", () => {
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
 
     expect(discord.send).toHaveBeenCalledTimes(1);
-    expect(discord.send.mock.calls[0][1]).toContain("faktisk modell kunde inte verifieras");
+    expect(discord.send.mock.calls[0][1]).toContain("the actual model could not be verified");
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
@@ -476,10 +476,10 @@ describe("native runtime Discord watcher", () => {
 
     expect(discord.send.mock.calls.map((call) => call[1])).toEqual([
       expect.stringContaining("watch:0 · native"),
-      expect.stringContaining("återupptas automatiskt"),
+      expect.stringContaining("resumes by itself"),
     ]);
-    expect(discord.send.mock.calls[0][1]).toContain("kvoten är slut");
-    expect(discord.send.mock.calls[1][1]).toContain("kvoten är tillbaka");
+    expect(discord.send.mock.calls[0][1]).toContain("the Claude quota is used up");
+    expect(discord.send.mock.calls[1][1]).toContain("the Claude quota is back");
   });
 
   it("releases the durable park when a later explicit native model setting clears the guard", async () => {

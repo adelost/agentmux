@@ -58,7 +58,7 @@ feature("memory relief", () => {
         { pid: 1401589, version: "8.11.1", state: "BUSY" },
         { pid: 1210313, version: "8.10.2", state: "UNREPORTED" },
       ]);
-      expect(formatMemoryRelief(result)).toBe("stoppade 1 inaktiva Gradle-processer (3.6 GiB), 1 bygger och får vara");
+      expect(formatMemoryRelief(result)).toBe("stopped 1 idle Gradle process (3.6 GiB), 1 building and left alone");
     }],
   });
 

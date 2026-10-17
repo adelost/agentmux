@@ -5,9 +5,9 @@
 // by whom, why in everyday words, and what happens next. Internal words
 // (see NOTICE_BANNED_WORDS) never appear in the copy; a test enforces it.
 
-/** WHAT: Lists the internal words no notice may contain. WHY: Keeps delivery machinery out of what a human reads. */
+/** WHAT: Names the internal words no notice may contain. WHY: Keeps delivery machinery out of what a human reads. */
 export const NOTICE_BANNED_WORDS = Object.freeze([
-  "submit", "composer", "jsonl", "fence", "fifo", "broker", "kvitto",
+  "submit", "composer", "jsonl", "fence", "fifo", "broker", "kvitto", "receipt",
 ]);
 
 const GROUP_LIST_MAX = 10;
@@ -20,13 +20,13 @@ export function clockTime(ms, timeZone) {
   return new Date(ms).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", timeZone });
 }
 
-/** WHAT: Names a wait as "12 minuters väntan". WHY: Reads as one Swedish phrase after "efter". */
+/** WHAT: Names a wait as "12 minutes". WHY: Keeps the wait from reading as two phrases after "after". */
 export function waitPhrase(ms) {
   const minutes = Math.max(0, Math.round(Number(ms || 0) / 60_000));
   if (minutes < 1) return null;
-  if (minutes < 60) return `${minutes} ${minutes === 1 ? "minuts" : "minuters"} väntan`;
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
   const hours = Math.floor(minutes / 60);
-  return `${hours} ${hours === 1 ? "timmes" : "timmars"} väntan`;
+  return `${hours} ${hours === 1 ? "hour" : "hours"}`;
 }
 
 /** WHAT: Formats a duration as "12 min" or "3 h". WHY: Keeps give-up copy short. */
@@ -35,7 +35,7 @@ function shortDuration(ms) {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h`;
 }
 
-/** WHAT: Extracts the first readable words of a queued message. WHY: Tells the reader which message a notice is about when no reply is possible. */
+/** WHAT: Extracts the first readable words of a queued message. WHY: Keeps the reader from guessing which message a notice concerns when no reply is possible. */
 export function messagePreview(job, max = PREVIEW_CHARS) {
   const raw = String(job?.verifyText || job?.text || "");
   const lines = raw.split("\n").map((line) => line.trim());
@@ -47,40 +47,40 @@ export function messagePreview(job, max = PREVIEW_CHARS) {
     .replace(/^\[transcribed voice[^\]]*\]\s*/u, "")
     .replace(/\s+/gu, " ")
     .trim();
-  const text = words || (hasImage ? "(bild)" : "");
+  const text = words || (hasImage ? "(image)" : "");
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
 
 /** WHAT: Names who removed a message. WHY: Keeps the broker's own name out of human copy. */
 function actorName(requestedBy) {
   const actor = String(requestedBy || "").trim();
-  if (!actor || actor === "unknown sender") return "Någon";
+  if (!actor || actor === "unknown sender") return "Someone";
   return actor === "delivery-broker" ? "amux" : actor;
 }
 
 const REASON_WORDS = [
   // Prefixes of ENGINE_START_REFUSED (engine-start-guard) and PANE_LAYOUT_UNSAFE (pane-provisioning).
   [/^engine start refused:/u,
-    () => "panelens session kör redan i en annan process eller panel, så amux startar den inte en gång till"],
+    () => "the pane's session already runs in another process or pane, so amux does not start it twice"],
   [/^pane layout unsafe:/u,
-    () => "amux kan inte lita på panelernas numrering i tmux just nu, så inget startas eller läggs till"],
+    () => "amux cannot trust the pane numbering in tmux right now, so nothing is started or added"],
   [/^Codex work blocked: selected (\S+), running (\S+);/u,
-    (m) => `panelen kör ${m[2]} men är inställd på ${m[1]}`],
+    (m) => `the pane runs ${m[2]} but is set to ${m[1]}`],
   [/^Codex work blocked:/u,
-    () => "ett modellbyte på panelen misslyckades, så den tar inte emot arbete förrän modellen är rättad"],
-  [/^context-cost:/u, () => "panelen är stor och har legat länge, så den compactas först"],
-  [/^memory-(critical|blocked|reserve-floor)/u, () => "datorn har ont om minne just nu"],
-  [/^guard-state-stale/u, () => "minneskontrollen är för gammal för att lita på just nu"],
-  [/^identity-/u, () => "amux-installationen kan inte verifieras"],
+    () => "a model change on the pane failed, so it takes no work until the model is fixed"],
+  [/^context-cost:/u, () => "the pane is large and has waited long, so it is compacted first"],
+  [/^memory-(critical|blocked|reserve-floor)/u, () => "the computer is low on memory right now"],
+  [/^guard-state-stale/u, () => "the memory check is too old to trust right now"],
+  [/^identity-/u, () => "the amux installation cannot be verified"],
   [/composer is not empty|differs from composer|composer-foreign/u,
-    () => "det står redan annan text i panelens inmatningsfält, och amux skriver inte över den"],
+    () => "the pane's input field already holds other text, and amux does not overwrite it"],
   [/durable draft is not visible|provisional paste|not currently observable/u,
-    () => "amux ser inte sin påbörjade text i panelen och skriver den inte två gånger"],
-  [/busy|arbetar/u, () => "panelen arbetar med något annat"],
-  [/JSONL|receipt/u, () => "panelen har inte bekräftat att den tagit emot det"],
+    () => "amux cannot see the text it started in the pane and does not type it twice"],
+  [/busy|arbetar/u, () => "the pane is busy with something else"],
+  [/JSONL|receipt/u, () => "the pane has not confirmed that it got it"],
 ];
 
-/** WHAT: Formats a durable delivery reason into everyday Swedish. WHY: Names the real blocker instead of a generic "not arrived yet". */
+/** WHAT: Formats a durable delivery reason into everyday English. WHY: Names the real blocker instead of a generic "not arrived yet". */
 export function plainReason(lastReason) {
   const original = String(lastReason || "").trim();
   const reason = original.replace(/^wake-refused:/u, "").replace(/^not sent: /u, "");
@@ -88,51 +88,51 @@ export function plainReason(lastReason) {
     const match = reason.match(pattern);
     if (match) return words(match);
   }
-  if (original.startsWith("wake-refused:")) return "panelen kunde inte startas";
-  return reason || "okänd orsak";
+  if (original.startsWith("wake-refused:")) return "the pane could not be started";
+  return reason || "unknown cause";
 }
 
 /** WHAT: Formats the waiting notice, optionally with the wait so far. WHY: One edited notice stays current instead of a stack of alerts. */
 export function waitingNotice(job, { waitedMs = 0 } = {}) {
   const hours = Math.floor(Number(waitedMs || 0) / 3_600_000);
-  const waited = hours > 0 ? ` (väntat ${hours} h)` : "";
-  return `⏸️ ${target(job)} har inte fått det här än${waited}. Orsak: ${plainReason(job.lastReason)}. `
-    + "Det skickas automatiskt när det går.";
+  const waited = hours > 0 ? ` (waited ${hours} h)` : "";
+  return `${target(job)} has not got this yet${waited}. Cause: ${plainReason(job.lastReason)}. `
+    + "It is sent automatically when it can be.";
 }
 
 /** WHAT: Formats the busy-turn notice after the message was entered. WHY: Keeps the entered-message status distinct from delivery. */
 export function busyNotice(job, { queuedBehind = 0 } = {}) {
-  const behind = Number(queuedBehind || 0) > 0 ? ` ${queuedBehind} till väntar efter det.` : "";
-  return `⏸️ ${target(job)} har fått det här men har inte bekräftat det än, eftersom panelen arbetar med något annat. `
-    + `amux skickar det inte igen, för att det inte ska bli dubbelt.${behind}`;
+  const behind = Number(queuedBehind || 0) > 0 ? ` ${queuedBehind} more wait behind it.` : "";
+  return `${target(job)} has this but has not confirmed it yet, because the pane is busy with something else. `
+    + `amux does not send it again, so it is not doubled.${behind}`;
 }
 
 /** WHAT: Formats the delivered outcome that replaces a waiting notice. WHY: Keeps the delivery confirmation in the same notice. */
 export function deliveredNotice(job, { timeZone } = {}) {
   const at = Number(job.acknowledgedAt || Date.now());
   const wait = waitPhrase(at - Number(job.createdAt || at));
-  return `✅ ${target(job)} fick det här ${clockTime(at, timeZone)}${wait ? `, efter ${wait}` : ""}.`;
+  return `${target(job)} got this at ${clockTime(at, timeZone)}${wait ? `, after ${wait}` : ""}.`;
 }
 
 /** WHAT: Formats one not-sent outcome by its cause. WHY: Keeps the cause and next step visible. */
 export function notSentNotice(job) {
   if (job.metadata?.deliveryCancellation === "sender-request") {
     const why = String(job.cancelRequestedReason || "").trim();
-    return `🚫 Skickades inte till ${target(job)}. ${actorName(job.cancelRequestedBy)} tog bort det`
-      + (why ? `: ”${why}”.` : ".");
+    return `Not sent to ${target(job)}. ${actorName(job.cancelRequestedBy)} removed it`
+      + (why ? `: “${why}”.` : ".");
   }
   if (job.metadata?.deliveryRejection === "engine-rejected") {
-    return `🚫 Skickades inte till ${target(job)}. Panelen avvisade kommandot: ${plainReason(job.lastReason)}.`;
+    return `Not sent to ${target(job)}. The pane rejected the command: ${plainReason(job.lastReason)}.`;
   }
   if (job.metadata?.deliveryTarget === "not-ingesting") {
-    return `🚫 Skickades inte till ${target(job)}. Orsak: panelen har slutat ta emot meddelanden. `
-      + "Skicka igen när panelen svarar igen.";
+    return `Not sent to ${target(job)}. The pane stopped taking messages. `
+      + "Send it again when the pane answers.";
   }
   const attempts = Math.max(1, Number(job.attempts || 0));
   const spent = shortDuration(Number(job.terminalAt || Date.now())
     - Number(job.firstAttemptAt || job.createdAt || Date.now()));
-  return `🚫 Skickades inte till ${target(job)} efter ${attempts} försök på ${spent}. `
-    + `Orsak: ${plainReason(job.lastReason)}. Skicka igen när det är åtgärdat.`;
+  return `Not sent to ${target(job)} after ${attempts} ${attempts === 1 ? "attempt" : "attempts"} in ${spent}. `
+    + `Cause: ${plainReason(job.lastReason)}. Send it again once that is fixed.`;
 }
 
 /** WHAT: Formats several same-outcome not-sent jobs as one list. WHY: Keeps grouped cancellation details in one notice. */
@@ -141,19 +141,19 @@ export function notSentGroupNotice(jobs, { timeZone } = {}) {
   const count = jobs.length;
   const why = String(first.cancelRequestedReason || "").trim();
   const head = first.metadata?.deliveryCancellation === "sender-request"
-    ? `🚫 ${count} meddelanden till ${target(first)} skickades inte. `
-      + `${actorName(first.cancelRequestedBy)} tog bort dem${why ? `: ”${why}”.` : "."}`
-    : `🚫 ${count} meddelanden till ${target(first)} skickades inte. Orsak: ${plainReason(first.lastReason)}.`;
+    ? `${count} messages to ${target(first)} were not sent. `
+      + `${actorName(first.cancelRequestedBy)} removed them${why ? `: “${why}”.` : "."}`
+    : `${count} messages to ${target(first)} were not sent. Cause: ${plainReason(first.lastReason)}.`;
   const shown = jobs.slice(0, GROUP_LIST_MAX)
     .map((job) => `• ${clockTime(Number(job.createdAt || 0), timeZone)} ${messagePreview(job)}`);
-  const more = count > GROUP_LIST_MAX ? [`+${count - GROUP_LIST_MAX} till`] : [];
+  const more = count > GROUP_LIST_MAX ? [`+${count - GROUP_LIST_MAX} more`] : [];
   return [head, ...shown, ...more].join("\n");
 }
 
 /** WHAT: Formats the cannot-confirm outcome. WHY: Prevents uncertain delivery from being sent twice. */
 export function uncertainNotice(job) {
-  return `❓ ${target(job)} kan ha fått det här, men amux kan inte bekräfta det. `
-    + "Det skickas inte igen, för att inte bli dubbelt. Se svaret ovan.";
+  return `${target(job)} may have got this, but amux cannot confirm it. `
+    + "It is not sent again, so it is not doubled. See the reply above.";
 }
 
 /** WHAT: Adds a quote of the message when the notice cannot reply to it. WHY: Tells the reader which message the notice concerns. */

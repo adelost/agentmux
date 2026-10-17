@@ -233,7 +233,7 @@ feature("/model dialect routing", () => {
       try {
         expect(ctx.changer).not.toHaveBeenCalled();
         expect(ctx.deliveryBroker.enqueueAndWait).not.toHaveBeenCalled();
-        expect(ctx.msg.reply.mock.calls.at(-1)[0]).toMatch(/unsupported|stöds inte/i);
+        expect(ctx.msg.reply.mock.calls.at(-1)[0]).toMatch(/not supported/i);
       } finally { unlinkSync(ctx.path); }
     }],
   });
@@ -253,7 +253,7 @@ feature("/model dialect routing", () => {
     then: ["failed closed before restarting", (_, { msg, agent }) => {
       const reply = msg.reply.mock.calls.at(-1)[0];
       expect(agent.restartCodex).not.toHaveBeenCalled();
-      expect(reply).toMatch(/^⚠️ _ai:0 was not switched\./);
+      expect(reply).toMatch(/^_ai:0 was not switched\./);
       expect(agent.sendOnly).not.toHaveBeenCalled();
     }],
   });
@@ -268,7 +268,7 @@ feature("/model dialect routing", () => {
       try {
         expect(agent.restartCodex).not.toHaveBeenCalled();
         expect(msg.reply.mock.calls.map(call => call[0])).toEqual([
-          "⚠️ gpt-7 is not a Codex model on this account. Available: gpt-6.1-sol, gpt-6-astra, gpt-6-sol, gpt-6-luna, gpt-5.6-sol. _ai:0 keeps its current model."]);
+          "gpt-7 is not a Codex model on this account. Available: gpt-6.1-sol, gpt-6-astra, gpt-6-sol, gpt-6-luna, gpt-5.6-sol. _ai:0 keeps its current model."]);
       } finally { unlinkSync(path); }
     }],
   });
@@ -484,7 +484,7 @@ feature("Codex native /status and account switching", () => {
     }],
     then: ["one-time device login is shown and restart is untouched", (_, { msg, agent, root }) => {
       const reply = msg.reply.mock.calls[0][0];
-      expect(reply).toContain("engångsinloggning");
+      expect(reply).toContain("needs a one-time login");
       expect(reply).toContain("CODEX_HOME=");
       expect(reply).toContain("codex login --device-auth");
       expect(agent.restartCodex).not.toHaveBeenCalled();
@@ -521,7 +521,7 @@ feature("Codex native /status and account switching", () => {
       expect(agent.restartCodex.mock.calls[0][2].profile.id).toBe("2");
       expect(state.get("codex_profile_by_pane", {})).toEqual({ "_ai:0": "2" });
       const reply = msg.reply.mock.calls[0][0];
-      expect(reply).toContain("✅ Konto bytt");
+      expect(reply).toContain("Account switched.");
       expect(reply).toContain("two@example.com (Pro)");
       expect(reply).toContain("Codex-profil **2**");
       delete process.env.AMUX_CODEX_PROFILE_2_HOME;
@@ -568,7 +568,7 @@ feature("AMUX Code Discord command compatibility", () => {
         kind: "slash",
       }));
       expect(agent.restartCodex).not.toHaveBeenCalled();
-      expect(msg.reply.mock.calls[0][0]).toContain("gäller från nästa turn");
+      expect(msg.reply.mock.calls[0][0]).toContain("applies from the next turn");
     }],
   });
 
@@ -584,7 +584,7 @@ feature("AMUX Code Discord command compatibility", () => {
     }],
     then: ["the limitation is visible and no pane restart occurs", (_, { msg, agent }) => {
       expect(agent.restartCodex).not.toHaveBeenCalled();
-      expect(msg.reply.mock.calls[0][0]).toContain("separat native-target");
+      expect(msg.reply.mock.calls[0][0]).toContain("separate native target");
     }],
   });
 });
@@ -615,8 +615,8 @@ feature("restart scope", () => {
     then: ["the destructive scope is explicit and durable", (_, { msg, queue, schedule }) => {
       expect(queue).toHaveBeenCalledWith({ source: "discord" });
       expect(schedule).toHaveBeenCalledWith(500);
-      expect(msg.reply.mock.calls[0][0]).toMatch(/alla konfigurerade tmux-sessioner/i);
-      expect(msg.reply.mock.calls[0][0]).toMatch(/aktiva turns avbryts/i);
+      expect(msg.reply.mock.calls[0][0]).toMatch(/every configured tmux session/i);
+      expect(msg.reply.mock.calls[0][0]).toMatch(/active turns stop/i);
     }],
   });
 

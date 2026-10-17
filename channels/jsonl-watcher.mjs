@@ -370,7 +370,7 @@ export function createJsonlWatcher({
       }
       return;
     }
-    notifyUser(`🔀 ${paneName} nedgraderad och STOPPAD: ${change.from} → ${change.to} — knuffa när läget är rätt`)
+    notifyUser(`${paneName} downgraded and STOPPED: ${change.from} → ${change.to}. Nudge it when the state is right.`)
       .catch?.((err) => log(`model-change push failed: ${err.message}`));
     // Stop the harm first: a mid-turn pane keeps building on the weaker
     // model until interrupted. Then park it. The
@@ -386,8 +386,8 @@ export function createJsonlWatcher({
     if (!interruption.stopped) {
       log(`model-change stop failed for ${paneName}: ${interruption.detail}`);
       await discord.send(channelId,
-        `🚨 **${paneName}: stopp kunde inte verifieras** (${interruption.detail}). ` +
-        "Panelen är fortfarande parkerad och tar inga nya briefs; avbryt manuellt med `amux esc`.")
+        `**${paneName}: the stop could not be verified** (${interruption.detail}). ` +
+        "The pane is still parked and takes no new briefs; interrupt it by hand with `amux esc`.")
         .catch((err) => log(`model-change stop failure line failed for ${paneName}: ${err.message}`));
       return;
     }

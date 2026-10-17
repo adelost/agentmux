@@ -118,10 +118,10 @@ export async function relieveIdleGradleDaemons({
 export function formatMemoryRelief(result) {
   const freedGiB = result.stopped.reduce((sum, daemon) => sum + daemon.rssKb, 0) / 1024 / 1024;
   const stopped = result.stopped.length
-    ? `stoppade ${result.stopped.length} inaktiva Gradle-processer (${freedGiB.toFixed(1)} GiB)`
-    : "inga inaktiva Gradle-processer att stoppa";
+    ? `stopped ${result.stopped.length} idle Gradle ${result.stopped.length === 1 ? "process" : "processes"} (${freedGiB.toFixed(1)} GiB)`
+    : "no idle Gradle processes to stop";
   const busy = result.kept.filter((daemon) => daemon.state === "BUSY").length;
-  return busy ? `${stopped}, ${busy} bygger och får vara` : stopped;
+  return busy ? `${stopped}, ${busy} building and left alone` : stopped;
 }
 
 const gibText = (kb) => Math.round((kb || 0) / 1024 / 1024 * 10) / 10;
@@ -138,12 +138,12 @@ export function startBridgeMemoryGuard({ discord = null, alertChannel = null, lo
   return startMemoryGuard({
     ...guardOptions,
     onTransition: ({ from, to, state }) => notify(
-      `🧠 Minnesvakt: ${from} → ${to} (MemAvailable ${gibText(state.sample?.memAvailableKb)} GiB, SwapFree ${gibText(state.sample?.swapFreeKb)} GiB): nya tunga automatjobb ${to === "blocked" || to === "critical" ? "stoppas" : "tillåts"}.`,
+      `Memory guard: ${from} → ${to} (MemAvailable ${gibText(state.sample?.memAvailableKb)} GiB, SwapFree ${gibText(state.sample?.swapFreeKb)} GiB): new heavy automatic jobs are ${to === "blocked" || to === "critical" ? "stopped" : "allowed"}.`,
       "alarm",
     ),
     onPressure: async () => {
       const relief = await relieve();
-      const text = `🧠 Minnesvakt: ${formatMemoryRelief(relief)}.`;
+      const text = `Memory guard: ${formatMemoryRelief(relief)}.`;
       if (relief.stopped.length) await notify(text, "relief notice");
       else log(`[memory-guard] ${text}`);
     },

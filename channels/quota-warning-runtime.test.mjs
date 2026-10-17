@@ -34,8 +34,7 @@ feature("the quota warning answers the human message", () => {
     when: ["two messages arrive together", async fx => { await Promise.all([fx.warn(fx.first), fx.warn(fx.second)]); return fx; }],
     then: ["only the first channel gets the notice", fx => {
       expect(fx.first.send).toHaveBeenCalledTimes(1);
-      expect(fx.first.send.mock.calls[0]).toEqual([expect.stringMatching(
-        /^Claude: in use Claude a · 85% · resets [A-Z][a-z]{2} \d+ \d\d:\d\d · lasts until reset\nRecommendation: no action needed\.$/u), { kind: "notice" }]);
+      expect(fx.first.send.mock.calls[0]).toEqual([expect.stringMatching(/^```\n {11}week  reset\n● Claude A  15%  [A-Z][a-z]{2} \d\d:\d\d\n```$/u), { kind: "notice" }]);
       expect(fx.second.send).not.toHaveBeenCalled();
     }],
   });
@@ -97,7 +96,7 @@ feature("warning activity and background reached-limit routing", () => {
     }],
     then: ["the full alert reaches an affected pane's channel once", send => {
       expect(send).toHaveBeenCalledTimes(1);
-      expect(send.mock.calls[0]).toEqual(["own-channel", expect.stringContaining("· 100% · resets"), { kind: "notice" }]);
+      expect(send.mock.calls[0]).toEqual(["own-channel", expect.stringContaining("→ Free reset Claude A now"), { kind: "notice" }]);
     }],
   });
   unit("a missing channel cannot mark the reached-limit alert as delivered", {
@@ -127,7 +126,7 @@ feature("quota rows are edited, Sky 2026-10-17", () => {
     }],
     then: ["one ordinary edit and one new full-limit signal", ({ send, editNotice }) => {
       expect(send).toHaveBeenCalledTimes(2); expect(editNotice).toHaveBeenCalledTimes(1);
-      expect(send.mock.calls[1][1]).toContain("· used up");
+      expect(send.mock.calls[1][1]).toContain("→ Free reset Claude A now");
     }],
   });
 });
@@ -146,34 +145,13 @@ feature("an explicitly deleted quota row", () => {
     }],
     then: ["one missing edit, two creates including the full-limit alert", ({ send, editNotice }) => {
       expect(editNotice).toHaveBeenCalledTimes(1); expect(send).toHaveBeenCalledTimes(2);
-      expect(send.mock.calls[1][0]).toContain("· used up");
+      expect(send.mock.calls[1][0]).toContain("→ Free reset Claude A now");
     }],
   });
 });
 
-feature("the account row keeps its current forecast", () => {
-  unit("a changed forecast edits the row even when percentage and active count stay the same", {
-    when: ["the same quota reading is revisited an hour later", async () => {
-      const { postDueQuotaWarnings } = await import("./quota-warning.mjs");
-      const sent = createSentNoticeStore(join(mkdtempSync(join(tmpdir(), "quota-forecast-edit-")), "sent.json"));
-      const snapshot = { accounts: [{ ...due.accounts[0], limits: [{ kind: "weekly_all", usedPercent: 85, resetsAt: "2026-10-22T06:13:00Z" }] }] };
-      const notify = vi.fn(async () => ({ channelId: "human", messageId: "notice-1" })), editNotice = vi.fn(async () => {});
-      const now = Date.parse("2026-10-17T09:00:00Z");
-      await postDueQuotaWarnings({ snapshot, sent, notify, editNotice, now });
-      await postDueQuotaWarnings({ snapshot, sent, notify, editNotice, now: now + 3_600_000 });
-      return { notify, editNotice };
-    }],
-    then: ["one post remains and its forecast is updated", ({ notify, editNotice }) => {
-      expect(notify).toHaveBeenCalledTimes(1);
-      expect(editNotice).toHaveBeenCalledTimes(1);
-      expect(editNotice.mock.calls[0][1]).not.toBe(notify.mock.calls[0][0]);
-    }],
-  });
-});
-
-
-feature("stable usage does not churn the forecast row", () => {
-  unit("120 half-minute pulses produce only one hourly forecast edit", {
+feature("stable usage does not churn the quota box", () => {
+  unit("120 half-minute pulses and a return after seven hours edit nothing while the reading stays", {
     when: ["usage and active panes stay constant for an hour and the human returns after seven hours", async () => {
       const { postDueQuotaWarnings } = await import("./quota-warning.mjs");
       const sent = createSentNoticeStore(join(mkdtempSync(join(tmpdir(), "quota-steady-")), "sent.json"));
@@ -186,8 +164,8 @@ feature("stable usage does not churn the forecast row", () => {
       await postDueQuotaWarnings({ snapshot, sent, notify, editNotice, now: now + 7 * hour });
       return { notify, editNotice, hourlyEdits };
     }],
-    then: ["one create, one edit in the first hour and an edit rather than a seven-hour repost", ({ notify, editNotice, hourlyEdits }) => {
-      expect(hourlyEdits).toBe(1); expect(notify).toHaveBeenCalledTimes(1); expect(editNotice).toHaveBeenCalledTimes(2);
+    then: ["one create and no edit or repost, since the box shows no forecast", ({ notify, editNotice, hourlyEdits }) => {
+      expect(hourlyEdits).toBe(0); expect(notify).toHaveBeenCalledTimes(1); expect(editNotice).not.toHaveBeenCalled();
     }],
   });
 });

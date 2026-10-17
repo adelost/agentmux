@@ -67,14 +67,14 @@ feature("which account each running pane spends", () => {
     when: ["rendering the snapshot with live panes", () =>
       formatQuotaSnapshot(withPanesInUse(SNAPSHOT, LIVE, PROFILES, identity)).split("\n")],
     then: ["the account in use is obvious and attrois/Kimi take one line", (lines) => {
-      expect(lines[1]).toMatch(/^Codex 1 · w@x/u);
-      expect(lines[2]).toBe("  i bruk: lsrc:3");
-      expect(lines[3]).toMatch(/^Claude 1\+2 · adelost@x/u);
-      expect(lines[4]).toBe("  i bruk: api:0–2, claw:0");
-      expect(lines[5]).toMatch(/^Claude · wetterlind@x · max · ingen plats/u);
-      expect(lines[6]).toBe("  ingen panel");
-      expect(lines.at(-1)).toBe("Utloggade: Claude attrois · Kimi 1 · Kimi 2");
-      expect(lines.join("\n")).not.toContain("otillgänglig");
+      expect(lines[1]).toMatch(/^Codex W · slot 1 · w@x/u);
+      expect(lines[2]).toBe("  in use: lsrc:3");
+      expect(lines[3]).toMatch(/^Claude A · slot 1\+2 · adelost@x/u);
+      expect(lines[4]).toBe("  in use: api:0–2, claw:0");
+      expect(lines[5]).toMatch(/^Claude W · no slot · wetterlind@x · max/u);
+      expect(lines[6]).toBe("  no pane");
+      expect(lines.at(-1)).toBe("Logged out: Claude attrois · Kimi 1 · Kimi 2");
+      expect(lines.join("\n")).not.toContain("unavailable");
     }],
   });
 
@@ -82,14 +82,14 @@ feature("which account each running pane spends", () => {
     when: ["a Kimi pane runs on an expired login", () => formatQuotaSnapshot(withPanesInUse(SNAPSHOT,
       [{ key: "api:7", engine: "kimi", home: "/h/.kimi-code" }], PROFILES, identity))],
     then: ["the failure stays visible next to its pane", (text) => {
-      expect(text).toContain("Kimi 1  otillgänglig (credentials_expired)\n  i bruk: api:7");
-      expect(text).toContain("Utloggade: Claude attrois · Kimi 2");
+      expect(text).toContain("Kimi 1  unavailable (credentials_expired)\n  in use: api:7");
+      expect(text).toContain("Logged out: Claude attrois · Kimi 2");
     }],
   });
 
   unit("names a pane on a dir no profile knows instead of hiding it", {
     when: ["a Claude pane runs on an unknown dir", () => formatQuotaSnapshot(withPanesInUse(SNAPSHOT,
       [{ key: "x:1", engine: "claude", home: "/tmp/other" }], PROFILES, identity))],
-    then: ["it is listed with its dir", (text) => expect(text).toContain("Paneler på en inloggning amux inte känner: x:1 (/tmp/other)")],
+    then: ["it is listed with its dir", (text) => expect(text).toContain("Panes on a login amux does not know: x:1 (/tmp/other)")],
   });
 });

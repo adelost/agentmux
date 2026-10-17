@@ -4,6 +4,7 @@
 // commands are provider-scoped; Codex pane switching remains the existing
 // explicit /switch flow with continuity checks.
 
+import { quotaBoxText } from "../channels/quota-warning.mjs";
 import { formatQuotaSnapshot } from "../core/quota-format.mjs";
 import { newClaudeLoginProfile, profileLoginInstruction, quotaAccountCatalog, quotaProfile } from "../core/quota-profiles.mjs";
 import { readQuotaSnapshotWithPanes } from "../core/quota-in-use.mjs";
@@ -31,17 +32,18 @@ Warnings never switch accounts; explicit operator requests use the guarded path 
 Codex automatic switch: only after a reached weekly limit, spare account quota and exact-session continuity.
 Disable with AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false. Predictions never switch accounts.`;
 
-/** WHAT: Builds one shared quota view. WHY: Keeps text and JSON views on one collection pass. */
+/** WHAT: Builds the quota box Discord shows plus every slot's detail, or the JSON. WHY: Keeps text and JSON views on one collection pass. */
 export async function runQuotaCommand(args, {
   readSnapshot = readQuotaSnapshotWithPanes,
   output = console.log,
+  boxText = quotaBoxText,
 } = {}) {
   if (args.length === 1 && ["--help", "-h"].includes(args[0])) { output(usage); return { help: true }; }
   const allowed = new Set(["--all", "--json"]);
   const invalid = args.find((arg) => !allowed.has(arg));
   if (invalid) throw new Error(`unknown quota option: ${invalid}`);
   const snapshot = await readSnapshot();
-  output(args.includes("--json") ? JSON.stringify(snapshot, null, 2) : formatQuotaSnapshot(snapshot));
+  output(args.includes("--json") ? JSON.stringify(snapshot, null, 2) : `${boxText(snapshot)}\n\n${formatQuotaSnapshot(snapshot)}`);
   return snapshot;
 }
 

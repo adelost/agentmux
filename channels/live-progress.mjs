@@ -14,8 +14,8 @@ const stepKey = item => item.id || createHash("sha256").update(item.content || "
 const lastStep = item => {
   const label = String(item?.content || "");
   const file = label.match(/^(Read|Edit|Write) (.+)/u);
-  if (file) return `${file[1] === "Read" ? "läser" : "ändrar"} ${basename(file[2]).slice(0, 60)}`;
-  return /^Search/u.test(label) ? "söker" : /^Run/u.test(label) ? "kör ett kommando" : "arbetar";
+  if (file) return `${file[1] === "Read" ? "reading" : "editing"} ${basename(file[2]).slice(0, 60)}`;
+  return /^Search/u.test(label) ? "searching" : /^Run/u.test(label) ? "running a command" : "working";
 };
 
 /** WHAT: Builds one temporary work row per turn and removes it on completion. WHY: Prevents immutable tool updates from becoming hundreds of Discord posts. */
@@ -51,7 +51,7 @@ export function createLiveProgress({ discord, state, env = process.env, log = co
       fresh.forEach(item => seen.add(stepKey(item)));
       const count = (row?.count || 0) + fresh.length;
       const latest = fresh.at(-1) ? lastStep(fresh.at(-1)) : row?.latest;
-      const text = `Arbetar · ${count} steg · senast: ${latest}`;
+      const text = `Working · ${count} step${count === 1 ? "" : "s"} · last: ${latest}`;
       if (!row) {
         const nonce = BigInt(`0x${createHash("sha256").update(`${channelId}:${turnKey}:work`).digest("hex").slice(0, 16)}`).toString();
         const message = await discord.send(channelId, { content: text, nonce, enforceNonce: true }, { kind: "notice" });

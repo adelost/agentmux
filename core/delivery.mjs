@@ -68,7 +68,7 @@ export function slashQueueReply(command, result) {
   if (result?.delivered) return `sent \`${command}\``;
   const refused = String(result?.reason || "").match(PANE_SAFETY_REFUSAL)?.[1];
   return refused
-    ? `⚠️ \`${command}\` is queued but its pane was not started: ${refused}`
+    ? `\`${command}\` is queued but its pane was not started: ${refused}`
     : `queued durably \`${command}\``;
 }
 

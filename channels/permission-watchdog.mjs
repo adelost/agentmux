@@ -132,7 +132,7 @@ export function createPermissionWatchdog({
       ageMs,
       reason: prompt.reason,
       command: prompt.command,
-      why: "kräver ägarbeslut",
+      why: "needs the owner's decision",
     });
     await agent.sendOnly(agentConfig.name, text, ownerPane);
   }
@@ -200,7 +200,7 @@ export function createPermissionWatchdog({
           return decided("stale", "session or signature changed before the answer");
         }
         log(`answered "${decision.keys}" in ${paneKey} after ${Math.round(ageMs / 1000)}s: ${decision.why}`);
-        await post(agentConfig.name, paneIdx, `Permission watchdog: svarade ja i ${paneKey} efter ${Math.round(ageMs / 1000)} s. ${decision.why}. Skäl i frågan: ${prompt.reason}`);
+        await post(agentConfig.name, paneIdx, `Permission watchdog: answered yes in ${paneKey} after ${Math.round(ageMs / 1000)} s. ${decision.why}. Reason in the prompt: ${prompt.reason}`);
         return decided("answered", decision.why);
       } catch (err) {
         log(`answer failed for ${paneKey}: ${err.message}`);
@@ -220,14 +220,14 @@ export function createPermissionWatchdog({
     }
 
     prev.humanNotified = true;
-    const text = formatPermissionAlert({ paneKey, ageMs, reason: prompt.reason, command: prompt.command, why: decision.action === "answer" ? "auto-svar avstängt" : decision.why });
+    const text = formatPermissionAlert({ paneKey, ageMs, reason: prompt.reason, command: prompt.command, why: decision.action === "answer" ? "auto-answer is off" : decision.why });
     log(`alert for ${paneKey}: ${decision.why}`);
     await post(agentConfig.name, paneIdx, text);
     if (notifyUser) {
       try { await notifyUser(text, { idempotencyKey: `permission-watchdog:${paneKey}:${prompt.signature.slice(0, 80)}` }); }
       catch (err) { log(`notifyUser failed for ${paneKey}: ${err.message}`); }
     }
-    return decided("escalated-human", decision.action === "answer" ? "auto-svar avstängt" : decision.why);
+    return decided("escalated-human", decision.action === "answer" ? "auto-answer is off" : decision.why);
   }
 
   async function tick() {

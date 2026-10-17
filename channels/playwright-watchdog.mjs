@@ -71,7 +71,7 @@ export function createPlaywrightWatchdog({
       await post(
         agentConfig.name,
         paneIdx,
-        `Playwright watchdog: avbröt en MCP-browsercall i ${paneKey} efter ${Math.round(age / 1000)}s. Försök gärna ta bilden igen.`,
+        `Playwright watchdog: interrupted an MCP browser call in ${paneKey} after ${Math.round(age / 1000)}s. Try the screenshot again.`,
       );
     } catch (err) {
       log(`Escape failed for ${paneKey}: ${err.message}`);

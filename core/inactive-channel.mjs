@@ -23,9 +23,9 @@ export function inactiveChannelBindings(extras, agents, channelMap) {
 /** WHAT: Formats the actual delivery outcome. WHY: Prevents an old channel from looking like a sleeping agent. */
 export function inactiveChannelNotice(target) {
   const next = /^\d+$/u.test(String(target?.redirectId || ""))
-    ? ` Skriv i <#${target.redirectId}> i stället.`
-    : " Välj en aktiv kanal i samma projekt.";
-  return `Den här kanalen är inte längre aktiv. Ingen agent fick ditt meddelande.${next}`;
+    ? ` Write in <#${target.redirectId}> instead.`
+    : " Pick an active channel in the same project.";
+  return `This channel is no longer active. No agent got your message.${next}`;
 }
 
 function noticePayload(record) {

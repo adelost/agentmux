@@ -512,11 +512,15 @@ speech-to-text note. Pane-to-pane messages retain their full text. Delivery,
 receipt, context and compaction notices are visible again, as before 9d37147.
 Transport idempotency and the tool-line environment setting remain in place.
 
-The quota notice is one English overview. Each engine gets a line for the
-account its panes use (used percent, reset, and when it runs out at the pace of
-the last day's readings) and a line per other account with what it adds. The
-last line is one recommendation: nothing, the exact switch command and the panes
-it moves, or a free reset on the account's usage page when it hits 100 percent.
+The quota box is a table of every account, named Claude A, Claude W, Codex A and
+Codex W by the login's initial: ● when panes use it (with pane counts when both
+accounts of an engine are in use), ○ when none do, the percent of the week left
+and the weekly reset. A five-hour window appears under its account only while it
+blocks it. At most one action follows: the switch command, when a used-up window
+comes back, or a free reset. A week that lasts until its reset at the last day's
+pace gets no advice. The box is the warning (80/90/100 percent), the `/quota`
+reply and the top of `amux quota`. Bridge notices and command replies are in
+English, without emoji.
 
 Set `AMUX_TOOL_LINES_CHANNELS` in the bridge environment to a comma-separated
 list of pane addresses or Discord channel IDs to restore the old tool rows in

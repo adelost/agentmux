@@ -1102,8 +1102,8 @@ feature("optional work row remains available", () => {
     }],
     then: ["one progress create, edits, delete and one unchanged answer", ctx => { try {
       expect(ctx.discord.sends).toHaveLength(2);
-      expect(ctx.discord.sends[0].payload.content).toContain("Arbetar · 1 steg");
-      expect(ctx.discord.editMessage).toHaveBeenCalledWith("ch-test", "post-1", expect.stringContaining("2 steg"));
+      expect(ctx.discord.sends[0].payload.content).toContain("Working · 1 step ·");
+      expect(ctx.discord.editMessage).toHaveBeenCalledWith("ch-test", "post-1", expect.stringContaining("2 steps"));
       expect(ctx.discord.deleteMessage).toHaveBeenCalledWith("ch-test", "post-1");
       expect(ctx.discord.sends[1].payload).toBe("SUMMARY: Done.");
     } finally { ctx.cleanup(); } }],

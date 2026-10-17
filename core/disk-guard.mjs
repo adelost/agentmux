@@ -33,8 +33,8 @@ export async function pollDiskGuardOnce({sample=sampleRootDisk,readState:read=re
   write(state);
   // Alert the observed critical condition before relief can consume time or fail.
   if(state.level==="critical"&&!state.alerted) {
-    const result=await notify(`Diskvakt: ${(before.availableBytes/1e9).toFixed(1)} GB ledigt på /. Försöker frigöra cacheutrymme.`,
-      {idempotencyKey:`disk-pressure-${state.episode}`,level:"error",title:"Rotdisken"});
+    const result=await notify(`Disk guard: ${(before.availableBytes/1e9).toFixed(1)} GB free on /. Trying to free cache space.`,
+      {idempotencyKey:`disk-pressure-${state.episode}`,level:"error",title:"Root disk"});
     if(result?.sent||result?.deduped) {state.alerted=true;write(state);}
   }
   state.maintenance=await maintain();

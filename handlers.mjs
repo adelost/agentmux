@@ -11,7 +11,7 @@ import { loadConfig } from "./cli/config.mjs";
 import { blockedSendMessage, decideParkedSend, readParkState, unparkPane } from "./core/pane-park.mjs";
 import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
 import { readQuotaSnapshotWithPanes } from "./core/quota-in-use.mjs";
-import { formatQuotaSnapshot } from "./core/quota-format.mjs";
+import { quotaBoxText } from "./channels/quota-warning.mjs";
 import { prepareCodexIdle } from "./core/codex-tui.mjs";
 import { codexModelRequest, formatCodexModelChange, formatCodexModelFailure, runLockedCodexModelChange } from "./core/codex-model-command.mjs";
 import { runLockedClaudeModelChange } from "./core/claude-model-command.mjs";
@@ -315,7 +315,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     // Account-wide shared quota (Claude weekly/Fable + Codex weekly) — unlike
     // /status this is not pane-specific, so it needs no mapping or pane.
     "/quota": async (msg) => {
-      await msg.reply(formatQuotaSnapshot(await readQuotaSnapshotWithPanes()));
+      await msg.reply(quotaBoxText(await readQuotaSnapshotWithPanes()));
     },
     "/byt": createAccountSwitchCommand({ state, runtime: () => deliveryBroker?.queue
       && { agent, deliveryQueue: deliveryBroker.queue, state, configPath: agentsYamlPath } }),
@@ -411,8 +411,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         const contextLabel = context
           ? `${context.percent}%${context.tokens != null ? ` (${Math.round(context.tokens / 1000)}k)` : ""}`
           : "unknown";
-        await msg.reply(`⚠️ Native Codex-status kunde inte läsas (${result.stage}: ${result.error}).\n` +
-          `**${mapping.name}** pane ${pane}${override} · profil ${profile.id} · model: ${model} · context: ${contextLabel}`);
+        await msg.reply(`Native Codex status could not be read (${result.stage}: ${result.error}).\n` +
+          `**${mapping.name}** pane ${pane}${override} · profile ${profile.id} · model: ${model} · context: ${contextLabel}`);
         return;
       }
       const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
@@ -427,28 +427,28 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     "/switch": async (msg, mapping, pane, args) => {
       if (isNativePane(mapping, pane)) {
         await msg.reply(
-          "Native-canaryn delar runtime-processens lokala Codex-inloggning. " +
-          "Kontobyte mitt i samma session är avsiktligt spärrat; använd en separat native-target/profil.",
+          "The native canary shares the runtime process's local Codex login. " +
+          "Switching accounts within one session is blocked on purpose; use a separate native target or profile.",
         );
         return;
       }
       if (!isCodexPane(mapping, pane)) {
-        await msg.reply(`**${mapping.name}:${pane}** är inte en Codex-panel; kontoprofiler gäller bara Codex.`);
+        await msg.reply(`**${mapping.name}:${pane}** is not a Codex pane; account profiles apply only to Codex.`);
         return;
       }
       const catalog = codexProfileCatalog();
       const current = selectedCodexProfile(state, mapping.name, pane, catalog);
       const target = resolveCodexProfile(args, current, catalog);
       if (!target) {
-        await msg.reply("okänd Codex-profil — använd `//switch`, `//switch 1` eller `//switch 2`");
+        await msg.reply("Unknown Codex profile. Use `//switch`, `//switch 1` or `//switch 2`.");
         return;
       }
 
       prepareCodexProfile(target, catalog[0]);
       if (!isCodexProfileAuthenticated(target)) {
-        await msg.reply(`Codex-profil **${target.id}** behöver en engångsinloggning. Kör i WSL:\n` +
+        await msg.reply(`Codex profile **${target.id}** needs a one-time login. Run in WSL:\n` +
           `\`${codexLoginCommand(target)}\`\n` +
-          "När den är klar fungerar bara `//switch` fram och tillbaka utan logout.");
+          "After that, `//switch` alone switches back and forth without a logout.");
         return;
       }
 
@@ -456,15 +456,15 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         agent, state, name: mapping.name, pane, current, target, statusDriver: codexStatusDriver }));
 
       if (result.kind === "failed") {
-        await msg.reply(`⚠️ Kontobytet avbröts: ${result.error}.` +
-          (result.rollbackError ? ` Återställningen misslyckades också: ${result.rollbackError}` : " Föregående profil återställdes."));
+        await msg.reply(`The account switch was stopped: ${result.error}.` +
+          (result.rollbackError ? ` Restoring the previous profile failed too: ${result.rollbackError}` : " The previous profile was restored."));
         return;
       }
       if (!result.status.ok) {
-        await msg.reply(`Profil **${current.id}** är redan aktiv, men native status kunde inte läsas (${result.status.stage}).`);
+        await msg.reply(`Profile **${current.id}** is already active, but its native status could not be read (${result.status.stage}).`);
         return;
       }
-      await msg.reply((result.kind === "switched" ? "✅ Konto bytt.\n" : "") +
+      await msg.reply((result.kind === "switched" ? "Account switched.\n" : "") +
         formatCodexStatus(result.status.status, {
           agentName: mapping.name,
           pane,
@@ -497,12 +497,12 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         if (!result.delivered) {
           await msg.reply(result.pending
             ? `queued durably \`${command}\``
-            : `⚠️ native model change failed: ${result.reason || "rejected"}`);
+            : `native model change failed: ${result.reason || "rejected"}`);
           return;
         }
         const updated = await agent.nativeRuntime.history(mapping.name, pane);
         await msg.reply(
-          `✅ ${mapping.name}:${pane} → ${updated.agent.model} ${updated.agent.effort}; gäller från nästa turn`,
+          `${mapping.name}:${pane} → ${updated.agent.model} ${updated.agent.effort}; applies from the next turn`,
         );
         return;
       }
@@ -542,14 +542,14 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           if (readParkState(mapping.name, pane)) {
             unparkPane({ session: mapping.name, pane, detail: `explicit model switch: ${result.model} ${result.effort || ""}`.trim() });
           }
-          await msg.reply(`✅ ${formatCodexModelChange(mapping.name, pane, result)}`);
+          await msg.reply(formatCodexModelChange(mapping.name, pane, result));
         } else {
-          await msg.reply(`⚠️ ${formatCodexModelFailure(mapping.name, pane, result)}`);
+          await msg.reply(formatCodexModelFailure(mapping.name, pane, result));
         }
         return;
       }
       const command = paneCommand(mapping, pane);
-      if (command && !/\bclaude\b/iu.test(command)) { await msg.reply("Modelbyte stöds inte för den här paneldialekten."); return; }
+      if (command && !/\bclaude\b/iu.test(command)) { await msg.reply("Model changes are not supported for this kind of pane."); return; }
       // Model ids/aliases only — never arbitrary text into the pane from a
       // typo'd Discord message. Spoken forms (`opus 4.8`) normalize to the
       // wire id first, so the guard rejects garbage and not human syntax.
@@ -565,12 +565,12 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           paneDir: mapping.dir ? `${mapping.dir}/.agents/${pane}` : null, targetModel: model,
         }));
         if (!result.ok) {
-          await msg.reply(`⚠️ Claude-modellbyte ${result.stage === "verify" ? "har okänt utfall" : "stoppat före byte"}: ${result.reason || result.stage}. Inget automatiskt omförsök.`);
+          await msg.reply(`Claude model change ${result.stage === "verify" ? "has an unknown outcome" : "stopped before the change"}: ${result.reason || result.stage}. No automatic retry.`);
         } else {
           if (readParkState(mapping.name, pane)) unparkPane({ session: mapping.name, pane, detail: `verified Claude model: ${result.model}` });
           await msg.reply(result.unchanged
-            ? `${mapping.name}:${pane} använder redan ${result.model}; ingen compact eller väckning.`
-            : `${mapping.name}:${pane}: compact verifierad${result.reusedCompact ? " sedan tidigare" : ""}; ${result.model} vald, effort oförändrad.`);
+            ? `${mapping.name}:${pane} already uses ${result.model}; no compact or wake-up.`
+            : `${mapping.name}:${pane}: compact verified${result.reusedCompact ? " earlier" : ""}; ${result.model} selected, effort unchanged.`);
         }
       } catch (err) {
         await msg.reply(`/model failed: ${err.message}`).catch(() => {});
@@ -579,29 +579,29 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     "/restore": async (msg, mapping, pane) => {
       if (isNativePane(mapping, pane)) {
-        await msg.reply("Native-targets TUI-parkeras inte; använd `//model <modell> [effort]` explicit.");
+        await msg.reply("Native targets are not parked in the TUI; use `//model <model> [effort]` explicitly.");
         return;
       }
       const park = readParkState(mapping.name, pane);
       if (!park) {
-        await msg.reply(`${mapping.name}:${pane} är inte parkerad; ingen modell behöver återställas.`);
+        await msg.reply(`${mapping.name}:${pane} is not parked; no model needs restoring.`);
         return;
       }
       const key = `${mapping.name}:${pane}`;
       const target = (state.get(MODEL_RECOVERY_STATE_KEY, {}) || {})[key];
       if (!target?.targetModel) {
-        await msg.reply(`⚠️ Återställningsmålet saknas för ${key}. Panelen förblir parkerad; använd \`//model <modell> <effort>\` explicit.`);
+        await msg.reply(`The restore target for ${key} is missing. The pane stays parked; use \`//model <model> <effort>\` explicitly.`);
         return;
       }
       const paneCmd = loadConfig(agentsYamlPath)?.[mapping.name]?.panes?.[pane]?.cmd || "";
       if (!/codex/i.test(paneCmd)) {
-        await msg.reply(`⚠️ Automatisk \`/restore\` stöder ännu Codex-paneler. ${key} förblir parkerad; använd \`//model ${target.targetModel}\`.`);
+        await msg.reply(`Automatic \`/restore\` supports only Codex panes so far. ${key} stays parked; use \`//model ${target.targetModel}\`.`);
         return;
       }
-      await msg.reply(`🔁 ${key}: väntar 10 s och försöker återställa ${target.targetModel}${target.targetEffort ? ` ${target.targetEffort}` : ""}. Timeout 60 s.`);
+      await msg.reply(`${key}: waits 10 s, then tries to restore ${target.targetModel}${target.targetEffort ? ` ${target.targetEffort}` : ""}. Timeout 60 s.`);
       await new Promise((resolve) => setTimeout(resolve, MODEL_RECOVERY_SETTLE_MS));
       if (await agent.isBusy(mapping.name, pane)) {
-        await msg.reply(`🅿 ${key} blev aktiv under väntan och förblir parkerad. Avbryt först och kör \`/restore\` igen.`);
+        await msg.reply(`${key} became active during the wait and stays parked. Stop it first and run \`/restore\` again.`);
         return;
       }
       const result = await withPaneSendLock(key, async () => {
@@ -629,7 +629,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         }
       });
       if (!result.ok) {
-        await msg.reply(`🅿 Återställning misslyckades (${result.error}). ${key} förblir parkerad.`);
+        await msg.reply(`The restore failed (${result.error}). ${key} stays parked.`);
         return;
       }
       const restored = `${result.model}${result.effort ? ` ${result.effort}` : ""}`;
@@ -645,7 +645,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       } else {
         await agent.sendOnly(mapping.name, brief, pane);
       }
-      await msg.reply(`✅ ${key} återställd till ${restored}, avparkerad och återstartad med re-verify.`);
+      await msg.reply(`${key} restored to ${restored}, unparked and restarted with re-verify.`);
     },
 
     "/dismiss": async (msg, mapping, pane) => {
@@ -709,7 +709,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           const { parseConfig } = await import("./sync.mjs");
           const cfg = parseConfig(configYaml);
           // A refused reconcile (unknown pane count, shifted pane) must reach the human, not only the log.
-          reconcileSummaries = await reconcileAllSessions(agent, cfg.agents.keys(), (line) => { console.warn(line); lines.push(`⚠️ ${line}`); });
+          reconcileSummaries = await reconcileAllSessions(agent, cfg.agents.keys(), (line) => { console.warn(line); lines.push(line); });
         } catch (err) {
           console.warn(`/sync: reconcile skipped: ${err.message}`);
         }
@@ -745,12 +745,12 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const mode = String(args || "").trim().toLowerCase();
       const fleet = ["all", "tmux", "fleet"].includes(mode);
       if (mode && !fleet) {
-        await msg.reply("använd `//restart` för bara bridgen eller `//restart all` för hela tmux-flottan");
+        await msg.reply("Use `//restart` for the bridge only or `//restart all` for the whole tmux fleet.");
         return;
       }
       if (fleet) queueFleetRestartRequest({ source: "discord" });
       await msg.reply(fleet
-        ? "helreset köad — alla konfigurerade tmux-sessioner återskapas; aktiva turns avbryts men sparad historik behålls..."
+        ? "Full reset queued. Every configured tmux session is recreated; active turns stop, saved history is kept..."
         : "restarting bridge...");
       state.set("restartChannel", msg.channelId);
       // Exit code 75 = restart signal (caught by start script loop)
@@ -1030,7 +1030,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
             sendSlashVerified(agent, mapping.name, pane, claudeCmd));
           if (result.delivered) await msg.reply(`sent \`${parsed.cmd}\``);
-          else await msg.reply(`⚠️ \`${parsed.cmd}\` still sits unsubmitted in the composer — check \`/raw\``);
+          else await msg.reply(`\`${parsed.cmd}\` still sits unsubmitted in the composer. Check \`/raw\`.`);
         }
       } catch (err) {
         await msg.reply(`${parsed.cmd} failed: ${err.message}`).catch(() => {});

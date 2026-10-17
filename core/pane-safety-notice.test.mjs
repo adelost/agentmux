@@ -31,7 +31,7 @@ feature("pane safety refusals in Discord replies", () => {
     then: ["the reply names the live pane and the notice names the duplicate", ({ reply, notice }) => {
       expect(reply).toContain("`/compact` is queued but its pane was not started");
       expect(reply).toContain("skyvw:10 (%23, claude) already runs from /repo/.agents/2");
-      expect(notice).toBe("panelens session kör redan i en annan process eller panel, så amux startar den inte en gång till");
+      expect(notice).toBe("the pane's session already runs in another process or pane, so amux does not start it twice");
     }],
   });
 
@@ -40,7 +40,7 @@ feature("pane safety refusals in Discord replies", () => {
     when: ["replying to the slash command", (result) => ({ reply: slashQueueReply("/compact", result), notice: plainReason(result.reason) })],
     then: ["the reply and the notice name the unsafe layout", ({ reply, notice }) => {
       expect(reply).toContain("pane layout unsafe: cannot count panes in 'skyvw' (timed out after 3000 ms)");
-      expect(notice).toBe("amux kan inte lita på panelernas numrering i tmux just nu, så inget startas eller läggs till");
+      expect(notice).toBe("amux cannot trust the pane numbering in tmux right now, so nothing is started or added");
     }],
   });
 

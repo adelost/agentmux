@@ -8,7 +8,7 @@ import { buildQuotaOverview, weeklyQuotaOf } from "./quota-overview.mjs";
 const HOUR = 3_600_000;
 // Mattias 2026-10-16: "en cool down på 6 timmar på 80-90% och sen cooldown på 3 timmar på 90 till 100 %".
 const WARN_COOLDOWN_MS = 6 * HOUR, RESERVE_COOLDOWN_MS = 3 * HOUR;
-// The pace behind "runs out" uses the last day of readings, as weeklyForecast measures it.
+// The pace that decides whether an account runs out before its reset uses the last day of readings, as weeklyForecast measures it.
 const READING_SPAN_MS = 24 * HOUR;
 // One overview message covers every account, so its reference is stored once.
 const OVERVIEW_KEY = "overview";
@@ -66,15 +66,15 @@ const activePanes = account => [...new Set(account.activeInUse || [])];
 const warnedAccounts = (accounts, config) => accounts.filter(account => activePanes(account).length
   && Number.isFinite(weeklyQuotaOf(account)?.usedPercent) && weeklyQuotaOf(account).usedPercent >= config.warnPercent);
 
-/** WHAT: Saves each account's newest weekly reading and returns its recent ones. WHY: Lets "runs out" follow the current pace, not the week's average. */
-function observeReadings(sent, accounts, now) {
+/** WHAT: Returns each account's recent weekly readings, saving its newest first when told to. WHY: Lets "runs out before the reset" follow the current pace, not the week's average. */
+function weeklyReadings(sent, accounts, now, { record = false } = {}) {
   const readings = new Map();
   for (const account of accounts) {
     const weekly = weeklyQuotaOf(account), resetAt = Date.parse(weekly?.resetsAt);
     if (!account.account?.email || !Number.isFinite(weekly?.usedPercent) || !(resetAt > now)) continue;
     const key = weeklyWindowKey(identityOf(account), weekly.resetsAt), at = Date.parse(account.observation?.observedAt);
     // A reading without its own time cannot measure a pace; the forecast then uses the week's average.
-    if (Number.isFinite(at)) sent.observe(key, { at, usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt }, { now, resetAt });
+    if (record && Number.isFinite(at)) sent.observe(key, { at, usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt }, { now, resetAt });
     readings.set(account, sent.readings(key));
   }
   return readings;
@@ -99,10 +99,10 @@ function warningState(account, sent, config, now) {
 export async function postDueQuotaWarnings({ snapshot, notify, sent, config = parseQuotaWarningConfig(), now = Date.now(), fullOnly = false, editNotice = null, channelId = null }) {
   if (!config.enabled) return [];
   const accounts = snapshot?.accounts || [];
-  const readings = observeReadings(sent, accounts, now);
+  const readings = weeklyReadings(sent, accounts, now, { record: true });
   const warned = warnedAccounts(accounts, config).map(account => warningState(account, sent, config, now)).filter(Boolean);
   if (!warned.length) return [];
-  const { text, fingerprint } = buildQuotaOverview(snapshot, { config, now, readingsOf: account => readings.get(account) || [] });
+  const { text } = buildQuotaOverview(snapshot, { config, now, readingsOf: account => readings.get(account) || [] });
   const existing = sent.entry(OVERVIEW_KEY)?.notice;
   const keep = { now, resetAt: Math.max(...warned.map(state => state.resetAt)) };
   // A first warning and a reached limit are news; anything else edits the overview he already has (Sky e2e815d6).
@@ -114,12 +114,11 @@ export async function postDueQuotaWarnings({ snapshot, notify, sent, config = pa
       sent.record(state.accountKey, state.usedPercent, { now, resetAt: state.resetAt });
       sent.record(state.key, state.usedPercent, { now, resetAt: state.resetAt });
     }
-    sent.saveNotice(OVERVIEW_KEY, messageId ? { channelId: posted.channelId || channelId, messageId, fingerprint, text, updatedAt: now } : null, keep);
+    sent.saveNotice(OVERVIEW_KEY, messageId ? { channelId: posted.channelId || channelId, messageId, text, updatedAt: now } : null, keep);
     return due;
   }
-  if (!existing?.messageId || !editNotice) return [];
-  const forecastDue = now - (existing.updatedAt ?? 0) >= HOUR && existing.text !== text;
-  if (existing.fingerprint === fingerprint && !forecastDue) return [];
+  // The box shows no forecast, so only a changed row or action is worth an edit.
+  if (!existing?.messageId || !editNotice || existing.text === text) return [];
   try { await editNotice(existing, text); }
   catch (error) {
     if (Number(error.code) !== 10008) throw error;
@@ -127,6 +126,12 @@ export async function postDueQuotaWarnings({ snapshot, notify, sent, config = pa
     sent.saveNotice(OVERVIEW_KEY, null, keep);
     return [];
   }
-  sent.saveNotice(OVERVIEW_KEY, { ...existing, fingerprint, text, updatedAt: now }, keep);
+  sent.saveNotice(OVERVIEW_KEY, { ...existing, text, updatedAt: now }, keep);
   return warned.map(state => ({ ...state, edited: true }));
+}
+
+/** WHAT: Formats the quota box for /quota and amux quota with the pace the warnings recorded. WHY: Keeps a view on demand from writing the warning's store. */
+export function quotaBoxText(snapshot, { sent = createSentNoticeStore(), config = parseQuotaWarningConfig(), now = Date.now() } = {}) {
+  const readings = weeklyReadings(sent, snapshot?.accounts || [], now);
+  return buildQuotaOverview(snapshot, { config, now, readingsOf: account => readings.get(account) || [] }).text;
 }

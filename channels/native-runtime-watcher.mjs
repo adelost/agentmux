@@ -141,7 +141,7 @@ export function groupNativeTurns(events = [], { includeEmpty = false } = {}) {
         const reason = String(current.error || `native turn failed (${event.code})`).trim();
         current.items.push({
           type: "text",
-          content: `${current.permissionDenied ? "🔒 Behörighet nekad" : "⚠️ Native-turn misslyckades"}: ${reason}`,
+          content: `${current.permissionDenied ? "Permission denied" : "Native turn failed"}: ${reason}`,
         });
       }
       current = null;
@@ -293,7 +293,7 @@ export function createNativeRuntimeWatcher({
     const operationId = turn.operationKey || `at:${turn.userAt}`;
     const acknowledgementId = `working:${operationId}`;
     if (acknowledgedOperation(channelId) !== acknowledgementId) {
-      await discord.send(channelId, `⏳ **${name}:${pane} jobbar**, meddelandet är mottaget.`);
+      await discord.send(channelId, `**${name}:${pane} is working**, the message was received.`);
       rememberAcknowledgedOperation(channelId, acknowledgementId);
     }
 
@@ -335,10 +335,10 @@ export function createNativeRuntimeWatcher({
       if (seen.has(id)) continue;
       const paneName = `${name}:${pane}`;
       if (event.subtype === "model-observation-missing") {
-        const warning = `⚠️ **${paneName}: faktisk modell kunde inte verifieras för senaste turen.**`;
+        const warning = `**${paneName}: the actual model could not be verified for the last turn.**`;
         await discord.send(channelId, warning)
           .catch((error) => log(`${paneName} missing-model warning failed: ${error.message}`));
-        await notify(`⚠️ ${paneName}: faktisk modell kunde inte verifieras för senaste turen`)
+        await notify(`${paneName}: the actual model could not be verified for the last turn`)
           .catch((error) => log(`${paneName} missing-model push failed: ${error.message}`));
         rememberModelChange(channelId, id);
         seen.add(id);
@@ -360,7 +360,7 @@ export function createNativeRuntimeWatcher({
         .catch((error) => log(`${paneName} model-change warning failed: ${error.message}`));
       if (event.policy === "stop" && !event.expected) {
         try {
-          await notify(`🔀 ${paneName} nedgraderad och STOPPAD: ${event.from} → ${event.to}. Byt modell när läget är rätt.`);
+          await notify(`${paneName} downgraded and STOPPED: ${event.from} → ${event.to}. Change the model when the state is right.`);
         } catch (error) {
           log(`${paneName} model-change push failed: ${error.message}`);
         }
@@ -379,8 +379,8 @@ export function createNativeRuntimeWatcher({
       if (seen.has(id)) continue;
       const waiting = event.subtype === "quota-waiting";
       const message = waiting
-        ? `⏸️ **${name}:${pane} · native:** Claude-kvoten är slut. Samma mottagna tur ligger kvar och återupptas automatiskt efter refill.`
-        : `▶️ **${name}:${pane} · native:** Claude-kvoten är tillbaka. Samma tur återupptas automatiskt.`;
+        ? `**${name}:${pane} · native:** the Claude quota is used up. The same received turn stays and resumes by itself after the refill.`
+        : `**${name}:${pane} · native:** the Claude quota is back. The same turn resumes by itself.`;
       await discord.send(channelId, message);
       rememberModelChange(channelId, id);
       seen.add(id);

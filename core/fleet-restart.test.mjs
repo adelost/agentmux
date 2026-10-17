@@ -75,7 +75,7 @@ feature("durable fleet restart handoff", () => {
     then: ["the fleet receipt is ready for startup notification", (receipt, { root, stored }) => {
       expect(receipt).toMatchObject({ ok: true, source: "discord", codingPanes: 6 });
       expect(stored[FLEET_RESTART_RESULT_KEY]).toEqual(receipt);
-      expect(formatFleetRestartResult(receipt)).toBe("online · helreset klar: 2/2 tmux-sessioner, 6 agentpaneler");
+      expect(formatFleetRestartResult(receipt)).toBe("online · full reset done: 2/2 tmux sessions, 6 agent panes");
       rmSync(root, { recursive: true, force: true });
     }],
   });
@@ -135,7 +135,7 @@ feature("durable fleet restart handoff", () => {
       });
       expect(ctx.enqueued[0].idempotencyKey).toContain("11111111-1111-4111-8111-111111111111");
       expect(ctx.enqueued[0].text).toContain("Fortsätt den avbrutna uppgiften");
-      expect(formatFleetRestartResult(receipt)).toContain("1 avbrutna turns återköade");
+      expect(formatFleetRestartResult(receipt)).toContain("1 interrupted turns requeued");
       rmSync(ctx.root, { recursive: true, force: true });
     }],
   });

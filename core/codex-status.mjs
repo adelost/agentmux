@@ -220,7 +220,7 @@ export function formatCodexStatus(status, { agentName, pane, profile } = {}) {
     formatLimit("Spark vecka", status.limits.sparkWeekly),
   ].filter(Boolean);
   if (spark.length) lines.push(spark.join("\n"));
-  if (status.warning) lines.push(`⚠️ ${status.warning}`);
+  if (status.warning) lines.push(`Warning: ${status.warning}`);
   if (status.usageUrl) lines.push(`<${status.usageUrl}>`);
   return lines.join("\n");
 }

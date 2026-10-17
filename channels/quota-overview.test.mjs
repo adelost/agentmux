@@ -1,98 +1,98 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { feature, unit, expect } from "bdd-vitest";
 import { afterAll, vi } from "vitest";
 import { buildQuotaOverview } from "./quota-overview.mjs";
-import { createSentNoticeStore, parseQuotaWarningConfig, postDueQuotaWarnings } from "./quota-warning.mjs";
+import { parseQuotaWarningConfig } from "./quota-warning.mjs";
 
 vi.stubEnv("TZ", "Europe/Stockholm");
 afterAll(() => vi.unstubAllEnvs());
-const NOW = Date.parse("2026-10-17T10:20:00Z"), MINUTE = 60_000;
+// 13:50 local, while Claude W's five-hour window is used up until 14:40.
+const NOW = Date.parse("2026-10-17T11:50:00Z");
 const config = parseQuotaWarningConfig({});
-const reading = (at, extra) => ({ ok: true, account: { email: `${extra.login}@example.test`, plan: extra.plan },
-  inUse: extra.panes, activeInUse: extra.panes, observation: { observedAt: new Date(at).toISOString() } });
-const codex = (id, login, plan, usedPercent, resetsAt, panes = [], at = NOW) => ({ ...reading(at, { login, plan, panes }),
-  provider: "codex", profile: { id }, limits: [{ limitId: "codex", windows: [{ windowMinutes: 10080, usedPercent, resetsAt }] }] });
-const claude = (login, plan, usedPercent, resetsAt, panes = [], at = NOW) => ({ ...reading(at, { login, plan, panes }),
-  provider: "claude", profile: { id: login }, limits: [{ kind: "weekly_all", usedPercent, resetsAt }] });
-// The readings lsrc:0 sent with the layout, 2026-10-17 12:20 CEST.
-const today = ({ codexUsed = 93, claudeUsed = 23, at = NOW } = {}) => ({ accounts: [
-  codex("1", "adelost", "pro", codexUsed, "2026-10-22T06:13:29Z", ["lsrc:3", "lsrc:7"], at),
-  codex("2", "mattias.wetterlind", "prolite", 100, "2026-10-22T09:28:56Z", [], at),
-  claude("adelost", "max", 95, "2026-10-21T00:00:00Z", [], at),
-  claude("mattias.wetterlind", "max", claudeUsed, "2026-10-21T07:00:00Z", ["lsrc:0", "skyvw:0"], at),
-  { ok: false, provider: "claude", account: { email: "logged-out@example.test" }, error: "login_expired", inUse: [] },
-] });
-const overview = accounts => buildQuotaOverview({ accounts }, { config, now: NOW }).text.split("\n").at(-1);
-const store = () => createSentNoticeStore(join(mkdtempSync(join(tmpdir(), "quota-overview-")), "sent.json"));
+const panes = (project, count) => Array.from({ length: count }, (_, pane) => `${project}:${pane}`);
+const codex = (id, login, usedPercent, resetsAt, inUse = [], more = {}) => ({ ok: true, provider: "codex", profile: { id },
+  account: { email: `${login}@example.test` }, inUse, ...more, limits: [{ limitId: "codex", windows: [{ windowMinutes: 10080, usedPercent, resetsAt }] }] });
+const claude = (login, usedPercent, resetsAt, inUse = [], { session = null, ...more } = {}) => ({ ok: true, provider: "claude",
+  profile: { id: login }, account: { email: `${login}@example.test` }, inUse, ...more, limits: [{ kind: "weekly_all", usedPercent, resetsAt },
+    ...(session ? [{ kind: "session", usedPercent: session.usedPercent, resetsAt: session.resetsAt }] : [])] });
+// The readings behind lsrc:0's layout for Mattias, 2026-10-17.
+const example = () => [
+  codex("1", "adelost", 0, "2026-10-24T11:35:12Z", panes("lsrc", 12)),
+  codex("2", "mattias.wetterlind", 100, "2026-10-22T09:28:56Z"),
+  claude("mattias.wetterlind", 36, "2026-10-21T07:00:00Z", panes("api", 12), { session: { usedPercent: 100, resetsAt: "2026-10-17T12:40:00Z" } }),
+  claude("adelost", 96, "2026-10-21T00:00:00Z", ["lsrc:0", "skyvw:0"]),
+  { ok: false, provider: "claude", account: { email: "attrois@example.test" }, error: "login_expired", inUse: [] },
+];
+const render = (accounts, now = NOW) => buildQuotaOverview({ accounts }, { config, now }).text.split("\n");
 
-feature("one quota overview for both engines, Mattias via lsrc:0 2026-10-17", () => {
-  unit("the posted notice is the English overview with one recommendation", {
-    when: ["Codex 1 warns with today's readings", async () => {
-      const notify = vi.fn(async () => ({}));
-      await postDueQuotaWarnings({ snapshot: today(), sent: store(), notify, now: NOW });
-      return notify;
+feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-10-17", () => {
+  unit("lsrc:0's example renders as a table and one action", {
+    when: ["rendering the example's readings", () => render(example())],
+    then: ["names, week left, reset, the blocking five-hour window and when it is back", lines => expect(lines).toEqual([
+      "```",
+      "                week  reset",
+      "● Codex A       100%  Sat 13:35",
+      // 09:28:56Z is shown to the nearest minute.
+      "○ Codex W         0%  Thu 11:29",
+      "● Claude W (12)  64%  Wed 09:00",
+      "    5h 0% until 14:40",
+      "● Claude A (2)    4%  Wed 02:00",
+      "```",
+      "→ Claude W back at 14:40",
+    ])],
+  });
+  unit("no line is wider than a phone's 32 characters", {
+    when: ["rendering 99 panes on both Claude accounts and a switch", () => render([
+      claude("mattias.wetterlind", 85, "2026-10-21T07:00:00Z", panes("a", 99)),
+      claude("adelost", 10, "2026-10-21T00:00:00Z", panes("b", 99)),
+    ])],
+    then: ["every line fits", lines => {
+      expect(lines.at(-1)).toBe("→ Use Claude A: /byt adelost");
+      expect(lines.filter(line => [...line].length > 32)).toEqual([]);
     }],
-    then: ["each engine shows its account in use, the others and what they add", notify => expect(notify.mock.calls.map(call => call[0])).toEqual([[
-      "Codex: in use Codex 1 adelost (Pro) · 93% · resets Oct 22 08:13 · runs out ~16:00 today",
-      "  Codex 2 wetterlind (Pro Lite) · 100% · resets Oct 22 11:28 · adds 0%",
-      "Claude: in use Claude wetterlind (Max) · 23% · resets Oct 21 09:00 · lasts until reset",
-      "  Claude adelost (Max) · 95% · resets Oct 21 02:00 · adds 5%",
-      "Recommendation: free reset for Codex 1 adelost at chatgpt.com/settings/usage when it hits 100%.",
-    ].join("\n")])],
   });
-  unit("the run-out time follows the last readings, not the week's average", {
-    when: ["Claude wetterlind climbs 6 points in 70 minutes after the fleet moved to it", async () => {
-      const sent = store(), notify = vi.fn(async () => ({ id: "overview", channelId: "human" })), editNotice = vi.fn(async () => {});
-      await postDueQuotaWarnings({ snapshot: today(), sent, notify, editNotice, now: NOW });
-      const later = NOW + 70 * MINUTE;
-      await postDueQuotaWarnings({ snapshot: today({ codexUsed: 95, claudeUsed: 29, at: later }), sent, notify, editNotice, now: later });
-      return editNotice;
-    }],
-    then: ["the edited overview says it runs out tonight", editNotice => expect(editNotice.mock.calls[0][1].split("\n")[2])
-      .toBe("Claude: in use Claude wetterlind (Max) · 29% · resets Oct 21 09:00 · runs out ~03:00 tomorrow")],
-  });
-  unit("a Claude account with room gets the exact switch and the panes it moves", {
-    when: ["wetterlind runs out and adelost has room", () => overview([
-      claude("mattias.wetterlind", "max", 90, "2026-10-21T07:00:00Z", ["lsrc:0", "skyvw:0"]), claude("adelost", "max", 20, "2026-10-21T00:00:00Z"),
+  unit("a Codex account with room gets the switch command", {
+    when: ["Codex A's working panes near the limit while Codex W has room", () => render([
+      codex("1", "adelost", 90, "2026-10-24T11:35:12Z", ["lsrc:3", "lsrc:7"]),
+      codex("2", "mattias.wetterlind", 40, "2026-10-22T09:28:56Z"),
     ])],
-    then: ["the recommendation is the /byt command", line => expect(line)
-      .toBe("Recommendation: `/byt adelost`, then `/byt adelost ok`, moves lsrc:0, skyvw:0 to Claude adelost.")],
+    then: ["the action is the slot command for Codex W", lines => expect(lines.at(-1)).toBe("→ Use Codex W: //switch 2")],
   });
-  unit("one pane left on a full-up account is moved, not reset", {
-    when: ["ai:2 alone runs on Claude adelost at 95 percent", () => buildQuotaOverview({ accounts: [
-      claude("adelost", "max", 95, "2026-10-21T00:00:00Z", ["ai:2"]),
-      claude("mattias.wetterlind", "max", 7, "2026-10-21T07:00:00Z", ["skyvw:0", "claw:2"]),
-    ] }, { config, now: NOW }).text.split("\n")],
-    then: ["its line names the pane and the advice moves it", lines => expect(lines.slice(1)).toEqual([
-      "  Claude adelost (Max) · 95% · resets Oct 21 02:00 · adds 5% · in use by ai:2",
-      "Recommendation: `/byt wetterlind`, then `/byt wetterlind ok`, moves ai:2 to Claude wetterlind.",
+  unit("a lone pane on a nearly full Claude account is moved to the one with room", {
+    when: ["ai:2 works alone on Claude A at 95 percent", () => render([
+      claude("adelost", 95, "2026-10-21T00:00:00Z", ["ai:2"]), claude("mattias.wetterlind", 7, "2026-10-21T07:00:00Z", ["skyvw:0", "claw:2"]),
+    ])],
+    then: ["both rows carry pane counts and /byt names the login", lines => expect(lines.slice(2)).toEqual([
+      "● Claude W (2)  93%  Wed 09:00",
+      "● Claude A (1)   5%  Wed 02:00",
+      "```",
+      "→ Use Claude W: /byt wetterlind",
     ])],
   });
-  unit("a Codex account with room gets the per-channel switch", {
-    when: ["Codex 1 runs out and Codex 2 has room", () => overview([
-      codex("1", "adelost", "pro", 93, "2026-10-22T06:13:29Z", ["lsrc:3", "lsrc:7"]), codex("2", "mattias.wetterlind", "prolite", 10, "2026-10-22T09:28:56Z"),
+  unit("an idle pane's account gets no advice", {
+    when: ["ai:2 runs on Claude A but has not worked in the last hour", () => render([
+      claude("adelost", 95, "2026-10-21T00:00:00Z", ["ai:2"], { activeInUse: [] }), claude("mattias.wetterlind", 7, "2026-10-21T07:00:00Z", []),
     ])],
-    then: ["the recommendation names the command and its panes", line => expect(line)
-      .toBe("Recommendation: `//switch 2` in the channels of lsrc:3, lsrc:7 moves them to Codex 2 wetterlind.")],
+    then: ["the table ends the notice", lines => expect(lines.at(-1)).toBe("```")],
+  });
+  unit("a used-up account with no room elsewhere says to reset now", {
+    when: ["16 panes have just reached the weekly limit", () => render([claude("mattias.wetterlind", 100, "2026-10-21T07:00:00Z", panes("test", 16))])],
+    then: ["nothing is left and the free reset is now", lines => expect(lines.slice(2)).toEqual([
+      "● Claude W   0%  Wed 09:00",
+      "```",
+      "→ Free reset Claude W now",
+    ])],
   });
   unit("an unreadable account its panes use stays visible", {
-    when: ["Claude's usage read fails while 12 panes run on wetterlind, as at 10:45Z", () => buildQuotaOverview({ accounts: [
-      codex("1", "adelost", "pro", 94, "2026-10-22T06:13:29Z", ["lsrc:3"]),
-      { ok: false, provider: "claude", profile: { id: "wetterlind" }, error: "network_error", account: { email: "mattias.wetterlind@example.test", plan: "max" },
-        inUse: Array.from({ length: 12 }, (_, i) => `test:${i}`) },
-      { ok: false, provider: "claude", profile: { id: "2" }, error: "login_expired", account: { email: "logged-out@example.test" }, inUse: [] },
-    ] }, { config, now: NOW }).text.split("\n")],
-    then: ["Claude says it cannot be read and the logged-out login stays hidden", lines => {
-      expect(lines[1]).toBe("Claude: in use Claude wetterlind (Max) · usage not readable right now");
-      expect(lines).toHaveLength(3);
-    }],
-  });
-  unit("accounts that last until their reset need nothing", {
-    when: ["every account in use runs slower than its week", () => overview([
-      codex("1", "adelost", "pro", 30, "2026-10-22T06:13:29Z", ["lsrc:3"]), claude("mattias.wetterlind", "max", 23, "2026-10-21T07:00:00Z", ["lsrc:0"]),
+    when: ["Claude W's usage read fails while panes run on it", () => render([
+      codex("1", "adelost", 30, "2026-10-24T11:35:12Z", ["lsrc:3"]),
+      { ok: false, provider: "claude", profile: { id: "wetterlind" }, error: "network_error",
+        account: { email: "mattias.wetterlind@example.test" }, inUse: panes("test", 12) },
     ])],
-    then: ["the last line says so", line => expect(line).toBe("Recommendation: no action needed.")],
+    then: ["it says so, and nothing else is advised", lines => expect(lines.slice(1)).toEqual([
+      "           week  reset",
+      "● Codex A   70%  Sat 13:35",
+      "● Claude W unreadable",
+      "```",
+    ])],
   });
 });

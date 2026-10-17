@@ -33,14 +33,15 @@ function sample(availableGiB, swapFreeGiB = 4) {
 
 feature("memory admission guard", () => {
   unit("disk guard relieves below 100 GB and alerts once until the pressure episode clears", {
-    then:["pressure relieves and only two distinct critical episodes alert",async()=>{
-      let state=null,reliefs=0,alerts=0;
+    then:["pressure relieves and only two distinct critical episodes alert, in English",async()=>{
+      let state=null,reliefs=0;const alerts=[];
       for(const gb of [120,100,90,30,29,25,40,29,120,29]) {
         await pollDiskGuardOnce({readState:()=>state,writeState:(next)=>{state=next;},
           sample:()=>({availableBytes:gb*1e9}),maintain:async()=>({}),
-          relieve:async()=>{reliefs++;return{};},notify:async()=>{alerts++;return{sent:true};}});
+          relieve:async()=>{reliefs++;return{};},notify:async(text,options)=>{alerts.push([text,options.title]);return{sent:true};}});
       }
-      expect(reliefs).toBe(7); expect(alerts).toBe(2);
+      expect(reliefs).toBe(7); expect(alerts).toHaveLength(2);
+      expect(alerts[0]).toEqual(["Disk guard: 29.0 GB free on /. Trying to free cache space.","Root disk"]);
     }],
   });
   unit("parses one meminfo snapshot into the four counters", {

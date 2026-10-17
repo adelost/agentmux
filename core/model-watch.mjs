@@ -112,17 +112,16 @@ export function label({ model, effort } = {}) {
   return effort ? `${model} ${effort}` : String(model);
 }
 
-/** The channel warning. Short: the channel already shows the pane's work. */
+/** WHAT: Formats the channel warning for a model change. WHY: Keeps it short, since the channel already shows the pane's work. */
 export function changeMessage(paneName, change, contextPct) {
-  const icon = { downgrade: "⚠️🔀", upgrade: "🔀⬆", lateral: "🔀" }[change.direction];
   const ctx = Number.isFinite(contextPct) ? ` (context ${contextPct}%)` : "";
   const stopped = change.direction === "downgrade" && change.kind === "model";
   const effortDrop = change.direction === "downgrade" && change.kind === "effort";
-  return `${icon} **${paneName} bytte modell: ${change.from} → ${change.to}**${ctx}` +
+  return `**${paneName} changed model: ${change.from} → ${change.to}**${ctx}` +
     (stopped
-      ? "\n_Nedgraderingen upptäcktes. Panelen STOPPAS och parkeras nu; nytt arbete blockeras tills modellen är återställd. /model byter tillbaka._"
+      ? "\n_Downgrade detected. The pane is STOPPED and parked now; new work is blocked until the model is restored. /model switches back._"
       : effortDrop
-        ? "\n_Effort sänkt (trolig orsak: respawn återställde sparad inställning). Panelen jobbar vidare — sätt tillbaka med /model när du vill._"
+        ? "\n_Effort lowered (likely cause: a respawn restored a saved setting). The pane keeps working; set it back with /model when you want._"
         : "");
 }
 
@@ -198,9 +197,9 @@ export function resumeBrief(restoredLabel) {
     "Re-verifiera beslut och kod från nedgraderingsfönstret innan du bygger vidare, fortsätt sedan din uppgift.";
 }
 
-/** Channel line for the recovery outcome. */
+/** WHAT: Formats the channel line for a recovery outcome. WHY: Keeps a restored pane apart from one that stays parked. */
 export function recoveryMessage(paneName, restored, detail) {
   return restored
-    ? `🔁 **${paneName}: auto-recovery lyckades** — ${detail}. Panelen väckt med re-verify-brief.`
-    : `🅿 **${paneName}: auto-recovery misslyckades** (${detail}). Panelen kvar parkerad — \`/model\` när läget är rätt.`;
+    ? `**${paneName}: auto-recovery succeeded**: ${detail}. The pane was woken with a re-verify brief.`
+    : `**${paneName}: auto-recovery failed** (${detail}). The pane stays parked; use \`/model\` when the state is right.`;
 }

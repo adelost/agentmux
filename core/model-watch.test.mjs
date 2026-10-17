@@ -195,20 +195,20 @@ feature("messages — actionable, not just informative", () => {
       expect(m).toContain("ai:3");
       expect(m).toContain("gpt-5.6-sol max → gpt-5.5 max");
       expect(m).toContain("context 72%");
-      expect(m).toContain("STOPPAS");
+      expect(m).toContain("STOPPED");
       expect(m).toContain("/model");
     }],
   });
 
-  unit("effort-drop message says working continues, never STOPPAD", {
+  unit("effort-drop message says working continues, never STOPPED", {
     given: ["an effort downgrade", () => changeMessage("ai:3", {
       direction: "downgrade", kind: "effort", from: "gpt-5.6-sol max", to: "gpt-5.6-sol xhigh",
     }, 82)],
     when: ["rendering", (m) => m],
-    then: ["jobbar vidare + /model hint, no stop wording", (m) => {
-      expect(m).toContain("jobbar vidare");
+    then: ["keeps working + /model hint, no stop wording", (m) => {
+      expect(m).toContain("keeps working");
       expect(m).toContain("/model");
-      expect(m).not.toContain("STOPPAD");
+      expect(m).not.toContain("STOPPED");
     }],
   });
 
@@ -320,11 +320,11 @@ feature("recovery messaging", () => {
       fail: recoveryMessage("api:3", false, "model-missing: quota"),
     })],
     when: ["rendering", (m) => m],
-    then: ["🔁 vs 🅿 with detail", ({ ok, fail }) => {
-      expect(ok).toContain("🔁");
+    then: ["succeeded vs failed with detail, in words", ({ ok, fail }) => {
+      expect(ok).toContain("auto-recovery succeeded");
       expect(ok).toContain("gpt-5.6-sol xhigh");
-      expect(fail).toContain("🅿");
-      expect(fail).toContain("kvar parkerad");
+      expect(fail).toContain("auto-recovery failed");
+      expect(fail).toContain("stays parked");
     }],
   });
 });

@@ -126,7 +126,7 @@ export function normalizeKimiQuota(profile, payload, credentials, observedAt) {
     const label = firstText(item, ["name", "title", "scope"])
       ?? firstText(detail, ["name", "title", "scope"])
       ?? durationLabel(item, detail)
-      ?? `Gräns ${index + 1}`;
+      ?? `Limit ${index + 1}`;
     const row = usageRow(detail, {
       id: `limit-${index + 1}`,
       label,

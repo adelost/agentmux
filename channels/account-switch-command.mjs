@@ -7,12 +7,15 @@
 // inte byta i onödan.. pga cache miss").
 
 import { resolveNotifyUserId } from "../cli/send-notify.mjs";
+import { accountName } from "../core/account-names.mjs";
 
 /** DTO: State key for the plans shown per target. */
 export const SWITCH_PLAN_STATE_KEY = "account_switch_plans_v1";
 /** DTO: How long a shown plan can be confirmed. */
 export const SWITCH_CONFIRM_MAX_AGE_MS = 10 * 60_000;
 const DISCORD_LIMIT = 1900;
+// The login he types names the account the way the quota box does, "wetterlind" as Claude W.
+const targetName = (target) => accountName({ provider: "claude", account: { email: target }, profile: { id: target } });
 
 /** WHAT: Parses `/byt` arguments into target and confirm. WHY: Keeps a confirm explicit: exactly "<target> ok". */
 export function parseSwitchArgs(args) {
@@ -34,8 +37,8 @@ const fenced = (lines) => {
 const planReply = (target, plan, lead) => {
   const usable = plan.result?.status !== "BLOCKED" || plan.result?.rows?.length;
   return [lead, fenced(plan.lines), usable
-    ? `Inget är ändrat. Byt med \`/byt ${target} ok\` inom 10 min. Paneler som står blocked rörs inte.`
-    : "Inget är ändrat, och det går inte att byta till det kontot just nu."].join("\n");
+    ? `Nothing has changed. Switch with \`/byt ${target} ok\` within 10 min. Panes marked blocked are not touched.`
+    : "Nothing has changed, and that account cannot be switched to right now."].join("\n");
 };
 
 /**
@@ -65,32 +68,32 @@ export function createAccountSwitchCommand({
   return async (msg, _mapping, _pane, args) => {
     const parsed = parseSwitchArgs(args);
     if (!parsed) {
-      await msg.reply("Använd `/byt <login|e-post>`, till exempel `/byt wetterlind`. Den visar planen per panel och ändrar inget.");
+      await msg.reply("Use `/byt <login|email>`, for example `/byt wetterlind`. It shows the plan per pane and changes nothing.");
       return;
     }
     const { target, confirm } = parsed;
     const key = target.toLowerCase();
     if (!runtime()) {
-      await msg.reply("Kontobyte kräver bryggans leveranskö, och den är inte igång här.");
+      await msg.reply("An account switch needs the bridge's delivery queue, and it is not running here.");
       return;
     }
     if (confirm && (!operatorId() || String(msg.authorId) !== String(operatorId()))) {
-      await msg.reply("Bara operatören kan bekräfta ett kontobyte.");
+      await msg.reply("Only the operator can confirm an account switch.");
       return;
     }
     const plan = await run(target, true);
     const pending = plans()[key];
     if (!confirm || !pending || now() - pending.at > maxAgeMs || pending.signature !== planSignature(plan.result)) {
-      const lead = !confirm ? `Plan för byte till **${target}**:`
-        : !pending || now() - pending.at > maxAgeMs ? "Planen var inte visad de senaste 10 minuterna. Här är den nu:"
-          : "Planen har ändrats sedan du såg den. Här är den nya:";
+      const lead = !confirm ? `Plan to switch to **${targetName(target)}**:`
+        : !pending || now() - pending.at > maxAgeMs ? "The plan was not shown in the last 10 minutes. Here it is now:"
+          : "The plan has changed since you saw it. Here is the new one:";
       remember(key, plan);
       await msg.reply(planReply(target, plan, lead));
       return;
     }
     forget(key);
-    await msg.reply(`Byter till **${target}** nu. Stora aktiva paneler får compact först.`);
+    await msg.reply(`Switching to **${targetName(target)}** now. Large active panes are compacted first.`);
     const done = await run(target, false);
-    await msg.reply([`Resultat för byte till **${target}**:`, fenced(done.lines)].join("\n"));
+    await msg.reply([`Result of the switch to **${targetName(target)}**:`, fenced(done.lines)].join("\n"));
   };
 }

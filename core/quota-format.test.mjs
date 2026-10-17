@@ -45,26 +45,26 @@ feature("quota text render for bridge and CLI", () => {
     when: ["rendering a live-shaped snapshot", () => formatQuotaSnapshot(SNAPSHOT).split("\n")],
     then: ["Claude carries session/week/Fable and Codex carries its week", ([, claude, codex]) => {
       expect(claude).toContain("session 9%");
-      expect(claude).toContain("vecka 13%");
-      expect(claude).toContain("vecka Fable 16%");
-      expect(codex).toContain("vecka 70%");
+      expect(claude).toContain("week 13%");
+      expect(claude).toContain("week Fable 16%");
+      expect(codex).toContain("week 70%");
     }],
   });
 
   unit("session carries its own reset; the weekly rows share one suffix", {
     when: ["rendering the Claude line", () => formatQuotaSnapshot(SNAPSHOT).split("\n")[1]],
     then: ["two reset stamps appear: the session's own and the shared weekly one", (claude) => {
-      expect(claude).toContain("session 9% (reset 15 jul");
-      expect(claude).toContain("(reset 22 jul");
+      expect(claude).toContain("session 9% (reset Jul 15");
+      expect(claude).toContain("(reset Jul 22");
     }],
   });
 
-  unit("marks 70%+ with a warning and 90%+ as critical", {
+  unit("marks 70%+ as high and 90%+ as critical, in words", {
     when: ["rendering elevated percentages", () => formatQuotaSnapshot(withClaudePercents(9, 71, 93))],
     then: ["rows at the thresholds are marked, calm rows are not", (text) => {
-      expect(text).toContain("vecka 71% ⚠️");
-      expect(text).toContain("vecka Fable 93% 🔴");
-      expect(text).not.toContain("session 9% ⚠️");
+      expect(text).toContain("week 71% (high)");
+      expect(text).toContain("week Fable 93% (critical)");
+      expect(text).not.toContain("session 9% (high)");
     }],
   });
 
@@ -72,8 +72,8 @@ feature("quota text render for bridge and CLI", () => {
     when: ["rendering with a typed Claude error", () =>
       formatQuotaSnapshot({ ...SNAPSHOT, claude: { ok: false, error: "credentials_expired" } })],
     then: ["the error is named, the healthy engine is unaffected", (text) => {
-      expect(text).toContain("Claude  otillgänglig (credentials_expired)");
-      expect(text).toContain("vecka 70%");
+      expect(text).toContain("Claude  unavailable (credentials_expired)");
+      expect(text).toContain("week 70%");
     }],
   });
 
@@ -81,8 +81,8 @@ feature("quota text render for bridge and CLI", () => {
     when: ["rendering with a typed Codex error", () =>
       formatQuotaSnapshot({ ...SNAPSHOT, codex: { ok: false, error: "no_session_files" } })],
     then: ["the error is named, the healthy engine is unaffected", (text) => {
-      expect(text).toContain("Codex   otillgänglig (no_session_files)");
-      expect(text).toContain("vecka Fable 16%");
+      expect(text).toContain("Codex   unavailable (no_session_files)");
+      expect(text).toContain("week Fable 16%");
     }],
   });
 
@@ -108,8 +108,8 @@ feature("quota text render for bridge and CLI", () => {
       // "· 2 gränser" hid the fact that settles a diagnosis: a 5h window heals
       // itself, the weekly does not. 2026-08-05 three panes were misread as
       // month-dead while the hidden 5h row was the actual bound.
-      expect(text.match(/⚠ samma inloggning/gu)).toHaveLength(2);
-      expect(text).toContain("Vecka 100% 🔴");
+      expect(text.match(/ · same login /gu)).toHaveLength(2);
+      expect(text).toContain("Vecka 100% (critical)");
       expect(text).toContain("5 h 20%");
       expect(text).not.toContain("gränser");
     }],
@@ -138,14 +138,15 @@ feature("one Claude line per account", () => {
           { ok: false, error: "login_expired", limits: undefined, account: { email: "attrois@example.com" } }),
       ],
     })],
-    then: ["three Claude lines and no duplicate warning", (text) => {
+    then: ["three Claude lines named by login, with their slots, and no duplicate warning", (text) => {
       const lines = text.split("\n").filter((line) => line.startsWith("Claude"));
+      // adelost and attrois share an initial, so both keep their whole login.
       expect(lines).toEqual([
-        "Claude 1+2 · adelost@example.com · max  session 10%",
-        "Claude · wetterlind@example.com · max · ingen plats  session 10%",
-        "Claude · attrois@example.com · ingen plats  otillgänglig (login_expired)",
+        "Claude adelost · slot 1+2 · adelost@example.com · max  session 10%",
+        "Claude W · no slot · wetterlind@example.com · max  session 10%",
+        "Claude attrois · no slot · attrois@example.com  unavailable (login_expired)",
       ]);
-      expect(text).not.toContain("samma inloggning");
+      expect(text).not.toContain("same login");
     }],
   });
 });
@@ -156,16 +157,16 @@ feature("stop notice for a pane that hit its plan limit", () => {
     when: ["lsrc:1 stops until 03:10 with recovery on", () => formatLimitedAlert({
       paneKey: "lsrc:1", resetAt: new Date(2026, 8, 28, 3, 10).getTime(), autoResume: true, logCommand })],
     then: ["the channel and the phone both get the reset time", ({ discord, push }) => {
-      expect(discord).toBe("🚫 **lsrc:1 står stilla, kvoten är slut (reset 28 sep 03:10).** amux fortsätter själv i samma session när fönstret är tillbaka. Panelen: `amux log lsrc -p 1 --tmux`");
-      expect(push).toBe("🚫 lsrc:1 står stilla på kvot, reset 28 sep 03:10. amux fortsätter själv.");
+      expect(discord).toBe("**lsrc:1 has stopped, its quota is used up (reset Sep 28 03:10).** amux continues it in the same session when the window is back. The pane: `amux log lsrc -p 1 --tmux`");
+      expect(push).toBe("lsrc:1 has stopped on quota, reset Sep 28 03:10. amux continues it by itself.");
     }],
   });
 
   unit("asks for a nudge when nothing resumes the pane", {
     when: ["a stop without a known reset and recovery off", () => formatLimitedAlert({ paneKey: "ai:4", logCommand })],
     then: ["no invented time and an honest next step", ({ discord, push }) => {
-      expect(discord).toBe("🚫 **ai:4 står stilla, kvoten är slut.** Knuffa igång den när kvoten är tillbaka. Panelen: `amux log lsrc -p 1 --tmux`");
-      expect(push).toBe("🚫 ai:4 står stilla på kvot. Knuffa igång den.");
+      expect(discord).toBe("**ai:4 has stopped, its quota is used up.** Nudge it when the quota is back. The pane: `amux log lsrc -p 1 --tmux`");
+      expect(push).toBe("ai:4 has stopped on quota. Nudge it.");
     }],
   });
 });

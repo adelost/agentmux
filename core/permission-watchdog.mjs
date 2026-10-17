@@ -207,7 +207,7 @@ export function classifyPermissionPrompt({ reason = "", command = "", screenWrap
       paths.push(path);
     }
   }
-  return { action: "answer", keys: "1", why: `rm-målen är djupa mappar utan filer som git behåller (${paths.join(", ")})` };
+  return { action: "answer", keys: "1", why: `the rm targets are deep folders without files git keeps (${paths.join(", ")})` };
 }
 
 // A variable in an rm target: ${NAME}, $NAME, ${N} or a one-digit positional $N.
@@ -339,9 +339,9 @@ function unsafeRmPath(path, home, holdsKeptFiles) {
 export function formatPermissionAlert({ paneKey, ageMs, reason, command, why }) {
   const cmd = String(command || "").split("\n").slice(0, 8).join("\n");
   return [
-    `Panel ${paneKey} har stått ${Math.round(ageMs / 60_000)} min på en Ja/Nej-fråga som amux inte svarar på själv (${why}).`,
-    reason ? `Skäl: ${reason}` : "",
-    cmd ? `Kommando:\n${cmd}` : "",
-    `Svara i panelen: amux ${paneKey.replace(":", " -p ")} -- 1   (eller 2 för nej)`,
+    `Pane ${paneKey} has waited ${Math.round(ageMs / 60_000)} min on a yes/no prompt that amux does not answer itself (${why}).`,
+    reason ? `Reason: ${reason}` : "",
+    cmd ? `Command:\n${cmd}` : "",
+    `Answer in the pane: amux ${paneKey.replace(":", " -p ")} -- 1   (or 2 for no)`,
   ].filter(Boolean).join("\n");
 }

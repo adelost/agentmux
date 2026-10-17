@@ -110,12 +110,12 @@ export async function runPendingFleetRestart({
 /** WHAT: Formats one fleet restart receipt. WHY: Keeps startup reporting compact and free from private error details. */
 export function formatFleetRestartResult(result) {
   if (!result) return "online";
-  const base = `${result.recreated?.length || 0}/${result.configured?.length || 0} tmux-sessioner, ${result.codingPanes || 0} agentpaneler` +
-    `${result.resumeTargets?.length ? `, ${result.resumeTargets.length} avbrutna turns återköade` : ""}`;
-  if (result.ok) return `online · helreset klar: ${base}`;
+  const base = `${result.recreated?.length || 0}/${result.configured?.length || 0} tmux sessions, ${result.codingPanes || 0} agent panes` +
+    `${result.resumeTargets?.length ? `, ${result.resumeTargets.length} interrupted turns requeued` : ""}`;
+  if (result.ok) return `online · full reset done: ${base}`;
   const failed = (result.failures || [])
     .slice(0, 5)
     .map((item) => `${item.name} (${item.stage})`)
     .join(", ");
-  return `⚠️ online · helreset delvis klar: ${base}${failed ? ` · fel: ${failed}` : ""}`;
+  return `online · full reset partly done: ${base}${failed ? ` · failed: ${failed}` : ""}`;
 }

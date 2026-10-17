@@ -37,7 +37,8 @@ feature("Discord /byt account switch", () => {
     when: ["asking for the plan", async (ctx) => { await ctx.say("wetterlind"); return ctx; }],
     then: ["only a dry run happened", (ctx) => {
       expect(ctx.calls).toEqual([{ target: "wetterlind", dry: true }]);
-      expect(ctx.replies[0]).toContain("Inget är ändrat. Byt med `/byt wetterlind ok` inom 10 min.");
+      expect(ctx.replies[0]).toContain("Plan to switch to **Claude W**:");
+      expect(ctx.replies[0]).toContain("Nothing has changed. Switch with `/byt wetterlind ok` within 10 min.");
     }],
   });
 
@@ -55,7 +56,7 @@ feature("Discord /byt account switch", () => {
     when: ["confirming late", async (ctx) => { await ctx.say("wetterlind ok"); return ctx; }],
     then: ["nothing switched", (ctx) => {
       expect(realRuns(ctx)).toEqual([]);
-      expect(ctx.replies.at(-1)).toContain("Planen var inte visad de senaste 10 minuterna");
+      expect(ctx.replies.at(-1)).toContain("The plan was not shown in the last 10 minutes");
     }],
   });
 
@@ -66,7 +67,7 @@ feature("Discord /byt account switch", () => {
     when: ["confirming", async (ctx) => { await ctx.say("wetterlind ok"); return ctx; }],
     then: ["nothing switched", (ctx) => {
       expect(realRuns(ctx)).toEqual([]);
-      expect(ctx.replies.at(-1)).toContain("Planen har ändrats sedan du såg den");
+      expect(ctx.replies.at(-1)).toContain("The plan has changed since you saw it");
     }],
   });
 
@@ -81,7 +82,7 @@ feature("Discord /byt account switch", () => {
     when: ["another user confirms", async (ctx) => { await ctx.say("wetterlind ok", "999"); return ctx; }],
     then: ["refused before any rotation", (ctx) => {
       expect(realRuns(ctx)).toEqual([]);
-      expect(ctx.replies.at(-1)).toBe("Bara operatören kan bekräfta ett kontobyte.");
+      expect(ctx.replies.at(-1)).toBe("Only the operator can confirm an account switch.");
     }],
   });
 });
