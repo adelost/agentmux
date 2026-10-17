@@ -670,7 +670,11 @@ feature("a pane idle past its cache's life is compacted before a delivery", () =
       try {
         expect(result.compacted).toBe(true);
         expect(ctx.calls).toEqual(["compact"]);
-        expect(ctx.coldBeforeDelivery.lines).toMatchObject([{ pane: "lsrc:4", cell: "before-delivery", outcome: "compacting", limit: 80_000 }]);
+        // The 2026-10-17 recovery incident requires an ending after the intent.
+        expect(ctx.coldBeforeDelivery.lines).toMatchObject([
+          { pane: "lsrc:4", cell: "before-delivery", outcome: "compacting", limit: 80_000 },
+          { pane: "lsrc:4", cell: "before-delivery", outcome: "compacted" },
+        ]);
       } finally { ctx.cleanup(); }
     }],
   });

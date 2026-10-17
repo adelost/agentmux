@@ -84,5 +84,11 @@ const heldForCost = job => job?.costHold === true && job.status === "pending" &&
 export function deliveryHead(jobs) {
   const open = jobs.filter(job => !TERMINAL_DELIVERY_STATES.has(job.status));
   if (!heldForCost(open[0])) return open[0] || null;
-  return open.find(job => isOwnerChannelJob(job) && !heldForCost(job)) || open[0];
+  const owner = open.find(job => isOwnerChannelJob(job) && !heldForCost(job));
+  if (owner) return owner;
+  // An explicitly requested compact can settle an untouched cost hold. Never
+  // jump any physical submit fence or a draft owned by either job.
+  return !open[0].submitFenceAt && !open[0].submittedAt && open.find(job => job.kind === "slash"
+    && job.source === "amux:compact" && job.status === "pending" && /^\/compact(?:\s|$)/u.test(job.text || "")
+    && !job.draftOwned && !job.submitFenceAt && !job.submittedAt) || open[0];
 }

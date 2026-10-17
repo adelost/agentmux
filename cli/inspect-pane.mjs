@@ -15,6 +15,7 @@ import { getContextFromQwenJsonl } from "../core/qwen-jsonl-reader.mjs";
 import { codexModelOverride, resolveCodexModelSelection } from "../core/codex-profiles.mjs";
 import { parseCodexPaneReading } from "../core/codex-status.mjs";
 import { isShellProcess } from "../core/tui-stall-recovery.mjs";
+import { activeClaudeLimitForTarget } from "../core/claude-quota-target.mjs";
 
 // `node` as a tmux process name is too generic to trust as Codex by itself,
 // so we resolve its dialect via agents.yaml cmd field instead — see
@@ -76,7 +77,7 @@ export async function inspectPane(ctx, agent, pane) {
   // Same scrape+hook merge as getPaneStatus, applied to the one capture we
   // already have. Capture failure (dead pane) stays "unknown" unmerged.
   let status = content
-    ? mergeStatus(detectPaneStatus(stripAnsi(content)),
+    ? mergeStatus(detectPaneStatus(stripAnsi(content), { limitReceipt: activeClaudeLimitForTarget(agent.name, pane.index, { configPath: ctx.configPath }) }),
                   latestPaneStatesCached().get(`${agent.name}:${pane.index}`)).status
     : "unknown";
   const lines = stripAnsi(content).split("\n").filter((l) => l.trim());

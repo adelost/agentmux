@@ -13,6 +13,7 @@ import { codexPromptProgress } from "./codex-user-events.mjs";
 import { regainSessionLease } from "./session-lease.mjs";
 import { finishSelfCompactRequest, selfCompactSuperseded } from "./self-compact-resume.mjs";
 import { isCodexCompaction } from "./codex-compaction.mjs";
+import { isRecoveredClaudeCompactAttempt } from "./claude-quota-target.mjs";
 
 const STATE_KEY = "context_maintenance_by_pane_v1";
 const paneKey = (name, pane) => `${name}:${pane}`;
@@ -77,7 +78,7 @@ export function beginContextCompact(state, name, pane, identity) {
 export function createContextMaintenance({ agent, state, queue, resolveTarget, now = Date.now, log = () => {}, policy = readContextCostPolicy(),
   identityFor = latestPaneSessionIdentity, activityFor = latestConversationActivityMs, journalFor = getContextPercent,
   compactFor = engine => engine === "codex" ? verifiedCodexCompact : verifiedClaudeCompact, coldBeforeDelivery = null,
-  selfRequests = null, notify = async () => {} }) {
+  selfRequests = null, notify = async () => {}, quotaRecoveryFor = () => ({ options: { queue } }) }) {
   const existing = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity);
 
   // skyvw:0 2026-10-11: lsrc:4 (370k) and lsrc:5 (310k) got new work after 50
@@ -129,7 +130,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     }
     const identity = identityFor(target.engine, target.dir);
     if (!identity) return { ok: true, skipped: "no-session" };
-    const prior = existing(name, pane, identity);
+    let prior = existing(name, pane, identity);
     if (prior?.status === "VERIFIED") return { ok: true, cell: "receipt-exists" };
     const context = await (agent.getContext?.(name, pane) ?? agent.getContextPercent(name, pane));
     let activity = activityFor(target.dir, target.engine, { recoverCodexHistory: true });
@@ -137,11 +138,16 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       const usage = journalFor(target.dir, target.engine, { journalOnly: true });
       activity = usage?.source?.endsWith("-jsonl") ? Date.parse(usage.observedAt) : NaN;
     }
-    const attempt = prior ? (prior.status === "VERIFIED" ? "VERIFIED" : "FAILED") : "NEW";
     // Names what holds the pane, e.g. "pasting" for a composer held by Claude's clipboard lookup.
     const input = await agent.isBusy(name, pane) ? "busy"
       : (await agent.promptTransportState(name, pane, "").catch(() => null))?.state || "unreadable";
     const safe = input === "empty-idle";
+    if (prior && safe && target.engine === "claude"
+        && isRecoveredClaudeCompactAttempt(name, pane, prior, { ...quotaRecoveryFor(name, pane), now: now() })) {
+      write(state, paneKey(name, pane), { ...prior, status: "NOT_SENT", reason: "quota-window-recovered", recoveredAt: now() });
+      prior = null;
+    }
+    const attempt = prior ? "FAILED" : "NEW";
     const facts = { tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, pauseTokens,
       ...(pauseSettleMs != null ? { pauseSettleMs } : {}), safe, attempt, required };
     let coldPolicy = policy;
@@ -158,6 +164,11 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const need = decision.at.need;
     if (decision.values.action === "HOLD") return { ok: false, need, reason: `context-cost:${decision.cell}${holder}${prior?.reason ? `:${prior.reason}` : ""}` };
     const result = await compactOnce({ name, pane, target, identity, context, decision, dry, leaseHeld, heldLease, jobId, focus, beforeDelivery });
+    if (cold && coldPolicy !== policy) {
+      try { coldBeforeDelivery.record({ at: new Date(now()).toISOString(), pane: `${name}:${pane}`, cell: "before-delivery",
+        outcome: result.compacted ? "compacted" : result.dry ? "would-compact" : "failed", detail: result.reason || result.cell || null }); }
+      catch { /* diagnostics never change delivery truth */ }
+    }
     return result.ok ? result : { ...result, need };
   }
 
@@ -205,12 +216,12 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
         latestIdentity: dir => identityFor(target.engine, dir), maxRescues: 0,
         ...(focus && target.engine === "claude" ? { command: `/compact ${focus}` } : {}),
         onCommandAccepted: () => writer?.releaseSession?.() });
-      write(state, paneKey(name, pane), { ...record, status: result.ok ? "VERIFIED" : "FAILED", reason: result.reason || null });
+      write(state, paneKey(name, pane), { ...record, status: result.ok ? "VERIFIED" : "FAILED", reason: result.reason || null, finishedAt: now() });
       log(`${name}:${pane} ${decision.cell}: ${result.ok ? "compact verified" : result.reason}`);
       return result.ok ? { ok: true, compacted: true, receipt: result }
         : { ok: false, attempted: true, reason: `context-cost:${result.reason}`, detail: result.detail || null };
     } catch (error) {
-      if (intent && !submitted) write(state, paneKey(name, pane), { ...intent, status: "NOT_SENT", reason: error.message });
+      if (intent) write(state, paneKey(name, pane), { ...intent, status: submitted ? "FAILED" : "NOT_SENT", reason: error.message, finishedAt: now() });
       log(`${name}:${pane} context compact failed: ${error.message}`);
       return { ok: false, reason: `context-cost:${error.message}` };
     } finally { lease?.release(); }

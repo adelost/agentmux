@@ -70,6 +70,9 @@ export function assertClaudeQuotaAvailable(agentName, pane = 0, options = {}) {
   if (isClaudeQuotaContinuationAuthorized(agentName, pane, receipt, options.prompt, options)) {
     return receipt;
   }
+  // A verified exact-session restart already qualified quota for this same limit.
+  // Its old banner persists until the first command or prompt is journaled.
+  if (isClaudeQuotaContinuationAuthorized(agentName, pane, receipt, quotaRecoveryContinuation(), options)) return receipt;
   const error = new Error(
     `Claude quota is exhausted for ${agentName}:${Number(pane) || 0}; automatic exact-session recovery is pending`,
   );
@@ -77,4 +80,14 @@ export function assertClaudeQuotaAvailable(agentName, pane = 0, options = {}) {
   error.quotaLimited = true;
   error.quotaReceipt = receipt;
   throw error;
+}
+
+/** WHAT: Checks one quota-denied compact generation after reset. WHY: Prevents an unfinished intent from deadlocking its exact-session recovery. */
+export function isRecoveredClaudeCompactAttempt(agentName, pane, attempt, { receipt, options = {}, now = Date.now() } = {}) {
+  const limit = receipt || activeClaudeLimitForTarget(agentName, pane, options);
+  if (!limit || limit.sessionId !== attempt?.sessionId || attempt.status === "VERIFIED"
+      || !Number.isFinite(attempt.at) || !Number.isFinite(limit.resetAt) || now < limit.resetAt + 15_000
+      || attempt.at >= limit.resetAt || limit.observedAt > attempt.at + 600_000
+      || (attempt.status === "ATTEMPTING" && now < attempt.at + 600_000)) return false;
+  return isClaudeQuotaContinuationAuthorized(agentName, pane, limit, quotaRecoveryContinuation(), options);
 }

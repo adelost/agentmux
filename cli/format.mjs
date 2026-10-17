@@ -4,6 +4,7 @@ import { stripAnsi } from "../lib.mjs";
 import { ALL_DIALECTS } from "../core/dialects.mjs";
 import { statusIcon } from "../core/pane-status.mjs";
 import { CLAUDE_STOP_BANNER } from "../core/claude-quota-recovery.mjs";
+import { hasEmptyClaudeComposer } from "../core/dismiss.mjs";
 
 // Re-exported so existing `import { statusIcon } from "./format.mjs"`
 // callers keep working; the truth lives in core/pane-status.mjs.
@@ -16,8 +17,8 @@ export { statusIcon };
  */
 export const LIMIT_BANNER = CLAUDE_STOP_BANNER;
 
-/** Detect pane status from captured content. */
-export function detectPaneStatus(paneContent) {
+/** WHAT: Reads pane status from captured content. WHY: Keeps expired quota residue from hiding a proven idle composer. */
+export function detectPaneStatus(paneContent, { limitReceipt = null, now = Date.now() } = {}) {
   const text = stripAnsi(paneContent);
   const lines = text.split("\n");
   const tailRaw = lines.slice(-15).join("\n");
@@ -70,7 +71,11 @@ export function detectPaneStatus(paneContent) {
   // a limited pane read as idle and got a false auto-compact warning). The
   // banner re-prints on every attempted prompt and scrolls out with the
   // first real turn after reset.
-  if (LIMIT_BANNER.test(tailRaw)) return "limited";
+  if (LIMIT_BANNER.test(tailRaw)) {
+    const reset = limitReceipt && Number.isFinite(limitReceipt.resetAt) && now >= limitReceipt.resetAt + 15_000
+      && tailRaw.includes(limitReceipt.text) && hasEmptyClaudeComposer(text);
+    if (!reset) return "limited";
+  }
 
   // Codex renders "■ Conversation interrupted - tell the model what to do
   // differently" when a turn dies (Esc keypress, stream error). The composer

@@ -25,7 +25,7 @@ import { findChannelForPane, loadConfig, validateAgentPane } from "./config.mjs"
 import { createNativeRuntimeClient } from "../core/native-runtime-client.mjs";
 import { createAgentRouter } from "../core/agent-router.mjs";
 import { createState } from "../core/state.mjs";
-
+import { activeClaudeLimitForTarget } from "../core/claude-quota-target.mjs";
 const exec = promisify(execCb);
 /** WHAT: Builds tmux execution helpers bound to one socket. WHY: Keeps CLI process and pane state on the bridge's shared boundaries. */
 export function createTmuxContext(socket, configPath) {
@@ -155,11 +155,8 @@ export async function listPanes(ctx, name) {
 }
 
 /**
- * Get status of a specific pane: tmux scraping refined by hook-pushed
- * events (core/events.mjs). mergeStatus is monotone-safe: pushed events
- * only upgrade idle/unknown, never contradict a live scraped observation
- * (modals, working). ps and auto-compact apply the same merge on their own
- * captures (they reuse a single capture per pane for latency).
+ * WHAT: Reads one pane's live status and exact limit receipt.
+ * WHY: Keeps expired quota residue separate from hook-pushed activity.
  */
 export async function getPaneStatus(ctx, name, pane) {
   if (ctx.agent?.isNativeTarget?.(name, pane)) {
@@ -180,7 +177,7 @@ export async function getPaneStatus(ctx, name, pane) {
     // "working" and make wait/dream poll a nonexistent pane to timeout.
     return "unknown";
   }
-  const scraped = detectPaneStatus(stripAnsi(stdout));
+  const scraped = detectPaneStatus(stripAnsi(stdout), { limitReceipt: activeClaudeLimitForTarget(name, pane, { configPath: ctx.configPath }) });
   const pushed = latestPaneStatesCached().get(`${name}:${pane}`);
   return mergeStatus(scraped, pushed).status;
 }
