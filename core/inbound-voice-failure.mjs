@@ -29,5 +29,5 @@ export async function deliverVoiceFailure({ record, error, store, message, onMes
     store.completeEffect(current, effect);
   }
   await message.sendTranscriptOnce(priorPost ? priorPost.slice("transcript-reply:".length) : "voice-failure",
-    [`**Transcription unavailable**\n${text}`], { kind: "notice" });
+    ["Rösten gick inte att skriva ut. Skriv meddelandet så länge."], { kind: "notice" });
 }

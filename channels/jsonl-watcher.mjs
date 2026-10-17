@@ -17,14 +17,14 @@
 // covering all of them.
 
 import { watch, statSync, existsSync } from "fs";
-import { join } from "path";
+import { basename, join } from "path";
 import { splitMessage, extractImageMarkers, validateImagePath, chunkAttachments } from "../lib.mjs";
 import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
 import { claudeProjectDir } from "../core/claude-paths.mjs";
 import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
 import { alternateEngineForCommand, alternateSessionReader, alternateWatchDir, latestAlternateMtime } from "../core/alternate-session-reader.mjs";
-import { getContextFromPane, shortModelName } from "../core/context.mjs";
+import { getContextFromPane } from "../core/context.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
 import {
@@ -43,6 +43,7 @@ import { parkPane, unparkPane } from "../core/pane-park.mjs";
 import { appendEvent } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
+import { createLiveProgress } from "./live-progress.mjs";
 import { compactionNoticeText } from "../core/compaction-notice.mjs";
 import { announceNewPaneEvents } from "../core/pane-notices.mjs";
 import { refusalNoticeText } from "../core/codex-refusal-notice.mjs";
@@ -123,6 +124,7 @@ export function createJsonlWatcher({
   if (!state) throw new Error("watcher: state store required");
 
   /** active fs.watch handles per pane key (`name:idx`). */
+  const progress = createLiveProgress({ discord, state, log });
   const fsWatchers = new Map();
   /** per-channel last-sendTyping ms, throttled via TYPING_THROTTLE_MS. */
   const lastTypingAt = new Map();
@@ -472,6 +474,7 @@ export function createJsonlWatcher({
   }
 
   async function postTurn({ name, idx, channelId, turn, config = null }) {
+    turn = await progress.update({ channelId, paneKey: `${name}:${idx}`, turn });
     const { fullText, validFiles, hasNarrative } = renderTurn(turn);
     if (!fullText && validFiles.length === 0) return { ok: true };
     // "No response requested." is Claude Code answering a harness-injected
@@ -480,7 +483,7 @@ export function createJsonlWatcher({
     // reply arrives as its own turn right after. Skip text AND footer.
     if (isHarnessPlaceholder(fullText) && validFiles.length === 0) return { ok: true };
 
-    const body = postPrefix && fullText ? `${postPrefix}${fullText}` : fullText || "(no text)";
+    const body = postPrefix && fullText ? `${postPrefix}${fullText}` : fullText || (validFiles.length ? basename(validFiles[0]) : "(no text)");
     const chunks = splitMessage(body);
     // Discord hard-caps 10 attachments/message; 11+ screenshots on the
     // first chunk used to 400 the whole message (text AND images lost).
@@ -545,15 +548,7 @@ export function createJsonlWatcher({
         const paneCmd = String(config?.[name]?.panes?.[idx]?.cmd || "");
         if (alternateEngineForCommand(paneCmd) !== "kimi") await watchModelChange({ name, idx, channelId, ctx, config })
           .catch((err) => log(`model-watch failed for ${name}:${idx}: ${err.message}`));
-        // tokens can be null when percent came from a custom statusline row.
-        const suffix = ctx.tokens != null ? ` (${Math.round(ctx.tokens / 1000)}k)` : "";
-        const model = shortModelName(ctx.model);
-        // Codex carries a reasoning effort next to the model ("gpt-5.6-sol
-        // max"); claude has no equivalent, ctx.effort stays undefined there.
-        const modelLabel = model ? `${model}${ctx.effort ? ` ${ctx.effort}` : ""}` : null;
-        const prefix = modelLabel ? `${modelLabel} · ` : "";
-        await discord.send(channelId, `_${prefix}context: ${ctx.percent}%${suffix}_`)
-          .catch((err) => log(`context-footer ${name}:${idx}: ${err.message}`));
+
       }
     } catch (err) {
       log(`context-footer skipped ${name}:${idx}: ${err.message}`);
@@ -661,6 +656,7 @@ export function createJsonlWatcher({
 
       const dir = paneDir(agentDir, idx);
       const key = paneKey(name, idx);
+      await progress.reconcile(channelId);
       const { readTurns, latestMtime, latestInfo } = readerFor(config, name, idx);
       const now = Date.now();
       const fileInfo = latestInfo(dir);
@@ -685,12 +681,13 @@ export function createJsonlWatcher({
       const tailBytes = startupAudit ? STARTUP_AUDIT_TAIL_BYTES : WATCHER_TAIL_BYTES;
       const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes, headless: true });
       await codexRecovery.tick({ name, pane: idx, dir, result });
+      await progress.reconcile(channelId, result.turns || []);
       const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
       const readMs = Date.now() - readStarted;
       const readBytes = estimatedReadBytes(fileInfo, tailBytes);
       const notice = { state, channelId, send: (to, text) => discord.send(to, text), log, paneName: `${name}:${idx}` };
       await announceNewPaneEvents({ ...notice, stateKey: STATE_KEY_COMPACTION_IDS, kind: "compaction",
-        events: result?.compactions || [], text: unseen => compactionNoticeText(`${name}:${idx}`, unseen) });
+        events: result?.compactions || [], send: async () => {}, text: unseen => compactionNoticeText(`${name}:${idx}`, unseen) });
       await announceNewPaneEvents({ ...notice, stateKey: STATE_KEY_REFUSAL_IDS, kind: "unanswered-turn",
         events: result?.refusals || [], text: unseen => refusalNoticeText(`${name}:${idx}`, unseen, unseen.at(-1).reason,
           { autoCapacity: !!deliveryBroker && isCodexCapacityError(unseen.at(-1).reason) }) });

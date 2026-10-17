@@ -505,6 +505,19 @@ config changes still apply. Updating config does not interrupt a running turn
 or wake stopped panes; `amux ps` labels configured and last-observed models
 separately.
 
+### Concise bridge notices
+
+The bridge keeps one live work row per turn, edits it as tools run, and removes
+it when the turn ends. Answers and attached files stay unchanged. Agent reports
+show their sender, recipient and first line; `amux log` retains the full text.
+Routine context and compaction details stay in the logs. Quota and delivery
+updates edit their existing notice instead of posting another one.
+
+Set `AMUX_TOOL_LINES_CHANNELS` in the bridge environment to a comma-separated
+list of pane addresses or Discord channel IDs to restore the old tool rows in
+those channels. `*` restores them everywhere; unset is the concise default.
+Restart the bridge after changing its environment.
+
 ### Two Codex accounts
 
 Profile 1 is the existing `~/.codex` login. Profile 2 is isolated under
@@ -711,6 +724,7 @@ Common `.env` variables:
 | `TIMEOUT_S` | `600` | Max wait for a pane response |
 | `TTS_VOICE` | `en-US-AriaNeural` | edge-tts voice |
 | `AMUX_OPERATOR_NAME` | `the operator` | Human-facing operator label |
+| `AMUX_TOOL_LINES_CHANNELS` | unset | Comma-separated channel IDs or pane addresses that retain old tool rows; `*` selects all |
 | `SUGGEST_BASE_URL` | unset | Optional self-hosted Suggestions-compatible board |
 | `AGENTMUX_RECORD` | `0` | Save request/response recordings when set to `1` |
 

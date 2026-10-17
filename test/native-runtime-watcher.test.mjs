@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   createNativeRuntimeWatcher,
   groupNativeTurns,
   nativeHistoryRows,
 } from "../channels/native-runtime-watcher.mjs";
+
+afterAll(() => vi.unstubAllEnvs());
 
 const events = [
   {
@@ -103,7 +105,7 @@ describe("native runtime Discord watcher", () => {
     })]);
   });
 
-  it("mirrors once across repeated polls and appends native context", async () => {
+  it("mirrors the unchanged answer once without tools or context", async () => {
     const stored = {};
     const state = {
       get: vi.fn((key, fallback) => stored[key] ?? fallback),
@@ -143,10 +145,10 @@ describe("native runtime Discord watcher", () => {
     // Drive one pane directly; sharedConfig avoids filesystem config I/O.
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
-    expect(discord.send).toHaveBeenCalledTimes(2);
-    expect(discord.send.mock.calls[0][1]).toContain("`Run npm test`");
+    expect(discord.send).toHaveBeenCalledTimes(1);
+    expect(discord.send.mock.calls[0][1]).not.toContain("`Run npm test`");
     expect(discord.send.mock.calls[0][1]).toContain("CANARY_OK");
-    expect(discord.send.mock.calls[1][1]).toBe("_opus-4-8 high · context: 61% (122k)_");
+    expect(discord.send.mock.calls[0][1]).not.toContain("context:");
   });
 
   it("mirrors an assistant-less native failure exactly once", async () => {
@@ -195,7 +197,8 @@ describe("native runtime Discord watcher", () => {
     expect(discord.send.mock.calls[0][1]).toContain("Behörighet nekad");
   });
 
-  it("acknowledges an active turn and mirrors each new tool start once", async () => {
+  it("the rollback option acknowledges an active turn and mirrors each tool once", async () => {
+    vi.stubEnv("AMUX_TOOL_LINES_CHANNELS", "*");
     const stored = {};
     const state = {
       get: (key, fallback) => stored[key] ?? fallback,
@@ -540,5 +543,34 @@ describe("native runtime Discord watcher", () => {
       detail: "explicit native model switch: sonnet",
     }));
     expect(discord.send).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("concise native progress", () => {
+  it("edits one work row across tools and deletes it before the final answer", async () => {
+    vi.stubEnv("AMUX_TOOL_LINES_CHANNELS", "");
+    const stored = {}, state = { get: (key, fallback) => stored[key] ?? fallback, set: (key, value) => { stored[key] = structuredClone(value); } };
+    const discord = { send: vi.fn(async () => ({ id: "work" })), sendTyping: vi.fn(async () => {}), editMessage: vi.fn(async () => {}), deleteMessage: vi.fn(async () => {}) };
+    const history = [
+      { type: "web", subtype: "user", text: "work", operationKey: "delivery:concise", at: 10 },
+      { type: "web", subtype: "tool", phase: "started", name: "Bash", summary: "npm test", webId: "one", at: 20 },
+    ];
+    let running = true;
+    const nativeRuntime = { history: async () => ({ agent: { running }, events: history }) };
+    const entry = { backend: "native", discord: { "channel-1": 0 }, panes: [{ cmd: "native:claude", engine: "claude" }] };
+    const watcher = createNativeRuntimeWatcher({ nativeRuntime, agentsYamlPath: "unused", discord, state, log: () => {} });
+    await watcher.check("test", 0, entry, { test: entry });
+    history.push({ type: "web", subtype: "tool", phase: "started", name: "Read", summary: "file.txt", webId: "two", at: 30 });
+    await watcher.check("test", 0, entry, { test: entry });
+    expect(discord.send).toHaveBeenCalledTimes(1);
+    expect(discord.editMessage).toHaveBeenCalledTimes(1);
+    history.push({ type: "assistant", message: { content: [{ type: "text", text: "Finished." }] }, at: 40 },
+      { type: "web", subtype: "turn-done", operationKey: "delivery:concise", code: 0, at: 50 });
+    running = false;
+    await watcher.check("test", 0, entry, { test: entry });
+    expect(discord.deleteMessage).toHaveBeenCalledWith("channel-1", "work");
+    expect(discord.send).toHaveBeenCalledTimes(2);
+    expect(discord.send.mock.calls[1][1]).toBe("Finished.");
   });
 });

@@ -149,7 +149,7 @@ export function startBot({
       // The quota warning answers in the channel the human writes in, after his message is handled:
       // it never holds up his delivery, and its post cannot hide the catch-up notice.
       void handled.then((outcome) => (msg?.isBot || !getMapping(msg?.channelId) || outcome?.ignored || outcome?.duplicate
-        ? null : onHumanMessage(msg)));
+        ? null : onHumanMessage(msg, { editNotice: (ref, text) => channel.editMessage(ref.channelId, ref.messageId, text) })));
       return handled;
     });
   }

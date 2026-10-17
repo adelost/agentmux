@@ -78,6 +78,14 @@ export function createDiscordChannel({ token, onSent, client = new Client({
       }
     },
 
+    /** WHAT: Removes a temporary message posted by this bot. WHY: Keeps completed work rows from remaining in the human conversation. */
+    async deleteMessage(channelId, messageId) {
+      const ch = await client.channels.fetch(channelId);
+      const message = await ch.messages.fetch(messageId);
+      if (message.author?.id !== client.user?.id) throw new Error("refusing to delete another author's message");
+      await message.delete();
+    },
+
     /** WHAT: Fetches every Discord message after one durable cursor. WHY: Gateway reconnects do not replay history and a one-page scan can skip busy outage windows. */
     async fetchMissed(channelId, afterId, {
       limit = 100,

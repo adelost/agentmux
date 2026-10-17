@@ -81,7 +81,7 @@ describe("voice failure is still delivered", () => {
       expect(accepted.size).toBe(3);
       expect(accepted.get(voice.id)).toContain("My top two games are A and B.");
       expect(store.read("channel", voice.id).status).toBe("completed");
-      expect([...notices.values()].filter(payload => payload.content?.includes("Transcription unavailable"))).toHaveLength(1);
+      expect([...notices.values()].filter(payload => payload.content?.includes("Rösten gick inte att skriva ut"))).toHaveLength(1);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
   // 2026-10-17: skyvw:0 got the 06:32Z voice note and its 06:39Z resend (same bytes) as two

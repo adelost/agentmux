@@ -81,9 +81,9 @@ feature("composer control adapter", () => {
       });
       expect(fx.mirrors).toEqual([
         { channelId: "target-channel",
-          content: "[composer-control from broker:2] keys Escape C-a C-k (control-123)" },
+          content: "broker:2 → target:0: Kommandot skickat." },
         { channelId: "sender-channel",
-          content: "`amux keys target -p 0 Escape C-a C-k` → sent (control-123)" },
+          content: "broker:2 → target:0: Kommandot skickat." },
       ]);
       rmSync(fx.root, { recursive: true, force: true });
     }],

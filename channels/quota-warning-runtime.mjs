@@ -66,12 +66,12 @@ function writeWarningHeartbeat(beat) {
 export function createQuotaWarningOnWrite({ env = process.env, sent = createSentNoticeStore(), readSnapshot = readWarningSnapshot,
   observe = writeWarningHeartbeat, log = message => console.warn(`quota-warning | ${message}`) } = {}) {
   let previous = Promise.resolve();
-  return (msg, { fullOnly = false, notify = null } = {}) => {
+  return (msg, { fullOnly = false, notify = null, editNotice = null } = {}) => {
     const check = previous.then(async () => {
       const config = parseQuotaWarningConfig(env);
       if (!config.enabled) return [];
       const snapshot = await readSnapshot({ config });
-      const notices = await postDueQuotaWarnings({ snapshot, sent, config, fullOnly,
+      const notices = await postDueQuotaWarnings({ snapshot, sent, config, fullOnly, editNotice, channelId: msg?.channelId,
         notify: notify || (text => msg.send(text, { kind: "notice" })) });
       observe({ mode: fullOnly ? "reached-limit-pulse" : "on-human-message", warnPercent: config.warnPercent, reservePercent: config.reservePercent,
         accounts: snapshot?.accounts?.length || 0, notices: notices.length });
@@ -87,10 +87,11 @@ export const warnQuotaOnHumanMessage = createQuotaWarningOnWrite();
 
 /** WHAT: Routes newly full accounts from the existing bridge heartbeat. WHY: Quota exhaustion must be visible without another human message. */
 export function createQuotaLimitPoll({ channels, channelMap, check = warnQuotaOnHumanMessage }) {
-  return () => check(null, { fullOnly: true, notify: async (text, notices) => {
+  return () => check(null, { fullOnly: true, editNotice: (ref, text) => channels[0].editMessage(ref.channelId, ref.messageId, text), notify: async (text, notices) => {
     const panes = new Set(notices.flatMap(notice => notice.panes));
     const target = [...channelMap()].find(([, value]) => panes.has(`${value.name}:${value.pane ?? 0}`));
     if (!target || !channels[0]) throw new Error("full quota notice has no affected channel");
-    await channels[0].send(target[0], text, { kind: "notice" });
+    const posted = await channels[0].send(target[0], text, { kind: "notice" });
+    return { messageId: posted?.id, channelId: target[0] };
   } });
 }

@@ -212,12 +212,11 @@ feature("sendToPane delivery outcome", () => {
       try { unlinkSync(ctx.configPath); } catch {}
       return { result, mirrors: ctx.mirrors };
     }],
-    then: ["target gets the brief and sender gets immediate delivery proof", ({ result, mirrors }) => {
+    then: ["one short mirror preserves the full queue message and CLI receipt", ({ result, mirrors }) => {
       expect(result.delivered).toBe(true);
       expect(result.queueState).toBe("acknowledged");
       expect(mirrors).toEqual([
-        { channelId: "target-channel", content: "[from lsrc:4]\n\nreview every image" },
-        { channelId: "sender-channel", content: "`amux lsrc -p 0 …` → delivered." },
+        { channelId: "target-channel", content: "lsrc:4 → lsrc:0: review every image", idempotencyKey: "mirror:job-1" },
       ]);
     }],
   });
@@ -268,8 +267,7 @@ feature("sendToPane delivery outcome", () => {
         queueState: "delivered_unverified",
       });
       expect(mirrors).toEqual([
-        { channelId: "target-channel", content: "[from lsrc:4]\n\ncritical review" },
-        { channelId: "sender-channel", content: "`amux lsrc -p 0 …` → delivery unverified." },
+        { channelId: "target-channel", content: "lsrc:4 → lsrc:0: critical review", idempotencyKey: "mirror:job-1" },
       ]);
     }],
   });

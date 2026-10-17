@@ -297,47 +297,34 @@ export function createAutoCompact({
   async function postCompactFailed(agentName, paneIdx, paneKey, reason) {
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
     if (!channelId || !discord) return;
-    await discord.send(channelId, formatCompactFailedMessage(paneKey, reason))
-      .catch((err) => log(`compact-failed notice send failed for ${paneKey}: ${err.message}`));
+    const text = /limit|quota|kvot/iu.test(reason)
+      ? `⛔ ${paneKey} väntar på kvot.` : `⚠ ${paneKey} kunde inte fortsätta. Kontrollera panelen.`;
+    await discord.send(channelId, text)
+      .catch(err => log(`stopped notice failed for ${paneKey}: ${err.message}`));
   }
 
   // lsrc:3 review 2026-10-10: only a notice Discord accepted counts; a rejected one is tried on the next poll.
-  async function postCompactHeld(agentName, paneIdx, paneKey, reason, { lastActivityMs, contextTokens }) {
+  async function postCompactHeld(agentName, paneIdx, paneKey, reason, { lastActivityMs }) {
     if (heldNotices.get(paneKey) === lastActivityMs) return;
-    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
-    if (!channelId || !discord) {
-      heldNotices.set(paneKey, lastActivityMs);
-      log(`${paneKey}: compact held (${reason}); no Discord channel to tell`);
-      return;
+    const quiet = reason.match(/journal has been silent for (\d+) min/u);
+    const text = quiet ? `⚠ ${paneKey} har inte visat framsteg på ${quiet[1]} min.`
+      : /pasting/iu.test(reason) ? `⏸ ${paneKey} väntar på att inmatningen ska bli klar.` : null;
+    if (text) {
+      const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
+      if (!channelId || !discord) return;
+      try { await discord.send(channelId, text); }
+      catch (error) { log(`stopped notice failed for ${paneKey}: ${error.message}`); return; }
     }
-    try {
-      await discord.send(channelId, formatCompactHeldMessage(paneKey, reason, contextTokens, lastActivityMs + config.warmCacheMs));
-      heldNotices.set(paneKey, lastActivityMs);
-      log(`${paneKey}: compact held (${reason}); notice sent`);
-    } catch (err) {
-      log(`compact-held notice send failed for ${paneKey}: ${err.message}; retrying on the next poll`);
-    }
+    heldNotices.set(paneKey, lastActivityMs);
+    log(`${paneKey}: compact held (${reason}); details kept in log`);
   }
 
   async function postCompactPostponed(agentName, paneIdx, paneKey, reason) {
-    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
-    if (!channelId || !discord) return;
-    await discord.send(channelId, formatCompactPostponedMessage(paneKey, reason))
-      .catch((err) => log(`compact-postponed notice send failed for ${paneKey}: ${err.message}`));
+    log(`${paneKey}: routine context notice kept in log`);
   }
 
   async function postWarning(agentName, paneIdx, paneKey, contextTokens) {
-    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
-    if (!channelId || !discord) {
-      log(`no discord channel for ${paneKey}, warning suppressed (will still fire at grace end)`);
-      return;
-    }
-    try {
-      await discord.send(channelId, formatWarningMessage(paneKey, contextTokens, config.graceMs));
-      log(`warned ${paneKey} at ${contextTokens} tokens`);
-    } catch (err) {
-      log(`warning send failed for ${paneKey}: ${err.message}`);
-    }
+    log(`${paneKey}: routine context notice kept in log`);
   }
 
   async function tick() {

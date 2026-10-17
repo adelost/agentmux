@@ -47,7 +47,8 @@ export function createSentNoticeStore(path = join(homedir(), ".agentmux", "quota
   };
   return {
     entry: key => read()[key] || null,
-    record(key, usedPercent, options) { update(key, { reminder: { at: options.now, usedPercent } }, options); },
+    record(key, usedPercent, options) { update(key, { reminder: { at: options.now, usedPercent },
+      notice: options.notice ?? null }, options); },
   };
 }
 
@@ -102,26 +103,49 @@ export function formatQuotaWarning(snapshot, { config = parseQuotaWarningConfig(
  * WHAT: Dispatches the due warnings for accounts panes run on in one message and records them.
  * WHY: Keeps the human from warnings more often than their cooldown or about accounts no pane uses.
  */
-export async function postDueQuotaWarnings({ snapshot, notify, sent, config = parseQuotaWarningConfig(), now = Date.now(), fullOnly = false }) {
+export async function postDueQuotaWarnings({ snapshot, notify, sent, config = parseQuotaWarningConfig(), now = Date.now(), fullOnly = false, editNotice = null, channelId = null }) {
   if (!config.enabled) return [];
   const accounts = snapshot?.accounts || [], due = [];
   for (const account of warnedAccounts(accounts, config)) {
     const weekly = weeklyQuotaOf(account), email = account.account?.email;
     const resetAt = Date.parse(weekly?.resetsAt), cooldownMs = warningCooldownMs(weekly?.usedPercent, config);
-    if (!email || cooldownMs === null || !(resetAt > now) || (fullOnly && weekly.usedPercent < 100)) continue;
+    if (!email || cooldownMs === null || !(resetAt > now)) continue;
     const identity = account.provider === "claude" ? email : `${account.provider}:${email}`;
     const key = weeklyWindowKey(identity, weekly.resetsAt), accountKey = weeklyWindowKey(identity, "1970-01-01T00:00:00Z");
     const lastAt = Math.max(sent.entry(key)?.reminder?.at ?? -Infinity, sent.entry(accountKey)?.reminder?.at ?? -Infinity);
     const previous = sent.entry(key)?.reminder;
+    const existing = sent.entry(key)?.notice;
     const justFull = weekly.usedPercent >= 100 && !(previous?.usedPercent >= 100);
+    const candidate = { account, panes: activePanes(account), provider: account.provider, email, usedPercent: weekly.usedPercent, key, accountKey, resetAt };
+    const text = formatQuotaWarning(snapshot, { config, now, only: [account] });
+    const spare = account.provider === "claude" && spareAccounts(accounts, account, config, now)[0];
+    const fingerprint = JSON.stringify([weekly.usedPercent, candidate.panes.length, Math.round(resetAt / HOUR), spare?.account?.email]);
+    if (existing?.messageId && editNotice) {
+      if (existing.fingerprint === fingerprint) continue;
+      try { await editNotice(existing, text); }
+      catch (error) {
+        if (Number(error.code) !== 10008) throw error;
+        existing.messageId = null;
+        const prior = { now: previous?.at ?? now, resetAt, notice: null };
+        sent.record(key, previous?.usedPercent ?? weekly.usedPercent, prior);
+        sent.record(accountKey, previous?.usedPercent ?? weekly.usedPercent, prior);
+      }
+      // A deleted row follows the normal cooldown; a newly full account still posts immediately.
+      if (existing.messageId && existing.fingerprint !== fingerprint) {
+        const notice = { ...existing, fingerprint };
+        sent.record(accountKey, weekly.usedPercent, { now, resetAt, notice });
+        sent.record(key, weekly.usedPercent, { now, resetAt, notice });
+        due.push({ ...candidate, edited: true });
+        continue;
+      }
+    }
     if (fullOnly ? !justFull : !justFull && now - lastAt < cooldownMs) continue;
-    due.push({ account, panes: activePanes(account), provider: account.provider, email, usedPercent: weekly.usedPercent, key, accountKey, resetAt });
-  }
-  if (!due.length) return due;
-  await notify(formatQuotaWarning(snapshot, { config, now, only: due.map(notice => notice.account) }), due);
-  for (const notice of due) {
-    sent.record(notice.accountKey, notice.usedPercent, { now, resetAt: notice.resetAt });
-    sent.record(notice.key, notice.usedPercent, { now, resetAt: notice.resetAt });
+    const posted = await notify(text, [candidate]);
+    const messageId = posted?.messageId || posted?.id;
+    const notice = messageId ? { channelId: posted.channelId || channelId, messageId, fingerprint } : null;
+    sent.record(accountKey, weekly.usedPercent, { now, resetAt, notice });
+    sent.record(key, weekly.usedPercent, { now, resetAt, notice });
+    due.push(candidate);
   }
   return due;
 }

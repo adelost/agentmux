@@ -38,22 +38,21 @@ feature("delivery notices a human understands", () => {
   unit("waiting names the panel and the real reason in everyday words", {
     when: ["rendering the lsrc:3 model-guard wait", () => deliveryStateNotice(humanJob({ lastReason: MODEL_GUARD }), "blocked", UTC)],
     then: ["one sentence per part, no machinery", (text) => expect(text).toBe(
-      "⏸️ lsrc:3 har inte fått det här än. Orsak: panelen kör gpt-6-sol men är inställd på gpt-5.6-sol. "
-      + "Det skickas automatiskt när det går.")],
+      "⏸ lsrc:3 väntar på att kunna ta emot det här: panelen kör gpt-6-sol men är inställd på gpt-5.6-sol.")],
   });
 
   unit("each known blocker is translated and an unknown one is shown as it is", {
     then: ["memory, identity, context cost and raw reasons", () => {
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "wake-refused:memory-critical" }))
-        .toContain("Orsak: datorn har ont om minne just nu.");
+        .toContain("datorn har ont om minne just nu.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "wake-refused:identity-package-content" }))
-        .toContain("Orsak: amux-installationen kan inte verifieras.");
+        .toContain("amux-installationen kan inte verifieras.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "wake-refused:context-cost:unknown-evidence" }))
-        .toContain("Orsak: panelen är stor och har legat länge, så den compactas först.");
+        .toContain("nästa meddelande kräver förberedelse.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "probe unavailable" }))
-        .toContain("Orsak: probe unavailable.");
+        .toContain("orsaken behöver kontrolleras.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "prompt has not reached authoritative JSONL yet" }))
-        .toContain("Orsak: panelen har inte bekräftat att den tagit emot det.");
+        .toContain("panelen har inte bekräftat att den tagit emot det.");
     }],
   });
 
@@ -61,7 +60,7 @@ feature("delivery notices a human understands", () => {
     when: ["rendering an acknowledgement 12 minutes after the message", () =>
       deliveryStateNotice(humanJob({ acknowledgedAt: T }), "recovered", UTC)],
     then: ["the outcome reads as one line", (text) =>
-      expect(text).toBe("✅ lsrc:3 fick det här 15:54, efter 12 minuters väntan.")],
+      expect(text).toBe("✓ lsrc:3 fick det 15:54.")],
   });
 
   unit("a single removal says who removed it and why", {
@@ -278,9 +277,9 @@ feature("delivery notices keep one notice per event", () => {
     then: ["one reply, then one edit of that reply", (world) => {
       expect(world.discord.posts).toHaveLength(1);
       expect(world.discord.posts[0]).toMatchObject({ replyTo: "d1" });
-      expect(world.discord.posts[0].text).toContain("⏸️ lsrc:3 har inte fått det här än");
+      expect(world.discord.posts[0].text).toContain("⏸ lsrc:3 väntar på att kunna ta emot det här");
       expect(world.discord.edits).toEqual([{ channelId: "c3", messageId: world.discord.posts[0].id,
-        text: "✅ lsrc:3 fick det här 16:07, efter 13 minuters väntan." }]);
+        text: "✓ lsrc:3 fick det 16:07." }]);
       world.cleanup();
     }],
   });

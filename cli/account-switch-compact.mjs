@@ -6,8 +6,6 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { findChannelForPane } from "./config.mjs";
-import { sendToChannelId } from "./send-notify.mjs";
 import { compactDayKey, discoverCompactTargets, observeNightlyPane, runNightlyCompact, readNightlyCompactAttempt } from "./nightly-compact.mjs";
 import { nightlyCompactDecision, isUnmeasuredCompact } from "../core/nightly-compact.mjs";
 import { contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
@@ -22,13 +20,6 @@ const VERIFIED_COMPACT = new Set(["within-budget", "compacted-above-budget", "co
 
 const compactPolicy = (policy) => ({ enabled: true, maxTokens: policy.maxTokens, idleMinutes: 0 });
 const reportDirectory = now => join(homedir(), ".agentmux", "account-switch-compact", compactDayKey(now));
-
-async function mirrorSwitchCompact(ctx, target, command) {
-  const channel = findChannelForPane(ctx.configPath, target.agent.name, target.pane.index);
-  if (!channel) return;
-  const receipts = await sendToChannelId(channel, `[amux account switch] ${command}`);
-  if (!receipts?.length) throw new Error("compact-mirror-unverified");
-}
 
 /**
  * WHAT: Reads one pane's context size, idle time and compact admission without waking it.
@@ -70,7 +61,8 @@ export async function compactBeforeSwitch(ctx, target, {
 } = {}) {
   const key = `${target.agent.name}:${target.pane.index}`;
   const pass = await run(ctx, {}, {
-    targets: [target], queue, now, mirror: mirrorSwitchCompact, force, retryUnmeasured: target.engine === "claude",
+    // The real command intent is saved by runNightlyCompact before this display callback.
+    targets: [target], queue, now, mirror: async () => {}, force, retryUnmeasured: target.engine === "claude",
     label: `Compact before account switch (${key})`,
     policy: compactPolicy(policy),
     path: reportDirectory(now()),

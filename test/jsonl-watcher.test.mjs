@@ -1,10 +1,14 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { vi } from "vitest";
+import { afterAll, vi } from "vitest";
 import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createJsonlWatcher } from "../channels/jsonl-watcher.mjs";
 import { buildClaudeLaunchCommand } from "../core/agent-launch-command.mjs";
+
+// Existing tool-detail regressions exercise the requested rollback option.
+vi.stubEnv("AMUX_TOOL_LINES_CHANNELS", "*");
+afterAll(() => vi.unstubAllEnvs());
 
 // --- Setup helpers --------------------------------------------------------
 
@@ -29,8 +33,10 @@ function mkDiscord({ paceMs = 0, failSends = false } = {}) {
       if (discord.failSends) throw new Error("discord unavailable");
       sends.push({ channelId, payload, t: Date.now() });
       if (paceMs > 0) await new Promise((r) => setTimeout(r, paceMs));
-      return true;
+      return { id: `post-${sends.length}` };
     }),
+    editMessage: vi.fn(async () => ({})),
+    deleteMessage: vi.fn(async () => {}),
     sendTyping: vi.fn(async () => {}),
   };
   return discord;
@@ -368,10 +374,7 @@ feature("watcher: claude compaction visibility", () => {
       return ctx;
     }],
     then: ["one notice names both times", (ctx) => {
-      expect(ctx.discord.sends).toHaveLength(1);
-      expect(ctx.discord.sends[0].payload).toBe(
-        `Context compacted 2 times for **testagent:0** (${clock("2026-09-27T15:08:31.242Z")}, ${clock("2026-09-27T17:50:05.444Z")}). Work continues from the latest summary.`,
-      );
+      expect(ctx.discord.sends).toHaveLength(0);
       ctx.cleanup();
     }],
   });
@@ -395,10 +398,7 @@ feature("watcher: claude compaction visibility", () => {
       return ctx;
     }],
     then: ["one completion notice with its time is posted", (ctx) => {
-      expect(ctx.discord.sends).toHaveLength(1);
-      expect(ctx.discord.sends[0].payload).toBe(
-        `Context compacted for **testagent:0** (${clock("2026-04-30T20:20:00.000Z")}). Work continues from the summary.`,
-      );
+      expect(ctx.discord.sends).toHaveLength(0);
       ctx.cleanup();
     }],
   });
@@ -812,10 +812,7 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
       return ctx;
     }],
     then: ["Discord receives one concise completion notice with its time and no duplicate", (ctx) => {
-      expect(ctx.discord.sends).toHaveLength(1);
-      expect(ctx.discord.sends[0].payload).toBe(
-        `Context compacted for **testagent:0** (${clock("2026-05-10T00:00:05.000Z")}). Work continues from the summary.`,
-      );
+      expect(ctx.discord.sends).toHaveLength(0);
       ctx.cleanup();
     }],
   });
@@ -1077,5 +1074,51 @@ feature("watcher: a footer cut short never replaces the pane's effort", () => {
         ctx.cleanup();
       }
     }],
+  });
+});
+
+feature("concise notices, Sky 2026-10-17", () => {
+  unit("a reply never gets a context footer", {
+    given: ["a complete answer and known context", () => {
+      process.env.AMUX_TOOL_LINES_CHANNELS = "";
+      const ctx = setupWatcher({ jsonlLines: [userTurn("reply", "2026-10-17T06:00:00Z"),
+        assistantText("SUMMARY: The answer.", "2026-10-17T06:00:01Z", "end_turn")],
+        stateInitial: { watcher_last_posted_ts: { "ch-test": Date.parse("2026-10-17T05:59:59Z") } } });
+      ctx.agent.getContextPercent.mockReturnValue({ percent: 42, model: "claude-opus-5-5" }); return ctx;
+    }],
+    when: ["the real watcher posts the answer", async ctx => { await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir); return ctx; }],
+    then: ["only the unchanged answer is visible", ctx => { try {
+      expect(ctx.discord.sends.map(row => row.payload)).toEqual(["SUMMARY: The answer."]);
+    } finally { ctx.cleanup(); } }],
+  });
+  unit("a compact updates its internal cursor without announcing itself", {
+    given: ["a compact on an initialized channel", () => setupWatcher({ jsonlLines: [compactSummary("new", "2026-10-17T06:00:00Z")],
+      stateInitial: { watcher_compaction_ids: { "ch-test": [] } } })],
+    when: ["the watcher reads it", async ctx => { await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir); return ctx; }],
+    then: ["no public notice, internal event retained", ctx => { try {
+      expect(ctx.discord.sends).toEqual([]); expect(ctx.state._data.watcher_compaction_ids["ch-test"]).toContain("new");
+    } finally { ctx.cleanup(); } }],
+  });
+  unit("tools share one edited row which disappears at the final reply", {
+    given: ["a live turn with two distinct tools", () => {
+      process.env.AMUX_TOOL_LINES_CHANNELS = "";
+      const at = Date.now() - 10_000, ts = new Date(at).toISOString();
+      return { at, ctx: setupWatcher({ jsonlLines: [userTurn("work", ts), assistantTool("Read", { file_path: "/tmp/cut.ts" }, new Date(at + 100).toISOString()),
+        toolResult("read", new Date().toISOString())], stateInitial: { watcher_last_posted_ts: { "ch-test": at - 1 } } }) };
+    }],
+    when: ["two partial updates then an end-turn arrive", async fx => {
+      await fx.ctx.watcher.checkPane("testagent", 0, fx.ctx.agentRootDir);
+      fx.ctx.appendJsonl([assistantTool("Edit", { file_path: "/tmp/cut.ts" }, new Date(fx.at + 200).toISOString()), toolResult("written", new Date().toISOString())]);
+      await fx.ctx.watcher.checkPane("testagent", 0, fx.ctx.agentRootDir);
+      fx.ctx.appendJsonl([assistantText("SUMMARY: Done.", new Date(fx.at + 300).toISOString(), "end_turn")]);
+      await fx.ctx.watcher.checkPane("testagent", 0, fx.ctx.agentRootDir); return fx.ctx;
+    }],
+    then: ["one progress create, edits, delete and one unchanged answer", ctx => { try {
+      expect(ctx.discord.sends).toHaveLength(2);
+      expect(ctx.discord.sends[0].payload.content).toContain("Arbetar · 1 steg");
+      expect(ctx.discord.editMessage).toHaveBeenCalledWith("ch-test", "post-1", expect.stringContaining("2 steg"));
+      expect(ctx.discord.deleteMessage).toHaveBeenCalledWith("ch-test", "post-1");
+      expect(ctx.discord.sends[1].payload).toBe("SUMMARY: Done.");
+    } finally { ctx.cleanup(); } }],
   });
 });

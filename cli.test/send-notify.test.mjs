@@ -159,8 +159,9 @@ feature("notifyuser helpers", () => {
       title: "Dream",
     })],
     then: ["title, level, and message are present", (result) => {
-      expect(result).toContain("**Dream**");
-      expect(result).toContain("(error)");
+      expect(result).toContain("Dream:");
+      expect(result).toContain("🚨");
+      expect(result).not.toContain("\n");
       expect(result).toContain("dream failed");
     }],
   });

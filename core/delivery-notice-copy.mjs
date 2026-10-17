@@ -68,7 +68,7 @@ const REASON_WORDS = [
     (m) => `panelen kör ${m[2]} men är inställd på ${m[1]}`],
   [/^Codex work blocked:/u,
     () => "ett modellbyte på panelen misslyckades, så den tar inte emot arbete förrän modellen är rättad"],
-  [/^context-cost:/u, () => "panelen är stor och har legat länge, så den compactas först"],
+  [/^context-cost:/u, () => "nästa meddelande kräver förberedelse"],
   [/^memory-(critical|blocked|reserve-floor)/u, () => "datorn har ont om minne just nu"],
   [/^guard-state-stale/u, () => "minneskontrollen är för gammal för att lita på just nu"],
   [/^identity-/u, () => "amux-installationen kan inte verifieras"],
@@ -80,7 +80,7 @@ const REASON_WORDS = [
   [/JSONL|receipt/u, () => "panelen har inte bekräftat att den tagit emot det"],
 ];
 
-/** WHAT: Translates a durable delivery reason into everyday Swedish. WHY: Names the real blocker instead of a generic "not arrived yet". */
+/** WHAT: Formats a durable delivery reason into everyday Swedish. WHY: Names the real blocker instead of a generic "not arrived yet". */
 export function plainReason(lastReason) {
   const original = String(lastReason || "").trim();
   const reason = original.replace(/^wake-refused:/u, "").replace(/^not sent: /u, "");
@@ -89,15 +89,13 @@ export function plainReason(lastReason) {
     if (match) return words(match);
   }
   if (original.startsWith("wake-refused:")) return "panelen kunde inte startas";
-  return reason || "okänd orsak";
+  return "orsaken behöver kontrolleras";
 }
 
-/** WHAT: Renders the waiting notice, optionally with the wait so far. WHY: One edited notice stays current instead of a stack of alerts. */
+/** WHAT: Formats the waiting notice. WHY: Keeps the current delivery state in one edited row. */
 export function waitingNotice(job, { waitedMs = 0 } = {}) {
-  const hours = Math.floor(Number(waitedMs || 0) / 3_600_000);
-  const waited = hours > 0 ? ` (väntat ${hours} h)` : "";
-  return `⏸️ ${target(job)} har inte fått det här än${waited}. Orsak: ${plainReason(job.lastReason)}. `
-    + "Det skickas automatiskt när det går.";
+  if (/quota|kvot/iu.test(job.lastReason || "")) return `⏸ ${target(job)} får det här när kvoten är tillbaka.`;
+  return `⏸ ${target(job)} väntar på att kunna ta emot det här: ${plainReason(job.lastReason)}.`;
 }
 
 /** WHAT: Renders the busy-turn notice after the message was entered. WHY: Says why nothing happens yet and that it will not be doubled. */
@@ -107,11 +105,10 @@ export function busyNotice(job, { queuedBehind = 0 } = {}) {
     + `amux skickar det inte igen, för att det inte ska bli dubbelt.${behind}`;
 }
 
-/** WHAT: Renders the delivered outcome that replaces a waiting notice. WHY: Closes the loop in the same notice. */
+/** WHAT: Formats the delivered outcome. WHY: Keeps its confirmation in the original waiting row. */
 export function deliveredNotice(job, { timeZone } = {}) {
   const at = Number(job.acknowledgedAt || Date.now());
-  const wait = waitPhrase(at - Number(job.createdAt || at));
-  return `✅ ${target(job)} fick det här ${clockTime(at, timeZone)}${wait ? `, efter ${wait}` : ""}.`;
+  return `✓ ${target(job)} fick det ${clockTime(at, timeZone)}.`;
 }
 
 /** WHAT: Renders one not-sent outcome by its cause. WHY: Names who or what stopped it and what to do. */

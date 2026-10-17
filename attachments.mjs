@@ -3,7 +3,6 @@
 
 import { writeFileSync } from "fs";
 import { extname } from "path";
-import { splitMessage } from "./lib.mjs";
 import { downloadDiscordAttachment } from "./core/discord-attachment-download.mjs";
 
 // No whitelist needed. All non-audio attachments are downloaded and passed
@@ -36,23 +35,6 @@ export function createAttachmentHandler({
   const downloadAttachment = (att) =>
     downloadDiscordAttachment(att, { downloadBuffer, sleep });
 
-  /** WHAT: Posts a readable Discord transcript in bounded chunks. WHY: Keeps long voice notes visible without markdown noise or 2000-character failures. */
-  async function replyWithTranscript(msg, attachmentId, text, viaFallback) {
-    const heading = viaFallback ? "**Transcript · Whisper fallback**" : "**Transcript**";
-    const note = viaFallback
-      ? "-# Gemini was unavailable. Technical terms may be less accurate."
-      : "-# Speech-to-text may contain errors.";
-    const chunks = splitMessage(`${heading}\n${text}\n${note}`);
-    if (typeof msg.sendTranscriptOnce === "function") {
-      await msg.sendTranscriptOnce(attachmentId, chunks);
-      return;
-    }
-    for (let i = 0; i < chunks.length; i++) {
-      const send = i === 0 ? msg.reply.bind(msg) : msg.send.bind(msg);
-      await send(chunks[i]).catch(() => {});
-    }
-  }
-
   async function buildPrompt(msg, tmpFiles) {
     if (msg.isInboundCompleted?.()) return null;
     let rawText = msg.text.trim();
@@ -72,15 +54,10 @@ export function createAttachmentHandler({
         const FALLBACK_MARK = "[stt-fallback:whisper1] ";
         const viaFallback = transcribed.startsWith(FALLBACK_MARK);
         if (viaFallback) transcribed = transcribed.slice(FALLBACK_MARK.length).trim();
-        // Same disclaimer in both destinations: the agent (via pane text)
-        // and the Discord reply. The "interpret intent" hint is as useful
-        // for the human reading the reply as it is for the agent reading
-        // the prompt — anyone seeing it knows this is AI-transcribed and
-        // may have word-level errors.
+        // Keep transcription and its timing private to the receiving pane.
         const tagged = viaFallback
           ? `[transcribed voice via whisper1 FALLBACK (gemini failed); extra error-prone on technical terms, interpret intent${lateVoiceNote(msg)}] ${transcribed}`
           : `[transcribed voice, may contain speech-to-text errors; interpret intent${lateVoiceNote(msg)}] ${transcribed}`;
-        await replyWithTranscript(msg, att.id, transcribed, viaFallback);
         if (!rawText) rawText = tagged;
         else rawText = `${rawText}\n${tagged}`;
       } else {

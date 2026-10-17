@@ -6,7 +6,8 @@
 
 import { sendToChannelId } from "./send-notify.mjs";
 import { readFileSync, rmSync } from "fs";
-import { dirname } from "path";
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "node:url";
 
 function readOpts() {
   const optsFile = process.env.AMUX_MIRROR_OPTS_FILE;
@@ -20,11 +21,12 @@ function readOpts() {
   }
 }
 
-const { channelId, content } = readOpts();
+/** WHAT: Dispatches one mirror with the queue's stable identity. WHY: Keeps a detached retry from creating another copy of the same report. */
+export async function deliverMirror({ channelId, content, idempotencyKey }, send = sendToChannelId) {
+  if (channelId && content) return send(channelId, content, { kind: "mirror", idempotencyKey });
+}
 
-try {
-  if (channelId && content) await sendToChannelId(channelId, content, { kind: "mirror" });
-} catch (err) {
-  // stdio is normally ignored. Keep stderr useful when run manually.
-  console.warn(`mirror-worker: ${err.message}`);
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  try { await deliverMirror(readOpts()); }
+  catch (err) { console.warn(`mirror-worker: ${err.message}`); }
 }

@@ -103,8 +103,7 @@ feature("buildPrompt: audio attachment transcription", () => {
         expect(ctx.runCalls[0]).toContain("/fake/transcribe.sh");
         expect(ctx.runCalls[0]).toContain("/tmp/discord-voice-m1.ogg");
         expect(tmpFiles).toEqual(["/tmp/discord-voice-m1.ogg"]);
-        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("**Transcript**"));
-        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("Speech-to-text may contain errors"));
+        expect(msg.reply).not.toHaveBeenCalled();
       }],
   });
 
@@ -125,11 +124,11 @@ feature("buildPrompt: audio attachment transcription", () => {
         expect(result).toContain("whisper1 FALLBACK");
         expect(result).toContain("hej det är jag");
         expect(result).not.toContain("[stt-fallback:whisper1]");
-        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("Whisper fallback"));
+        expect(msg.reply).not.toHaveBeenCalled();
       }],
   });
 
-  unit("long transcripts are split into Discord-safe messages without repeating the reply quote", {
+  unit("long transcripts remain complete in the pane without human-channel copies", {
     given: ["a transcript longer than Discord's message limit", () => ({
       ctx: setup({ transcribeOutput: `start ${"word ".repeat(520)} end` }),
       msg: fakeMsg({
@@ -139,13 +138,9 @@ feature("buildPrompt: audio attachment transcription", () => {
       tmpFiles: [],
     })],
     when: ["buildPrompt", async ({ ctx, msg, tmpFiles }) => ctx.handler.buildPrompt(msg, tmpFiles)],
-    then: ["the first chunk replies and remaining chunks send normally", (result, { msg }) => {
-      expect(result).toContain("start word");
-      expect(msg.reply).toHaveBeenCalledTimes(1);
-      expect(msg.send.mock.calls.length).toBeGreaterThan(0);
-      const chunks = [...msg.reply.mock.calls, ...msg.send.mock.calls].map(([text]) => text);
-      expect(chunks.every((text) => text.length <= 1990)).toBe(true);
-      expect(chunks.join("\n")).toContain("end");
+    then: ["the pane keeps the complete text and the channel stays quiet", (result, { msg }) => {
+      expect(result).toContain("start word"); expect(result).toContain("end");
+      expect(msg.reply).not.toHaveBeenCalled(); expect(msg.send).not.toHaveBeenCalled();
     }],
   });
 
@@ -340,6 +335,17 @@ feature("buildPrompt: multiple attachments", () => {
       expect(result).toContain("beskriv bilden");
       // Both attachments wrote to tmp
       expect(tmpFiles).toHaveLength(2);
+    }],
+  });
+});
+
+feature("voice stays in the pane, Sky 2026-10-17", () => {
+  unit("keeps transcription in the prompt without another human-channel transcript", {
+    given: ["a voice attachment and a synthetic provider response", () => ({ ctx: setup({ transcribeOutput: "SYNTHETIC_VOICE" }),
+      msg: fakeMsg({ attachments: [{ id: "voice", name: "voice.ogg", contentType: "audio/ogg", url: "fixture" }] }) })],
+    when: ["the prompt is built", async fx => ({ ...fx, prompt: await fx.ctx.handler.buildPrompt(fx.msg, []) })],
+    then: ["the pane receives the text and the human gets no duplicate", fx => {
+      expect(fx.prompt).toContain("SYNTHETIC_VOICE"); expect(fx.msg._replies).toEqual([]);
     }],
   });
 });

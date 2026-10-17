@@ -110,3 +110,42 @@ feature("warning activity and background reached-limit routing", () => {
     then: ["the later valid route still receives the alert", send => expect(send).toHaveBeenCalledTimes(1)],
   });
 });
+
+feature("quota rows are edited, Sky 2026-10-17", () => {
+  unit("changed usage and the reached limit edit the original account row", {
+    when: ["one human notice is followed by changed usage and a full-limit pulse", async () => {
+      let usedPercent = 85;
+      const fx = hook(async () => ({ accounts: [{ ...due.accounts[0], limits: [{ ...due.accounts[0].limits[0], usedPercent }] }] }));
+      const send = vi.fn(async () => ({ id: "notice-1", channelId: "human-channel" })), editNotice = vi.fn(async () => {});
+      const msg = { channelId: "human-channel", send };
+      await fx.warn(msg, { editNotice }); usedPercent = 86; await fx.warn(msg, { editNotice });
+      usedPercent = 100;
+      const poll = createQuotaLimitPoll({ check: fx.warn, channels: [{ send, editMessage: (channelId, messageId, text) => editNotice({ channelId, messageId }, text) }],
+        channelMap: () => new Map([["human-channel", { name: "lsrc", pane: 0 }]]) });
+      await poll(); await poll(); return { send, editNotice };
+    }],
+    then: ["one create and two edits, including the full-limit signal", ({ send, editNotice }) => {
+      expect(send).toHaveBeenCalledTimes(1); expect(editNotice).toHaveBeenCalledTimes(2);
+      expect(editNotice.mock.calls[1]).toEqual([{ channelId: "human-channel", messageId: "notice-1" }, expect.stringContaining("100 %, kvoten är slut")]);
+    }],
+  });
+});
+
+feature("an explicitly deleted quota row", () => {
+  unit("forgets a missing row and still posts a newly reached limit", {
+    when: ["an edit gets Discord unknown-message before the account fills", async () => {
+      let usedPercent = 85;
+      const fx = hook(async () => ({ accounts: [{ ...due.accounts[0], limits: [{ ...due.accounts[0].limits[0], usedPercent }] }] }));
+      const send = vi.fn(async () => ({ id: "row", channelId: "channel" }));
+      const editNotice = vi.fn(async () => { throw Object.assign(Error("deleted"), { code: 10008 }); });
+      const msg = { channelId: "channel", send };
+      await fx.warn(msg, { editNotice }); usedPercent = 86;
+      await fx.warn(msg, { editNotice }); await fx.warn(msg, { editNotice });
+      usedPercent = 100; await fx.warn(msg, { editNotice }); return { send, editNotice };
+    }],
+    then: ["one missing edit, two creates including the full-limit alert", ({ send, editNotice }) => {
+      expect(editNotice).toHaveBeenCalledTimes(1); expect(send).toHaveBeenCalledTimes(2);
+      expect(send.mock.calls[1][0]).toContain("100 %, kvoten är slut");
+    }],
+  });
+});

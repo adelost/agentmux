@@ -9,7 +9,8 @@ import { createHash, randomUUID } from "crypto";
 import {
   mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from "fs";
-import { dirname, join } from "path";
+import { basename, dirname, join } from "path";
+import { formatUserNotification } from "../core/user-notification-copy.mjs";
 import { splitMessage } from "../lib.mjs";
 import { recordDiscordPost } from "../channels/post-ledger.mjs";
 
@@ -296,11 +297,12 @@ export async function sendToChannel(channelName, message) {
   return sendToChannelId(channelId, message);
 }
 
-/** Send a message directly to a Discord channel by raw channel ID. */
-export async function sendToChannelId(channelId, message, { kind = "notice" } = {}) {
+/** WHAT: Dispatches one idempotent message to a channel. WHY: Keeps retries from duplicating the same report. */
+export async function sendToChannelId(channelId, message, { kind = "notice", idempotencyKey = null } = {}) {
   const chunks = splitMessage(String(message || ""));
   const results = [];
-  for (const chunk of chunks) results.push(await discordPost(channelId, chunk, null, kind));
+  for (const [index, chunk] of chunks.entries()) results.push(await discordPost(channelId, chunk,
+    idempotencyKey ? notificationNonce(`${idempotencyKey}:${index}`) : null, kind));
   return results;
 }
 
@@ -318,22 +320,7 @@ export function resolveNotifyUserId(explicitUserId) {
   return "";
 }
 
-export function formatUserNotification(message, { level = "info", title = "" } = {}) {
-  const clean = String(message || "").replace(/\s+/g, " ").trim();
-  if (!clean) throw new Error("notifyuser message is empty");
-  const normalized = String(level || "info").toLowerCase();
-  const icon = {
-    info: "🔔",
-    done: "✅",
-    warn: "⚠️",
-    warning: "⚠️",
-    error: "🚨",
-    urgent: "🚨",
-  }[normalized] || "🔔";
-  const label = normalized === "warning" ? "warn" : normalized;
-  const heading = title ? `${icon} **${title}** (${label})` : `${icon} **amux** (${label})`;
-  return `${heading}\n${clean}`.slice(0, 1900);
-}
+export { formatUserNotification };
 
 function notifyKey(content, userId, channelName, idempotencyKey = null) {
   const identity = idempotencyKey == null ? content : `idempotency:${idempotencyKey}`;
@@ -490,9 +477,9 @@ export async function notifyUser(message, opts = {}) {
   return { sent: true, target: channelName, channelId, fallback: !!dmError, dmError: dmError?.message };
 }
 
-/** Send a file (e.g. tts mp3) to a Discord channel by raw ID, with optional text body. */
+/** WHAT: Dispatches a file with a caption. WHY: Keeps a missing caption from exposing a local path. */
 export async function sendFileToChannelId(channelId, filePath, text = "", { kind = "file" } = {}) {
-  return discordPostFile(channelId, filePath, text, kind);
+  return discordPostFile(channelId, filePath, text.trim() || basename(filePath), kind);
 }
 
 /** Send a message to an OpenClaw session. */

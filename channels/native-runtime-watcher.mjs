@@ -1,3 +1,4 @@
+import { createLiveProgress, toolLinesEnabled } from "./live-progress.mjs";
 // Mirrors completed native-runtime turns to the same Discord channels used by
 // the legacy JSONL watcher. Runtime operation keys and content hashes make the
 // projection restart-safe without pretending terminal files are authoritative.
@@ -11,7 +12,6 @@ import {
   splitMessage,
   validateImagePath,
 } from "../lib.mjs";
-import { shortModelName } from "../core/context.mjs";
 import { changeMessage } from "../core/model-watch.mjs";
 import { parkPane, unparkPane } from "../core/pane-park.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
@@ -218,6 +218,7 @@ export function createNativeRuntimeWatcher({
   let stopped = false;
   let ticking = false;
   const lastError = new Map();
+  const progress = createLiveProgress({ discord, state, log });
 
   function posted(channelId) {
     const all = state.get(STATE_KEY, {}) || {};
@@ -274,6 +275,15 @@ export function createNativeRuntimeWatcher({
   }
 
   async function sendProgress(name, pane, channelId, snapshot) {
+    if (!toolLinesEnabled(channelId, `${name}:${pane}`)) {
+      const active = snapshot.agent.running && activeNativeTurn(snapshot.events);
+      if (!active) { await progress.finish(channelId); return; }
+      await progress.update({ channelId, paneKey: `${name}:${pane}`, turn: {
+        id: `operation:${active.operationKey || `at:${active.userAt}`}`,
+        items: active.tools.map(event => ({ id: progressEventId(event), type: "tool", content: progressToolLabel(event) })),
+      } });
+      return;
+    }
     if (!snapshot.agent.running) return;
     const turn = activeNativeTurn(snapshot.events);
     if (!turn) return;
@@ -376,8 +386,10 @@ export function createNativeRuntimeWatcher({
     }
   }
 
-  async function sendTurn(channelId, turn, agent) {
+  async function sendTurn(channelId, turn, agent, paneKey) {
+    turn = await progress.update({ channelId, paneKey, turn: { ...turn, isComplete: true } });
     const rendered = renderTurn(turn);
+    if (!rendered.text && !rendered.files.length) return;
     const chunks = splitMessage(rendered.text || "(no text)");
     const groups = chunkAttachments(rendered.files);
     for (let index = 0; index < chunks.length; index += 1) {
@@ -389,18 +401,7 @@ export function createNativeRuntimeWatcher({
     for (let index = 1; index < groups.length; index += 1) {
       await discord.send(channelId, { files: groups[index] }, { kind: "file" });
     }
-    const context = agent.context;
-    if (Number.isFinite(context?.percent)) {
-      const model = shortModelName(agent.observedModel || agent.model);
-      const modelLabel = [model, agent.observedEffort || agent.effort].filter(Boolean).join(" ");
-      const tokens = Number.isFinite(context.usedTokens)
-        ? ` (${Math.round(context.usedTokens / 1_000)}k)`
-        : "";
-      await discord.send(
-        channelId,
-        `_${modelLabel ? `${modelLabel} · ` : ""}context: ${Math.round(context.percent)}%${tokens}_`,
-      );
-    }
+
   }
 
   async function check(name, pane, entry, sharedConfig = null) {
@@ -421,7 +422,7 @@ export function createNativeRuntimeWatcher({
     const turns = groupNativeTurns(snapshot.events, { includeEmpty: true });
     for (const turn of turns.slice(-20)) {
       if (seen.has(turn.id)) continue;
-      if (turn.items.length) await sendTurn(channelId, turn, snapshot.agent);
+      if (turn.items.length) await sendTurn(channelId, turn, snapshot.agent, `${name}:${pane}`);
       remember(channelId, turn.id);
       seen.add(turn.id);
       log(`${name}:${pane} → ${channelId} (${turn.id})`);
