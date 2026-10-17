@@ -28,14 +28,26 @@ export const formatReset = (resetsAt) => {
   return `reset ${at.getDate()} ${SHORT_MONTHS[at.getMonth()]} ${hh}:${mm}`;
 };
 
+const ENGLISH_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** WHAT: Formats a local time as "08:13". WHY: Lets a same-day forecast drop its date. */
+export const clockOf = (time) => `${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}`;
+
+/** WHAT: Formats a local time as "Oct 22 08:13". WHY: Keeps English quota notices (Mattias 2026-10-17) from showing Swedish dates. */
+export const formatNoticeTime = (at) => {
+  const time = new Date(at);
+  if (at == null || Number.isNaN(time.getTime())) return "";
+  return `${ENGLISH_MONTHS[time.getMonth()]} ${time.getDate()} ${clockOf(time)}`;
+};
+
 /**
  * WHAT: Builds the Discord and push notice for a pane stopped by its plan limit.
  * WHY: Keeps a quota stop from looking like work (lsrc:1 stood still from 02:48 to 06:50 on 2026-09-28 without a word).
  */
 export const formatLimitedAlert = ({ paneKey, resetAt = null, autoResume = false, logCommand }) => {
-  const reset = formatReset(resetAt).replace(/^reset /u, "");
-  const next = autoResume ? " och fortsätter sedan själv" : "";
-  const text = `⛔ ${paneKey} väntar på kvot${reset ? ` till ${reset}` : ""}${next}.`;
+  const reset = formatNoticeTime(resetAt);
+  const next = autoResume ? " and then continues by itself" : "";
+  const text = `⛔ ${paneKey} waits for quota${reset ? ` until ${reset}` : ""}${next}.`;
   return { discord: text, push: text };
 };
 

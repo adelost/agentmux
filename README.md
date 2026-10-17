@@ -515,6 +515,12 @@ updates edit their existing notice instead of posting another one. An active
 account newly reaching 100 percent posts a fresh alert. With unchanged usage,
 its exhaustion forecast refreshes at most once per hour.
 
+The quota notice is one English overview. Each engine gets a line for the
+account its panes use (used percent, reset, and when it runs out at the pace of
+the last day's readings) and a line per other account with what it adds. The
+last line is one recommendation: nothing, the exact switch command and the panes
+it moves, or a free reset on the account's usage page when it hits 100 percent.
+
 Set `AMUX_TOOL_LINES_CHANNELS` in the bridge environment to a comma-separated
 list of pane addresses or Discord channel IDs to restore the old tool rows in
 those channels. `*` restores them everywhere; unset is the concise default.

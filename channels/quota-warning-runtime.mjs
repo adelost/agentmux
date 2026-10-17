@@ -10,7 +10,8 @@ import { createTmuxContext, getPaneStatus } from "../cli/tmux.mjs";
 import { runtimeAgentsPath, DEFAULT_TMUX_SOCKET } from "../core/runtime-defaults.mjs";
 import { latestConversationActivityMs } from "../core/pane-activity.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
-import { createSentNoticeStore, parseQuotaWarningConfig, postDueQuotaWarnings, weeklyQuotaOf } from "./quota-warning.mjs";
+import { createSentNoticeStore, parseQuotaWarningConfig, postDueQuotaWarnings } from "./quota-warning.mjs";
+import { weeklyQuotaOf } from "./quota-overview.mjs";
 
 /**
  * WHAT: Reads every account and its panes through the dashboard's shared quota budget.

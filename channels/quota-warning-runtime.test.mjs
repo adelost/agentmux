@@ -34,7 +34,8 @@ feature("the quota warning answers the human message", () => {
     when: ["two messages arrive together", async fx => { await Promise.all([fx.warn(fx.first), fx.warn(fx.second)]); return fx; }],
     then: ["only the first channel gets the notice", fx => {
       expect(fx.first.send).toHaveBeenCalledTimes(1);
-      expect(fx.first.send.mock.calls[0]).toEqual([expect.stringMatching(/^⚠️ Claude a: 85 %, slut ca .*1 aktiv panel\.$/u), { kind: "notice" }]);
+      expect(fx.first.send.mock.calls[0]).toEqual([expect.stringMatching(
+        /^Claude: in use Claude a · 85% · resets [A-Z][a-z]{2} \d+ \d\d:\d\d · lasts until reset\nRecommendation: no action needed\.$/u), { kind: "notice" }]);
       expect(fx.second.send).not.toHaveBeenCalled();
     }],
   });
@@ -96,7 +97,7 @@ feature("warning activity and background reached-limit routing", () => {
     }],
     then: ["the full alert reaches an affected pane's channel once", send => {
       expect(send).toHaveBeenCalledTimes(1);
-      expect(send.mock.calls[0]).toEqual(["own-channel", expect.stringContaining("100 %, kvoten är slut"), { kind: "notice" }]);
+      expect(send.mock.calls[0]).toEqual(["own-channel", expect.stringContaining("· 100% · resets"), { kind: "notice" }]);
     }],
   });
   unit("a missing channel cannot mark the reached-limit alert as delivered", {
@@ -126,7 +127,7 @@ feature("quota rows are edited, Sky 2026-10-17", () => {
     }],
     then: ["one ordinary edit and one new full-limit signal", ({ send, editNotice }) => {
       expect(send).toHaveBeenCalledTimes(2); expect(editNotice).toHaveBeenCalledTimes(1);
-      expect(send.mock.calls[1][1]).toContain("100 %, kvoten är slut");
+      expect(send.mock.calls[1][1]).toContain("· used up");
     }],
   });
 });
@@ -145,7 +146,7 @@ feature("an explicitly deleted quota row", () => {
     }],
     then: ["one missing edit, two creates including the full-limit alert", ({ send, editNotice }) => {
       expect(editNotice).toHaveBeenCalledTimes(1); expect(send).toHaveBeenCalledTimes(2);
-      expect(send.mock.calls[1][0]).toContain("100 %, kvoten är slut");
+      expect(send.mock.calls[1][0]).toContain("· used up");
     }],
   });
 });

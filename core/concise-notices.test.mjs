@@ -14,7 +14,7 @@ describe("approved short notice copy, Sky 2026-10-17", () => {
   });
   it("names the stopped pane and its known automatic continuation", () => {
     expect(formatLimitedAlert({ paneKey: "skyvw:0", resetAt: "2026-10-21T07:00:00Z", autoResume: true }).discord)
-      .toMatch(/^⛔ skyvw:0 väntar på kvot till .* och fortsätter sedan själv\.$/u);
+      .toMatch(/^⛔ skyvw:0 waits for quota until [A-Z][a-z]{2} 21 \d\d:00 and then continues by itself\.$/u);
   });
   it("answers an unmapped channel in one short line", () => {
     expect(unmappedChannelNotice("test")).toBe("Ingen panel läser #test. Skriv i en panels kanal.");
