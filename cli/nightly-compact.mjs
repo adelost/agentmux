@@ -5,9 +5,10 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID, createHash } from "node:crypto";
 import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "../core/context-maintenance.mjs";
-import { listAgents, loadConfig } from "./config.mjs";
+import { listAgents, loadConfig, findChannelForPane } from "./config.mjs";
 import { listPanes } from "./tmux.mjs";
 import { dialectFor, inspectPane } from "./inspect-pane.mjs";
+import { sendToChannelId } from "./send-notify.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { latestConversationActivityMs } from "../core/pane-activity.mjs";
@@ -107,8 +108,12 @@ export async function discoverCompactTargets(ctx, agents) {
   return targets;
 }
 
-// The durable intent below owns the command. Routine compact text stays in logs.
-async function mirror() {}
+async function mirror(ctx, target, command) {
+  const channel = findChannelForPane(ctx.configPath, target.agent.name, target.pane.index);
+  if (!channel) return;
+  const receipts = await sendToChannelId(channel, `[nightly compact] ${command}`);
+  if (!receipts?.length) throw new Error("compact-mirror-unverified");
+}
 
 function reconcileRows(ctx, rows, { agents, identityFor = latestPaneSessionIdentity }) {
   return rows.map(row => {

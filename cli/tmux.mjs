@@ -19,7 +19,6 @@ import { readParkState, shouldBlockSend, blockedSendMessage } from "../core/pane
 import {
   createDeliveryQueue, DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES, waitForDeliveryJob,
 } from "../core/delivery-queue.mjs";
-import { mirrorLine } from "../core/mirror-copy.mjs";
 import { parseSenderHeader } from "../core/sender-detect.mjs";
 import { detectPaneStatus } from "./format.mjs";
 import { findChannelForPane, loadConfig, validateAgentPane } from "./config.mjs";
@@ -212,17 +211,23 @@ async function mirrorComposerControl(ctx, name, pane, receipt, {
   const senderChannel = sender
     ? findChannelForPane(ctx.configPath, sender.session, sender.pane)
     : null;
+  const label = receipt.action === "keys"
+    ? `keys ${receipt.keys.join(" ")}`
+    : receipt.action === "esc-pager" ? "esc (pager exit)" : receipt.action;
+  const command = receipt.action === "keys"
+    ? `amux keys ${name} -p ${pane} ${receipt.keys.join(" ")}`
+    : `amux ${receipt.action === "esc-pager" ? "esc" : receipt.action} ${name} -p ${pane}`;
   try {
     if (targetChannel) {
       await mirrorDispatch({
         channelId: targetChannel,
-        content: mirrorLine({ sender: sender ? actor : null, target: `${name}:${pane}`, text: "Kommandot skickat." }),
+        content: `[composer-control${actor ? ` from ${actor}` : ""}] ${label} (${receipt.controlId})`,
       });
     }
     if (senderChannel && senderChannel !== targetChannel) {
       await mirrorDispatch({
         channelId: senderChannel,
-        content: mirrorLine({ sender: sender ? actor : null, target: `${name}:${pane}`, text: "Kommandot skickat." }),
+        content: `\`${command}\` → sent (${receipt.controlId})`,
       });
     }
   } catch (error) {
@@ -351,6 +356,18 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     ? findChannelForPane(ctx.configPath, name, pane)
     : null;
 
+  const mirrorSenderStatus = (result) => {
+    if (!mirror || !sender || sender.key === `${name}:${pane}` || !ctx.configPath) return;
+    const senderChannelId = findChannelForPane(ctx.configPath, sender.session, sender.pane);
+    if (!senderChannelId) return;
+    const status = result?.unverified
+      ? "delivery unverified"
+      : result?.delivered
+      ? (result.pending ? "durably queued" : "delivered")
+      : "NOT delivered";
+    mirrorDispatch({ channelId: senderChannelId, content: `\`amux ${name} -p ${pane} …\` → ${status}.` });
+  };
+
   // 0. Park guard: a pane parked by model-watch (model downgrade) must not
   //    be woken by a brief — the work would run on the fallback model
   //    (api:3, 2026-07-10). Slash commands (administration, incl. the
@@ -405,14 +422,16 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   // 2. Best-effort mirror. Failure here is a transparency degradation,
   //    not a correctness issue — the pane already got the text.
   if (!outcome.delivered) {
+    mirrorSenderStatus(outcome);
     return outcome;
   }
   if (!mirror) return outcome;
   if (!ctx.configPath) return outcome;
   if (targetChannelId) {
-    const mirrored = mirrorLine({ sender: sender?.key, target: `${name}:${pane}`, text });
+    const mirrored = opts.source ? `[${opts.source}] ${text}` : text;
     mirrorDispatch({ channelId: targetChannelId, content: mirrored, idempotencyKey: `mirror:${job.id}` });
   }
+  mirrorSenderStatus(outcome);
   // Channel topic is intentionally NOT touched here. Topics are a stable
   // per-pane summary set via agentmux.yaml `labels` and propagated by
   // /sync (core/sync-discord.mjs:topicFor). Per-send overwrite was

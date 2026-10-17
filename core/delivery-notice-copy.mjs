@@ -68,7 +68,7 @@ const REASON_WORDS = [
     (m) => `panelen kör ${m[2]} men är inställd på ${m[1]}`],
   [/^Codex work blocked:/u,
     () => "ett modellbyte på panelen misslyckades, så den tar inte emot arbete förrän modellen är rättad"],
-  [/^context-cost:/u, () => "nästa meddelande kräver förberedelse"],
+  [/^context-cost:/u, () => "panelen är stor och har legat länge, så den compactas först"],
   [/^memory-(critical|blocked|reserve-floor)/u, () => "datorn har ont om minne just nu"],
   [/^guard-state-stale/u, () => "minneskontrollen är för gammal för att lita på just nu"],
   [/^identity-/u, () => "amux-installationen kan inte verifieras"],
@@ -89,29 +89,32 @@ export function plainReason(lastReason) {
     if (match) return words(match);
   }
   if (original.startsWith("wake-refused:")) return "panelen kunde inte startas";
-  return "orsaken behöver kontrolleras";
+  return reason || "okänd orsak";
 }
 
-/** WHAT: Formats the waiting notice. WHY: Keeps the current delivery state in one edited row. */
+/** WHAT: Formats the waiting notice, optionally with the wait so far. WHY: One edited notice stays current instead of a stack of alerts. */
 export function waitingNotice(job, { waitedMs = 0 } = {}) {
-  if (/quota|kvot/iu.test(job.lastReason || "")) return `⏸ ${target(job)} får det här när kvoten är tillbaka.`;
-  return `⏸ ${target(job)} väntar på att kunna ta emot det här: ${plainReason(job.lastReason)}.`;
+  const hours = Math.floor(Number(waitedMs || 0) / 3_600_000);
+  const waited = hours > 0 ? ` (väntat ${hours} h)` : "";
+  return `⏸️ ${target(job)} har inte fått det här än${waited}. Orsak: ${plainReason(job.lastReason)}. `
+    + "Det skickas automatiskt när det går.";
 }
 
-/** WHAT: Renders the busy-turn notice after the message was entered. WHY: Says why nothing happens yet and that it will not be doubled. */
+/** WHAT: Formats the busy-turn notice after the message was entered. WHY: Keeps the entered-message status distinct from delivery. */
 export function busyNotice(job, { queuedBehind = 0 } = {}) {
   const behind = Number(queuedBehind || 0) > 0 ? ` ${queuedBehind} till väntar efter det.` : "";
   return `⏸️ ${target(job)} har fått det här men har inte bekräftat det än, eftersom panelen arbetar med något annat. `
     + `amux skickar det inte igen, för att det inte ska bli dubbelt.${behind}`;
 }
 
-/** WHAT: Formats the delivered outcome. WHY: Keeps its confirmation in the original waiting row. */
+/** WHAT: Formats the delivered outcome that replaces a waiting notice. WHY: Keeps the delivery confirmation in the same notice. */
 export function deliveredNotice(job, { timeZone } = {}) {
   const at = Number(job.acknowledgedAt || Date.now());
-  return `✓ ${target(job)} fick det ${clockTime(at, timeZone)}.`;
+  const wait = waitPhrase(at - Number(job.createdAt || at));
+  return `✅ ${target(job)} fick det här ${clockTime(at, timeZone)}${wait ? `, efter ${wait}` : ""}.`;
 }
 
-/** WHAT: Renders one not-sent outcome by its cause. WHY: Names who or what stopped it and what to do. */
+/** WHAT: Formats one not-sent outcome by its cause. WHY: Keeps the cause and next step visible. */
 export function notSentNotice(job) {
   if (job.metadata?.deliveryCancellation === "sender-request") {
     const why = String(job.cancelRequestedReason || "").trim();
@@ -132,7 +135,7 @@ export function notSentNotice(job) {
     + `Orsak: ${plainReason(job.lastReason)}. Skicka igen när det är åtgärdat.`;
 }
 
-/** WHAT: Renders several same-outcome not-sent jobs as one list. WHY: Fourteen cancellations must be one notice, not fourteen. */
+/** WHAT: Formats several same-outcome not-sent jobs as one list. WHY: Keeps grouped cancellation details in one notice. */
 export function notSentGroupNotice(jobs, { timeZone } = {}) {
   const first = jobs[0];
   const count = jobs.length;
@@ -147,7 +150,7 @@ export function notSentGroupNotice(jobs, { timeZone } = {}) {
   return [head, ...shown, ...more].join("\n");
 }
 
-/** WHAT: Renders the cannot-confirm outcome. WHY: Explains why amux will not resend. */
+/** WHAT: Formats the cannot-confirm outcome. WHY: Prevents uncertain delivery from being sent twice. */
 export function uncertainNotice(job) {
   return `❓ ${target(job)} kan ha fått det här, men amux kan inte bekräfta det. `
     + "Det skickas inte igen, för att inte bli dubbelt. Se svaret ovan.";

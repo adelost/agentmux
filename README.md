@@ -505,15 +505,12 @@ config changes still apply. Updating config does not interrupt a running turn
 or wake stopped panes; `amux ps` labels configured and last-observed models
 separately.
 
-### Concise bridge notices
+### Bridge notices
 
-The bridge keeps one live work row per turn, edits it as tools run, and removes
-it when the turn ends. Answers and attached files stay unchanged. Agent reports
-show their sender, recipient and first line; `amux log` retains the full text.
-Routine context and compaction details stay in the logs. Quota and delivery
-updates edit their existing notice instead of posting another one. An active
-account newly reaching 100 percent posts a fresh alert. With unchanged usage,
-its exhaustion forecast refreshes at most once per hour.
+Voice transcripts are posted in Discord with their heading, bounded chunks and
+speech-to-text note. Pane-to-pane messages retain their full text. Delivery,
+receipt, context and compaction notices are visible again, as before 9d37147.
+Transport idempotency and the tool-line environment setting remain in place.
 
 The quota notice is one English overview. Each engine gets a line for the
 account its panes use (used percent, reset, and when it runs out at the pace of

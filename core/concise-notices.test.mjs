@@ -5,21 +5,21 @@ import { unmappedChannelNotice } from "./unmapped-channel.mjs";
 import { formatUserNotification } from "../cli/send-notify.mjs";
 const job = { agentName: "skyvw", pane: 0, createdAt: 1000, acknowledgedAt: Date.parse("2026-10-17T02:48:00Z"),
   lastReason: "Claude quota is exhausted; exact-session recovery is pending" };
-describe("approved short notice copy, Sky 2026-10-17", () => {
+describe("restored full notice copy, Mattias 2026-10-17", () => {
   it("says when the human's waiting message can arrive", () => {
-    expect(waitingNotice(job)).toBe("⏸ skyvw:0 får det här när kvoten är tillbaka.");
+    expect(waitingNotice(job)).toContain("Det skickas automatiskt när det går.");
   });
   it("edits delivery into a short checkmark", () => {
-    expect(deliveredNotice(job, { timeZone: "UTC" })).toBe("✓ skyvw:0 fick det 02:48.");
+    expect(deliveredNotice(job, { timeZone: "UTC" })).toContain("✅ skyvw:0 fick det här 02:48, efter ");
   });
   it("names the stopped pane and its known automatic continuation", () => {
     expect(formatLimitedAlert({ paneKey: "skyvw:0", resetAt: "2026-10-21T07:00:00Z", autoResume: true }).discord)
-      .toMatch(/^⛔ skyvw:0 waits for quota until [A-Z][a-z]{2} 21 \d\d:00 and then continues by itself\.$/u);
+      .toContain("amux fortsätter själv i samma session");
   });
   it("answers an unmapped channel in one short line", () => {
-    expect(unmappedChannelNotice("test")).toBe("Ingen panel läser #test. Skriv i en panels kanal.");
+    expect(unmappedChannelNotice("test")).toBe("#test saknas i amux kanalkarta, så ingen agent har fått ditt meddelande än. Skriv i en annan panels kanal så länge.");
   });
   it("keeps a direct notification to one line and one symbol", () => {
-    expect(formatUserNotification("Behöver svar.\nVälj A.", { level: "error", title: "Fråga" })).toBe("🚨 Fråga: Behöver svar. Välj A.");
+    expect(formatUserNotification("Behöver svar.\nVälj A.", { level: "error", title: "Fråga" })).toBe("🚨 **Fråga** (error)\nBehöver svar. Välj A.");
   });
 });

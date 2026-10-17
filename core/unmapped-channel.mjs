@@ -15,7 +15,7 @@ export function syncedAmuxChannelName(syncedChannels, channelId) {
 
 /** WHAT: Formats the answer to a message in an unmapped amux channel. WHY: The person learns at once that no agent got it, instead of waiting days for a reply. */
 export function unmappedChannelNotice(channelName) {
-  return `Ingen panel läser #${channelName}. Skriv i en panels kanal.`;
+  return `#${channelName} saknas i amux kanalkarta, så ingen agent har fått ditt meddelande än. Skriv i en annan panels kanal så länge.`;
 }
 
 function noticePayload(msg, channelName) {

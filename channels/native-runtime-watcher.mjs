@@ -12,6 +12,7 @@ import {
   splitMessage,
   validateImagePath,
 } from "../lib.mjs";
+import { nativeContextFooter } from "../core/context-footer.mjs";
 import { changeMessage } from "../core/model-watch.mjs";
 import { parkPane, unparkPane } from "../core/pane-park.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
@@ -401,7 +402,9 @@ export function createNativeRuntimeWatcher({
     for (let index = 1; index < groups.length; index += 1) {
       await discord.send(channelId, { files: groups[index] }, { kind: "file" });
     }
-
+    if (Number.isFinite(agent.context?.percent)) {
+      await discord.send(channelId, nativeContextFooter(agent));
+    }
   }
 
   async function check(name, pane, entry, sharedConfig = null) {

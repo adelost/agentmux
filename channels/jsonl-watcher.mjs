@@ -17,7 +17,7 @@
 // covering all of them.
 
 import { watch, statSync, existsSync } from "fs";
-import { basename, join } from "path";
+import { join } from "path";
 import { splitMessage, extractImageMarkers, validateImagePath, chunkAttachments } from "../lib.mjs";
 import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
@@ -25,6 +25,7 @@ import { claudeProjectDir } from "../core/claude-paths.mjs";
 import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
 import { alternateEngineForCommand, alternateSessionReader, alternateWatchDir, latestAlternateMtime } from "../core/alternate-session-reader.mjs";
 import { getContextFromPane } from "../core/context.mjs";
+import { jsonlContextFooter } from "../core/context-footer.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
 import {
@@ -483,7 +484,7 @@ export function createJsonlWatcher({
     // reply arrives as its own turn right after. Skip text AND footer.
     if (isHarnessPlaceholder(fullText) && validFiles.length === 0) return { ok: true };
 
-    const body = postPrefix && fullText ? `${postPrefix}${fullText}` : fullText || (validFiles.length ? basename(validFiles[0]) : "(no text)");
+    const body = postPrefix && fullText ? `${postPrefix}${fullText}` : fullText || "(no text)";
     const chunks = splitMessage(body);
     // Discord hard-caps 10 attachments/message; 11+ screenshots on the
     // first chunk used to 400 the whole message (text AND images lost).
@@ -518,14 +519,8 @@ export function createJsonlWatcher({
     }
     if (!ok) return { ok: false };
 
-    // Context footer — prefer tmux UI percent so the number matches what
-    // auto-compact sees and what Claude Code itself displays. CC's bar is
-    // computed against its own effective window (~840k for the 1M beta,
-    // not raw 1M), so jsonl-derived percent (697k/1000k = 70%) and
-    // UI-derived percent (697k/840k = 84%) diverged. UI is the user-facing
-    // metric that actually predicts auto-compact firing — match it.
-    // Fall back to jsonl if the pane has no visible token line (idle
-    // narrow pane, just-spawned, etc).
+    // Match the pane-first context measurement used by auto-compact.
+    // agent.getContext owns the terminal reading and JSONL fallback.
     if (hasNarrative || validFiles.length > 0) try {
       // One source of truth: agent.getContext is pane-first (CC's own
       // percent, incl. custom-statusline rows) with jsonl fallback.
@@ -548,7 +543,8 @@ export function createJsonlWatcher({
         const paneCmd = String(config?.[name]?.panes?.[idx]?.cmd || "");
         if (alternateEngineForCommand(paneCmd) !== "kimi") await watchModelChange({ name, idx, channelId, ctx, config })
           .catch((err) => log(`model-watch failed for ${name}:${idx}: ${err.message}`));
-
+        await discord.send(channelId, jsonlContextFooter(ctx))
+          .catch((err) => log(`context-footer ${name}:${idx}: ${err.message}`));
       }
     } catch (err) {
       log(`context-footer skipped ${name}:${idx}: ${err.message}`);
@@ -687,7 +683,7 @@ export function createJsonlWatcher({
       const readBytes = estimatedReadBytes(fileInfo, tailBytes);
       const notice = { state, channelId, send: (to, text) => discord.send(to, text), log, paneName: `${name}:${idx}` };
       await announceNewPaneEvents({ ...notice, stateKey: STATE_KEY_COMPACTION_IDS, kind: "compaction",
-        events: result?.compactions || [], send: async () => {}, text: unseen => compactionNoticeText(`${name}:${idx}`, unseen) });
+        events: result?.compactions || [], text: unseen => compactionNoticeText(`${name}:${idx}`, unseen) });
       await announceNewPaneEvents({ ...notice, stateKey: STATE_KEY_REFUSAL_IDS, kind: "unanswered-turn",
         events: result?.refusals || [], text: unseen => refusalNoticeText(`${name}:${idx}`, unseen, unseen.at(-1).reason,
           { autoCapacity: !!deliveryBroker && isCodexCapacityError(unseen.at(-1).reason) }) });

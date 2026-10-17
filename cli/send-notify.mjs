@@ -9,7 +9,7 @@ import { createHash, randomUUID } from "crypto";
 import {
   mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from "fs";
-import { basename, dirname, join } from "path";
+import { dirname, join } from "path";
 import { formatUserNotification } from "../core/user-notification-copy.mjs";
 import { splitMessage } from "../lib.mjs";
 import { recordDiscordPost } from "../channels/post-ledger.mjs";
@@ -477,9 +477,9 @@ export async function notifyUser(message, opts = {}) {
   return { sent: true, target: channelName, channelId, fallback: !!dmError, dmError: dmError?.message };
 }
 
-/** WHAT: Dispatches a file with a caption. WHY: Keeps a missing caption from exposing a local path. */
+/** WHAT: Dispatches a file with its original optional caption. WHY: Keeps caller-provided output unchanged. */
 export async function sendFileToChannelId(channelId, filePath, text = "", { kind = "file" } = {}) {
-  return discordPostFile(channelId, filePath, text.trim() || basename(filePath), kind);
+  return discordPostFile(channelId, filePath, text, kind);
 }
 
 /** Send a message to an OpenClaw session. */

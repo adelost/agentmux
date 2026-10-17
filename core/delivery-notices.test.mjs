@@ -38,21 +38,22 @@ feature("delivery notices a human understands", () => {
   unit("waiting names the panel and the real reason in everyday words", {
     when: ["rendering the lsrc:3 model-guard wait", () => deliveryStateNotice(humanJob({ lastReason: MODEL_GUARD }), "blocked", UTC)],
     then: ["one sentence per part, no machinery", (text) => expect(text).toBe(
-      "⏸ lsrc:3 väntar på att kunna ta emot det här: panelen kör gpt-6-sol men är inställd på gpt-5.6-sol.")],
+      "⏸️ lsrc:3 har inte fått det här än. Orsak: panelen kör gpt-6-sol men är inställd på gpt-5.6-sol. "
+      + "Det skickas automatiskt när det går.")],
   });
 
   unit("each known blocker is translated and an unknown one is shown as it is", {
     then: ["memory, identity, context cost and raw reasons", () => {
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "wake-refused:memory-critical" }))
-        .toContain("datorn har ont om minne just nu.");
+        .toContain("Orsak: datorn har ont om minne just nu.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "wake-refused:identity-package-content" }))
-        .toContain("amux-installationen kan inte verifieras.");
+        .toContain("Orsak: amux-installationen kan inte verifieras.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "wake-refused:context-cost:unknown-evidence" }))
-        .toContain("nästa meddelande kräver förberedelse.");
+        .toContain("Orsak: panelen är stor och har legat länge, så den compactas först.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "probe unavailable" }))
-        .toContain("orsaken behöver kontrolleras.");
+        .toContain("Orsak: probe unavailable.");
       expect(blockedDeliveryNotice({ agentName: "a", pane: 1, lastReason: "prompt has not reached authoritative JSONL yet" }))
-        .toContain("panelen har inte bekräftat att den tagit emot det.");
+        .toContain("Orsak: panelen har inte bekräftat att den tagit emot det.");
     }],
   });
 
@@ -60,7 +61,7 @@ feature("delivery notices a human understands", () => {
     when: ["rendering an acknowledgement 12 minutes after the message", () =>
       deliveryStateNotice(humanJob({ acknowledgedAt: T }), "recovered", UTC)],
     then: ["the outcome reads as one line", (text) =>
-      expect(text).toBe("✓ lsrc:3 fick det 15:54.")],
+      expect(text).toBe("✅ lsrc:3 fick det här 15:54, efter 12 minuters väntan.")],
   });
 
   unit("a single removal says who removed it and why", {
@@ -88,17 +89,18 @@ feature("delivery notices a human understands", () => {
       "❓ lsrc:3 kan ha fått det här, men amux kan inte bekräfta det. Det skickas inte igen, för att inte bli dubbelt. Se svaret ovan.")],
   });
 
-  unit("no notice uses an internal word", {
-    then: ["every template over every known reason is free of machinery", () => {
-      const reasons = [MODEL_GUARD, "Codex work blocked: compact not verified", "wake-refused:memory-blocked",
+  const reasons = [MODEL_GUARD, "Codex work blocked: compact not verified", "wake-refused:memory-blocked",
         "wake-refused:guard-state-stale", "wake-refused:identity-x", "wake-refused:context-cost:unknown-evidence",
         "Codex prompt delivery blocked: composer is not empty (starts with: hej)",
         "provisional paste differs from composer; preserving both (x)",
         "Prompt delivery blocked: durable draft is not visible; refusing to paste it again",
         "awaiting exact JSONL receipt; TUI hint: hidden", "prompt has not reached authoritative JSONL yet",
         "submit fence committed before physical completion; awaiting authoritative receipt"];
+  // Each reason keeps the original full matrix within the unit-test time budget.
+  for (const lastReason of reasons) {
+  unit(`no notice uses an internal word for ${lastReason}`, {
+    then: ["every template and metadata case remains free of machinery", () => {
       const texts = [];
-      for (const lastReason of reasons) {
         for (const metadata of [{ deliveryCancellation: "sender-request" }, { deliveryRejection: "engine-rejected" },
           { deliveryTarget: "not-ingesting" }, { deliveryTimeout: "pre-submit" }, { deliveryAmbiguity: "submitting-fence" }]) {
           const job = humanJob({ lastReason, cancelRequestedBy: "delivery-broker", acknowledgedAt: T, attempts: 3,
@@ -108,12 +110,12 @@ feature("delivery notices a human understands", () => {
           }
           texts.push(deliveryStateNotice(job, "not-sent-group", { jobs: [job, job], ...UTC }));
         }
-      }
       for (const text of texts) {
         for (const word of NOTICE_BANNED_WORDS) expect(text.toLowerCase()).not.toContain(word);
       }
     }],
   });
+  }
 
   unit("a notice for a pane without a bound channel fails so the broker retries it", {
     given: ["a Discord adapter and no channel for the pane", () => recordingDiscord()],
@@ -277,9 +279,9 @@ feature("delivery notices keep one notice per event", () => {
     then: ["one reply, then one edit of that reply", (world) => {
       expect(world.discord.posts).toHaveLength(1);
       expect(world.discord.posts[0]).toMatchObject({ replyTo: "d1" });
-      expect(world.discord.posts[0].text).toContain("⏸ lsrc:3 väntar på att kunna ta emot det här");
+      expect(world.discord.posts[0].text).toContain("⏸️ lsrc:3 har inte fått det här än");
       expect(world.discord.edits).toEqual([{ channelId: "c3", messageId: world.discord.posts[0].id,
-        text: "✓ lsrc:3 fick det 16:07." }]);
+        text: "✅ lsrc:3 fick det här 16:07, efter 13 minuters väntan." }]);
       world.cleanup();
     }],
   });

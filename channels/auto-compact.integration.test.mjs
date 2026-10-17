@@ -275,7 +275,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       return state;
     }],
     then: ["exactly one warning reached Discord despite 5 warn-eligible ticks", (state) => {
-      expect(state.warns).toBe(0);
+      expect(state.warns).toBe(1);
     }],
   });
 
@@ -310,7 +310,9 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     }],
     when: ["four poll ticks", async ({ ac, sends }) => { await ticks(ac, 4); return sends; }],
     then: ["one warning, one notice with Claude's reason, and nothing more", (sends) => {
-      expect(sends).toEqual(["⛔ test:0 väntar på kvot."]);
+      expect(sends).toHaveLength(2);
+      expect(sends[0]).toContain("Auto-compact in");
+      expect(sends[1]).toBe("⚠ Auto-compact of **test:0** did not run: Error during compaction: You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm). No new attempt until the pane has done new work.");
     }],
   });
 
@@ -338,7 +340,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     when: ["warn, refused compact, then one more poll", async ({ ac, state }) => { await ticks(ac, 3); return state; }],
     then: ["the compact runs again without a second warning", (state) => {
       expect(state.runs).toBe(2);
-      expect(state.sends).toHaveLength(0);
+      expect(state.sends).toHaveLength(1);
     }],
   });
 
@@ -374,9 +376,9 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     }],
     then: ["one warning, one postponed notice with the reason, and no further attempt", (state) => {
       expect(state.runs).toBe(1);
-      expect(state.sends).toHaveLength(0);
+      expect(state.sends).toHaveLength(2);
       // The before-delivery rule (channels/pause-compact.mjs) compacts Claude from 80k, not 210k.
-
+      expect(state.sends[1]).toBe("⚠ Auto-compact of **test:0** postponed: delivery-lease-busy. The prompt cache has expired, so nothing runs now; the pane's next message decides whether to compact first.");
     }],
   });
 
@@ -498,7 +500,8 @@ feature("a quiet pane the compact cannot reach is reported before its cache goes
       try { await ticks(ac, 4); return state; } finally { restore(); }
     }],
     then: ["one warning, then one held notice that names the paste, before the cache is cold", (state) => {
-      expect(state.sends).toEqual(["⏸ test:0 väntar på att inmatningen ska bli klar."]);
+      expect(state.sends).toHaveLength(2);
+      expect(state.sends[1]).toMatch(/^⚠ Auto-compact of \*\*test:0\*\* is held: the compact was refused: context-cost:not-idle:pasting\. It has 1000000 context tokens and its prompt cache goes cold at \d\d:\d\d\.$/u);
     }],
   });
 
@@ -511,7 +514,7 @@ feature("a quiet pane the compact cannot reach is reported before its cache goes
     then: ["one held notice and no compact attempt", (state) => {
       expect(state.runs).toBe(0);
       expect(state.sends).toHaveLength(1);
-      expect(state.sends[0]).toMatch(/^⚠ test:0 har inte visat framsteg på 51 min\.$/u);
+      expect(state.sends[0]).toMatch(/is held: its screen shows a running turn, but its journal has been silent for 51 min\./u);
     }],
   });
 
@@ -545,7 +548,7 @@ feature("a held notice counts only once Discord has accepted it", () => {
     then: ["two send attempts, one delivered notice, no compact", (state) => {
       expect(state.attempts).toBe(2);
       expect(state.sends).toHaveLength(1);
-      expect(state.sends[0]).toMatch(/har inte visat framsteg/u);
+      expect(state.sends[0]).toMatch(/is held: its screen shows a running turn/u);
       expect(state.runs).toBe(0);
     }],
   });

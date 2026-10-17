@@ -43,7 +43,7 @@ feature("a message in an unmapped amux channel is answered instead of dropped", 
       expect(fx.replies).toHaveLength(1);
       expect(fx.replies[0].messageId).toBe("1559140232253669447");
       expect(fx.replies[0].payload.content).toContain("#ai-8-qwen");
-      expect(fx.replies[0].payload.content).toContain("Ingen panel läser #ai-8-qwen");
+      expect(fx.replies[0].payload.content).toContain("ingen agent har fått ditt meddelande");
       expect(fx.replies[0].post).toEqual({ kind: "notice" });
       expect(fx.logged).toEqual(["[inbound] #ai-8-qwen (1551820619639824395) has no pane mapping; answered with a notice"]);
     }],

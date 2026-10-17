@@ -285,46 +285,54 @@ export function createAutoCompact({
 
     const notice = formatLimitedAlert({ paneKey, resetAt: limitResetAt, autoResume,
       logCommand: `amux log ${agentName} -p ${paneIdx} --tmux` });
-    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
-    if (channelId && discord) {
-      await discord.send(channelId, notice.discord)
-        .catch((err) => log(`limited warning send failed for ${paneKey}: ${err.message}`));
-    }
+    await postCompactNotice(agentName, paneIdx, paneKey, notice.discord, "limited warning");
     notifyUser(notice.push)
       .catch?.((err) => log(`limited push failed: ${err.message}`));
   }
 
-  async function postCompactFailed(agentName, paneIdx, paneKey, reason) {
+  async function postCompactNotice(agentName, paneIdx, paneKey, text, kind) {
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
     if (!channelId || !discord) return;
-    const text = /limit|quota|kvot/iu.test(reason)
-      ? `⛔ ${paneKey} väntar på kvot.` : `⚠ ${paneKey} kunde inte fortsätta. Kontrollera panelen.`;
     await discord.send(channelId, text)
-      .catch(err => log(`stopped notice failed for ${paneKey}: ${err.message}`));
+      .catch((err) => log(`${kind} notice send failed for ${paneKey}: ${err.message}`));
   }
+
+  const postCompactFailed = (name, idx, key, reason) =>
+    postCompactNotice(name, idx, key, formatCompactFailedMessage(key, reason), "compact-failed");
 
   // lsrc:3 review 2026-10-10: only a notice Discord accepted counts; a rejected one is tried on the next poll.
-  async function postCompactHeld(agentName, paneIdx, paneKey, reason, { lastActivityMs }) {
+  async function postCompactHeld(agentName, paneIdx, paneKey, reason, { lastActivityMs, contextTokens }) {
     if (heldNotices.get(paneKey) === lastActivityMs) return;
-    const quiet = reason.match(/journal has been silent for (\d+) min/u);
-    const text = quiet ? `⚠ ${paneKey} har inte visat framsteg på ${quiet[1]} min.`
-      : /pasting/iu.test(reason) ? `⏸ ${paneKey} väntar på att inmatningen ska bli klar.` : null;
-    if (text) {
-      const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
-      if (!channelId || !discord) return;
-      try { await discord.send(channelId, text); }
-      catch (error) { log(`stopped notice failed for ${paneKey}: ${error.message}`); return; }
+    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
+    if (!channelId || !discord) {
+      heldNotices.set(paneKey, lastActivityMs);
+      log(`${paneKey}: compact held (${reason}); no Discord channel to tell`);
+      return;
     }
-    heldNotices.set(paneKey, lastActivityMs);
-    log(`${paneKey}: compact held (${reason}); details kept in log`);
+    try {
+      await discord.send(channelId, formatCompactHeldMessage(paneKey, reason, contextTokens, lastActivityMs + config.warmCacheMs));
+      heldNotices.set(paneKey, lastActivityMs);
+      log(`${paneKey}: compact held (${reason}); notice sent`);
+    } catch (err) {
+      log(`compact-held notice send failed for ${paneKey}: ${err.message}; retrying on the next poll`);
+    }
   }
 
-  async function postCompactPostponed(agentName, paneIdx, paneKey, reason) {
-    log(`${paneKey}: routine context notice kept in log`);
-  }
+  const postCompactPostponed = (name, idx, key, reason) =>
+    postCompactNotice(name, idx, key, formatCompactPostponedMessage(key, reason), "compact-postponed");
 
   async function postWarning(agentName, paneIdx, paneKey, contextTokens) {
-    log(`${paneKey}: routine context notice kept in log`);
+    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
+    if (!channelId || !discord) {
+      log(`no discord channel for ${paneKey}, warning suppressed (will still fire at grace end)`);
+      return;
+    }
+    try {
+      await discord.send(channelId, formatWarningMessage(paneKey, contextTokens, config.graceMs));
+      log(`warned ${paneKey} at ${contextTokens} tokens`);
+    } catch (err) {
+      log(`warning send failed for ${paneKey}: ${err.message}`);
+    }
   }
 
   async function tick() {

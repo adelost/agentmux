@@ -203,7 +203,7 @@ feature("sendToPane delivery outcome", () => {
         { agent: ctx.agent, configPath: ctx.configPath, deliveryQueue: ctx.deliveryQueue, deliveryWaitMs: 0 },
         "lsrc",
         0,
-        "[from lsrc:4]\n\nreview every image",
+        "[from lsrc:4]\n\nreview every image\nKeep the entire second line visible.",
         { mirrorDispatch: (payload) => ctx.mirrors.push(payload) },
       );
       if (ctx.oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
@@ -212,11 +212,12 @@ feature("sendToPane delivery outcome", () => {
       try { unlinkSync(ctx.configPath); } catch {}
       return { result, mirrors: ctx.mirrors };
     }],
-    then: ["one short mirror preserves the full queue message and CLI receipt", ({ result, mirrors }) => {
+    then: ["target gets the brief and sender gets immediate delivery proof", ({ result, mirrors }) => {
       expect(result.delivered).toBe(true);
       expect(result.queueState).toBe("acknowledged");
       expect(mirrors).toEqual([
-        { channelId: "target-channel", content: "lsrc:4 → lsrc:0: review every image", idempotencyKey: "mirror:job-1" },
+        { channelId: "target-channel", content: "[from lsrc:4]\n\nreview every image\nKeep the entire second line visible.", idempotencyKey: "mirror:job-1" },
+        { channelId: "sender-channel", content: "`amux lsrc -p 0 …` → delivered." },
       ]);
     }],
   });
@@ -267,7 +268,8 @@ feature("sendToPane delivery outcome", () => {
         queueState: "delivered_unverified",
       });
       expect(mirrors).toEqual([
-        { channelId: "target-channel", content: "lsrc:4 → lsrc:0: critical review", idempotencyKey: "mirror:job-1" },
+        { channelId: "target-channel", content: "[from lsrc:4]\n\ncritical review", idempotencyKey: "mirror:job-1" },
+        { channelId: "sender-channel", content: "`amux lsrc -p 0 …` → delivery unverified." },
       ]);
     }],
   });

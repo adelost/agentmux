@@ -156,16 +156,16 @@ feature("stop notice for a pane that hit its plan limit", () => {
     when: ["lsrc:1 stops until 03:10 with recovery on", () => formatLimitedAlert({
       paneKey: "lsrc:1", resetAt: new Date(2026, 8, 28, 3, 10).getTime(), autoResume: true, logCommand })],
     then: ["the channel and the phone both get the reset time", ({ discord, push }) => {
-      expect(discord).toBe("⛔ lsrc:1 waits for quota until Sep 28 03:10 and then continues by itself.");
-      expect(push).toBe("⛔ lsrc:1 waits for quota until Sep 28 03:10 and then continues by itself.");
+      expect(discord).toBe("🚫 **lsrc:1 står stilla, kvoten är slut (reset 28 sep 03:10).** amux fortsätter själv i samma session när fönstret är tillbaka. Panelen: `amux log lsrc -p 1 --tmux`");
+      expect(push).toBe("🚫 lsrc:1 står stilla på kvot, reset 28 sep 03:10. amux fortsätter själv.");
     }],
   });
 
-  unit("does not promise an automatic resume when recovery is off", {
+  unit("asks for a nudge when nothing resumes the pane", {
     when: ["a stop without a known reset and recovery off", () => formatLimitedAlert({ paneKey: "ai:4", logCommand })],
     then: ["no invented time and an honest next step", ({ discord, push }) => {
-      expect(discord).toBe("⛔ ai:4 waits for quota.");
-      expect(push).toBe("⛔ ai:4 waits for quota.");
+      expect(discord).toBe("🚫 **ai:4 står stilla, kvoten är slut.** Knuffa igång den när kvoten är tillbaka. Panelen: `amux log lsrc -p 1 --tmux`");
+      expect(push).toBe("🚫 ai:4 står stilla på kvot. Knuffa igång den.");
     }],
   });
 });

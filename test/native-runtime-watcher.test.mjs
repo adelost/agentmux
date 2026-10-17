@@ -5,6 +5,7 @@ import {
   nativeHistoryRows,
 } from "../channels/native-runtime-watcher.mjs";
 
+vi.stubEnv("AMUX_TOOL_LINES_CHANNELS", "*");
 afterAll(() => vi.unstubAllEnvs());
 
 const events = [
@@ -105,7 +106,7 @@ describe("native runtime Discord watcher", () => {
     })]);
   });
 
-  it("mirrors the unchanged answer once without tools or context", async () => {
+  it("mirrors once across repeated polls and appends native context", async () => {
     const stored = {};
     const state = {
       get: vi.fn((key, fallback) => stored[key] ?? fallback),
@@ -145,10 +146,10 @@ describe("native runtime Discord watcher", () => {
     // Drive one pane directly; sharedConfig avoids filesystem config I/O.
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
-    expect(discord.send).toHaveBeenCalledTimes(1);
-    expect(discord.send.mock.calls[0][1]).not.toContain("`Run npm test`");
+    expect(discord.send).toHaveBeenCalledTimes(2);
+    expect(discord.send.mock.calls[0][1]).toContain("`Run npm test`");
     expect(discord.send.mock.calls[0][1]).toContain("CANARY_OK");
-    expect(discord.send.mock.calls[0][1]).not.toContain("context:");
+    expect(discord.send.mock.calls[1][1]).toBe("_opus-4-8 high · context: 61% (122k)_");
   });
 
   it("mirrors an assistant-less native failure exactly once", async () => {
@@ -197,8 +198,7 @@ describe("native runtime Discord watcher", () => {
     expect(discord.send.mock.calls[0][1]).toContain("Behörighet nekad");
   });
 
-  it("the rollback option acknowledges an active turn and mirrors each tool once", async () => {
-    vi.stubEnv("AMUX_TOOL_LINES_CHANNELS", "*");
+  it("acknowledges an active turn and mirrors each new tool start once", async () => {
     const stored = {};
     const state = {
       get: (key, fallback) => stored[key] ?? fallback,
@@ -545,7 +545,6 @@ describe("native runtime Discord watcher", () => {
     expect(discord.send).toHaveBeenCalledTimes(1);
   });
 });
-
 
 describe("concise native progress", () => {
   it("edits one work row across tools and deletes it before the final answer", async () => {
