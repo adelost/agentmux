@@ -240,7 +240,7 @@ export async function readQuotaSnapshot({
       collectClaudeAccount(members, options, readers, now, identityOf))),
     collectAll("kimi"),
   ]);
-  const accounts = withAccountEntries([...codexAccounts, ...claudeAccounts, ...kimiAccounts], entries.entries);
+  const accounts = withAccountEntries([...codexAccounts, ...claudeAccounts, ...kimiAccounts], entries.entries, now());
   return {
     schemaVersion: 2,
     generatedAt: new Date(now()).toISOString(),

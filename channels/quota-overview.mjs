@@ -61,22 +61,32 @@ function accountFact(engine, account, shown, context) {
     blockedBy5h: fiveHour?.usedPercent >= 100 && Date.parse(fiveHour.resetsAt) > context.now ? fiveHour : null };
 }
 
+/** WHAT: Phrases the free resets left and the day the first of them ends. WHY: Keeps a reset from ending unused. */
+function freeResetsText(left, [first] = []) {
+  const count = `${left} free reset${left === 1 ? "" : "s"}`;
+  if (!left || !first) return count;
+  const end = new Date(first);
+  return `${count}, ${left === 1 ? "" : "1st "}ends ${MONTHS[end.getMonth()]} ${end.getDate()}`;
+}
+
 /** WHAT: Phrases the renewal date and free resets the login's entry holds, or nothing. WHY: Keeps a renewal from being forgotten. */
-function subscriptionLine({ renewsOn, freeResetsLeft } = {}) {
+function subscriptionLines({ renewsOn, freeResetsLeft, freeResetsExpire } = {}) {
   const day = renewsOn ? new Date(`${renewsOn}T12:00:00Z`) : null;
   const parts = [...(day ? [`renews ${MONTHS[day.getUTCMonth()]} ${day.getUTCDate()}`] : []),
-    ...(Number.isInteger(freeResetsLeft) ? [`${freeResetsLeft} free reset${freeResetsLeft === 1 ? "" : "s"}`] : [])];
-  return parts.length ? [`  ${parts.join(" · ")}`] : [];
+    ...(Number.isInteger(freeResetsLeft) ? [freeResetsText(freeResetsLeft, freeResetsExpire)] : [])];
+  const line = `  ${parts.join(" · ")}`;
+  // lsrc:0 2026-10-17: what does not fit 32 characters gets its own short line.
+  return !parts.length ? [] : line.length <= 32 ? [line] : parts.map(part => `  ${part}`);
 }
 
 /** WHAT: Phrases one account's panes and week, its blocking five-hour window and its subscription. WHY: The week is what he plans by. */
 function linesOf(fact, width, now) {
   const head = `${fact.name.padEnd(width)} ${String(fact.account.inUse?.length || 0).padStart(5)}`;
-  if (!fact.week) return [`${head}  unreadable`, ...subscriptionLine(fact.account.subscription)];
+  if (!fact.week) return [`${head}  unreadable`, ...subscriptionLines(fact.account.subscription)];
   const left = Math.max(0, Math.min(100, Math.round(100 - fact.week.usedPercent)));
   return [`${head}  ${`${left}%`.padStart(4)}  ${dayAndClock(fact.week.resetsAt)}`,
     ...(fact.blockedBy5h ? [`    5h 0% until ${untilClock(fact.blockedBy5h.resetsAt, now)}`] : []),
-    ...subscriptionLine(fact.account.subscription)];
+    ...subscriptionLines(fact.account.subscription)];
 }
 
 /** WHAT: Finds the engine's other account with the most room that nothing stops now. WHY: A switch is only advice when it helps. */

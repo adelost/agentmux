@@ -1,6 +1,7 @@
 // The names the human reads for subscription accounts.
 // Mattias 2026-10-17 13:04Z: "Bättre att kalla demd för claude wetterlind eller Claude W och Claude A.. tror faktist jag
 // föredrar det egentlige... Claude W och Claude A.. och Codex A och Codex W ... överallt .. konsekvent.. gärna.."
+import { subscriptionAt } from "./quota-profiles.mjs";
 
 const ENGINE_NAMES = Object.freeze({ claude: "Claude", codex: "Codex", kimi: "Kimi" });
 
@@ -25,16 +26,16 @@ export function accountName(account, accounts = [account]) {
 const LOGGED_OUT = new Set(["login_expired", "credentials_expired", "credentials_unavailable", "login_required"]);
 
 /**
- * WHAT: Returns each account with its name and its login's subscription entry, also when its reading failed.
+ * WHAT: Returns each account with its name and its login's subscription now, also when its reading failed.
  * WHY: Keeps the box, amux quota and the stats board on one name and one renewal date per login.
  */
-export function withAccountEntries(accounts, entries = new Map()) {
+export function withAccountEntries(accounts, entries = new Map(), now = Date.now()) {
   // A logged-out login is no reason to spell out a live login that shares its initial.
   const peers = accounts.filter((account) => account.ok || !LOGGED_OUT.has(account.error));
   return accounts.map((account) => {
     const login = loginOfEmail(account.account?.email);
     const entry = login ? entries.get(`${account.provider}:${login}`) : null;
     return { ...account, name: entry?.name || accountName(account, peers),
-      ...(entry?.subscription ? { subscription: entry.subscription } : {}) };
+      ...(entry?.subscription ? { subscription: subscriptionAt(entry.subscription, now) } : {}) };
   });
 }

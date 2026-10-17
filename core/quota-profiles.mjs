@@ -141,13 +141,19 @@ const LOGIN_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/iu;
 const ACCOUNT_KEY = /^(?:codex|claude|kimi):[a-z0-9][a-z0-9._-]{0,63}$/u;
 const isDay = (value) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value)
   && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
+// The usage page gives each reset's end with its offset: "Expires Oct 29, 8:24 PM GMT+1".
+const isMoment = (value) => typeof value === "string"
+  && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})$/u.test(value) && Number.isFinite(Date.parse(value));
 
 // Mattias 2026-10-17: the renewal date and the free resets left, read by hand from the billing and usage pages.
 // The names are the ones stats.v1d.io reads (api:0, 2026-10-17), so the push forwards them unchanged.
+// freeResetsExpire: lsrc:0 the same day, when each reset ends, so the box can show the first.
 const SUBSCRIPTION_FIELDS = Object.freeze({
   renewsOn: { valid: isDay, need: "YYYY-MM-DD" },
   freeResetsLeft: { valid: (value) => Number.isInteger(value) && value >= 0, need: "a whole number" },
   freeResetsReadOn: { valid: isDay, need: "YYYY-MM-DD" },
+  freeResetsExpire: { valid: (value) => Array.isArray(value) && value.length > 0 && value.every(isMoment),
+    need: "a list of times like 2026-10-29T20:24+01:00" },
 });
 
 /** WHAT: Checks one login's subscription fields. WHY: Keeps a free-reset count from standing without the day it was read. */
@@ -167,7 +173,23 @@ function subscriptionOf(key, value, problems) {
     delete kept.freeResetsLeft;
     delete kept.freeResetsReadOn;
   }
+  if (kept.freeResetsExpire && kept.freeResetsLeft === undefined) {
+    problems.push(`${key}: subscription.freeResetsExpire goes with freeResetsLeft`);
+    delete kept.freeResetsExpire;
+  }
   return Object.keys(kept).length ? kept : null;
+}
+
+/**
+ * WHAT: Returns the subscription at a time, without the free resets that ended before it.
+ * WHY: Keeps an expired reset from being counted or shown after the day its page was read.
+ */
+export function subscriptionAt(subscription, now) {
+  if (!subscription?.freeResetsExpire) return subscription;
+  const { freeResetsExpire: expire, ...rest } = subscription;
+  const ahead = expire.filter((at) => Date.parse(at) > now).sort((a, b) => Date.parse(a) - Date.parse(b));
+  return { ...rest, freeResetsLeft: Math.max(0, rest.freeResetsLeft - (expire.length - ahead.length)),
+    ...(ahead.length ? { freeResetsExpire: ahead } : {}) };
 }
 
 /**

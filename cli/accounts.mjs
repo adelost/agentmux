@@ -25,7 +25,8 @@ const usage = `Usage:
 Login dirs: ~/.config/agent/account-profiles/claude/<login>, one account per dir.
 ~/.agentmux/account-profiles.json version 2 holds one entry per login, filled in by hand from the billing pages:
   "accounts": {"claude:<login>": {"name": "Claude W", "subscription": {"renewsOn": "YYYY-MM-DD",
-  "freeResetsLeft": 0, "freeResetsReadOn": "YYYY-MM-DD"}}}, and "slots" only for a slot's non-default home.
+  "freeResetsLeft": 1, "freeResetsReadOn": "YYYY-MM-DD", "freeResetsExpire": ["YYYY-MM-DDTHH:MM+01:00"]}}},
+  and "slots" only for a slot's non-default home. A free reset stops counting when its time has passed.
 rotate --dry prints the plan per pane and changes nothing; Discord: /byt <login>.
 Codex switch compacts running panes first and preserves model/effort and the exact session when portable.
 Busy panes keep a durable request for the existing watcher; dormant panes are selected for their next start, never woken.

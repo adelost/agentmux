@@ -117,4 +117,24 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
       expect(lines.filter(line => [...line].length > 32)).toEqual([]);
     }],
   });
+  // lsrc:0 2026-10-17: Codex W's two resets end Oct 29 20:24 and Nov 7 00:48 (GMT+1); the box shows the first.
+  unit("the day the first free reset ends joins its count, and a renewal that no longer fits gets its own line", {
+    when: ["Codex W has two resets that end, and Codex A a renewal beside one", () => render([
+      { ...codex("1", "adelost", 8, "2026-10-24T11:35:12Z", panes("lsrc", 12)), subscription: { renewsOn: "2026-11-03",
+        freeResetsLeft: 1, freeResetsReadOn: "2026-10-17", freeResetsExpire: ["2026-11-07T00:48+01:00"] } },
+      { ...codex("2", "mattias.wetterlind", 100, "2026-10-22T09:28:56Z"), subscription: { freeResetsLeft: 2,
+        freeResetsReadOn: "2026-10-17", freeResetsExpire: ["2026-10-29T20:24+01:00", "2026-11-07T00:48+01:00"] } },
+    ])],
+    then: ["each line fits a phone", lines => {
+      expect(lines.slice(1, -1)).toEqual([
+        "        panes  week  reset",
+        "Codex A    12   92%  Sat 13:35",
+        "  renews Nov 3",
+        "  1 free reset, ends Nov 7",
+        "Codex W     0    0%  Thu 11:29",
+        "  2 free resets, 1st ends Oct 29",
+      ]);
+      expect(lines.filter(line => [...line].length > 32)).toEqual([]);
+    }],
+  });
 });

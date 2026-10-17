@@ -188,7 +188,9 @@ feature("account-profiles.json version 2", () => {
     version: 2,
     accounts: {
       "claude:adelost": { name: "Claude A", subscription: { renewsOn: "2026-11-12", freeResetsLeft: 0, freeResetsReadOn: "2026-10-17" } },
-      "codex:wetterlind": { subscription: { renewsOn: "2026-02-30", freeResetsLeft: 2 } },
+      "codex:adelost": { subscription: { freeResetsLeft: 1, freeResetsReadOn: "2026-10-17", freeResetsExpire: ["2026-10-29T20:24+01:00"] } },
+      "codex:wetterlind": { subscription: { renewsOn: "2026-02-30", freeResetsLeft: 2, freeResetsExpire: ["Oct 29"] } },
+      "claude:wetterlind": { subscription: { freeResetsExpire: ["2026-11-07T00:48+01:00"] } },
       "slot:1": { name: "not a login" },
     },
     slots: { "claude:2": { home: "/profiles/claude/adelost" } },
@@ -205,10 +207,15 @@ feature("account-profiles.json version 2", () => {
     then: ["the valid entry is kept whole and the rest is reported", ({ entries, problems }) => {
       expect(entries.get("claude:adelost")).toEqual({ name: "Claude A",
         subscription: { renewsOn: "2026-11-12", freeResetsLeft: 0, freeResetsReadOn: "2026-10-17" } });
+      expect(entries.get("codex:adelost")).toEqual({
+        subscription: { freeResetsLeft: 1, freeResetsReadOn: "2026-10-17", freeResetsExpire: ["2026-10-29T20:24+01:00"] } });
       expect(entries.get("codex:wetterlind")).toEqual({});
+      expect(entries.get("claude:wetterlind")).toEqual({});
       expect(problems).toEqual([
         "codex:wetterlind: subscription.renewsOn needs YYYY-MM-DD",
+        "codex:wetterlind: subscription.freeResetsExpire needs a list of times like 2026-10-29T20:24+01:00",
         "codex:wetterlind: subscription.freeResetsLeft and freeResetsReadOn go together",
+        "claude:wetterlind: subscription.freeResetsExpire goes with freeResetsLeft",
         "slot:1: not an engine:login entry",
       ]);
     }],

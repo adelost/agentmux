@@ -516,8 +516,9 @@ The quota box is a table of every account, named Claude A, Claude W, Codex A and
 Codex W (by the login's entry, else the login's initial): how many panes run on
 it, the percent of the week left and the weekly reset. A five-hour window
 appears under its account only while it blocks it, and a second short line
-gives the subscription's renewal date and free resets left when the login's
-entry has them. At most one action follows: the switch command, when a used-up
+gives the subscription's renewal date, the free resets left and the day the
+first of them ends when the login's entry has them; what does not fit 32
+characters gets a line of its own. At most one action follows: the switch command, when a used-up
 window comes back, or a free reset. A week that lasts until its reset at the
 last day's pace gets no advice. The box is the warning (80/90/100 percent), the
 `/quota` reply and the top of `amux quota`. Bridge notices and command replies
@@ -527,9 +528,11 @@ are in English, without emoji.
 `accounts` (`"claude:wetterlind": {"name": "Claude W", "subscription":
 {"renewsOn": "2026-11-05", "freeResetsLeft": 0, "freeResetsReadOn":
 "2026-10-17"}}`), filled in by hand from the billing and usage pages, and
-`slots` only for a slot's non-default home. `amux quota --json` puts `name` and
-`subscription` on every account, also when its reading failed. Version 1 files
-still give their slot homes.
+`slots` only for a slot's non-default home. `freeResetsExpire` optionally lists
+when each free reset ends, as the usage page gives it
+(`["2026-10-29T20:24+01:00"]`); a reset stops counting when its time has
+passed. `amux quota --json` puts `name` and `subscription` on every account,
+also when its reading failed. Version 1 files still give their slot homes.
 
 Set `AMUX_TOOL_LINES_CHANNELS` in the bridge environment to a comma-separated
 list of pane addresses or Discord channel IDs to restore the old tool rows in

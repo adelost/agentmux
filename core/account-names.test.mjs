@@ -41,4 +41,18 @@ feature("each account carries its login's entry", () => {
         ["Claude A", null], ["Claude W", { renewsOn: "2026-11-05" }], ["Claude attrois", null]]);
     }],
   });
+  // lsrc:0 2026-10-17: Codex W's page, read that day, gave two resets that end Oct 29 20:24 and Nov 7 00:48 (GMT+1).
+  unit("a free reset counts until it ends", {
+    when: ["reading Codex W's entry on Oct 17, Oct 30 and Nov 8", () => {
+      const entries = new Map([["codex:wetterlind", { subscription: { freeResetsLeft: 2, freeResetsReadOn: "2026-10-17",
+        freeResetsExpire: ["2026-11-07T00:48+01:00", "2026-10-29T20:24+01:00"] } }]]);
+      return ["2026-10-17T15:00:00Z", "2026-10-30T08:00:00Z", "2026-11-08T08:00:00Z"].map((at) =>
+        withAccountEntries([account("codex", "mattias.wetterlind@example.test", "2")], entries, Date.parse(at))[0].subscription);
+    }],
+    then: ["two in the order they end, then the Nov 7 one, then none", (subscriptions) => expect(subscriptions).toEqual([
+      { freeResetsLeft: 2, freeResetsReadOn: "2026-10-17", freeResetsExpire: ["2026-10-29T20:24+01:00", "2026-11-07T00:48+01:00"] },
+      { freeResetsLeft: 1, freeResetsReadOn: "2026-10-17", freeResetsExpire: ["2026-11-07T00:48+01:00"] },
+      { freeResetsLeft: 0, freeResetsReadOn: "2026-10-17" },
+    ])],
+  });
 });
