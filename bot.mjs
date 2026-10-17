@@ -7,7 +7,7 @@ import { createInboundReconciler, formatRecoveredNotice } from "./core/inbound-r
 import { resolveConfiguredInboundTarget } from "./core/inbound-target.mjs";
 import { createUnmappedChannelAnswer } from "./core/unmapped-channel.mjs";
 import { FLEET_RESTART_RESULT_KEY, formatFleetRestartResult } from "./core/fleet-restart.mjs";
-import { warnQuotaOnHumanMessage } from "./channels/quota-warning-runtime.mjs";
+import { warnQuotaOnHumanMessage, createQuotaLimitPoll } from "./channels/quota-warning-runtime.mjs";
 
 const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
 const READY_FILE = process.env.READY_FILE || "/tmp/agentmux.ready";
@@ -214,8 +214,10 @@ export function startBot({
   const HEARTBEAT_INTERVAL = 30_000;
   const MAX_FAILURES = 3; // 3 consecutive failures (~90s) before restart
 
+  const pollQuotaLimits = createQuotaLimitPoll({ channels, channelMap: () => channelMap });
   const heartbeat = setInterval(() => {
     if (shuttingDown) return;
+    void pollQuotaLimits();
     const alive = channels.every((ch) => !ch.isAlive || ch.isAlive());
     if (alive) {
       failCount = 0;

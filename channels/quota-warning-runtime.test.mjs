@@ -10,10 +10,10 @@ vi.mock("../core/quota-profiles.mjs", () => ({ quotaAccountCatalog: () => [
 ] }));
 import { readQuotaSnapshot } from "../core/quota-usage.mjs";
 import { createSentNoticeStore } from "./quota-warning.mjs";
-import { createQuotaWarningOnWrite, readWarningSnapshot } from "./quota-warning-runtime.mjs";
+import { createQuotaWarningOnWrite, readWarningSnapshot, readWarningActivity, createQuotaLimitPoll } from "./quota-warning-runtime.mjs";
 
 const due = { accounts: [{ ok: true, provider: "claude", profile: { id: "1" }, account: { email: "a@example.test" },
-  inUse: ["lsrc:0"], limits: [{ kind: "weekly_all", usedPercent: 85, resetsAt: new Date(Date.now() + 86_400_000).toISOString() }] }] };
+  inUse: ["lsrc:0"], activeInUse: ["lsrc:0"], limits: [{ kind: "weekly_all", usedPercent: 85, resetsAt: new Date(Date.now() + 86_400_000).toISOString() }] }] };
 const message = () => ({ send: vi.fn(async () => ({})) });
 function hook(readSnapshot = async () => due, env = {}) {
   const sent = createSentNoticeStore(join(mkdtempSync(join(tmpdir(), "quota-hook-")), "sent.json"));
@@ -34,7 +34,7 @@ feature("the quota warning answers the human message", () => {
     when: ["two messages arrive together", async fx => { await Promise.all([fx.warn(fx.first), fx.warn(fx.second)]); return fx; }],
     then: ["only the first channel gets the notice", fx => {
       expect(fx.first.send).toHaveBeenCalledTimes(1);
-      expect(fx.first.send.mock.calls[0]).toEqual([expect.stringMatching(/^\*\*Weekly quota\*\* · no action needed\n⚠️ \*\*Claude 1\*\* · a@example\.test · \*\*85%\*\* used/u), { kind: "notice" }]);
+      expect(fx.first.send.mock.calls[0]).toEqual([expect.stringMatching(/^⚠️ Claude a: 85 %, slut ca .*1 aktiv panel\.$/u), { kind: "notice" }]);
       expect(fx.second.send).not.toHaveBeenCalled();
     }],
   });
@@ -59,5 +59,54 @@ feature("the quota warning answers the human message", () => {
       expect(fx.readSnapshot).not.toHaveBeenCalled();
       expect(fx.msg.send).not.toHaveBeenCalled();
     }],
+  });
+});
+
+feature("warning activity and background reached-limit routing", () => {
+  unit("working or last-hour work qualifies, an old idle panel does not", {
+    when: ["reading canonical statuses and conversation times", async () => {
+      const now = Date.now();
+      const snapshot = { accounts: [{ ...due.accounts[0], inUse: ["test:0", "test:1", "test:2", "test:3"] }] };
+      return readWarningActivity(snapshot, { now, agents: [{ name: "test", dir: "/test" }],
+        statusFor: async (_name, pane) => pane === 0 ? "working" : "idle",
+        activityFor: (_dir, _engine, pane) => pane === 1 ? now - 3_600_000 : pane === 2 ? now - 3_600_001 : null,
+      });
+    }],
+    then: ["only working and the inclusive one-hour boundary count", snapshot =>
+      expect(snapshot.accounts[0].activeInUse).toEqual(["test:0", "test:1"])],
+  });
+  unit("the installed snapshot path applies activity after actual account ownership", {
+    when: ["a pane is idle despite a live process on the account", () => readWarningSnapshot({
+      readSnapshot: async () => ({ accounts: [{ ...due.accounts[0], activeInUse: undefined }] }),
+      readActivity: async snapshot => ({ ...snapshot, accounts: snapshot.accounts.map(account => ({ ...account, activeInUse: [] })) }),
+    })],
+    then: ["it cannot qualify as active", snapshot => expect(snapshot.accounts[0].activeInUse).toEqual([])],
+  });
+  unit("the background pulse posts a full account without any human write", {
+    when: ["a 95 percent reminder precedes the reached-limit pulse", async () => {
+      let usedPercent = 95;
+      const fx = hook(async () => ({ accounts: [{ ...due.accounts[0], limits: [
+        { ...due.accounts[0].limits[0], usedPercent },
+      ] }] }));
+      await fx.warn(message()); usedPercent = 100;
+      const send = vi.fn(async () => {});
+      const poll = createQuotaLimitPoll({ check: fx.warn, channels: [{ send }],
+        channelMap: () => new Map([["own-channel", { name: "lsrc", pane: 0 }]]) });
+      await poll(); await poll(); return send;
+    }],
+    then: ["the full alert reaches an affected pane's channel once", send => {
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0]).toEqual(["own-channel", expect.stringContaining("100 %, kvoten är slut"), { kind: "notice" }]);
+    }],
+  });
+  unit("a missing channel cannot mark the reached-limit alert as delivered", {
+    when: ["the first pulse lacks a route and a later pulse has one", async () => {
+      const fx = hook(async () => ({ accounts: [{ ...due.accounts[0], limits: [{ ...due.accounts[0].limits[0], usedPercent: 100 }] }] }));
+      let mapped = false; const send = vi.fn(async () => {});
+      const poll = createQuotaLimitPoll({ check: fx.warn, channels: [{ send }],
+        channelMap: () => mapped ? new Map([["own-channel", { name: "lsrc", pane: 0 }]]) : new Map() });
+      await poll(); mapped = true; await poll(); return send;
+    }],
+    then: ["the later valid route still receives the alert", send => expect(send).toHaveBeenCalledTimes(1)],
   });
 });

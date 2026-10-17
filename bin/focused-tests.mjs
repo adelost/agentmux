@@ -23,6 +23,7 @@ const ZERO_TEST_ALLOWLIST = [
 ];
 
 const TEST_ALIASES = {
+  "bot.mjs": ["channels/quota-warning-runtime.test.mjs"],
   "channels/fixtures/quota-warning-20261016.json": ["channels/quota-warning.test.mjs"],
   "agent.mjs": ["core/tui-stall-recovery.test.mjs"],
   "index.mjs": ["core/delivery-notices.test.mjs"],
