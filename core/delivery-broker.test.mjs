@@ -2734,7 +2734,7 @@ feature("single-writer delivery broker", () => {
     then: ["reminders land at 1 h and 3 h, never on every poll", async (_, ctx) => {
       const { broker, advance } = ctx;
       expect(ctx.notices).toHaveLength(1);
-      expect(ctx.notices[0]).toContain("1 h");
+      expect(ctx.notices[0]).toMatch(/^⏸ lsrc:3 väntar på att kunna ta emot/u);
       expect(ctx.notices[0]).toContain("gpt-6-sol");
       advance(60 * 60_000);
       await broker.kickTarget("lsrc", 3);
@@ -2742,7 +2742,7 @@ feature("single-writer delivery broker", () => {
       advance(61 * 60_000);
       await broker.kickTarget("lsrc", 3);
       expect(ctx.notices).toHaveLength(2);
-      expect(ctx.notices[1]).toContain("3 h");
+      expect(ctx.notices[1]).toContain("gpt-6-sol");
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
