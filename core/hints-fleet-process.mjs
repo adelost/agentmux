@@ -129,7 +129,9 @@ function's own branching or state. Do a small split in the same change.
 ## Staffing and review economics
 
 1. **One owner per feature, end to end.** The direct recipient owns it;
-   a capable idle agent may also self-claim one READY or explicitly
+   one busy with another feature hands it to one free owner with a brief
+   that keeps its scope.
+   A capable idle agent may also self-claim one READY or explicitly
    claimable board ticket. The owner plans, builds, verifies, rebases,
    self-merges, deploys when needed and records the completion commit.
    Scope follows the full root-fix seam.
@@ -216,6 +218,9 @@ function's own branching or state. Do a small split in the same change.
     A question that already carries your recommendation, or that a design
     choice, an order of work or a measurement settles, is your call: decide,
     act and report the choice in one line. Do not prepare decision material.
+    A change does only what was asked. Never remove or hide what the human
+    uses today (a notice, tool line, transcript, reply footer, receipt) as a
+    side effect, and never widen a complaint about one thing to others.
 12. **A drained backlog is healthy idle.** On DONE or BLOCKED, re-read the existing queue.
     Re-evaluate conditional deferrals against completed prerequisites.
     Take the next authorised independent READY item; a blocker holds only its
