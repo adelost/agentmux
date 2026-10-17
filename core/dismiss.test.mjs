@@ -227,3 +227,13 @@ feature("Codex 0.163 mixed startup overlay", () => {
     then: ["none receives keys", prompts => expect(prompts).toEqual([null, null, null, null, null, null])],
   });
 });
+
+feature("existing Codex composer placeholders", () => {
+  component("the older live overlay still accepts a known empty placeholder", {
+    when: ["the composer shows the existing follow-up hint", () => findBlockingPrompt(
+      pausedGoalOverlay.replace("› Ask Codex to do anything", "› Ask a follow-up question"),
+    )],
+    then: ["Leave paused is still the safe selection", prompt =>
+      expect(prompt).toMatchObject({ name: "codex-paused-goal", keys: "Down Enter" })],
+  });
+});

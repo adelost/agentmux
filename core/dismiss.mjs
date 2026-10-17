@@ -1,3 +1,5 @@
+import { codexComposerText } from "./codex-tui.mjs";
+
 // Blocking prompt recognition and dismissal for Claude/Codex panes.
 // These dialogs occasionally appear and block further input until handled:
 //   - "Resume from summary? Press Enter to confirm"
@@ -45,7 +47,7 @@ function activeWorkspaceTrustCursor(text) {
 // status row below a composer shared with option 2 (0.163).
 const OVERLAY_HINT = /\benter select\s*·\s*esc back\b/iu;
 const OVERLAY_MAX_LINES_BELOW = 4;
-const emptyCodexComposer = line => /^[›❯]\s*Ask Codex to do anything\s*$/u.test(line.trim());
+const emptyCodexComposer = line => codexComposerText(line) === "";
 const codexStatusLine = line => /^(?:GPT-[\w.-]+(?:\s|$)|\? for shortcuts\b)/iu.test(line.trim());
 // The overlay shows the whole goal text, which ran to eight lines on lsrc:3,
 // so its header can sit far above the options.
@@ -61,8 +63,8 @@ function liveCodexMenuLines(text, footer) {
   if (/^enter select/iu.test(lines[hint].trim())) {
     if (!below.length || !emptyCodexComposer(below[0]) || !below.slice(1).every(codexStatusLine)) return null;
   } else {
-    const sharedComposer = /^[›❯]\s+Ask Codex to do an(?:ything)?\s+[›❯]?\s*2\.\s/u;
-    if (!codexStatusLine(lines[hint]) || !sharedComposer.test(lines[hint - 1]?.trim() || "")
+    const sharedComposer = lines[hint - 1]?.match(/^(.*?)\s+[›❯]?\s*2\.\s/u)?.[1];
+    if (!codexStatusLine(lines[hint]) || !sharedComposer || !emptyCodexComposer(sharedComposer)
         || !below.every(line => /^\? for shortcuts\b/u.test(line.trim()))) return null;
   }
   return lines.slice(0, hint);
