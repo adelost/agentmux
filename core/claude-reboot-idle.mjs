@@ -7,6 +7,7 @@ import { claudePasteTransportState } from "./claude-composer-guards.mjs";
 import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
 import { parseJsonlWindow } from "./jsonl-reader.mjs";
 import { parseBootMs } from "./revive.mjs";
+import { userPromptText } from "./claude-turn-lifecycle.mjs";
 
 function interruptedJournal(dir, procRoot) {
   const bootMs = parseBootMs(readFileSync(join(procRoot, "stat"), "utf8"));
@@ -14,7 +15,10 @@ function interruptedJournal(dir, procRoot) {
   const identity = latestClaudeSessionIdentity(dir);
   if (!identity) return null;
   const stat = statSync(identity.path);
-  const activity = parseJsonlWindow(identity.path).filter(event =>
+  const events = parseJsonlWindow(identity.path);
+  const turn = events.findLastIndex(event => userPromptText(event) !== null);
+  if (turn < 0) return null;
+  const activity = events.slice(turn).filter(event =>
     ["user", "assistant", "progress", "queue-operation"].includes(event.type));
   if (!activity.length || activity.some(event => {
     const at = Date.parse(event.timestamp);

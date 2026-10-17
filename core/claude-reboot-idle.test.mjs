@@ -11,7 +11,7 @@ const roots = [];
 afterEach(() => { vi.unstubAllEnvs(); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })); });
 const idle = "Claude Code\n────────────────────\n❯ \n────────────────────\n  bypass permissions on";
 
-function fixture({ screen = idle, afterBoot = false, onCapture = () => {} } = {}) {
+function fixture({ screen = idle, afterBoot = false, priorResume = false, onCapture = () => {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-reboot-idle-")); roots.push(root);
   vi.stubEnv("HOME", root);
   const dir = join(root, "project"), pane = join(dir, ".agents/1"), proc = join(root, "proc");
@@ -21,6 +21,8 @@ function fixture({ screen = idle, afterBoot = false, onCapture = () => {} } = {}
   const path = join(journalDir, "6b153c93-0f4d-4456-ba1a-52aecf8a8173.jsonl");
   const timestamp = afterBoot ? "2026-10-17T18:10:00Z" : "2026-10-17T17:18:09Z";
   const append = row => appendFileSync(path, JSON.stringify({ timestamp, ...row }) + "\n");
+  if (priorResume) append({ type: "assistant", timestamp: "2026-10-17T19:19:05Z",
+    message: { model: "<synthetic>", stop_reason: "stop_sequence", content: [{ type: "text", text: "No response requested." }] } });
   append({ type: "user", message: { content: "Continue the movement work" } });
   append({ type: "assistant", message: { stop_reason: "tool_use", content: [{ type: "tool_use", id: "t", name: "Bash" }] } });
   append({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t", content: "done" }] } });
@@ -45,6 +47,11 @@ describe("delivery and compact activity after a host reboot", () => {
     expect(await agent.isBusy("fixture", 1)).toBe(false);
     expect(await agent.promptTransportState("fixture", 1, "")).toMatchObject({ state: "empty-idle", busy: false });
     expect(calls.some(command => /send-keys|respawn|kill-/u.test(command))).toBe(false);
+  });
+
+  it("ignores a later-dated resume receipt before the current interrupted turn", async () => {
+    // Given Claude's resumed journal order, only the current turn can keep the activity hold.
+    expect(await fixture({ priorResume: true }).agent.isBusy("fixture", 1)).toBe(false);
   });
 
   it.each([
