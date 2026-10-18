@@ -62,6 +62,8 @@ const TEST_ALIASES = {
   "lib.mjs": ["test/attachments.test.mjs"],
   "channels/drift-guard.mjs": ["core/reminder-state.test.mjs", "test/jsonl-reader.test.mjs"],
   "channels/auto-compact.mjs": ["channels/auto-compact.integration.test.mjs"],
+  "core/codex-process-launch.mjs": ["core/agent-launch-command.test.mjs"],
+  "cli/codex-account-compact.mjs": ["cli/codex-account-switch.test.mjs"],
   "channels/jsonl-watcher.mjs": ["test/jsonl-watcher.test.mjs"],
   "channels/native-runtime-watcher.mjs": ["test/native-runtime-watcher.test.mjs"],
   "core/mirror-copy.mjs": ["cli/tmux.test.mjs", "cli/composer-control.test.mjs"],

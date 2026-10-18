@@ -20,8 +20,8 @@ function prefixMatches(older, newer) {
 }
 
 /** WHAT: Stores one quiescent pane-owned session on another account. WHY: Keeps account recovery from losing history or overwriting a divergent target session. */
-export function transferCodexSession(dir, current, target, { discover = latestCodexSessionIdentity, writers = liveRolloutWriters } = {}) {
-  const source = discover(dir, { sessionDirs: [join(current.home, "sessions")] });
+export function transferCodexSession(dir, current, target, { discover = latestCodexSessionIdentity, writers = liveRolloutWriters, sessionId = null } = {}) {
+  const source = discover(dir, { sessionDirs: [join(current.home, "sessions")], sessionId });
   if (!source) return { ok: false, reason: "no exact current session" };
   const fragment = relative(join(current.home, "sessions"), source.path);
   if (fragment.startsWith("..") || resolve(current.home, "sessions", fragment) !== resolve(source.path)) return { ok: false, reason: "session is outside its account home" };

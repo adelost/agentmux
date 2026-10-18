@@ -562,7 +562,17 @@ Preview or request a pane, project or configured-fleet switch:
 amux accounts switch codex:2 claw -p 5 --dry
 amux accounts switch codex:2 claw -p 5
 amux accounts switch codex:2 --all
+amux accounts switch codex:2 --all --json --request-id dashboard-request-uuid
+amux accounts switch-status --json --request-id dashboard-request-uuid
 ```
+
+JSON switches atomically register the complete pane scope before doing account work.
+The same request id returns its existing receipt; `switch-status` only reads it,
+including after a bridge or dashboard restart. Per-pane phase, reason, result kind
+and totals distinguish pending, blocked, verified switches and dormant selections.
+A divergent dormant history keeps both journals and saves a labeled handover for
+a fresh session on the next real start, shown as `mode: fresh-next-start`.
+
 
 Running panes compact first under the existing delivery and native-receipt
 guards, then preserve their model, effort and exact portable session. A

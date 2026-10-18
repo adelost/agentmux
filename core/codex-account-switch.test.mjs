@@ -84,6 +84,17 @@ feature("manual and automatic Codex account transitions share continuity verific
     then: ["the exact new identity verifies instead of rolling back a correct fresh session", result =>
       expect(result).toMatchObject({ kind: "switched", fresh: true })],
   });
+  component("an empty fresh session verifies before its first rollout exists", {
+    when: ["native status proves a new UUID and directory but the old journal remains newest", async () => {
+      const fx = setup(), status = fx.options.statusDriver;
+      fx.options.continuity = null;
+      fx.options.freshHandover = { ok: true, path: "/private/handover.json", text: "Read the saved task." };
+      fx.options.identityFor = () => ({ sessionId: "older-session", path: "/two/old.jsonl" });
+      fx.options.statusDriver = async () => { const result = await status(); return { ...result, status: { ...result.status, session: fx.calls.at(-1)?.profile.id === "2" ? "new-session" : "exact" } }; };
+      return switchCodexAccount(fx.options);
+    }],
+    then: ["the fresh session continues without a paid probe or false rollback", result => expect(result).toMatchObject({ kind: "switched", fresh: true, sessionId: "new-session", path: null })],
+  });
   for (const wrongModel of [false, true]) {
     component(`fresh handover keeps model and rollback, wrong model=${wrongModel}`, {
       when: ["the source session cannot be transferred", async () => {

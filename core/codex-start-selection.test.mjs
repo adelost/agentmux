@@ -33,3 +33,15 @@ feature("a pane never resumes the session it replaced", () => {
     }],
   });
 });
+
+feature("dormant account handover starts on the next real request", () => {
+  unit("an old target session cannot replace the saved fresh handover", {
+    when: ["selecting startup with a divergent target history and a stale configured resume", () => selectCodexStart({
+      dir: "/pane", profile: { home: "/two" }, owner: "api:4@2", configuredSessionId: "older",
+      remembered: { pane: "api:4@2", sessionId: null, supersededSessionId: "older", status: "awaiting-first-rollout", deferredHandover: { createdAt: 1000 } },
+      discover: (_dir, { accept }) => accept({ id: "oldz", timestamp: new Date(500).toISOString() }) ? { sessionId: "oldz", path: "/old.jsonl" } : null,
+      writers: () => [],
+    })],
+    then: ["the first actual start is fresh and both old histories remain unused", result => expect(result.decision).toMatchObject({ action: "fresh", sessionId: null })],
+  });
+});

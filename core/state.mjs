@@ -175,5 +175,5 @@ export const createState = (path, {
 
   const all = () => { maybeReload(); return { ...data }; };
 
-  return { get, set, updateKey, toggle, remove, all };
+  return { get, set, updateKey, updateAll: update, toggle, remove, all };
 };

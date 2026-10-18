@@ -61,14 +61,16 @@ export async function switchCodexAccount({ agent, state, name, pane, current, ta
     if (continuity && verified.status.session !== continuity.sessionId) throw new Error("account switch lost the exact session");
     if (continuity && statusDirectory(verified.status) !== beforeDirectory) throw new Error("account switch changed the working directory");
     const freshIdentity = freshHandover && identityFor(beforeDirectory, { sessionDirs: [join(target.home, "sessions")] });
-    if (freshHandover && (!freshIdentity || freshIdentity.sessionId !== verified.status.session
+    // Empty native sessions have no rollout until their first user turn. /status
+    // already proves the new UUID, cwd, account and requested model without a paid probe.
+    if (freshHandover && (!verified.status.session
         || verified.status.session === beforeStatus.status.session || statusDirectory(verified.status) !== beforeDirectory)) {
       throw new Error("fresh account session identity/directory did not verify");
     }
     const accountEmail = String(verified.status.account || "").match(/[^\s()]+@[^\s()]+/u)?.[0];
     if (expectedEmail && accountEmail !== expectedEmail) throw new Error("the new account identity could not be verified");
     if (verified.status.model?.id) setCodexModelOverride(state, name, pane, verified.status.model.id, verified.status.model.effort);
-    return { kind: "switched", status: verified, ...(freshHandover ? { fresh: true, path: freshIdentity.path,
+    return { kind: "switched", status: verified, ...(freshHandover ? { fresh: true, sessionId: verified.status.session, path: freshIdentity?.sessionId === verified.status.session ? freshIdentity.path : null,
       text: freshHandover.text, handoverPath: freshHandover.path } : {}) };
   } catch (error) {
     let rollbackError = null;

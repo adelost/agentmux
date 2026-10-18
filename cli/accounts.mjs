@@ -11,6 +11,7 @@ import { readQuotaSnapshotWithPanes } from "../core/quota-in-use.mjs";
 import { prepareRuntimeProfile, resolveClaudeAccountTarget } from "../core/runtime-account-profiles.mjs";
 import { readClaudeProfileIdentity } from "../core/claude-account-quota.mjs";
 import { rotateClaudeFleet } from "./account-rotation.mjs";
+import { switchStatusCommand } from "./codex-account-status.mjs";
 import { switchCodexAccounts } from "./codex-account-switch.mjs";
 
 const usage = `Usage:
@@ -19,7 +20,8 @@ const usage = `Usage:
   amux accounts login claude:<1|2|login|email>   a new login name gets its own dir
   amux accounts rotate claude:<1|2|login|email> [--dry]
   amux accounts switch codex:<1|2> PROJECT [-p N] [--dry] [--continue-file PATH]
-  amux accounts switch codex:<1|2> --all [--dry]
+  amux accounts switch codex:<1|2> --all [--dry] [--json] [--request-id ID]
+  amux accounts switch-status [--json] [--request-id ID]
   amux quota [--all] [--json]
 
 Login dirs: ~/.config/agent/account-profiles/claude/<login>, one account per dir.
@@ -88,9 +90,13 @@ export async function cmdAccounts(args, ctxOrOptions = null, suppliedOptions = {
     if (provider !== "claude" || !id) throw new Error(usage);
     return rotate(ctx, id, { dry: args[2] === "--dry" });
   }
+  if (args[0] === "switch-status") {
+    if (!ctx) throw new Error(usage);
+    return switchStatusCommand(ctx, args.slice(1), { output });
+  }
   if (args[0] === "switch") {
     if (!ctx) throw new Error(usage);
-    return switchCodex(ctx, args.slice(1));
+    return options.output ? switchCodex(ctx, args.slice(1), { output }) : switchCodex(ctx, args.slice(1));
   }
   if (args[0] !== "login" || args.length !== 2) throw new Error(usage);
   const selected = loginProfile(catalog, args[1], { identityOf, newLogin });

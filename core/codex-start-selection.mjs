@@ -10,12 +10,13 @@ export const startedAfterSession = (replacedSessionId) => (meta) =>
 /** WHAT: Returns an exact resume or an explicitly requested fresh session. WHY: Keeps ordinary wakes from erasing context or reviving a forbidden model. */
 export function selectCodexStart({ dir, profile, owner, remembered, launch, configuredSessionId,
   discover = latestCodexSessionIdentity, writers = liveRolloutWriters }) {
-  const requestedSessionId = launch?.resumeSessionId || configuredSessionId || null;
+  const requestedSessionId = launch?.resumeSessionId || (!remembered?.deferredHandover ? configuredSessionId : null) || null;
   // A replaced session is never resumed again, even before its replacement has
   // written a rollout; only an explicitly requested session may reopen it.
   const replacedSessionId = requestedSessionId ? null : remembered?.supersededSessionId || null;
   const discovered = discover(dir, { sessionDirs: [join(profile.home, "sessions")],
-    accept: replacedSessionId ? startedAfterSession(replacedSessionId) : null });
+    accept: replacedSessionId ? meta => startedAfterSession(replacedSessionId)(meta)
+      && (!remembered?.deferredHandover?.createdAt || Date.parse(meta.timestamp) >= remembered.deferredHandover.createdAt) : null });
   if (launch?.newSession === true) {
     if (discovered && writers(discovered.path).length) throw new Error("fresh Codex session blocked: the old rollout still has a live writer");
     return { decision: { action: "fresh", pane: owner, sessionId: null, reason: "explicit-new-session" },

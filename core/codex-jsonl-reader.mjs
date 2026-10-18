@@ -540,12 +540,12 @@ export function latestCodexSessionFor(paneDir, options) {
 }
 
 /**
- * Exact pane-owned Codex session identity, or null when this profile has never
- * started in the pane. Ancestor matches are useful for output discovery but
- * are not strong enough for resume ownership, so this requires cwd equality.
+ * WHAT: Reads the exact pane-owned Codex session, optionally pinned to a native UUID.
+ * WHY: Prevents ancestor or recently copied sessions from authorizing a different resume.
  */
-export function latestCodexSessionIdentity(paneDir, options) {
-  const path = latestSessionFor(paneDir, options);
+export function latestCodexSessionIdentity(paneDir, { sessionId = null, accept = null, ...options } = {}) {
+  const path = latestSessionFor(paneDir, { ...options, accept: meta => meta.cwd === paneDir
+    && (!sessionId || meta.id === sessionId) && (!accept || accept(meta)) });
   if (!path) return null;
   const meta = readSessionMeta(path);
   if (meta?.cwd !== paneDir || !/^[0-9a-f-]{36}$/iu.test(String(meta?.id || ""))) return null;

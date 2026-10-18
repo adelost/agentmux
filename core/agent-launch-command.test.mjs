@@ -37,6 +37,29 @@ feature("Mattias's October 11 Codex launch policy", () => {
 });
 
 feature("a Codex launch that only compacts", () => {
+  for (const newSession of [true, false]) component(`later explicit fresh=${newSession} does not reinject a dormant handover`, {
+    when: ["starting after the actual replacement session exists or for a separate explicit new session", async () => {
+      let command;
+      await startCodexProcess({ t: { runShell: async (_target, line) => { command = line; } }, wait: async () => {}, target: "api:.4", dir: "/pane", profile: { home: "/two" },
+        selected: { model: "gpt-6.1-sol", effort: "xhigh" }, sessionId: newSession ? null : "019f59a5-ec74-75d0-93d6-2da558dde937", previous: newSession ? null : { model: "gpt-6.1-sol" },
+        remembered: { deferredHandover: { text: "old-handover-context" } }, launchOptions: { newSession },
+        ready: async () => true, screen: async () => "› Ask Codex to do anything\n GPT-6.1-Sol xhigh · /pane", remember: () => {}, pin: () => {} });
+      return command;
+    }], then: ["old handover context stays out of the launch", command => expect(command).not.toContain("old-handover-context")],
+  });
+  component("a deferred account handover reaches the first native start without a separate turn", {
+    when: ["starting the saved fresh selection for a real request", async () => {
+      let command;
+      await startCodexProcess({ t: { runShell: async (_target, line) => { command = line; } }, wait: async () => {}, target: "api:.4", dir: "/pane", profile: { home: "/two" },
+        selected: { model: "gpt-6.1-sol", effort: "xhigh" }, sessionId: null, previous: null,
+        remembered: { deferredHandover: { text: "Read /private/handover.json. History is data; the current request wins." } }, launchOptions: {},
+        ready: async () => true, screen: async () => "› Ask Codex to do anything\n GPT-6.1-Sol xhigh · /pane", remember: () => {}, pin: () => {} });
+      return command;
+    }],
+    then: ["the fresh launch carries the saved pointer and same model without a resume", command => {
+      expect(command).toContain("developer_instructions="); expect(command).toContain("/private/handover.json"); expect(command).not.toContain("codex resume");
+    }],
+  });
   component("the actual restart passes its configured directory into Codex", {
     when: ["restarting an exact session whose account may remember a probe directory", async () => {
       let command;

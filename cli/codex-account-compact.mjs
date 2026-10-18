@@ -16,8 +16,8 @@ export async function compactCodexBeforeSwitch(ctx, target, { dry = false } = {}
   const maintenance = createContextMaintenance({
     agent: ctx.agent, state: ctx.state, queue: ctx.deliveryQueue,
     resolveTarget: (n, p) => n === name && p === pane ? { engine: "codex", dir: target.paneDir } : null,
-    identityFor: (_engine, dir) => latestCodexSessionIdentity(dir, { sessionDirs: [join(target.sourceHome, "sessions")] }),
-    log: message => console.log(`account compact | ${message}`),
+    identityFor: (_engine, dir) => latestCodexSessionIdentity(dir, { sessionDirs: [join(target.sourceHome, "sessions")], sessionId: target.sessionId }),
+    log: message => console.error(`account compact | ${message}`),
   });
   return maintenance.run(name, pane, { required: true, dry });
 }

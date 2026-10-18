@@ -64,6 +64,7 @@ export function buildCodexLaunchCommand({
   resumeSessionId = null,
   allowFreshBootstrap = false,
   disableGoals = false,
+  developerInstructions = null,
   cwd = null,
 } = {}) {
   if (!profileHome) throw new Error("Codex profile home is required");
@@ -78,6 +79,7 @@ export function buildCodexLaunchCommand({
     // Resume otherwise follows the target account's saved cwd, even when the
     // shell was started in the configured pane directory.
     cwd ? `--cd ${shellQuote(cwd)}` : "",
+    developerInstructions ? `-c ${shellQuote(`developer_instructions=${JSON.stringify(developerInstructions)}`)}` : "",
     model ? `-m ${shellQuote(model)}` : "",
     effort ? `-c ${shellQuote(`model_reasoning_effort="${effort.toLowerCase()}"`)}` : "",
     // Verified on codex-cli 0.162.1: no goal turn starts, and the goal resumes on the next launch.

@@ -8,7 +8,7 @@ import { allowedCodexLaunchModel } from "./codex-profiles.mjs";
 
 /** WHAT: Builds a pane's next Codex session record. WHY: Keeps a replaced session replaced after its replacement starts, until a later replacement. */
 export function codexSessionRecord(current, record) {
-  return { ...record, supersededSessionId: record.supersededSessionId || current?.supersededSessionId || null };
+  return { ...record, deferredHandover: Object.hasOwn(record, "deferredHandover") ? record.deferredHandover : current?.deferredHandover || null, supersededSessionId: record.supersededSessionId || current?.supersededSessionId || null };
 }
 
 /** WHAT: Maps exact-session model and compact evidence to resume inputs. WHY: Prevents old remembered settings from hiding a later provider fallback. */
@@ -43,10 +43,11 @@ export async function prepareCodexResume({ decision, discovered, observed, remem
       tried: Boolean(maintenance && maintenance.sessionId === evidence.resumeSessionId && maintenance.status !== "VERIFIED") });
   }
   const startRecord = evidence.resumeSessionId
-    ? { ...remembered, sessionId: decision.sessionId, status: "ready", rolloutPath: discovered.path }
+    ? { ...remembered, deferredHandover: null, sessionId: decision.sessionId, status: "ready", rolloutPath: discovered.path }
     : { sessionId: null, status: "awaiting-first-rollout", startedAt: Date.now(),
       supersededSessionId: decision.action === "resume" ? decision.sessionId : null,
       modelTransitionBlocked: remembered?.sessionId == null ? remembered?.modelTransitionBlocked ?? null : null };
+  if (launch?.newSession) startRecord.deferredHandover = null;
   return { ...evidence, startRecord };
 }
 

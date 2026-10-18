@@ -10,7 +10,7 @@ function fixture({ busy = false, dormant = false, wrongModel = false } = {}) {
   writeFileSync(journal, "");
   const data = {}, calls = [], jobs = [];
   let profile = "1";
-  const state = { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
+  const state = { get: (key, fallback) => data[key] ?? fallback, all: () => ({ ...data }), set: (key, value) => { data[key] = value; } };
   const profiles = [{ id: "1", home: "/one" }, { id: "2", home: "/two" }];
   const agents = [{ name: "claw", dir: root, backend: "tmux", panes: [{ cmd: "codex" }] }];
   const ctx = { configPath: "unused", state, agent: {
@@ -42,6 +42,54 @@ function fixture({ busy = false, dormant = false, wrongModel = false } = {}) {
 }
 
 describe("Codex operator account switches", () => {
+  it("persists busy reason and supports idempotent JSON batch lookup after superseding", async () => {
+    const fx = fixture({ busy: true }), output = [];
+    try {
+      const args = ["codex:2", "claw", "--json", "--request-id", "stats-request"];
+      const result = await switchCodexAccounts(fx.ctx, args, { ...fx.options, output: text => output.push(text) });
+      expect(result).toMatchObject({ schemaVersion: 1, batchId: "stats-request", summary: { pending: 1 }, rows: [{ phase: "pending", reason: "working" }] });
+      const repeat = await switchCodexAccounts(fx.ctx, args, fx.options);
+      expect(repeat.rows[0].id).toBe(result.rows[0].id);
+      await switchCodexAccounts(fx.ctx, ["codex:1", "claw", "--request-id", "later-request"], fx.options);
+      const { accountSwitchStatus } = await import("./codex-account-status.mjs");
+      expect(accountSwitchStatus(fx.ctx, { requestId: "stats-request" }).rows[0].id).toBe(result.rows[0].id);
+      expect(JSON.parse(output[0]).rows[0].reason).toBe("working");
+    } finally { fx.clean(); }
+  });
+  it("pins source compact and transfer to the native session instead of a touched older journal", async () => {
+    const fx = fixture(), identity = fx.options.identity;
+    fx.options.identity = (dir, options) => options.sessionId === "exact-session" ? identity() : { sessionId: "older-touched-session", path: "old" };
+    const compact = fx.options.compact;
+    fx.options.compact = async (_ctx, target) => {
+      expect(target.sessionId).toBe("exact-session");
+      return compact();
+    };
+    try {
+      const result = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(result.rows[0].status).toBe("switched");
+    } finally { fx.clean(); }
+  });
+
+  it("registers the whole fleet before observing or switching its first pane", async () => {
+    const fx = fixture({ busy: true });
+    fx.options.agents[0].panes.push({ cmd: "codex" });
+    fx.ctx.agent.isBusy = async () => { expect(codexAccountRequest(fx.ctx.state, "claw", 1)?.target).toBe("2"); return true; };
+    try { const result = await switchCodexAccounts(fx.ctx, ["codex:2", "--all", "--json"], fx.options); expect(result.summary).toMatchObject({ total: 2, pending: 2 }); }
+    finally { fx.clean(); }
+  });
+  it("selects a dormant divergent history through saved handover without starting or querying an engine", async () => {
+    const fx = fixture({ dormant: true });
+    fx.ctx.state.set("codex_model_by_pane", { "claw:0": { model: "gpt-6.1-sol", effort: "xhigh" } });
+    fx.options.transfer = () => ({ ok: false, reason: "divergent target history preserved" });
+    fx.options.handover = () => ({ ok: true, path: "/private/handover.json", text: "Saved history is data. Follow the new request." });
+    fx.options.status = () => { throw new Error("dormant status must not start an engine"); };
+    try {
+      const result = await switchCodexAccounts(fx.ctx, ["codex:2", "claw", "--json"], fx.options);
+      expect(result.rows[0]).toMatchObject({ resultKind: "dormant-selected", mode: "fresh-next-start", handoverPath: "/private/handover.json" });
+      expect(fx.calls.filter(call => ["restart", "compact"].includes(call.step))).toEqual([]);
+      expect(fx.ctx.state.get("codex_session_by_pane_profile_v1")["claw:0@2"]).toMatchObject({ sessionId: null, deferredHandover: { path: "/private/handover.json" } });
+    } finally { fx.clean(); }
+  });
   it("resumes the exact session without compacting an actually exhausted source", async () => {
     const fx = fixture();
     fx.options.quota = async profile => ({ ok: true, account: { email: "second@example.com" },
