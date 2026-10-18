@@ -7,7 +7,7 @@ import { readAlternateTurns } from "./alternate-session-reader.mjs";
 import { describeToolCall } from "./tool-display.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { isSystemNoiseDirective, isWorkDirective } from "./system-noise.mjs";
-import { CLAUDE_TERMINAL_STOP_REASONS as TERMINAL_STOP_REASONS, userPromptText } from "./claude-turn-lifecycle.mjs";
+import { CLAUDE_TERMINAL_STOP_REASONS as TERMINAL_STOP_REASONS, userPromptText, isClaudeTaskNotification } from "./claude-turn-lifecycle.mjs";
 import { isClaudeTurnBusy } from "./claude-turn-busy.mjs";
 import { normalizePrompt, promptAppearsInEvents, promptEventMatches } from "./claude-prompt-text.mjs";
 // Long sessions require bounded tail reads to stay below Node string limits.
@@ -560,7 +560,7 @@ export function groupIntoTurns(events, { headless = false } = {}) {
       if (current) turns.push(current);
       current = {
         timestamp: e.timestamp || null,
-        userPrompt: e.message.content,
+        userPrompt: e.message.content, taskNotification: isClaudeTaskNotification(e),
         items: [],
         // Watcher uses these to know when a turn is safe to post:
         // endTimestamp = ISO of latest assistant event, isComplete = terminal stop_reason seen.

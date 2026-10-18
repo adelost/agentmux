@@ -15,7 +15,6 @@
 // All these scenarios converge on "agent wrote turn to jsonl but Discord
 // didn't see it". Watcher reads jsonl directly so it's by definition
 // covering all of them.
-
 import { watch, statSync, existsSync } from "fs";
 import { join } from "path";
 import { splitMessage, extractImageMarkers, validateImagePath, chunkAttachments } from "../lib.mjs";
@@ -47,6 +46,7 @@ import { createPaneQueue } from "../core/pane-queue.mjs";
 import { createLiveProgress } from "./live-progress.mjs";
 import { compactionNoticeText } from "../core/compaction-notice.mjs";
 import { announceNewPaneEvents } from "../core/pane-notices.mjs";
+import { planQuotaStopMirror } from "../core/watcher-quota-stop.mjs";
 import { refusalNoticeText } from "../core/codex-refusal-notice.mjs";
 import { isCodexCapacityError } from "../core/codex-capacity-recovery.mjs";
 import { createCodexRecovery } from "../cli/codex-recovery.mjs";
@@ -55,7 +55,6 @@ import {
   recordPaneModelReading,
   setPaneModelSelection,
 } from "../core/pane-model-state.mjs";
-
 const DEFAULT_POLL_MS = 15_000;
 // Typing-indicator is event-driven via fs.watch (every jsonl write fires
 // sendTyping with throttle below). This polling cadence is the fallback
@@ -88,7 +87,6 @@ const STARTUP_AUDIT_TAIL_BYTES = 16 * 1024 * 1024;
 const MAX_POST_ACTIONS = 3;
 const RETRY_BACKOFF_MS = 30_000;
 const MAX_CONCURRENT_PANES = 4;
-
 const STATE_KEY_LAST_POSTED = "watcher_last_posted_ts";
 // Posted-item dedupe keyed on stable content-addressed ids (see watcher-engine
 // itemKey / jsonl-reader itemIdFor). Replaces the old positional
@@ -101,7 +99,6 @@ const STATE_KEY_RETRY_UNTIL = "watcher_retry_until_ts";
 const STATE_KEY_COMPACTION_IDS = "watcher_compaction_ids";
 const STATE_KEY_REFUSAL_IDS = "watcher_refusal_ids";
 const STATE_KEY_CUSTOM_TOOLS_SEEDED = "watcher_custom_tools_seeded";
-
 /**
  * WHAT: Routes completed Claude and Codex JSONL items to their bound channels.
  * WHY: Keeps response forwarding restart-safe and independent of terminal scrollback.
@@ -123,7 +120,6 @@ export function createJsonlWatcher({
   if (!agentsYamlPath) throw new Error("watcher: agentsYamlPath required");
   if (!discord) throw new Error("watcher: discord required");
   if (!state) throw new Error("watcher: state store required");
-
   /** active fs.watch handles per pane key (`name:idx`). */
   const progress = createLiveProgress({ discord, state, log });
   const fsWatchers = new Map();
@@ -475,9 +471,11 @@ export function createJsonlWatcher({
   }
 
   async function postTurn({ name, idx, channelId, turn, config = null }) {
-    turn = await progress.update({ channelId, paneKey: `${name}:${idx}`, turn });
+    const quotaKey = `watcher_quota_episode:${name}:${idx}`;
+    const quota = planQuotaStopMirror(turn, state.get(quotaKey, null));
+    turn = await progress.update({ channelId, paneKey: `${name}:${idx}`, turn: quota.turn });
     const { fullText, validFiles, hasNarrative } = renderTurn(turn);
-    if (!fullText && validFiles.length === 0) return { ok: true };
+    if (!fullText && validFiles.length === 0) { state.set(quotaKey, quota.next); return { ok: true }; }
     // "No response requested." is Claude Code answering a harness-injected
     // notification (dead background task, resume bookkeeping) — not the
     // agent talking. Mirroring it reads as a refusal to answer; the real
@@ -518,6 +516,7 @@ export function createJsonlWatcher({
       }
     }
     if (!ok) return { ok: false };
+    state.set(quotaKey, quota.next);
 
     // Match the pane-first context measurement used by auto-compact.
     // agent.getContext owns the terminal reading and JSONL fallback.

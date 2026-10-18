@@ -225,6 +225,22 @@ function toolResult(content, ts) {
 
 // --- Tests ----------------------------------------------------------------
 
+feature("watcher: repeated quota stop after background completions", () => {
+  unit("one quota episode mirrors once while every source item is acknowledged", {
+    given: ["a weekly refusal already followed by a background task and the same refusal", () => setupWatcher({ jsonlLines: [
+      userTurn("finish the task", "2026-10-18T17:35:00.000Z"),
+      assistantText("You've hit your weekly limit · resets Oct 21, 9am (Europe/Stockholm)", "2026-10-18T17:35:10.000Z", "end_turn"),
+      { ...userTurn("<task-notification>finished</task-notification>", "2026-10-18T17:50:20.000Z"), origin: { kind: "task-notification" }, promptSource: "system" },
+      assistantText("You've hit your weekly limit · resets Oct 21, 9am (Europe/Stockholm)", "2026-10-18T17:50:21.000Z", "end_turn"),
+    ], stateInitial: { watcher_last_posted_ts: { "ch-test": 1 } } })],
+    when: ["the watcher audits and mirrors the completed journal", async ctx => { await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir); return ctx; }],
+    then: ["only one stop is delivered and both item ids are receipted", ctx => {
+      expect(ctx.discord.sends.filter(send => String(send.payload?.content || send.payload).includes("You've hit your weekly limit"))).toHaveLength(1);
+      expect(ctx.state._data.watcher_posted_item_ids["ch-test"]).toContain("a-2026-10-18T17:50:21.000Z:0");
+    }], cleanup: ctx => ctx.cleanup(),
+  });
+});
+
 feature("watcher: long agent turn with tool calls posts ALL content", () => {
   unit("text + 2 tool_use + final text + end_turn → one post with all 3 items", {
     given: ["a jsonl with full multi-step turn ending in end_turn", () => {
