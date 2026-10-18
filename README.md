@@ -568,7 +568,9 @@ amux accounts switch-status --json --request-id dashboard-request-uuid
 
 JSON switches atomically register the complete pane scope before doing account work.
 The same request id returns its existing receipt; `switch-status` only reads it,
-including after a bridge or dashboard restart. Per-pane phase, reason, result kind
+including after a bridge or dashboard restart. After correcting a blocker,
+`switch ... --request-id ID --retry-blocked` explicitly retries that batch
+without changing its pane identities. Per-pane phase, reason, result kind
 and totals distinguish pending, blocked, verified switches and dormant selections.
 A divergent dormant history keeps both journals and saves a labeled handover for
 a fresh session on the next real start, shown as `mode: fresh-next-start`.

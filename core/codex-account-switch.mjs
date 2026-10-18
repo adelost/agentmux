@@ -26,7 +26,7 @@ export async function switchCodexAccount({ agent, state, name, pane, current, ta
   continuity = null, expectedEmail = null, freshHandover = null, identityFor = latestCodexSessionIdentity }) {
   const status = async () => {
     const result = await statusDriver({ agent, name, pane });
-    if (result.ok || result.stage !== "compose") return result;
+    if (result.ok || !["compose", "parse"].includes(result.stage)) return result;
     // The driver cleared only its own /status text. Retry a torn startup
     // frame once, never through new work, a human draft or a modal.
     const input = await agent.promptTransportState?.(name, pane, "");

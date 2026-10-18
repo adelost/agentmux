@@ -10,7 +10,7 @@ function fixture({ busy = false, dormant = false, wrongModel = false } = {}) {
   writeFileSync(journal, "");
   const data = {}, calls = [], jobs = [];
   let profile = "1";
-  const state = { get: (key, fallback) => data[key] ?? fallback, all: () => ({ ...data }), set: (key, value) => { data[key] = value; } };
+  const state = { updateAll: change => change(data), get: (key, fallback) => data[key] ?? fallback, all: () => ({ ...data }), set: (key, value) => { data[key] = value; } };
   const profiles = [{ id: "1", home: "/one" }, { id: "2", home: "/two" }];
   const agents = [{ name: "claw", dir: root, backend: "tmux", panes: [{ cmd: "codex" }] }];
   const ctx = { configPath: "unused", state, agent: {
@@ -70,6 +70,35 @@ describe("Codex operator account switches", () => {
     } finally { fx.clean(); }
   });
 
+  it("reuses a native compact-only rollout whose authored activity was removed", async () => {
+    const fx = fixture();
+    const path = fx.options.identity().path;
+    writeFileSync(path, [{ type: "session_meta", payload: { id: "exact-session" } }, { type: "compacted" }, { type: "event_msg", payload: { type: "task_complete" } }].map(JSON.stringify).join("\n") + "\n");
+    fx.options.compact = async () => ({ ok: false, reason: "compact-skipped:activity-unknown" });
+    try {
+      const result = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(result.rows[0].status).toBe("switched");
+    } finally { fx.clean(); }
+  });
+  it("retries a transient native status frame only after verifying another safe boundary", async () => {
+    const fx = fixture(), status = fx.options.status;
+    let reads = 0;
+    fx.options.status = async () => ++reads === 1 ? { ok: false, stage: "parse", error: "torn frame" } : status();
+    try { const result = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options); expect(result.rows[0].status).toBe("switched"); }
+    finally { fx.clean(); }
+  });
+  it("retries blocked panes explicitly within the original durable batch", async () => {
+    const fx = fixture(), compact = fx.options.compact;
+    fx.options.compact = async () => ({ ok: false, reason: "provider-unavailable" });
+    const args = ["codex:2", "--all", "--json", "--request-id", "repair-batch"];
+    try {
+      const first = await switchCodexAccounts(fx.ctx, args, fx.options);
+      expect(first.rows[0].phase).toBe("blocked");
+      fx.options.compact = compact;
+      const repaired = await switchCodexAccounts(fx.ctx, [...args, "--retry-blocked"], fx.options);
+      expect(repaired.rows[0]).toMatchObject({ id: first.rows[0].id, phase: "complete", resultKind: "switched" });
+    } finally { fx.clean(); }
+  });
   it("registers the whole fleet before observing or switching its first pane", async () => {
     const fx = fixture({ busy: true });
     fx.options.agents[0].panes.push({ cmd: "codex" });

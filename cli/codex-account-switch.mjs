@@ -19,6 +19,7 @@ import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import { defaultDeliveryQueueDir } from "../core/delivery-queue.mjs";
 import { acquireFileLease } from "../core/file-lease.mjs";
 import { accountSwitchStatus, registerAccountSwitchBatch } from "./codex-account-status.mjs";
+import { isCompactedCodexSession } from "../core/codex-compacted-session.mjs";
 import { codexWeeklyLimitReached } from "../core/codex-limit-recovery.mjs";
 
 /** WHAT: Defines explicit pane-local account request keys. WHY: Keeps operator intent separate from provider quota evidence and unrelated state writers. */
@@ -140,8 +141,12 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
       setCodexProfile(ctx.state, name, pane, target.id);
       return finish(ctx, key, request, { kind: "selected", dormant: true, sessionId: identity?.sessionId || null });
     }
-    const native = await deps.status({ agent: ctx.agent, name, pane });
-    if (!native.ok || !native.status?.session) throw new Error("native source session identity unavailable");
+    let native = await deps.status({ agent: ctx.agent, name, pane });
+    if (!native.ok && ["compose", "parse"].includes(native.stage)) {
+      const gate = await observe(ctx, name, pane, deps);
+      if (!gate.blocked && !gate.dormant && gate.current.id === current.id) native = await deps.status({ agent: ctx.agent, name, pane });
+    }
+    if (!native.ok || !native.status?.session) return pending(`native-source-status:${native.stage || "session-missing"}`);
     const identityOptions = { sessionDirs: [join(current.home, "sessions")], sessionId: native.status.session };
     const before = deps.identity(dir, identityOptions);
     if (!before || before.sessionId !== native.status.session) throw new Error("source session identity unavailable");
@@ -149,7 +154,8 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
     if (prior?.status === "ATTEMPTING") return pending("compact-already-in-flight");
     const exhausted = codexWeeklyLimitReached(await deps.quota(current));
     const targetPane = { agent: cfg, pane: { index: pane }, engine: "codex", paneDir: dir, sourceHome: current.home, sessionId: before.sessionId };
-    const compact = exhausted || prior?.status === "VERIFIED" ? { ok: true } : await deps.compact(ctx, targetPane, { force: true });
+    const compacted = isCompactedCodexSession(before);
+    const compact = exhausted || compacted || prior?.status === "VERIFIED" ? { ok: true } : await deps.compact(ctx, targetPane, { force: true });
     if (!compact.ok) {
       if (/^(?:compact-skipped:(?:not-idle:|delivery-|composer-|recent-activity$|not-running-tmux$|session-or-activity-changed$)|context-cost:(?:not-idle:|delivery-|session-or-activity-changed$|compose:)|delivery-lease-busy$)/u.test(compact.reason || "")) {
         return pending(compact.reason);
@@ -164,7 +170,7 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
         || observed.current.id !== current.id || after?.sessionId !== before.sessionId) {
       return pending(observed.blocked || "account-or-session-changed");
     }
-    if (!exhausted && contextMaintenanceAttempt(ctx.state, name, pane, after)?.status !== "VERIFIED") {
+    if (!exhausted && !isCompactedCodexSession(after) && contextMaintenanceAttempt(ctx.state, name, pane, after)?.status !== "VERIFIED") {
       return pending("new-work-or-compact-unverified");
     }
     const proof = deps.transfer(dir, current, target, { sessionId: before.sessionId });
@@ -173,6 +179,7 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
     const result = await deps.switchAccount({ agent: ctx.agent, state: ctx.state, name, pane, current, target,
       statusDriver: deps.status, expectedEmail: quota.account?.email,
       ...(proof.ok ? { continuity: proof } : { freshHandover: handover }) });
+    if (result.kind === "failed" && result.error?.startsWith("Account unchanged:")) return pending("native-source-status:unverified");
     if (result.kind !== "switched" && result.kind !== "same") throw new Error(`${result.error}${result.rollbackError ? `; rollback: ${result.rollbackError}` : ""}`);
     return finish(ctx, key, request, result);
   } catch (error) {
@@ -184,12 +191,13 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
 /** WHAT: Stores pane/project-scoped operator switches and previews without mutation. WHY: Keeps explicit paid-account intent separate from quota-triggered automatic recovery. */
 export async function switchCodexAccounts(ctx, args, options = {}) {
   const profileId = /^codex:([12])$/u.exec(args[0] || "")?.[1];
-  let name = null, pane = null, all = false, dry = false, continuation = null, json = false, requestId = null;
+  let name = null, pane = null, all = false, dry = false, continuation = null, json = false, requestId = null, retryBlocked = false, existingBatch = null;
   for (let index = 1; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--all") all = true;
     else if (arg === "--dry") dry = true;
     else if (arg === "--json") json = true;
+    else if (arg === "--retry-blocked") retryBlocked = true;
     else if (arg === "--request-id" && /^[a-z0-9_-]{1,128}$/iu.test(args[index + 1] || "")) requestId = args[++index];
     else if (["-p", "--pane"].includes(arg) && /^\d+$/u.test(args[index + 1] || "")) pane = Number(args[++index]);
     else if (arg === "--continue-file" && args[index + 1]) continuation = readFileSync(args[++index], "utf8");
@@ -199,25 +207,36 @@ export async function switchCodexAccounts(ctx, args, options = {}) {
   if (!profileId || all === Boolean(name) || (pane !== null && !name) || (continuation && pane === null)) {
     throw new Error("Usage: amux accounts switch codex:1|2 PROJECT [-p N] [--dry] [--continue-file PATH], or --all");
   }
+  if (retryBlocked && (!requestId || !all || dry)) throw new Error("--retry-blocked requires --all and an existing --request-id");
   const output = options.output || console.log;
   if (requestId && !dry) {
     const previous = accountSwitchStatus(ctx, { requestId });
     if (previous.found) {
       if (previous.target !== profileId) throw new Error("request-id already belongs to another target");
+      if (retryBlocked) {
+        if (!ctx.state.updateAll) throw new Error("blocked retry requires atomic state");
+        ctx.state.updateAll(data => { for (const row of previous.rows) {
+          const field = `${CODEX_ACCOUNT_REQUESTS}:${row.key}`, request = data[field];
+          if (request?.id === row.id && request.phase === "blocked") data[field] = { ...request, phase: "pending", reason: null };
+        } });
+        existingBatch = previous;
+      } else {
       if (json) output(JSON.stringify(previous));
       else for (const row of previous.rows) output(`${row.key} ${row.status}${row.reason ? ` (${row.reason})` : ""}`);
       return previous;
+      }
     }
   }
+  if (retryBlocked && !existingBatch) throw new Error("--retry-blocked requires an existing --request-id");
   const deps = { ...defaults, ...options }, agents = options.agents || listAgents(ctx.configPath);
   if (name && !agents.some(agent => agent.name === name)) throw new Error(`unknown project: ${name}`);
   const entries = agents.filter(agent => !name || agent.name === name).flatMap(agent => agent.panes.flatMap((definition, index) =>
-    engine(definition) === "codex" && (pane === null || pane === index) ? [{ agent, pane: index }] : []));
+    engine(definition) === "codex" && (pane === null || pane === index) ? [{ agent, pane: index }] : [])).filter(entry => !existingBatch || existingBatch.rows.some(row => row.key === keyOf(entry.agent.name, entry.pane)));
   if (!entries.length) throw new Error("no configured Codex panes match that scope");
   const target = deps.profiles().find(profile => profile.id === profileId);
   if (!target || !deps.authenticated(target)) throw new Error("target Codex account needs login");
-  const rows = [], batchId = requestId || randomUUID(), requestedAt = new Date().toISOString();
-  if (!dry) {
+  const rows = [], batchId = requestId || randomUUID(), requestedAt = existingBatch?.requestedAt || new Date().toISOString();
+  if (!dry && !existingBatch) {
     const requests = entries.map(entry => {
       const key = keyOf(entry.agent.name, entry.pane), existing = requestOf(ctx, key);
       const reusable = existing?.target === profileId && existing.phase !== "blocked" && (!continuation || existing.continuation === continuation)
