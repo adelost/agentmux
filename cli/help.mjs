@@ -72,7 +72,7 @@ Usage:
                                   Send only Escape,C-a,C-k,C-u,Enter
   agent enter <name|:nr> [-p N]   Submit the current composer with Enter
   agent clearline <name|:nr> [-p N]
-                                  Clear composer with Escape,C-a,C-k
+                                  Clear an idle composer and verify it is empty
   agent esc <name|:nr> [-p N]     Escape, or close a detected Codex pager
   amux prompts [answer <agent> [-p N] <N>]  Blocked permission prompts; answer one
   agent ps                        Show all running agents + status + context%

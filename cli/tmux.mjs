@@ -11,7 +11,6 @@ import { esc, stripAnsi } from "../lib.mjs";
 import { isShellProcess } from "../core/tui-stall-recovery.mjs";
 import { appendEvent, latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import {
-  CLEARLINE_RECIPE,
   escapeComposerRecipe,
   normalizeComposerKeys,
 } from "../core/composer-control.mjs";
@@ -25,6 +24,7 @@ import { findChannelForPane, loadConfig, validateAgentPane } from "./config.mjs"
 import { createNativeRuntimeClient } from "../core/native-runtime-client.mjs";
 import { createAgentRouter } from "../core/agent-router.mjs";
 import { createState } from "../core/state.mjs";
+import { clearComposerAndVerify } from "./composer-clear.mjs";
 import { activeClaudeLimitForTarget } from "../core/claude-quota-target.mjs";
 const exec = promisify(execCb);
 /** WHAT: Builds tmux execution helpers bound to one socket. WHY: Keeps CLI process and pane state on the bridge's shared boundaries. */
@@ -294,11 +294,13 @@ export async function sendComposerKeys(ctx, name, pane, keys, options = {}) {
   });
 }
 
-/** Exact explicit clear recipe; C-u is intentionally not part of it. */
+/** WHAT: Checks that an idle editor clears its draft. WHY: Prevents key dispatch from masquerading as a cleared draft. */
 export async function clearPaneComposer(ctx, name, pane, options = {}) {
-  return sendComposerControl(ctx, name, pane, CLEARLINE_RECIPE, {
-    ...options,
-    action: "clearline",
+  validateComposerTarget(ctx, name, pane);
+  return clearComposerAndVerify({
+    ...options, target: { session: name, pane: Number(pane) }, record: options.record ?? appendEvent,
+    capture: () => ctx.agent.captureScreen(name, pane),
+    send: keys => sendComposerControl(ctx, name, pane, keys, { ...options, action: "clearline" }),
   });
 }
 

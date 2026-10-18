@@ -31,6 +31,7 @@ export const CLAUDE = {
 
   // UI glyphs
   promptChar: "❯",         // user prompt marker
+  clearlineKeys: ["Escape", "Escape"], // Nonempty drafts go to native history; never use this on an empty prompt.
   bullet: "●",              // response bullet (text or tool call)
   toolResultPrefix: "⎿",   // tool-output continuation prefix
 

@@ -107,7 +107,11 @@ feature("composer control adapter", () => {
   });
 
   unit("clearline is one exact Escape,C-a,C-k write", {
-    given: ["a foreign composer", () => fixture({ discord: false })],
+    given: ["a Codex composer that actually empties after the clear", () => {
+      const fx = fixture({ discord: false });
+      fx.ctx.agent.captureScreen.mockResolvedValueOnce("› composer").mockResolvedValue("› ");
+      return fx;
+    }],
     when: ["clearing explicitly", async (fx) => {
       const receipt = await clearPaneComposer(fx.ctx, "target", 0, opts(fx));
       return { fx, receipt };
@@ -117,6 +121,84 @@ feature("composer control adapter", () => {
       expect(receipt.keys).toEqual(["Escape", "C-a", "C-k"]);
       expect(fx.tmuxCalls[0]).not.toContain("C-u");
       rmSync(fx.root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("clearline refuses success when the captured pasted draft survives the keystrokes", {
+    given: ["the observed idle Claude composer, unchanged after the keys", () => fixture({ discord: false,
+      snapshot: "────────────────────\n❯ [Pasted text #24 +7 lines][Pasted text #25 +4 lines]\n────────────────────\nOpus 5.5" })],
+    when: ["the explicit clear is attempted once", async fx => {
+      let error = null;
+      try { await clearPaneComposer(fx.ctx, "target", 0, opts(fx, { wait: async () => {} })); }
+      catch (failure) { error = failure.message; }
+      return { fx, error };
+    }],
+    then: ["a sent key sequence is not a verified empty composer", ({ fx, error }) => {
+      expect(error).toMatch(/not verified|not empty/u);
+      expect(fx.tmuxCalls).toHaveLength(1);
+      expect(fx.events.some(event => event.event === "composer_control_verified")).toBe(false);
+      rmSync(fx.root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("a nonempty Claude draft clears through its native double Escape without Enter", {
+    given: ["the observed paste chips followed by an actually empty composer", () => {
+      const fx = fixture({ discord: false });
+      fx.ctx.agent.captureScreen.mockResolvedValueOnce("────────────────────\n❯ [Pasted text #24 +7 lines][Pasted text #25 +4 lines]\n────────────────────\nOpus 5.5")
+        .mockResolvedValue("────────────────────\n❯ \n────────────────────\nOpus 5.5");
+      return fx;
+    }],
+    when: ["clearing explicitly", async fx => ({ fx, receipt: await clearPaneComposer(fx.ctx, "target", 0, opts(fx)) })],
+    then: ["the empty observation, not the tmux write, proves completion", ({ fx, receipt }) => {
+      expect(receipt).toMatchObject({ keys: ["Escape", "Escape"], verified: true });
+      expect(fx.tmuxCalls).toEqual(["send-keys -t 'target:.0' Escape Escape"]);
+      expect(fx.events.at(-1).event).toBe("composer_control_verified");
+      rmSync(fx.root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("an already empty Claude composer is not double-Escaped into rewind", {
+    given: ["an idle empty Claude composer", () => fixture({ discord: false, snapshot: "❯ " })],
+    when: ["clearing explicitly", async fx => ({ fx, receipt: await clearPaneComposer(fx.ctx, "target", 0, opts(fx)) })],
+    then: ["nothing is typed and the empty result is explicit", ({ fx, receipt }) => {
+      expect(fx.tmuxCalls).toEqual([]); expect(receipt).toMatchObject({ verified: true, alreadyEmpty: true });
+      rmSync(fx.root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("clearline cannot interrupt an active tool turn or act without a composer", {
+    given: ["an active Claude turn and an unrelated shell", () => ["❯ draft\n✻ Working… (3s · esc to interrupt)", "adelost@host:~$"]],
+    when: ["both explicit clears are requested", async snapshots => Promise.all(snapshots.map(async snapshot => {
+      const fx = fixture({ discord: false, snapshot }); let error = null;
+      try { await clearPaneComposer(fx.ctx, "target", 0, opts(fx)); } catch (failure) { error = failure.message; }
+      const result = { writes: fx.tmuxCalls.length, error }; rmSync(fx.root, { recursive: true, force: true }); return result;
+    }))],
+    then: ["neither gets any clearing key", rows => { for (const row of rows) { expect(row.writes).toBe(0); expect(row.error).toMatch(/not idle|no composer/u); } }],
+  });
+
+  unit("a delayed clear is observed without a second physical clear", {
+    given: ["a draft whose repaint first remains stale and then empties", () => {
+      const fx = fixture({ discord: false });
+      fx.ctx.agent.captureScreen.mockResolvedValueOnce("❯ draft").mockResolvedValueOnce("❯ draft").mockResolvedValue("❯ ");
+      return fx;
+    }],
+    when: ["the clear waits for its postcondition", async fx => ({ fx, receipt: await clearPaneComposer(fx.ctx, "target", 0, opts(fx, { wait: async () => {} })) })],
+    then: ["only one key sequence precedes the verified observation", ({ fx, receipt }) => {
+      expect(fx.tmuxCalls).toHaveLength(1); expect(fx.ctx.agent.captureScreen).toHaveBeenCalledTimes(3); expect(receipt.verified).toBe(true);
+      rmSync(fx.root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("a new draft or a lost composer after dispatch is never erased again or reported empty", {
+    given: ["two possible post-submit observations", () => ["❯ new human draft", "screen unavailable"]],
+    when: ["both explicit clears see that changed observation", async snapshots => Promise.all(snapshots.map(async after => {
+      const fx = fixture({ discord: false }); let error = null;
+      fx.ctx.agent.captureScreen.mockResolvedValueOnce("❯ original draft").mockResolvedValue(after);
+      try { await clearPaneComposer(fx.ctx, "target", 0, opts(fx, { wait: async () => {} })); } catch (failure) { error = failure.message; }
+      const result = { writes: fx.tmuxCalls.length, error }; rmSync(fx.root, { recursive: true, force: true }); return result;
+    }))],
+    then: ["each outcome stays explicitly unverified after just one physical attempt", rows => {
+      for (const row of rows) { expect(row.writes).toBe(1); expect(row.error).toMatch(/not verified/u); }
     }],
   });
 

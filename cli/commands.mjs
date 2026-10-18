@@ -2679,7 +2679,7 @@ async function cmdEnter(name, flags, ctx) {
 async function cmdClearline(name, flags, ctx) {
   const pane = flags.p ?? 0;
   const receipt = await clearPaneComposer(ctx, name, pane, { actor: detectSelfKey() });
-  console.log(`Cleared composer in '${name}' (pane ${pane}) [${receipt.controlId}].`);
+  console.log(`Verified empty composer in '${name}' (pane ${pane}) [${receipt.controlId}].`);
 }
 
 async function cmdAdd(name, dir, ctx) {

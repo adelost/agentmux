@@ -789,7 +789,7 @@ If a pane does not respond:
 amux log <agent> -p <pane> --tmux
 amux esc <agent> -p <pane>
 amux enter <agent> -p <pane>       # submit an existing composer
-amux clearline <agent> -p <pane>   # Escape,C-a,C-k; never C-u
+amux clearline <agent> -p <pane>   # idle editor only; verified empty afterward
 amux wait <agent> -p <pane>
 ```
 

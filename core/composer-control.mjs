@@ -3,6 +3,7 @@
 // text through the key channel.
 
 import { isCodexFullscreenPager } from "./codex-tui.mjs";
+import { ALL_DIALECTS, composerLines } from "./dialects.mjs";
 
 export const COMPOSER_KEY_ALLOWLIST = Object.freeze([
   "Escape",
@@ -14,6 +15,13 @@ export const COMPOSER_KEY_ALLOWLIST = Object.freeze([
 
 const ALLOWED = new Set(COMPOSER_KEY_ALLOWLIST);
 export const CLEARLINE_RECIPE = Object.freeze(["Escape", "C-a", "C-k"]);
+
+/** WHAT: Builds the visible editor's clear sequence. WHY: Prevents collapsed Claude pastes from surviving logical-line deletion. */
+export function clearComposerRecipe(snapshot) {
+  const line = composerLines(snapshot)[0] ?? "";
+  const dialect = ALL_DIALECTS.find(candidate => line.startsWith(candidate.promptChar));
+  return Object.freeze([...(dialect?.clearlineKeys ?? CLEARLINE_RECIPE)]);
+}
 
 export function normalizeComposerKeys(keys) {
   if (!Array.isArray(keys) || keys.length < 1 || keys.length > 32) {

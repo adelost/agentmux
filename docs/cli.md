@@ -318,8 +318,12 @@ Composer control is intentionally narrow. `amux keys`, `amux enter`, and
 exactly `Escape`, `C-a`, `C-k`, `C-u`, and
 `Enter`; arbitrary text, tmux flags, and other keys are rejected before the
 pane is touched. `amux enter` submits an already visible composer.
-`amux clearline` uses the fixed `Escape,C-a,C-k` recipe and never relies on
-`C-u`, which does not clear the Codex composer. On tmux panes, `amux esc`
+`amux clearline` requires a visible idle composer. A nonempty Claude draft uses
+native double Escape; Codex retains `Escape,C-a,C-k`, never the ineffective
+`C-u`. An empty composer receives no keys, so it cannot open Claude's rewind
+menu. Success requires a fresh empty-composer observation; a surviving draft
+or unreadable result fails without repeating the keys. No Enter is sent.
+On tmux panes, `amux esc`
 detects Codex's full-screen transcript/backtrack pager and exits it with its
 internal `q` recipe in one invocation; native targets retain their existing
 adapter-owned Escape path. Every tmux composer control has a durable requested/sent/failed
