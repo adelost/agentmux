@@ -33,6 +33,9 @@ Read each view for what it is:
 - A commit is banked source. A test proves a named revision. Deploy and a
   feature exercise are separate evidence. Keep stated limits (synthetic input,
   debug build).
+- Follow the task's Spec/Design link to its current canonical document before
+  staffing or reporting acceptance. Compare the dated approval's scope with the
+  latest requirement; an earlier fit approval cannot accept a later redesign.
 - A sound owner receipt is not a request to repeat its builds and downloads.
 - A feature branch in a canonical checkout may be the authorized writer.
   Check the owner and git history before any cleanup or branch change.
@@ -92,6 +95,9 @@ Read each view for what it is:
   subassignments. When code is banked or hardware is released, tell the
   coordinator about that resource only; the task stays with its owner.
 - A checkpoint is not completion of the requested outcome.
+- For a complex feature, exercise the hardest representative case in the actual
+  engine early. If that fails, keep the row open while focused tests guide the
+  repair; a large isolated green suite does not override the failed exercise.
 - "Sync everyone" means: read the overview and journals and update the task
   record. Do not prompt every pane; "no action needed" still spends a turn.
 - Keep the operator's participant scope. Do not recruit dormant providers for
@@ -228,6 +234,13 @@ board uses the board instead of a second list.
   commit or release plus the numbers the proof gave).
 - Numbers are never reused. A finding made while working a row becomes a new
   row; it does not grow the old one.
+- At task creation/update, use a Markdown link in Spec or Design to the current
+  canonical document, with version and verification/approval scope in that
+  document. Stats opens the latest host reading through its existing sign-in.
+  Relative links resolve from the ledger directory (legacy repo-relative paths
+  are also read). Optional artifact/sketch links carry their own date/version;
+  they stay secondary. Source selection and payload bounds belong to
+  v1d-stats's README, not another tracker or a copy of the design here.
 - One "done for every row" block above the table: release or merge, a picture
   for anything visible, the test that fails before and passes after, nothing
   silent. A row's own line adds to it and never replaces it.

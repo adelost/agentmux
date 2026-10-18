@@ -46,8 +46,7 @@ Pick one option and explain it using the user's goals or evidence, not
 ## Root cause > symptoms
 
 Find the cause before patching. Never skip a failing test, bypass a hook with
-\`--no-verify\`, or swallow an error to hide the symptom. A deliberate workaround
-must name the root cause and what remains unfixed.
+\`--no-verify\`, or swallow errors. A workaround names the root cause and what remains unfixed.
 
 ## Verify before reporting
 
@@ -166,11 +165,13 @@ function's own branching or state. Do a small split in the same change.
    A blocked task does not reserve its pane indefinitely:
    checkpoint it and release its active resources before taking independent work.
    Honor the project's concurrency limit; invent no extra parallelism. A board lease alone does not prove a pane is free.
-5. **A configured board is a shared work list, not an orchestration ceremony.** Keep the
-   minimum durable facts: task, owner, state, blocker/reason, and completion
-   commit or PR. Comments route to the current owner. Managers read the
-   aggregate view; workers do not need a manager round-trip to claim, update or
+5. **A configured board is a shared work list, not an orchestration ceremony.**
+   Keep task, owner, state, blocker/reason and completion SHA/PR. Comments go to
+   the owner; managers read the aggregate. Workers do not need a manager round-trip to claim, update or
    finish their own work.
+   Link current canonical Markdown in Spec/Design when creating/updating tasks;
+   keep version, verification and dated approval scope there. Date artifacts
+   separately; changed requirements need new evidence.
 6. **Merge by fresh proof.** Immediately before merge, fetch and rebase onto
    current trunk in the allowed checkout. On that exact source run fast
    changed-unit tests and lint, exercise the actual feature manually, and run
@@ -185,12 +186,13 @@ function's own branching or state. Do a small split in the same change.
    PR ceremony to a clean, locally verified change. Deploy by
    the repo's local-first release contract (exact source and rollback SHA,
    build, live check). Do not duplicate gates.
+   Test the hardest representative case early in the actual engine; focused
+   unit tests cannot close a task while that feature exercise fails.
 7. **Owners self-merge and self-deliver.** A normal green change does not need
    peer review. Human-requested review is welcome; a red gate or high-risk seam
    needs resolution, not a review loop.
-   A merged-but-undeployed feature remains open when
-   deployment is part of the task. Irreversible or money-spending actions still
-   require human approval.
+   A merged-but-undeployed feature remains open when deployment is part of the task.
+   Irreversible or money-spending actions still require human approval.
 8. **Report only terminal outcomes:** a blocker, collision, handoff or DONE. The board and the ask
    ledger also carry progress.
 9. **Record blockers where work is tracked:** a concrete reason and the
@@ -201,9 +203,7 @@ function's own branching or state. Do a small split in the same change.
     as authority (a GO, a price, a name) keeps the human quote byte-for-byte with
     provenance. A work brief is the orchestrator's interpretation: numbered
     executable steps, not the human's text (see the amux-orchestrator skill).
-    Bad: "Mattias, verbatim: '...ska ju helst vara generistk...' Fix the
-    rig." Good: "1. Use Haunt's rig.js as the shared rig. 2. Report to
-    claw:0." His words go to the decision log, never into the brief. Mark each item as his request or your own
+    His words go to the decision log. Mark each item as his request or your own
     addition; only his request may remove something he sees or change a
     test's expected output.
     No manager, memory note or older topology rule may narrow,
@@ -214,9 +214,8 @@ function's own branching or state. Do a small split in the same change.
 11. **Make reversible product calls yourself.** Pick the option best supported
     by the user's history, ship it, and explain the choice. Ask first only for
     irreversible, external-facing, money-spending or genuinely risky decisions.
-    A question that already carries your recommendation, or that a design
-    choice, an order of work or a measurement settles, is your call: decide,
-    act and report the choice in one line. Do not prepare decision material.
+    Decide design, order and measurement questions yourself; act and report
+    the choice in one line. Do not prepare decision material.
 12. **A drained backlog is healthy idle.** On DONE or BLOCKED, re-read the existing queue.
     Re-evaluate conditional deferrals against completed prerequisites.
     Take the next authorised independent READY item; a blocker holds only its
