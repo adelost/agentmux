@@ -7,7 +7,7 @@ import { esc, stripAnsi } from "./lib.mjs";
 import { TOOL_GUIDE_HINTS } from "./core/hints-tool-guide.mjs";
 import { FLEET_PROCESS_HINTS } from "./core/hints-fleet-process.mjs";
 import { contextMaintenanceAttempt } from "./core/context-maintenance.mjs";
-import { prepareCodexResume } from "./core/codex-launch-policy.mjs";
+import { codexSessionRecord, prepareCodexResume } from "./core/codex-launch-policy.mjs";
 import { createTmuxAdapter } from "./core/tmux.mjs";
 import { appendMissingPanes, countPanes as countPanesStrict } from "./core/pane-provisioning.mjs";
 import { createEngineStartGuard } from "./core/engine-start-guard.mjs";
@@ -533,11 +533,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const persistSession = (record) => {
       if (!state?.set) return;
-      state.set(CODEX_SESSION_STATE_KEY, {
-        ...(state.get(CODEX_SESSION_STATE_KEY, {}) || {}),
-        [owner]: { pane: owner, profileId: profile.id, ...record,
-          ...(launch?.newSession ? { supersededSessionId: discovered?.sessionId || remembered?.sessionId || null } : {}) },
-      });
+      const sessions = state.get(CODEX_SESSION_STATE_KEY, {}) || {};
+      state.set(CODEX_SESSION_STATE_KEY, { ...sessions,
+        [owner]: codexSessionRecord(sessions[owner], { pane: owner, profileId: profile.id, ...record,
+          ...(launch?.newSession ? { supersededSessionId: discovered?.sessionId || remembered?.sessionId || null } : {}) }) });
     };
     const { previous, launchOptions, resumeSessionId, startRecord } = await prepareCodexResume({
       decision, discovered, remembered, launch, requestedSessionId, dir,

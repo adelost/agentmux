@@ -216,7 +216,7 @@ function isPaneWorktreeCwd(paneDir, cwd) {
   return false;
 }
 
-function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
+function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs(), accept = null } = {}) {
   // Profile 1 remains ~/.codex; profile 2 has its own CODEX_HOME.  Search
   // both so switching accounts does not make the watcher/context layer lose
   // the pane's rollout just because its storage root changed.
@@ -226,7 +226,7 @@ function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
   const candidates = [];
   for (const { path, mtime } of files) {
     const meta = readSessionMeta(path);
-    if (meta?.source !== "cli" || meta?.originator !== "codex-tui") continue;
+    if (meta?.source !== "cli" || meta?.originator !== "codex-tui" || (accept && !accept(meta))) continue;
     const cwd = meta?.cwd;
     if (!cwd) continue;
     if (paneDir === cwd) {

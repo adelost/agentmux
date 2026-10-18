@@ -2,20 +2,20 @@ import { component, expect, feature } from "bdd-vitest";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { launchCodexWithPolicy, codexResumeEvidence, prepareCodexResume, validCodexCompactReceipt } from "./codex-launch-policy.mjs";
+import { launchCodexWithPolicy, codexResumeEvidence, codexSessionRecord, prepareCodexResume, validCodexCompactReceipt } from "./codex-launch-policy.mjs";
 import { createCodexCompact } from "./codex-process-launch.mjs";
 import { readCodexRolloutModel } from "./codex-rollout-model.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 
 const fixture = (extra = {}) => {
   const events = [];
-  return { events, sessionId: "session-a", previous: { model: "gpt-6-astra" },
+  return { events, sessionId: "session-a", previous: { model: "gpt-6-luna" },
     selected: { model: "gpt-5.6-sol", effort: "xhigh" },
-    launch: async ({ model }) => events.push(`launch:${model}`),
+    launch: async ({ model }, options = {}) => events.push(`launch:${model}${options.fresh ? ":fresh" : ""}`),
     compact: async () => { events.push("compact"); return { ok: true, sessionId: "session-a" }; },
     reset: async () => events.push("reset"),
     verify: async () => ({ model: "gpt-5.6-sol", effort: "xhigh" }),
-    remember: (actual) => events.push(`remember:${actual.model}`),
+    remember: (actual, options = {}) => events.push(`remember:${actual.model}${options.replacedSessionId ? `:replaces:${options.replacedSessionId}` : ""}`),
     recordBlocked: () => events.push("blocked"),
     validReceipt: (r, id) => r?.ok === true && r.sessionId === id,
     ...extra };
@@ -100,10 +100,10 @@ feature("a cold large Codex session is compacted before it resumes work", () => 
     then: ["no compact", (_, ctx) => expect(ctx.events).toEqual(["launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
   });
   component("a model change compacts the old model with goals off too", {
-    given: ["an Astra session selected for Sol", () => resumeFixture(() => ({ previous: { model: "gpt-6-astra" } }))],
+    given: ["a Luna session selected for Sol", () => resumeFixture(() => ({ previous: { model: "gpt-6-luna" } }))],
     when: ["waking it", (ctx) => launchCodexWithPolicy(ctx)],
     then: ["the old model cannot run its goal before the compact", (_, ctx) => expect(ctx.events).toEqual(
-      ["launch:gpt-6-astra:goals-off", "compact", "reset", "launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
+      ["launch:gpt-6-luna:goals-off", "compact", "reset", "launch:gpt-6.1-sol", "remember:gpt-6.1-sol"])],
   });
   component("the resume facts are read before Codex opens the session", {
     given: ["skyvw:4's rollout: 409 537 tokens, last turn 94 minutes ago, with and without an earlier attempt", () => {
@@ -280,10 +280,10 @@ feature("Codex wake cannot bypass compact-first model selection", () => {
     }],
   });
   component("a changed default compacts the old model before starting Sol", {
-    given: ["a dormant Astra session selected for Sol", () => fixture()],
+    given: ["a dormant Luna session selected for Sol", () => fixture()],
     when: ["waking its exact session", (ctx) => launchCodexWithPolicy(ctx)],
     then: ["compact precedes the new model and the choice is remembered", (_, ctx) => {
-      expect(ctx.events).toEqual(["launch:gpt-6-astra", "compact", "reset", "launch:gpt-5.6-sol", "remember:gpt-5.6-sol"]);
+      expect(ctx.events).toEqual(["launch:gpt-6-luna", "compact", "reset", "launch:gpt-5.6-sol", "remember:gpt-5.6-sol"]);
     }],
   });
   component("failed compact leaves no model process able to receive work", {
@@ -291,7 +291,7 @@ feature("Codex wake cannot bypass compact-first model selection", () => {
     when: ["waking for a model change", (ctx) => launchCodexWithPolicy(ctx).catch(e => e.message)],
     then: ["the target model never starts and the failure persists", (error, ctx) => {
       expect(error).toContain("usage-limit");
-      expect(ctx.events).toEqual(["launch:gpt-6-astra", "blocked", "reset"]);
+      expect(ctx.events).toEqual(["launch:gpt-6-luna", "blocked", "reset"]);
     }],
   });
   component("a restart of the remembered model does not compact or switch again", {
@@ -327,5 +327,44 @@ feature("Codex wake cannot bypass compact-first model selection", () => {
     then: ["nothing launches or spends compact quota", (error, ctx) => {
       expect(error).toContain("compact-boundary-missing"); expect(ctx.events).toEqual([]);
     }],
+  });
+});
+
+// ai:3, 2026-10-18: Mattias's message waited on a session last run on Astra,
+// which may never launch again, so its compact-first change could never run.
+// Mattias: "starta en ny session om du så behöver men du kan ju inte bara
+// strunta i mitt meddelande".
+feature("a session that cannot reach the selected model gives way to a new one", () => {
+  const astra = { previous: { model: "gpt-6-astra" }, selected: { model: "gpt-6.1-sol", effort: "xhigh" },
+    verify: async () => ({ model: "gpt-6.1-sol", effort: "xhigh" }) };
+  for (const work of ["HUMAN", "AUTOMATIC"]) {
+    component(`${work} work to an Astra session starts a new Sol session`, {
+      given: ["ai:3's dormant Astra session, selected for Sol", () => fixture({ ...astra, work })],
+      when: ["delivering to it", (ctx) => launchCodexWithPolicy(ctx)],
+      then: ["no Astra launch or compact, and the old session is recorded as replaced", (actual, ctx) => {
+        expect(actual).toMatchObject({ model: "gpt-6.1-sol" });
+        expect(ctx.events).toEqual(["launch:gpt-6.1-sol:fresh", "remember:gpt-6.1-sol:replaces:session-a"]);
+      }],
+    });
+  }
+  component("the owner's message after a failed model-change compact starts a new session", {
+    given: ["a persisted failed transition, woken by a Discord message", () => fixture({
+      blocked: { target: "gpt-5.6-sol", reason: "compact-ended-without-boundary" }, work: "HUMAN" })],
+    when: ["delivering to it", (ctx) => launchCodexWithPolicy(ctx)],
+    then: ["the message gets a working pane and no compact is paid again", (_, ctx) =>
+      expect(ctx.events).toEqual(["launch:gpt-5.6-sol:fresh", "remember:gpt-5.6-sol:replaces:session-a"])],
+  });
+});
+
+feature("a pane's session record keeps its replaced session", () => {
+  component("starting and remembering the replacement keeps the old session replaced", {
+    when: ["recording the replacement's start and its later verified launch", () => {
+      const started = codexSessionRecord({ sessionId: "old", supersededSessionId: null },
+        { sessionId: null, status: "awaiting-first-rollout", supersededSessionId: "old" });
+      const remembered = codexSessionRecord(started, { sessionId: null, status: "awaiting-first-rollout", model: "gpt-6.1-sol", supersededSessionId: null });
+      const replacedAgain = codexSessionRecord(remembered, { sessionId: null, status: "awaiting-first-rollout", supersededSessionId: "newer" });
+      return [started, remembered, replacedAgain].map(record => record.supersededSessionId);
+    }],
+    then: ["only a later replacement moves the marker", markers => expect(markers).toEqual(["old", "old", "newer"])],
   });
 });

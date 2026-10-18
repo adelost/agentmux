@@ -52,9 +52,9 @@ export async function startCodexProcess({
     sessionId, previous, selected, blocked: remembered?.modelTransitionBlocked,
     retry: launchOptions?.retryModelChange === true,
     receipt: launchOptions?.compactReceipt, context: launchOptions?.resumeContext, work: launchOptions?.work,
-    launch: async (choice, { goals = true } = {}) => {
+    launch: async (choice, { goals = true, fresh = false } = {}) => {
       const cmd = buildCodexLaunchCommand({ profileHome: profile.home, ...choice,
-        resumeSessionId: sessionId, allowFreshBootstrap: !sessionId, disableGoals: !goals, cwd: dir });
+        resumeSessionId: fresh ? null : sessionId, allowFreshBootstrap: fresh || !sessionId, disableGoals: !goals, cwd: dir });
       await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
       await wait(500);
       if (!await ready()) throw new Error("Codex composer did not become ready");
@@ -62,9 +62,10 @@ export async function startCodexProcess({
     compact,
     reset,
     verify: () => waitForCodexModelSelection({ screen, wait, selected, status, dismiss }),
-    remember: (actual) => {
-      remember({ sessionId, status: sessionId ? "ready" : "awaiting-first-rollout",
-        model: actual.model, effort: actual.effort, modelTransitionBlocked: null });
+    remember: (actual, { replacedSessionId = null } = {}) => {
+      const current = replacedSessionId ? null : sessionId;
+      remember({ sessionId: current, status: current ? "ready" : "awaiting-first-rollout",
+        model: actual.model, effort: actual.effort, modelTransitionBlocked: null, supersededSessionId: replacedSessionId });
       pin(actual);
     },
     recordBlocked: (error) => remember({ sessionId, status: "model-change-blocked",

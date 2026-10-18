@@ -87,14 +87,21 @@ export function contextCostDecision({ tokens, idleMs, cold = false, pauseTokens 
 // message opens any existing session with the goal paused (LAUNCH_PAUSED), so
 // the newest human instruction is read before the old goal; a failed compact
 // never locks a pane against its owner (the 2026-09-26 availability rule).
+// ai:3, 2026-10-18: the owner's message waited all day on a session last run on
+// Astra, which may never launch, so its compact-first change could never run.
+// Mattias: "starta en ny session om du så behöver men du kan ju inte bara
+// strunta i mitt meddelande". A change that is IMPOSSIBLE, or that FAILED
+// when the owner writes, starts a new session (FRESH) and keeps the old journal.
 /** WHAT: Defines every Codex launch admission. WHY: Prevents wake and recovery from bypassing compact-first model changes. */
 export const codexLaunchRules = defineDecisionTable({
   id: "amux.codex-launch",
-  axes: { identity: ["FRESH", "KNOWN", "UNKNOWN"], selection: ["SAME", "CHANGED"], receipt: ["VERIFIED", "MISSING"], blocked: ["YES", "NO"],
-    context: ["WITHIN", "COLD_LARGE", "TRIED", "UNKNOWN"], work: ["AUTOMATIC", "HUMAN"] },
-  columns: { action: choice(["LAUNCH", "LAUNCH_PAUSED", "COMPACT", "HOLD"]) },
+  axes: { identity: ["FRESH", "KNOWN", "UNKNOWN"], selection: ["SAME", "CHANGED"], receipt: ["VERIFIED", "MISSING"],
+    blocked: ["IMPOSSIBLE", "FAILED", "NO"], context: ["WITHIN", "COLD_LARGE", "TRIED", "UNKNOWN"], work: ["AUTOMATIC", "HUMAN"] },
+  columns: { action: choice(["LAUNCH", "LAUNCH_PAUSED", "COMPACT", "HOLD", "FRESH"]) },
   cells: [
-    on("previous-failure", { blocked: "YES" }, { action: "HOLD" }),
+    on("impossible-change", { blocked: "IMPOSSIBLE" }, { action: "FRESH" }),
+    on("previous-failure", { blocked: "FAILED", work: "AUTOMATIC" }, { action: "HOLD" }),
+    on("owner-after-failed-change", { blocked: "FAILED", work: "HUMAN" }, { action: "FRESH" }),
     on("unknown-model", { blocked: "NO", identity: "UNKNOWN" }, { action: "HOLD" }),
     on("fresh-session", { blocked: "NO", identity: "FRESH" }, { action: "LAUNCH" }),
     on("compact-tried", { blocked: "NO", identity: "KNOWN", context: "TRIED", receipt: "MISSING", work: "AUTOMATIC" }, { action: "HOLD" }),
@@ -113,10 +120,12 @@ export const codexLaunchRules = defineDecisionTable({
   invariants: [
     { refuse: "a changed existing model cannot launch without compact proof", when: d => d.at.identity === "KNOWN" && d.at.selection === "CHANGED" && d.at.receipt === "MISSING" && d.values.action.startsWith("LAUNCH") },
     { refuse: "a cold large session cannot resume before its compact", when: d => d.at.identity === "KNOWN" && d.at.context === "COLD_LARGE" && d.at.receipt === "MISSING" && d.values.action.startsWith("LAUNCH") },
-    { refuse: "an unverified compact cannot release automatic work or pay again", when: d => d.at.identity === "KNOWN" && d.at.context === "TRIED" && d.at.receipt === "MISSING" && d.at.work === "AUTOMATIC" && d.values.action !== "HOLD" },
+    // FRESH leaves that context unopened and pays for no compact.
+    { refuse: "an unverified compact cannot release automatic work or pay again", when: d => d.at.identity === "KNOWN" && d.at.context === "TRIED" && d.at.receipt === "MISSING" && d.at.work === "AUTOMATIC" && !["HOLD", "FRESH"].includes(d.values.action) },
     { refuse: "an unverified compact or unknown context cannot start the old goal", when: d => d.at.identity === "KNOWN" && ["TRIED", "UNKNOWN"].includes(d.at.context) && d.at.receipt === "MISSING" && d.values.action === "LAUNCH" },
     { refuse: "the owner's message is read before an existing session's goal", when: d => d.at.identity === "KNOWN" && d.at.work === "HUMAN" && d.values.action === "LAUNCH" },
-    { refuse: "blocked transitions cannot spend automatic retries", when: d => d.at.blocked === "YES" && d.values.action !== "HOLD" },
+    { refuse: "a failed or impossible change never compacts or reopens the old session again", when: d => d.at.blocked !== "NO" && !["HOLD", "FRESH"].includes(d.values.action) },
+    { refuse: "automatic work cannot replace a session whose change only failed", when: d => d.at.blocked === "FAILED" && d.at.work === "AUTOMATIC" && d.values.action !== "HOLD" },
   ],
 });
 
@@ -129,10 +138,10 @@ export function codexResumeContext({ tokens, idleMs, tried = false }, policy = P
 }
 
 /** WHAT: Maps exact session and compact facts to the launch table. WHY: Keeps the model-change decision inspectable before any process side effect. */
-export function codexLaunchDecision({ sessionId, previous, selected, blocked, receipt, context = "WITHIN", work = "AUTOMATIC" }) {
+export function codexLaunchDecision({ sessionId, previous, selected, blocked, impossible = false, receipt, context = "WITHIN", work = "AUTOMATIC" }) {
   return decide(codexLaunchRules, { identity: !sessionId ? "FRESH" : previous?.model ? "KNOWN" : "UNKNOWN",
     selection: previous?.model === selected?.model ? "SAME" : "CHANGED",
-    receipt: receipt ? "VERIFIED" : "MISSING", blocked: blocked ? "YES" : "NO", context, work });
+    receipt: receipt ? "VERIFIED" : "MISSING", blocked: impossible ? "IMPOSSIBLE" : blocked ? "FAILED" : "NO", context, work });
 }
 
 // 518 deliveries once waited on unreadable evidence and locked panes against

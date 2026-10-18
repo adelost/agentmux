@@ -15,6 +15,7 @@ import {
   latestCodexSessionIdentity,
   latestCodexSessionFor,
 } from "../core/codex-jsonl-reader.mjs";
+import { startedAfterSession } from "../core/codex-start-selection.mjs";
 
 /**
  * Build a codex rollout jsonl file at ~/.codex/sessions/2026/04/09/rollout-x.jsonl
@@ -906,5 +907,33 @@ feature("readLastTurnsCodex: task_complete-before-response_item race", () => {
       expect(r.turns[0].items).toMatchObject([{ type: "text", content: "delayed reply" }]);
       cleanup();
     }],
+  });
+});
+
+// skybar:4, 2026-10-16: two explicit new Sol sessions fell back to the old
+// Astra rollout, which was touched after the replacement started.
+feature("a pane's replaced Codex session stays replaced", () => {
+  const OLDER = "019e0bd1-f34c-7c00-9115-86c3b6e38a46";
+  const REPLACED = "019f59a7-d4bd-77c0-8860-4f4356acd515";
+  const REPLACEMENT = "01a1450a-1e16-7461-b9e6-dcbb932cf230";
+  const rollouts = (sessions) => {
+    const root = mkdtempSync(join(tmpdir(), "codex-replaced-"));
+    for (const [id, mtime] of sessions) {
+      const path = join(root, `rollout-${id}.jsonl`);
+      writeFileSync(path, `${JSON.stringify({ type: "session_meta", payload: { id, cwd: "/pane", source: "cli", originator: "codex-tui" } })}\n`);
+      utimesSync(path, mtime, mtime);
+    }
+    return root;
+  };
+  const find = (root, replacedSessionId) => latestCodexSessionIdentity("/pane", { sessionDirs: [root],
+    accept: replacedSessionId ? startedAfterSession(replacedSessionId) : null })?.sessionId ?? null;
+  unit("discovery skips the replaced session and every older one, even when touched last", {
+    given: ["an older session, the replaced one touched last, and the replacement", () => [
+      rollouts([[OLDER, 300], [REPLACED, 400], [REPLACEMENT, 200]]), rollouts([[OLDER, 300], [REPLACED, 400]])]],
+    when: ["resolving the pane's session with and without the replacement on disk", ([withReplacement, unwritten]) => {
+      try { return [find(withReplacement, null), find(withReplacement, REPLACED), find(unwritten, REPLACED)]; }
+      finally { for (const root of [withReplacement, unwritten]) rmSync(root, { recursive: true, force: true }); }
+    }],
+    then: ["only a session started after the replaced one is the pane's", (found) => expect(found).toEqual([REPLACED, REPLACEMENT, null])],
   });
 });

@@ -4,6 +4,12 @@ import { codexPromptProgress } from "./codex-user-events.mjs";
 import { codexLaunchDecision, codexResumeContext } from "../policies/context-cost.mjs";
 import { latestConversationActivityMs } from "./pane-activity.mjs";
 import { isCodexCompaction } from "./codex-compaction.mjs";
+import { allowedCodexLaunchModel } from "./codex-profiles.mjs";
+
+/** WHAT: Builds a pane's next Codex session record. WHY: Keeps a replaced session replaced after its replacement starts, until a later replacement. */
+export function codexSessionRecord(current, record) {
+  return { ...record, supersededSessionId: record.supersededSessionId || current?.supersededSessionId || null };
+}
 
 /** WHAT: Maps exact-session model and compact evidence to resume inputs. WHY: Prevents old remembered settings from hiding a later provider fallback. */
 export function codexResumeEvidence({ sessionId, observed, rollout, remembered, launch, maintenance,
@@ -75,8 +81,11 @@ export async function launchCodexWithPolicy({
 }) {
   const verified = validReceipt(receipt, sessionId);
   const transition = Boolean(sessionId && previous?.model !== selected.model);
+  // Its compact-first change would have to launch the old model, which may no longer launch (Astra).
+  const oldModelRefused = transition && !allowedCodexLaunchModel(previous?.model).ok;
   const decideFor = (launchContext, proven = verified) => codexLaunchDecision({ sessionId, previous, selected,
-    blocked: transition && blocked?.target === selected.model && !retry && !proven, receipt: proven, context: launchContext, work });
+    blocked: transition && blocked?.target === selected.model && !retry && !proven,
+    impossible: oldModelRefused && !proven, receipt: proven, context: launchContext, work });
   const decision = decideFor(context);
   if (decision.values.action === "HOLD") throw heldLaunch(decision, blocked);
   // An active goal starts a turn as soon as Codex opens the session, so the
@@ -102,12 +111,15 @@ export async function launchCodexWithPolicy({
       });
     }
     // A paused goal lets the owner's message run first; the next normal start resumes it.
-    await launch(selected, { goals: action === "LAUNCH" });
+    // FRESH leaves the old session on disk and gives the work a new one on the selected model.
+    const fresh = action === "FRESH";
+    if (fresh) log(`${sessionId}: ${decision.cell}, a new ${selected.model} session takes the work`);
+    await launch(selected, { goals: action === "LAUNCH" || fresh, fresh });
     const actual = await verify();
     if (actual?.model !== selected.model || (selected.effort && actual?.effort !== selected.effort)) {
       throw new Error(`requested ${selected.model}, running ${actual?.model || "unknown"}`);
     }
-    remember(actual);
+    remember(actual, fresh ? { replacedSessionId: sessionId } : {});
     return actual;
   } catch (error) {
     // This process was opened only for the guarded transition. Preserve its
