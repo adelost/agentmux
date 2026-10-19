@@ -161,7 +161,10 @@ ${fakeTranscribe}
     env: { ...process.env, HOME: root, ...env }, encoding: "utf8", timeout: 10_000,
   });
   const calls = () => readFileSync(join(root, "calls"), "utf8").trim().split("\n");
-  return { run, calls, close: () => rmSync(root, { recursive: true, force: true }) };
+  const args = () => readFileSync(join(root, "args"), "utf8").trim().split("\n");
+  const failures = () => readFileSync(join(root, ".agentmux/stt-gemini-failures.jsonl"), "utf8")
+    .trim().split("\n").map((line) => JSON.parse(line));
+  return { run, calls, args, failures, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 describe("a hung Gemini call, sandman:0 2026-10-18", () => {
@@ -187,6 +190,50 @@ echo "$backend words"`);
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout.trim()).toBe("gemini words");
       expect(fx.calls()).toEqual(["gemini", "gemini"]);
+    } finally { fx.close(); }
+  });
+});
+
+// sandman:0's proposal 2026-10-19, decided by lsrc:0 on Mattias' delegation: keep why each Gemini
+// try failed, cap thinking and answer length, and vary a second try only after a fast failure.
+describe("Gemini tries are capped, logged when they fail, and varied only after a fast failure", () => {
+  it("logs why each Gemini try failed, without the words", () => {
+    const fx = providerFixture(`if [ "$backend" = gemini ]; then
+  echo "google.genai.errors.ServerError: 503 UNAVAILABLE. {'error': {'code': 503}}" >&2; echo "Gemini error" >&2; exit 1
+fi
+echo "whisper words"`);
+    try {
+      const result = fx.run();
+      expect(result.status, result.stderr).toBe(0);
+      const log = fx.failures();
+      expect(log.map((entry) => entry.attempt)).toEqual([1, 2]);
+      expect(log[0]).toMatchObject({ backend: "gemini", exit: 1, reason: expect.stringContaining("503 UNAVAILABLE") });
+      expect(JSON.stringify(log)).not.toContain("whisper words");
+    } finally { fx.close(); }
+  });
+  it("caps thinking and answer length on every try and varies only the second", () => {
+    const fx = providerFixture(`echo "$*" >> "$HOME/args"
+if [ "$backend" = gemini ] && [ "$(grep -c gemini "$HOME/calls")" -eq 1 ]; then
+  echo "503 UNAVAILABLE" >&2; exit 1
+fi
+echo "$backend words"`);
+    try {
+      const result = fx.run();
+      expect(result.status, result.stderr).toBe(0);
+      const [first, second] = fx.args();
+      for (const line of [first, second]) expect(line).toContain("--thinking-budget 1024 --max-output-tokens 2048");
+      expect(first).toContain("--temperature 0 ");
+      expect(second).toContain("--temperature 0.3 ");
+    } finally { fx.close(); }
+  });
+  it("repeats a try that heard no words unchanged", () => {
+    const fx = providerFixture(`echo "$*" >> "$HOME/args"
+[ "$backend" = gemini ] && exit 0
+echo "whisper words"`);
+    try {
+      const result = fx.run();
+      expect(result.status, result.stderr).toBe(0);
+      expect(fx.args().map((line) => line.includes("--temperature 0 "))).toEqual([true, true]);
     } finally { fx.close(); }
   });
 });

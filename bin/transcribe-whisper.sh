@@ -70,9 +70,31 @@ fi
 
 GEMINI_CAP_S="${AMUX_STT_GEMINI_CAP_S:-100}"
 HUNG_AFTER_S="${AMUX_STT_HUNG_AFTER_S:-60}"
+# A clip of at most 45 s needs about 400 answer tokens, so a thinking or
+# repetition loop stops at these caps instead of running on to the deadline.
+GEMINI_LIMITS=(--thinking-budget 1024 --max-output-tokens 2048)
+STT_FAILURE_LOG="$HOME/.agentmux/stt-gemini-failures.jsonl"
 
-try_backend() { # $1=backend $2=wall-clock-cap $3=clip
-  timeout "$2" "$HOME/bin/transcribe" --backend "$1" --stdout --lang "$LANG" "$3"
+try_backend() { # $1=backend $2=wall-clock-cap $3=clip, then extra transcribe options
+  local backend="$1" cap="$2" clip="$3"
+  shift 3
+  timeout "$cap" "$HOME/bin/transcribe" --backend "$backend" --stdout --lang "$LANG" "$@" "$clip"
+}
+
+# One line per failed Gemini try, so a clip that whisper1 rescued still says
+# why Gemini failed. The reason is the provider's error line, never the words.
+log_gemini_failure() { # $1=attempt $2=exit $3=seconds $4=stderr-file $5=start $6=end
+  mkdir -p "${STT_FAILURE_LOG%/*}" && (umask 077; python3 -I - "$@" "$AUDIO_FILE" >> "$STT_FAILURE_LOG") <<'PY' \
+    || echo "[stt] could not log the Gemini failure to $STT_FAILURE_LOG" >&2
+import json, re, sys, time
+attempt, rc, seconds, errfile, start, end, audio = sys.argv[1:8]
+lines = [line.strip() for line in open(errfile, encoding="utf-8", errors="replace") if line.strip()]
+errors = [line for line in lines if re.search(r"Error|Exception|DEADLINE|UNAVAILABLE|MAX_TOKENS|[Tt]imeout", line)]
+reason = (errors or lines or [f"wall-clock cap after {seconds} s" if rc == "124" else "no error text"])[-1]
+print(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "audio": audio,
+                  "range": [int(start), int(end)], "attempt": int(attempt), "backend": "gemini",
+                  "exit": int(rc), "seconds": int(seconds), "reason": reason[:300]}, ensure_ascii=False))
+PY
 }
 
 has_words() { [ -n "${1//[[:space:]]/}" ]; }
@@ -81,23 +103,32 @@ has_words() { [ -n "${1//[[:space:]]/}" ]; }
 # gets the same answer, so failing the message only made every retry repeat
 # it (2026-10-17). Mark the range instead. Only an unanswered call fails.
 transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
-  local clip="$1" attempt TEXT rc started heard_no_words=false
+  local clip="$1" attempt TEXT rc started temperature=0 heard_no_words=false
+  local errlog
+  errlog=$(mktemp) || return 1
   for attempt in 1 2; do
     started=$SECONDS
-    if TEXT=$(try_backend gemini "${GEMINI_CAP_S}s" "$clip"); then
-      if has_words "$TEXT"; then printf '%s\n' "$TEXT"; return 0; fi
+    if TEXT=$(try_backend gemini "${GEMINI_CAP_S}s" "$clip" "${GEMINI_LIMITS[@]}" --temperature "$temperature" 2> "$errlog"); then
+      cat "$errlog" >&2
+      if has_words "$TEXT"; then rm -f "$errlog"; printf '%s\n' "$TEXT"; return 0; fi
       heard_no_words=true
       echo "[stt] gemini attempt $attempt/2 heard no words" >&2
       continue
     else
       rc=$?
+      cat "$errlog" >&2
     fi
     echo "[stt] gemini attempt $attempt/2 failed (exit $rc) after $((SECONDS - started)) s" >&2
+    log_gemini_failure "$attempt" "$rc" "$((SECONDS - started))" "$errlog" "$2" "$3"
     if [ $((SECONDS - started)) -ge "$HUNG_AFTER_S" ]; then
       echo "[stt] gemini hung; whisper1 takes over now" >&2
       break
     fi
+    # Only a fast failure reaches a second try; at temperature 0 the same clip
+    # would take the same path again.
+    temperature=0.3
   done
+  rm -f "$errlog"
   if $heard_no_words; then range_marker ohörbart "$2" "$3"; return 0; fi
   if TEXT=$(try_backend whisper1 60s "$clip"); then
     if has_words "$TEXT"; then printf '[stt-fallback:whisper1] %s\n' "$TEXT"; else range_marker ohörbart "$2" "$3"; fi
