@@ -15,6 +15,7 @@ import { captureJsonlAppendCursor, createJsonlReceiptProbe } from "./jsonl-appen
 import { codexUserPrompt, normalizeCodexUserEvents } from "./codex-user-events.mjs";
 import { readCodexDreamEvents } from "./codex-dream-history.mjs";
 import { codexRefusals, codexLastPrompt } from "./codex-refusal-notice.mjs";
+import { isBytePrefix } from "./file-prefix.mjs";
 
 // Content-addressed line identity for the watcher's posted-set dedupe. Codex
 // rollout events carry no stable id (no uuid, no payload.id), so we key on a
@@ -564,8 +565,22 @@ export function codexSessionIdentityById(sessionId, paneDir, {
   const matches = sessionDirs.flatMap((base) => findJsonlFiles(base, 0, []))
     .map((path) => ({ path, meta: readSessionMeta(path) }))
     .filter(({ meta }) => String(meta?.id || "") === expectedId && (paneDir == null || meta?.cwd === paneDir));
-  if (matches.length !== 1) return null;
-  return Object.freeze({ sessionId: expectedId, cwd: matches[0].meta.cwd, path: matches[0].path });
+  const live = liveSessionCopy(matches);
+  if (!live) return null;
+  return Object.freeze({ sessionId: expectedId, cwd: live.meta.cwd, path: live.path });
+}
+
+/**
+ * WHAT: Picks the one rollout that a session's copies agree on.
+ * WHY: Account recovery copies a session to the new account and leaves the old
+ *      copy behind as its prefix, which made the Dream proof fail on 17 and 19
+ *      Oct 2026. Divergent copies or another cwd still fail closed.
+ */
+function liveSessionCopy(matches) {
+  if (matches.length <= 1) return matches[0] || null;
+  const [longest, ...rest] = [...matches].sort((a, b) => statSync(b.path).size - statSync(a.path).size);
+  const copiesOfOne = rest.every((copy) => copy.meta.cwd === longest.meta.cwd && isBytePrefix(copy.path, longest.path));
+  return copiesOfOne ? longest : null;
 }
 
 /**
