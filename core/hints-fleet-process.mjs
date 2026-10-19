@@ -173,10 +173,10 @@ function's own branching or state. Do a small split in the same change.
    Link current canonical Markdown in Spec/Design when creating/updating tasks;
    keep version, verification and dated approval scope there. Date artifacts
    separately; changed requirements need new evidence.
-6. **Merge by fresh proof.** Immediately before merge, fetch and rebase onto
-   current trunk in the allowed checkout. On that exact source run fast
-   changed-unit tests and lint, exercise the actual feature manually, and run
-   one relevant local smoke lasting at most 5 minutes. Heavy CI,
+6. **Merge by fresh proof.** Just before merge, fetch and rebase on
+   current trunk in the allowed checkout. On that exact source run the
+   test plan's tests (testing-philosophy.md) and lint, exercise the feature
+   by hand, and run one relevant local smoke of at most 5 minutes. Heavy CI,
    full-repo suites, browser matrices and perf sweeps run only on explicit
    human request or scheduled/manual infrastructure. A green pre-rebase check
    proves nothing. Visual work: one smallest scenario and screenshot. Preserve

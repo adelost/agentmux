@@ -465,8 +465,8 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["local proof stays small without weakening correctness requirements", (content) => {
-      expect(content).toContain("changed-unit tests and lint, exercise the actual feature manually");
-      expect(content).toContain("one relevant local smoke lasting at most 5 minutes");
+      expect(content).toContain("test plan's tests (testing-philosophy.md) and lint, exercise the feature");
+      expect(content).toContain("one relevant local smoke of at most 5 minutes");
       expect(content).toMatch(/Heavy CI,\s+full-repo suites, browser matrices and perf sweeps run only on explicit\s+human request or scheduled\/manual infrastructure/u);
       expect(content).toContain("repo correctness and security requirements: never hide a real failure");
       expect(content).toContain("GitHub-hosted CI is optional evidence, never release authority");
