@@ -5,7 +5,7 @@ import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact 
 import { sendSlashVerified } from "./delivery.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
-import { paneModelSelection, setPaneModelSelection } from "./pane-model-state.mjs";
+import { beginPaneModelSwitch, endPaneModelSwitch, paneModelSelection, setPaneModelSelection } from "./pane-model-state.mjs";
 import { verifiedClaudeCompact } from "./verified-compact.mjs";
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -20,23 +20,27 @@ const observedModelId = raw => {
  * WHY: The model-watch reads an unsaved switch to a cheaper model as a downgrade
  *      and parks the pane (skydive:1 and claw:2, 2026-10-19).
  */
-async function switchVerified({ agent, state, name, pane, model, current, sendSlash, wait }) {
-  const sent = await sendSlash(agent, name, pane, `/model ${model}`, { suppressReceipt: true,
-    settleMs: 200, maxRescues: 0 });
-  if (!sent.delivered || sent.via !== "command-receipt") {
-    return { ok: false, stage: "switch", reason: "model-command-unverified" };
-  }
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const actual = await current();
-    const running = observedModelId(actual?.model);
-    if (isRequestedClaudeModel(running, model)) {
-      setPaneModelSelection(state, name, pane, running,
-        actual.effort || paneModelSelection(state, name, pane)?.effort || null);
-      return { ok: true, model: running };
+async function switchVerified({ agent, state, name, pane, from, model, current, sendSlash, wait }) {
+  // A turn the watcher mirrors before the choice is saved shows the new model.
+  beginPaneModelSwitch(state, name, pane, { from, to: model });
+  try {
+    const sent = await sendSlash(agent, name, pane, `/model ${model}`, { suppressReceipt: true,
+      settleMs: 200, maxRescues: 0 });
+    if (!sent.delivered || sent.via !== "command-receipt") {
+      return { ok: false, stage: "switch", reason: "model-command-unverified" };
     }
-    if (attempt < 9) await wait(250);
-  }
-  return { ok: false, stage: "verify", reason: "model-status-unverified" };
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const actual = await current();
+      const running = observedModelId(actual?.model);
+      if (isRequestedClaudeModel(running, model)) {
+        setPaneModelSelection(state, name, pane, running,
+          actual.effort || paneModelSelection(state, name, pane)?.effort || null);
+        return { ok: true, model: running };
+      }
+      if (attempt < 9) await wait(250);
+    }
+    return { ok: false, stage: "verify", reason: "model-status-unverified" };
+  } finally { endPaneModelSwitch(state, name, pane); }
 }
 
 /** WHAT: Routes one idle Claude model change after an exact compact. WHY: Prevents an old conversation from crossing models without a compact receipt. */
@@ -100,7 +104,8 @@ export async function runLockedClaudeModelChange({
       rememberContextCompact(state, name, pane, receipt);
       reusedCompact = false;
     }
-    const kept = await keepDefault(() => switchVerified({ agent, state, name, pane, model, current, sendSlash, wait }));
+    const kept = await keepDefault(() => switchVerified({ agent, state, name, pane, from: previousModel, model,
+      current, sendSlash, wait }));
     if (kept.busy) return { ok: false, stage: "default", reason: "default-model-busy" };
     return { ...kept.result, ...(kept.result.ok ? { reusedCompact } : {}), defaultModel: kept.defaults };
   } finally { lease.release(); }

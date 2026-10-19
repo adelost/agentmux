@@ -1113,36 +1113,52 @@ feature("watcher: a footer cut short never replaces the pane's effort", () => {
 // skydive:1 and claw:2 on 2026-10-19: `amux model … sonnet` switched both panes
 // but saved nothing, so each builder's first turn on Sonnet read as a downgrade.
 // The watcher stopped and parked the pane, and every later message needed --force.
+const SONNET_FOOTER = "old text\n────────────\n❯ \n────────────\n"
+  + "  ⬆ /gsd-update │ Sonnet 5.5 │ 0 ██░░░░░░░░ 26% · thinking: max\n bypass permissions on";
+
+function builderOnOpus() {
+  const userTs = "2026-10-19T14:35:45.000Z";
+  const ctx = setupWatcher({
+    jsonlLines: [userTurn("bygg Kit och Tess", userTs), assistantText("klart", "2026-10-19T14:36:20.000Z", "end_turn")],
+    stateInitial: {
+      watcher_last_posted_ts: { "ch-test": new Date(userTs).getTime() - 1 },
+      watcher_last_model: { "testagent:0": { model: "claude-opus-5-5", effort: "max" } },
+    },
+  });
+  ctx.agent.capturePane.mockResolvedValue(SONNET_FOOTER);
+  vi.mocked(notifyUser).mockClear();
+  return ctx;
+}
+
+// `amux model testagent -p 0 sonnet` on an idle pane; `duringSwitch` runs after
+// Claude has switched and before amux has saved the choice.
+function amuxModelSonnet(ctx, duringSwitch = async () => {}) {
+  let live = "Opus 5.5";
+  const sessionId = "11111111-1111-4111-8111-111111111111";
+  return runLockedClaudeModelChange({
+    agent: {
+      paneProcessState: async () => ({ running: true }),
+      isBusy: async () => false,
+      promptTransportState: async () => ({ state: "empty-idle" }),
+      getContext: async () => ({ model: live, effort: "max" }),
+    },
+    state: ctx.state, name: "testagent", pane: 0, paneDir: ctx.agentRootDir, targetModel: "sonnet",
+    queue: { acquireSessionLease: () => ({ release: () => {} }), list: () => [] },
+    identityFor: () => ({ sessionId, path: ctx.jsonlPath }),
+    compact: async () => ({ ok: false, nothingToCompact: true, sessionId }),
+    sendSlash: async () => { live = "Sonnet 5.5"; await duringSwitch(); return { delivered: true, via: "command-receipt" }; },
+    keepDefault: async (work) => ({ result: await work(), defaults: { restored: [], failed: [] } }),
+    wait: async () => {},
+  });
+}
+
+const messagesFlow = () => !shouldBlockSend({ text: "nästa brief", park: readParkState("testagent", 0) });
+
 feature("watcher: a model chosen with amux model is no downgrade", () => {
   unit("the builder's first turn after amux model sonnet leaves its messages flowing", {
     given: ["an Opus 5.5 pane switched with the alias sonnet, its footer now showing Sonnet 5.5", async () => {
-      const userTs = "2026-10-19T14:35:45.000Z";
-      const ctx = setupWatcher({
-        jsonlLines: [userTurn("bygg Kit och Tess", userTs), assistantText("klart", "2026-10-19T14:36:20.000Z", "end_turn")],
-        stateInitial: {
-          watcher_last_posted_ts: { "ch-test": new Date(userTs).getTime() - 1 },
-          watcher_last_model: { "testagent:0": { model: "claude-opus-5-5", effort: "max" } },
-        },
-      });
-      let live = "Opus 5.5";
-      const switching = {
-        paneProcessState: async () => ({ running: true }),
-        isBusy: async () => false,
-        promptTransportState: async () => ({ state: "empty-idle" }),
-        getContext: async () => ({ model: live, effort: "max" }),
-      };
-      const switched = await runLockedClaudeModelChange({
-        agent: switching, state: ctx.state, name: "testagent", pane: 0, paneDir: ctx.agentRootDir, targetModel: "sonnet",
-        queue: { acquireSessionLease: () => ({ release: () => {} }), list: () => [] },
-        identityFor: () => ({ sessionId: "11111111-1111-4111-8111-111111111111", path: ctx.jsonlPath }),
-        compact: async () => ({ ok: false, nothingToCompact: true, sessionId: "11111111-1111-4111-8111-111111111111" }),
-        sendSlash: async () => { live = "Sonnet 5.5"; return { delivered: true, via: "command-receipt" }; },
-        keepDefault: async (work) => ({ result: await work(), defaults: { restored: [], failed: [] } }),
-        wait: async () => {},
-      });
-      ctx.agent.capturePane.mockResolvedValue("old text\n────────────\n❯ \n────────────\n"
-        + "  ⬆ /gsd-update │ Sonnet 5.5 │ 0 ██░░░░░░░░ 26% · thinking: max\n bypass permissions on");
-      return { ctx, switched };
+      const ctx = builderOnOpus();
+      return { ctx, switched: await amuxModelSonnet(ctx) };
     }],
     when: ["the watcher mirrors the builder's first finished turn on Sonnet", async ({ ctx, switched }) => {
       await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
@@ -1150,8 +1166,26 @@ feature("watcher: a model chosen with amux model is no downgrade", () => {
     }],
     then: ["the pane is not parked, its next brief is not held, and nobody is paged", ({ ctx, switched }) => {
       try {
-        expect(shouldBlockSend({ text: "nästa brief", park: readParkState("testagent", 0) })).toBe(false);
+        expect(messagesFlow()).toBe(true);
         expect(notifyUser).not.toHaveBeenCalled();
+        expect(switched).toMatchObject({ ok: true, model: "claude-sonnet-5-5" });
+      } finally {
+        ctx.cleanup();
+      }
+    }],
+  });
+  // lsrc:0's fourth fault: an alarm fired before amux had saved the choice.
+  unit("a turn mirrored while amux model switches the pane raises no alarm", {
+    given: ["an Opus 5.5 pane with a finished turn the watcher has not mirrored yet", builderOnOpus],
+    when: ["the watcher mirrors it after Claude switched and before amux saved the choice", async (ctx) => {
+      const switched = await amuxModelSonnet(ctx, () => ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir));
+      return { ctx, switched };
+    }],
+    then: ["no downgrade alarm, no park, and the switch is saved", ({ ctx, switched }) => {
+      try {
+        expect(messagesFlow()).toBe(true);
+        expect(notifyUser).not.toHaveBeenCalled();
+        expect(ctx.discord.sends.some((send) => String(send.payload?.content ?? send.payload).includes("Downgrade"))).toBe(false);
         expect(switched).toMatchObject({ ok: true, model: "claude-sonnet-5-5" });
       } finally {
         ctx.cleanup();

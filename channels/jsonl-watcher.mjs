@@ -50,11 +50,7 @@ import { planQuotaStopMirror } from "../core/watcher-quota-stop.mjs";
 import { refusalNoticeText } from "../core/codex-refusal-notice.mjs";
 import { isCodexCapacityError } from "../core/codex-capacity-recovery.mjs";
 import { createCodexRecovery } from "../cli/codex-recovery.mjs";
-import {
-  paneModelSelection,
-  recordPaneModelReading,
-  setPaneModelSelection,
-} from "../core/pane-model-state.mjs";
+import { isPaneModelSwitchReading, paneModelSelection, recordPaneModelReading, setPaneModelSelection } from "../core/pane-model-state.mjs";
 const DEFAULT_POLL_MS = 15_000;
 // Typing-indicator is event-driven via fs.watch (every jsonl write fires
 // sendTyping with throttle below). This polling cadence is the fallback
@@ -334,6 +330,8 @@ export function createJsonlWatcher({
     const prev = paneModelSelection(state, name, idx);
     const next = { model: ctx.model, effort: recordPaneModelReading(state, name, idx, ctx.model, ctx.effort ?? null).effort };
     if (isExpectedCodexModel(state, name, idx, config?.[name]?.panes?.[idx], next)) return;
+    // amux model is switching this pane on purpose; its old and new model are both expected.
+    if (isPaneModelSwitchReading(state, name, idx, next)) return;
     if (!prev) return;
 
     const change = classifyModelChange(prev, next);

@@ -1,5 +1,7 @@
 import { expect, feature, unit } from "bdd-vitest";
 import {
+  beginPaneModelSwitch,
+  isPaneModelSwitchReading,
   paneModelSelection,
   recordPaneModelReading,
   setPaneModelSelection,
@@ -76,5 +78,19 @@ feature("durable pane model selection", () => {
       expect(cut).toEqual({ model: "claude-opus-5-5", effort: "max" });
       expect(changed).toEqual({ model: "claude-opus-5-5", effort: "medium" });
     }],
+  });
+});
+
+// A crashed amux model leaves its switch behind; it must not hide a later real downgrade.
+feature("a model switch in progress", () => {
+  unit("a switch marked longer ago than its window no longer passes a reading", {
+    given: ["claw:2's switch from Opus 5.5 to sonnet marked three minutes ago", () => {
+      const state = memoryState();
+      beginPaneModelSwitch(state, "claw", 2, { from: "claude-opus-5-5", to: "sonnet" }, Date.parse("2026-10-19T14:35:37Z"));
+      return state;
+    }],
+    when: ["the watcher reads Sonnet 5.5 on that pane", (state) =>
+      isPaneModelSwitchReading(state, "claw", 2, { model: "Sonnet 5.5" }, Date.parse("2026-10-19T14:38:37Z"))],
+    then: ["the reading is judged like any other", (passes) => expect(passes).toBe(false)],
   });
 });
