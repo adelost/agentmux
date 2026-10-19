@@ -38,6 +38,8 @@ const RM_GUARD_CMD = `p=$(cat); case "$p" in *rm*) printf '%s' "$p" | exec node 
 // fork type; the same existing Agent/Task guard also serializes fresh subagents (Mattias 2026-10-17).
 const FORK_GUARD_CMD = `exec node "${join(__dir, "fork-guard.mjs")}"`;
 const FORK_GUARD_MATCHER = "Agent|Task";
+// TaskStop ends an agent without a SubagentStop, so its receipt is what frees the slot.
+const FORK_GUARD_RECEIPT_MATCHER = "Agent|Task|TaskStop";
 const FORK_SWITCH = "CLAUDE_CODE_FORK_SUBAGENT";
 // WHAT: Defines the PostToolUse command for the daily memory section rule.
 // WHY: Keeps every other tool call free of a node start; only payloads naming a daily note reach it.
@@ -173,7 +175,7 @@ function main() {
   else delete hooks.PreToolUse;
   for (const event of ["SubagentStart", "SubagentStop", "PostToolUseFailure", "PostToolUse", "SessionStart"]) {
     const kept = without(hooks[event], isForkGuard);
-    if (!remove) kept.push({ ...(event.startsWith("PostTool") ? { matcher: FORK_GUARD_MATCHER } : {}),
+    if (!remove) kept.push({ ...(event.startsWith("PostTool") ? { matcher: FORK_GUARD_RECEIPT_MATCHER } : {}),
       hooks: [{ type: "command", command: FORK_GUARD_CMD, timeout: 10 }] });
     if (kept.length) hooks[event] = kept;
     else delete hooks[event];

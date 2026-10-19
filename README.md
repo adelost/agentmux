@@ -366,7 +366,10 @@ node bin/install-release.mjs --sha "$MASTER_SHA"
 
 Claude Agent/Task calls use the existing PreToolUse guard. `AMUX_CLAUDE_SUBAGENT_CAP`
 in `~/.agentmux/.env` defaults to `1`; `0` disables the cap. Start/stop and tool
-receipts release the slot, including background agents. Each attempt appends a
+receipts release the slot, including background agents and a TaskStop. When a spawn
+would be refused, the guard first frees slots whose agent has stopped (its task
+notification in the parent journal) or belonged to an earlier Claude process; a
+started or resumed process begins with no slots. Each attempt appends a
 time, pane, decision and description to `~/.agentmux/subagent-spawns.jsonl`, never
 the prompt. An unknown count allows the call and records `countKnown:false`.
 

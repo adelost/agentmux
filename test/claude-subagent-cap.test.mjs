@@ -1,9 +1,10 @@
 import { component, expect, feature } from "bdd-vitest";
 import { afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { claudeProcessStartMs, claudeSubagentHook } from "../core/claude-subagent-cap.mjs";
 
 const refusal = "One subagent at a time. Hand mechanical work to a free Codex pane with a brief (policy: Opus designs; Codex implements).";
 const homes = [];
@@ -88,5 +89,102 @@ feature("Claude pane subagent admission", () => {
       return [afterForeground, background, f.spawn("blocked").status];
     }],
     then: ["only running background work still holds the slot", result => expect(result).toEqual([0, 0, 2])],
+  });
+  // lsrc:0 2026-10-20: a stopped or finished agent frees its slot. sandman:0's floor agent, ended by TaskStop at
+  // 21:23Z on 2026-10-19, got no SubagentStop and held the pane's only slot for hours.
+  component("an agent TaskStop ended frees its slot", {
+    when: ["a background agent starts and TaskStop ends it", () => {
+      const f = fixture();
+      f.spawn("first", { tool_input: { description: "Background", run_in_background: true } });
+      f.call("SubagentStart", null, { agent_id: "child-1", agent_type: "general-purpose" });
+      f.call("PostToolUse", "first");
+      f.call("PostToolUse", "stop", { tool_name: "TaskStop", tool_input: { task_id: "child-1" } });
+      return f.spawn("second").status;
+    }],
+    then: ["the next spawn is admitted", status => expect(status).toBe(0)],
+  });
+  component("a started or resumed Claude process begins with no slots", {
+    when: ["a background agent runs, then the pane's Claude resumes its session", () => {
+      const f = fixture();
+      f.spawn("first", { tool_input: { description: "Background", run_in_background: true } });
+      f.call("SubagentStart", null, { agent_id: "child-1", agent_type: "general-purpose" });
+      f.call("PostToolUse", "first");
+      const before = f.spawn("blocked").status;
+      f.call("SessionStart", null, { source: "resume" });
+      return [before, f.spawn("second").status];
+    }],
+    then: ["refused while it ran, admitted after the restart", statuses => expect(statuses).toEqual([2, 0])],
+  });
+});
+
+// lsrc:0 2026-10-20: a slot whose agent no longer exists is freed on the next admission check.
+feature("admission frees slots whose agents no longer exist", () => {
+  const STARTED = Date.parse("2026-10-19T18:47:36Z");
+  const setup = () => {
+    const home = mkdtempSync(join(tmpdir(), "amux-subagent-live-")); homes.push(home);
+    mkdirSync(join(home, ".agentmux"));
+    const project = join(home, "projects", "pane");
+    mkdirSync(join(project, "session", "subagents"), { recursive: true });
+    const transcript = join(project, "session.jsonl");
+    writeFileSync(transcript, "");
+    const hook = (event, extra = {}, claudeStartMs = () => STARTED) => claudeSubagentHook({ hook_event_name: event,
+      session_id: "session", transcript_path: transcript, tool_name: "Agent", ...extra }, { pane: "test:0", home, env: {}, claudeStartMs });
+    const start = async (id, agent) => {
+      await hook("PreToolUse", { tool_use_id: id, tool_input: { description: id, subagent_type: "Explore", run_in_background: true } });
+      await hook("SubagentStart", { agent_id: agent, agent_type: "Explore" });
+      await hook("PostToolUse", { tool_use_id: id });
+    };
+    const journal = (agent, at) => {
+      const path = join(project, "session", "subagents", `agent-${agent}.jsonl`);
+      writeFileSync(path, "{}\n");
+      utimesSync(path, new Date(at), new Date(at));
+    };
+    const notify = (agent, at) => writeFileSync(transcript, `${JSON.stringify({ type: "queue-operation", operation: "enqueue",
+      timestamp: new Date(at).toISOString(), content: `<task-notification>\n<task-id>${agent}</task-id>\n<status>killed</status>\n`
+        + "<summary>Agent was stopped</summary>\n</task-notification>" })}\n`, { flag: "a" });
+    return { hook, start, journal, notify };
+  };
+  const admitted = async (ctx, id) => (await ctx.hook("PreToolUse", { tool_use_id: id, tool_input: { description: id } })).allowed;
+
+  component("a stop notification in the parent journal frees the slot, and a later restart of that agent counts again", {
+    when: ["an agent is stopped without a receipt, then resumed", async () => {
+      const ctx = setup();
+      await ctx.start("first", "child-1");
+      ctx.journal("child-1", Date.now());
+      const whileRunning = await admitted(ctx, "blocked");
+      ctx.notify("child-1", Date.now() + 1000);
+      const afterStop = await admitted(ctx, "second");
+      await ctx.hook("PostToolUseFailure", { tool_use_id: "second" });
+      await new Promise(done => setTimeout(done, 1100));
+      await ctx.hook("SubagentStart", { agent_id: "child-1", agent_type: "Explore" });
+      return [whileRunning, afterStop, await admitted(ctx, "third")];
+    }],
+    then: ["refused, admitted, refused", results => expect(results).toEqual([false, true, false])],
+  });
+  component("an agent of an earlier Claude process frees its slot, while one of the current process still counts", {
+    when: ["two panes' agents last wrote before and after their Claude process started", async () => {
+      const earlier = setup();
+      await earlier.start("first", "child-1");
+      earlier.journal("child-1", STARTED - 3 * 3600_000);
+      const current = setup();
+      await current.start("first", "child-2");
+      current.journal("child-2", STARTED + 60_000);
+      return [await admitted(earlier, "second"), await admitted(current, "second")];
+    }],
+    then: ["the earlier one is freed, the current one is refused", results => expect(results).toEqual([true, false])],
+  });
+  component("the Claude process is the first one named claude above the hook", {
+    when: ["a hook runs under sh -c under claude, with boot at 1 000 000 s", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-proc-")); homes.push(root);
+      writeFileSync(join(root, "stat"), "cpu 1 2 3\nbtime 1000000\n");
+      const proc = (pid, ppid, start, command) => {
+        mkdirSync(join(root, String(pid)));
+        writeFileSync(join(root, String(pid), "stat"), `${pid} (${command.split("/").at(-1)}) S ${ppid} ${"0 ".repeat(17)}${start} 0 0\n`);
+        writeFileSync(join(root, String(pid), "cmdline"), `${command}\0--resume\0`);
+      };
+      proc(30, 20, 9000, "/bin/sh"); proc(20, 10, 5000, "/home/u/.local/bin/claude"); proc(10, 1, 100, "/usr/bin/tmux");
+      return claudeProcessStartMs(root, 30);
+    }],
+    then: ["claude's start, 50 s after boot", started => expect(started).toBe(1_000_000_000 + 50_000)],
   });
 });
