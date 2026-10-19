@@ -2,30 +2,14 @@
 // WHAT: Claude Stop-hook entrypoint for one-pane reactive watcher pokes.
 // WHY: Keeps hook wiring tiny while the tested resolver prevents global fanout.
 
-import { existsSync, readFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { cwdFromHookInput, loadAgentsConfig, resolvePaneFromCwd, sendReactivePoke } from "../core/reactive-poke.mjs";
 import { runtimeAgentsPath } from "../core/runtime-defaults.mjs";
+import { loadRuntimeEnv } from "../core/runtime-env.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dir, "..");
-
-function parseEnvFile(path) {
-  if (!existsSync(path)) return {};
-  const out = {};
-  for (const raw of readFileSync(path, "utf-8").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const idx = line.indexOf("=");
-    if (idx === -1) continue;
-    const key = line.slice(0, idx).trim();
-    let value = line.slice(idx + 1).trim();
-    value = value.replace(/^['"]|['"]$/g, "");
-    out[key] = value;
-  }
-  return out;
-}
 
 async function readHookInput() {
   if (process.stdin.isTTY) return {};
@@ -40,7 +24,8 @@ async function readHookInput() {
 }
 
 async function main() {
-  const env = { ...parseEnvFile(resolve(root, ".env")), ...process.env };
+  // The CLI's sources and order: process env, ~/.agentmux/.env, then this package's .env.
+  const env = loadRuntimeEnv({ packageRoot: root, processEnv: { ...process.env } });
   if (env.AMUX_REACTIVE_POKE !== "1") return;
 
   const agentsYaml = runtimeAgentsPath(env, env.HOME);
