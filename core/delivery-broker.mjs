@@ -11,10 +11,11 @@ import { deliverToPane } from "./delivery.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
 import { captureDeliveryCursor } from "./delivery-cursor.mjs";
 import { recoverSupersededSubmit } from "./submit-boundary.mjs";
-import { createDeliveryNotSent, PRE_SUBMIT_STATES } from "./delivery-not-sent.mjs";
+import { cancelledBeforeSubmit, createDeliveryNotSent } from "./delivery-not-sent.mjs";
 import { createDeliveryNotices } from "./delivery-notices.mjs";
 import { createDeliveryTerminalizer } from "./delivery-terminal.mjs";
 import { runDeliveryPreflight } from "./delivery-stale.mjs";
+import { throwIfCancelRequested } from "./delivery-fence.mjs";
 import { createIngestProbeGate } from "./ingest-probe-gate.mjs";
 import { createWakeAdmissionGate } from "./wake-admission.mjs";
 import { deliveryHead, wakeDeliveryTarget } from "./delivery-wake.mjs";
@@ -190,8 +191,6 @@ export function createDeliveryBroker({
     }
   }
 
-  const cancellationRequested = (job) => job.cancelRequestStatus === "requested";
-
   async function processJob(initialJob, lease = null) {
     let job = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
     queue.restoreAssets?.(job);
@@ -254,6 +253,10 @@ export function createDeliveryBroker({
         return cancelled;
       }
     }
+
+    // A cancelled job that never reached the submit fence starts no attempt: no wake, cursor, paste or Enter.
+    // Its draft, if an earlier attempt typed one, is withdrawn before it ends (delivery-not-sent.mjs).
+    if (cancelledBeforeSubmit(job)) return terminalizeNotSent(job);
 
     // Persist a same-host timestamp before the first possible tmux write.
     // Event-identity cursors are stronger, but a fresh/missing JSONL can make
@@ -441,6 +444,9 @@ export function createDeliveryBroker({
     job = memoryContext.prepare(job);
     const attemptDelivery = async () => {
       try {
+        // A cancel can land while the attempt waits for the pane (wake, compact), as on claw:2 (2026-10-19).
+        // This re-read, right before the paste, keeps a cancelled job from ever being typed.
+        throwIfCancelRequested(queue.read(job.agentName, job.pane, job.id) || job, "paste");
         return await deliverToPane(agent, job.agentName, job.pane, job.text, {
           verifyText: deliveryMemoryReceiptText(job),
           attempts: 1,
@@ -467,11 +473,7 @@ export function createDeliveryBroker({
           },
           onSubmitting: async () => {
             const current = queue.read(job.agentName, job.pane, job.id) || job;
-            if (cancellationRequested(current)) {
-              const error = new Error("delivery cancellation requested before submit fence");
-              error.code = "AMUX_DELIVERY_CANCEL_REQUESTED";
-              throw error;
-            }
+            throwIfCancelRequested(current, "submit fence");
             job = queue.update(current, {
               status: "submitting",
               draftOwned: false,
@@ -536,9 +538,7 @@ export function createDeliveryBroker({
     // An explicit engine rejection closes terminally: never blind-retried,
     // never allowed into the fail-open submitted lane (slash-submit-recovery).
     if (result.failed === "not-ingested") return terminalizeSlashRejection({ job, queue, now, queueEvent, notifyTerminal, reason: result.reason });
-    if (cancellationRequested(job) && PRE_SUBMIT_STATES.has(job.status)) {
-      return terminalizeNotSent(job);
-    }
+    if (cancelledBeforeSubmit(job)) return terminalizeNotSent(job);
     if (job.status === "submitting") {
       return queue.update(job, {
         draftOwned: false,

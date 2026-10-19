@@ -159,3 +159,55 @@ feature("a delivery never types after text amux did not write", () => {
     }],
   });
 });
+
+// lsrc:0 2026-10-19 (claw:2): a delivery that is cancelled after amux typed its text either clears that text or
+// submits it. Text typed by this attempt is erased when the cancellation reaches the submit fence; any other
+// refusal keeps the draft, which the next attempt recovers.
+const cancelRefusal = () => Object.assign(new Error("delivery cancellation requested before submit fence"),
+  { code: "AMUX_DELIVERY_CANCEL_REQUESTED" });
+
+async function refusedAtFence(setup, prompt, refusal, options = {}) {
+  const { agent, pane, clean } = claudePane(setup);
+  let error = null;
+  try {
+    await agent.sendOnly("probe", prompt, 0, { existingOnly: true, ...options,
+      onSubmitting: async () => { throw refusal; } });
+  } catch (caught) { error = caught; }
+  finally { clean(); }
+  return { ...pane, error, erases: pane.calls.filter((call) => /\bBSpace\b/u.test(call)).length };
+}
+
+feature("a cancelled delivery leaves no text of its own in the composer", () => {
+  const question = "[transcribed voice] Hej, var är ni någonstans?";
+
+  component("a cancellation between paste and Enter erases exactly what this attempt typed", {
+    when: ["the sender cancels while the submit fence is checked", () =>
+      refusedAtFence({ screen: withAgentList }, question, cancelRefusal())],
+    then: ["the composer is empty again, nothing was sent and the cancellation still reaches the broker", ({ composer, submitted, error, erases }) => {
+      expect(composer).toBe("");
+      expect(submitted).toBeNull();
+      expect(error.code).toBe("AMUX_DELIVERY_CANCEL_REQUESTED");
+      expect(erases).toBe(1);
+    }],
+  });
+
+  component("any other refusal at the fence keeps the draft for the next attempt", {
+    when: ["the fence fails for a reason that is not a cancellation", () =>
+      refusedAtFence({ screen: withAgentList }, question, new Error("queue disk is full"))],
+    then: ["the typed text stays and nothing was sent", ({ composer, submitted, error, erases }) => {
+      expect(composer).toBe(question);
+      expect(submitted).toBeNull();
+      expect(error.message).toBe("queue disk is full");
+      expect(erases).toBe(0);
+    }],
+  });
+
+  component("a cancellation never erases a draft from an earlier attempt", {
+    when: ["the sender cancels while the composer holds the text an earlier attempt typed", () =>
+      refusedAtFence({ screen: withAgentList, composer: question }, question, cancelRefusal(), { knownDrafted: true })],
+    then: ["the draft is left for the broker to withdraw once it proves the text is its own", ({ composer, erases }) => {
+      expect(composer).toBe(question);
+      expect(erases).toBe(0);
+    }],
+  });
+});

@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createDeliveryBroker } from "./delivery-broker.mjs";
 import { deliveryStateNotice } from "./delivery-notices.mjs";
+import { composerAgent } from "../test/fixtures/composer-agent.mjs";
 
 const tempRoot = () => join(tmpdir(), `amux-delivery-broker-${process.pid}-${Math.random().toString(36).slice(2)}`);
 
@@ -79,6 +80,8 @@ feature("single-writer delivery broker", () => {
       agent.promptTransportState = async () => ({
         state: "empty-idle", busy: false, dialect: "codex",
       });
+      // A cancelled draft owner is read before it ends (lsrc:0, 2026-10-19); the empty Codex composer is on screen.
+      agent.captureScreen = async () => "› ";
       const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
       return { rootDir, queue, compact, user, agent, broker };
     }],
@@ -1847,10 +1850,16 @@ feature("single-writer delivery broker", () => {
       const job = queue.enqueue({ agentName: "lsrc", pane: 8, text: "stop before Enter", createdAt: 9_000 });
       const notices = [];
       let physicalEnters = 0;
-      const agent = acceptingAgent();
+      // The broker now reads the composer it typed into before it ends a cancelled job (lsrc:0, 2026-10-19).
+      const { agent: paneApi, pane: composerPane } = composerAgent();
+      const agent = Object.assign(acceptingAgent(), {
+        promptTransportState: paneApi.promptTransportState, captureScreen: paneApi.captureScreen,
+        sendEscape: paneApi.sendEscape, clearInputLine: paneApi.clearInputLine,
+      });
       agent.waitForPromptEcho = async () => false;
       agent.sendOnly = async (_name, text, _pane, options = {}) => {
         agent.sends.push({ text, options });
+        composerPane.composer = text;
         await options.onPasteStarted?.();
         await options.onDrafted?.();
         queue.requestCancellation(job.id, {
@@ -1864,7 +1873,7 @@ feature("single-writer delivery broker", () => {
       const broker = createDeliveryBroker({
         agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
       });
-      return { rootDir, queue, job, notices, agent, broker, physicalEnters: () => physicalEnters,
+      return { rootDir, queue, job, notices, agent, broker, composerPane, physicalEnters: () => physicalEnters,
         advance: (ms) => { clock += ms; } };
     }],
     when: ["the durable fence callback observes the sender request", async ({ broker, advance }) => {
@@ -1872,8 +1881,11 @@ feature("single-writer delivery broker", () => {
       advance(31_000);
       await broker.kickTarget("lsrc", 8);
     }],
-    then: ["the composer is preserved, Enter never runs, and NOT SENT is truthful", (_, ctx) => {
+    // Changed requirement (lsrc:0, 2026-10-19): this test used to expect "the composer is preserved". A cancelled
+    // delivery now either clears its own draft or is submitted, so the typed text must be gone.
+    then: ["the typed text is withdrawn, Enter never runs, and NOT SENT is truthful", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(1);
+      expect(ctx.composerPane.composer).toBe("");
       expect(ctx.physicalEnters()).toBe(0);
       expect(ctx.notices).toEqual(["not-sent"]);
       expect(ctx.queue.read("lsrc", 8, ctx.job.id)).toMatchObject({
@@ -2745,5 +2757,121 @@ feature("single-writer delivery broker", () => {
       expect(ctx.notices[1]).toContain("gpt-6-sol");
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
+  });
+});
+
+// lsrc:0 2026-10-19 (claw:2, job 32619fff): claw:0 cancelled a quota-recovery job while its attempt waited for the
+// pane's compact. amux typed the text 51 s later, the submit fence refused, and the text stayed in a composer
+// nothing would submit, which held the pane until a person pressed Enter. A cancelled delivery either clears its own
+// draft or is submitted, and text amux cannot prove is its own is never cleared (claude-composer-guards.mjs, 2026-09-28).
+feature("a cancelled delivery never leaves its own text in a composer", () => {
+  const RECOVERY_TEXT = "[amux quota-recovery] The weekly limit has reset.\nContinue the task you were on.";
+  const CANCEL = { requestedBy: "claw:0", reason: "claw:2 should wait for the week reset" };
+  // An earlier attempt typed the text; the job waits with its draft in the composer.
+  const OWNS_DRAFT = { status: "drafted", draftOwned: true, attempts: 1, firstAttemptAt: 900_000,
+    lastAttemptAt: 900_000, nextAttemptAt: 0 };
+  const cleanup = (ctx) => rmSync(ctx.rootDir, { recursive: true, force: true });
+
+  /** claw:2's quota-recovery job and a pane behind the agent API. `waitForPane` runs while the attempt waits for the pane. */
+  function clawWorld({ pane: paneOptions = {}, job: jobState = null, waitForPane = null } = {}) {
+    const rootDir = tempRoot();
+    let clock = 1_000_000;
+    const queue = createDeliveryQueue({ rootDir, now: () => clock });
+    const job = queue.enqueue({ agentName: "claw", pane: 2, text: RECOVERY_TEXT, source: "quota-recovery", createdAt: 900_000 });
+    if (jobState) queue.update(job, jobState);
+    const { agent, pane } = composerAgent(paneOptions);
+    const cancel = () => queue.requestCancellation(job.id, CANCEL);
+    const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {},
+      ...(waitForPane ? { costAdmission: async () => { await waitForPane(cancel); return { ok: true }; } } : {}) });
+    return { rootDir, queue, pane, broker, cancel, current: () => queue.read("claw", 2, job.id),
+      advance: (ms) => { clock += ms; } };
+  }
+
+  component("a quota-recovery job cancelled after amux typed it leaves no text in the composer", {
+    given: ["claw:2's job is typed into the pane right before claw:0's cancellation reaches the submit fence", () => {
+      const world = clawWorld();
+      world.pane.afterPaste = () => world.cancel();
+      return world;
+    }],
+    when: ["the fence refuses and the transport's erase does not happen", ({ broker }) => broker.kickTarget("claw", 2)],
+    then: ["the composer is empty, nothing was submitted, and the job says amux cleared its draft", (_, ctx) => {
+      expect(ctx.pane.typed).toEqual([RECOVERY_TEXT]);
+      expect(ctx.pane.composer).toBe("");
+      expect(ctx.pane.enters).toBe(0);
+      expect(ctx.pane.rewindOpened).toBe(false);
+      expect(ctx.current()).toMatchObject({ status: "cancelled", cancelRequestStatus: "completed",
+        metadata: { deliveryOutcome: "not-sent", deliveryCancellation: "sender-request" } });
+      expect(ctx.current().lastReason).toMatch(/amux cleared the draft it typed/u);
+    }],
+    cleanup,
+  });
+
+  component("a cancel requested while the attempt waits for the pane types nothing", {
+    given: ["claw:2's attempt waits for the pane's compact and claw:0 cancels meanwhile", () =>
+      clawWorld({ waitForPane: async (cancel) => cancel() })],
+    when: ["the compact ends and the attempt continues", ({ broker }) => broker.kickTarget("claw", 2)],
+    then: ["nothing is typed or submitted, and the job says nothing was typed", (_, ctx) => {
+      expect(ctx.pane.typed).toEqual([]);
+      expect(ctx.pane.composer).toBe("");
+      expect(ctx.pane.enters).toBe(0);
+      expect(ctx.current()).toMatchObject({ status: "cancelled", cancelRequestStatus: "completed" });
+      expect(ctx.current().lastReason).toMatch(/nothing was typed/u);
+    }],
+    cleanup,
+  });
+
+  for (const [name, composer] of [
+    ["a person's words added after the text", `${RECOVERY_TEXT}\nAnd buy milk on the way.`],
+    ["a collapsed paste", "[Pasted text #1 +12 lines]"],
+    ["another message", "A different message that amux never typed."],
+  ]) {
+    component(`a cancel never clears ${name}`, {
+      given: ["claw:2's job owns a draft from an earlier attempt, and the composer now holds something else", () =>
+        clawWorld({ pane: { composer }, job: OWNS_DRAFT })],
+      when: ["claw:0 cancels and the broker polls", async (ctx) => {
+        ctx.cancel();
+        await ctx.broker.kickTarget("claw", 2);
+      }],
+      then: ["the composer is untouched, nothing was submitted, and the job says amux left it", (_, ctx) => {
+        expect(ctx.pane.composer).toBe(composer);
+        expect(ctx.pane.keys).toEqual([]);
+        expect(ctx.pane.enters).toBe(0);
+        expect(ctx.current()).toMatchObject({ status: "cancelled", cancelRequestStatus: "completed" });
+        expect(ctx.current().lastReason).toMatch(/cannot prove is its own, left untouched/u);
+      }],
+      cleanup,
+    });
+  }
+
+  component("a cancel while the pane is busy waits and never submits, then clears the draft once the pane is idle", {
+    given: ["claw:2's draft sits in a pane that is busy with a turn", () =>
+      clawWorld({ pane: { composer: RECOVERY_TEXT, busy: true }, job: OWNS_DRAFT })],
+    when: ["claw:0 cancels, the broker polls twice while busy, and the pane goes idle", async (ctx) => {
+      ctx.cancel();
+      await ctx.broker.kickTarget("claw", 2);
+      ctx.whileBusy = { job: ctx.current(), composer: ctx.pane.composer, keys: [...ctx.pane.keys], looks: ctx.pane.observations };
+      ctx.advance(1_000);
+      await ctx.broker.kickTarget("claw", 2);
+      ctx.looksBeforeRetryTime = ctx.pane.observations - ctx.whileBusy.looks;
+      ctx.pane.busy = false;
+      ctx.advance(20_000);
+      await ctx.broker.kickTarget("claw", 2);
+    }],
+    then: ["the draft waits untouched, no attempt starts, Enter never runs, and the text is cleared when idle", (_, ctx) => {
+      const { job, composer, keys } = ctx.whileBusy;
+      expect(job).toMatchObject({ status: "drafted", cancelRequestStatus: "requested", attempts: 1 });
+      expect(job.lastReason).toMatch(/busy/u);
+      expect(composer).toBe(RECOVERY_TEXT);
+      expect(keys).toEqual([]);
+      expect(ctx.looksBeforeRetryTime).toBe(0);
+      expect(ctx.pane.wakeChecks).toBe(0);
+      expect(ctx.pane.typed).toEqual([]);
+      expect(ctx.pane.interrupted).toBe(false);
+      expect(ctx.pane.enters).toBe(0);
+      expect(ctx.pane.composer).toBe("");
+      expect(ctx.current()).toMatchObject({ status: "cancelled", cancelRequestStatus: "completed" });
+      expect(ctx.current().lastReason).toMatch(/amux cleared the draft it typed/u);
+    }],
+    cleanup,
   });
 });

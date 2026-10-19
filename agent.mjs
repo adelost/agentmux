@@ -82,7 +82,7 @@ import {
   isCodingPaneCommand as isAgentCmd,
   isShellProcess as isShellProc,
 } from "./core/tui-stall-recovery.mjs";
-import { eraseKeys, shouldPastePrompt, submitCheckOrErase, submitWithDurableFence } from "./core/delivery-fence.mjs";
+import { eraseKeys, isDeliveryCancelRequested, shouldPastePrompt, submitCheckOrErase, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
 import { claudePasteTransportState, claudeSafePasteParts, createClaudeComposerGuards } from "./core/claude-composer-guards.mjs";
 import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
@@ -1151,11 +1151,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
     // Claude holds an Enter pressed during "Pasting…" and drops it when the paste lands.
     if (dialect === "claude" && !maintenanceGuard) await claudeGuards.requireSettledPaste(agentName, pane, { maintenance: false });
-    // Persist ambiguity before Enter; a crash must never authorize a second paste.
+    // Persist ambiguity before Enter; a crash must never authorize a second paste. A cancel at the fence erases our text.
     const eraseTyped = shouldPastePrompt({ knownDrafted, alreadyComposed }) ? () => t.sendKeys(target, eraseKeys(prompt)) : null;
     if (maintenanceGuard) await submitCheckOrErase(maintenanceGuard, eraseTyped);
     await submitWithDurableFence({
-      onSubmitting,
+      onSubmitting: onSubmitting && (() => submitCheckOrErase(onSubmitting, eraseTyped, isDeliveryCancelRequested)),
       sendEnter: () => dialect === "kimi" ? submitKimiPromptNow(target, { busy: busyAtSend }) : t.sendEnter(target),
       onSubmitted,
     });

@@ -4,7 +4,9 @@
 // age). When the budget ends without an authoritative receipt the message is
 // never dropped silently: a pre-submit timeout PARKS the head with a fresh
 // retry budget, preserving its lifetime blocker and counters, while
-// sender cancels and proven-not-ingesting followers stay terminal.
+// sender cancels and proven-not-ingesting followers stay terminal. A sender
+// cancel first withdraws the draft its job typed (core/draft-withdrawal.mjs),
+// so it never leaves text in a composer that nothing will submit.
 // The single writer lease means only the broker ever runs these transitions.
 
 import {
@@ -12,6 +14,7 @@ import {
   NOT_INGESTING_UNVERIFIED_STREAK, isNotSentDeliveryJob,
   isTargetProvenNotIngesting,
 } from "./delivery-queue.mjs";
+import { withdrawDraft } from "./draft-withdrawal.mjs";
 
 const STALE_PRE_SUBMIT_TERMINAL_MS = 60 * 60 * 1_000;
 const MAX_PRE_SUBMIT_ATTEMPTS = 64;
@@ -20,12 +23,33 @@ export const PRE_SUBMIT_STATES = new Set(["pending", "delivering", "pasting", "d
 // A head that exhausts its pre-submit budget is never dropped: it parks this
 // long, then gets a fresh budget. The FIFO and the message are preserved.
 const PRE_SUBMIT_PARK_MS = 5 * 60_000;
+// A cancelled job that owns a draft looks again at a pane it could not read (busy, pasting, composer hidden) after
+// this long. Idle-composer waits of capacity and self-compact continuations use the same 15 s.
+const DRAFT_WITHDRAWAL_RETRY_MS = 15_000;
+// What a cancelled job says about the text it may have typed, by what the withdrawal found.
+const WITHDRAWN_DRAFT_REASONS = {
+  untyped: "nothing was typed",
+  absent: "no draft of it is left in the composer",
+  cleared: "amux cleared the draft it typed",
+  foreign: "the composer holds text amux cannot prove is its own, left untouched",
+  unreadable: "this engine's composer is not read by amux, so any text in it is left untouched",
+};
+
+/** WHAT: Checks whether a job has a standing cancellation request and no Enter behind it. WHY: Keeps the broker's attempt gate and its post-attempt branch on one rule. */
+export const cancelledBeforeSubmit = (job) => job.cancelRequestStatus === "requested" && PRE_SUBMIT_STATES.has(job.status);
 
 /** WHAT: Builds the pre-submit NOT SENT transitions over the broker's seams. WHY: Keeps parking and cancellation policy out of the delivery loop. */
 export function createDeliveryNotSent({
   queue, agent, now, queueEvent, exactEcho, acknowledge, notifyTerminal, maybeNotifyBlocked,
 }) {
   const cancellationRequested = (job) => job.cancelRequestStatus === "requested";
+  const mayOwnDraft = (job) => Boolean(job.draftOwned) || job.status === "drafted" || job.status === "pasting";
+
+  /**
+   * WHAT: Checks whether a cancelled job waits for its next look at a pane it could not read.
+   * WHY: Keeps the pane from being read every poll; nextAttemptAt stays with delivery attempts and quota parks.
+   */
+  const withdrawalWaiting = (job) => cancelledBeforeSubmit(job) && Number(job.metadata?.draftWithdrawal?.retryAt || 0) > now();
 
   /** WHAT: Checks whether a pre-submit job spent its retry budget. WHY: Prevents one wedged composer from consuming the FIFO forever. */
   function stalePreSubmit(job) {
@@ -133,6 +157,22 @@ export function createDeliveryNotSent({
     return settleCancellation(job, "refused", `state ${job.status} is not safe for pre-submit cancellation`);
   }
 
+  /**
+   * WHAT: Clears the draft a cancelled job typed, or keeps the job pending while the pane cannot be read.
+   * WHY: Prevents a cancelled message from staying in a composer that nothing will submit.
+   */
+  async function withdrawCancelledDraft(job) {
+    if (!mayOwnDraft(job)) return { found: "untyped" };
+    const { outcome, detail } = await withdrawDraft({ agent, job });
+    if (outcome !== "unobservable") return { found: outcome };
+    const kept = queue.update(job, {
+      lastReason: `cancellation requested by ${job.cancelRequestedBy || "unknown sender"}; waiting to clear the draft amux typed (${detail})`,
+      metadata: { draftWithdrawal: { retryAt: now() + DRAFT_WITHDRAWAL_RETRY_MS } },
+    });
+    if (!job.metadata?.draftWithdrawal) queueEvent(kept, "cancel_waiting", { reason: detail });
+    return { kept };
+  }
+
   /** WHAT: Parks one exhausted head instead of dropping its message. WHY: Keeps the FIFO intact while the stall stays visible. */
   async function parkPreSubmitTimeout(current) {
     const previous = current.metadata?.preSubmitPark;
@@ -156,6 +196,7 @@ export function createDeliveryNotSent({
   /** WHAT: Ends or parks one pre-submit job with the receipt re-read at the boundary. WHY: Prevents a stale observer from overwriting a late acknowledgement. */
   async function terminalizeNotSent(job) {
     let current = queue.read(job.agentName, job.pane, job.id) || job;
+    if (withdrawalWaiting(current)) return current;
     let cause = notSentCause(current);
     if (!cause) return settleCancellationOutsidePreSubmit(current);
 
@@ -181,12 +222,15 @@ export function createDeliveryNotSent({
 
     if (cause === "pre-submit-timeout") return parkPreSubmitTimeout(current);
 
+    const withdrawn = cause === "sender-cancel" ? await withdrawCancelledDraft(current) : null;
+    if (withdrawn?.kept) return withdrawn.kept;
+
     const firstAttemptAt = Number(current.firstAttemptAt || current.createdAt || now());
     const ageMinutes = Math.max(0, Math.floor((now() - firstAttemptAt) / 60_000));
     const requestedReason = String(current.cancelRequestedReason || "sender no longer needs this job");
     const requestedBy = String(current.cancelRequestedBy || "unknown sender");
     const terminalReason = cause === "sender-cancel"
-      ? `not sent: cancellation requested by ${requestedBy} before submit (${requestedReason}); composer preserved`
+      ? `not sent: cancellation requested by ${requestedBy} before submit (${requestedReason}); ${WITHDRAWN_DRAFT_REASONS[withdrawn.found]}`
       : cause === "target-not-ingesting"
         ? `not sent: ${current.agentName}:${current.pane} let ${NOT_INGESTING_UNVERIFIED_STREAK} consecutive receipt budgets expire without ingesting a prompt; resend once that pane acknowledges again`
         : `not sent: composer remained unsafe for ${ageMinutes} minute(s) across ${Number(current.attempts || 0)} attempt(s); automatic retries stopped`;
@@ -210,7 +254,7 @@ export function createDeliveryNotSent({
       } : {}),
       lastReason: terminalReason,
     });
-    queueEvent(terminal, "cancelled", { reason: cause });
+    queueEvent(terminal, "cancelled", { reason: cause, ...(withdrawn ? { draft: withdrawn.found } : {}) });
     return notifyTerminal(terminal);
   }
 
