@@ -62,3 +62,8 @@ export function defaultTodosPath(home = homedir()) {
 export function runtimeAgentsPath(env = process.env, home = homedir()) {
   return env.AGENTS_YAML || env.AGENT_CONFIG || join(home, ".agentmux", "agents.yaml");
 }
+
+/** WHAT: Resolves the bridge and CLI state file. WHY: Keeps config generation and the bridge on one /sync record. */
+export function runtimeStatePath(env = process.env) {
+  return env.STATE_FILE || "/tmp/agentmux-state.json";
+}
