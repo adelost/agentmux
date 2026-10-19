@@ -9,7 +9,7 @@ import { runLockedClaudeModelChange } from "./claude-model-command.mjs";
 const FRESH_FOOTER = "❯ \n────\n  ⬆ /gsd-update │ Opus 5.5 │ 2\n  ⏵⏵ bypass permissions on";
 
 function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5", running = true,
-  screen = null, compactResult = null } = {}) {
+  screen = null, compactResult = null, footerFor = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-claude-model-change-"));
   const path = join(root, "session.jsonl");
   writeFileSync(path, "");
@@ -36,9 +36,11 @@ function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5
     appendFileSync(path, `${JSON.stringify({ type: "system", subtype: "compact_boundary" })}\n`);
     return { ok: true, sessionId: identityFor().sessionId, cursor: { positions: { [path]: 0 } }, compactBoundary: true };
   };
+  // Claude Code resolves an alias itself and shows the model in its footer.
   const sendSlash = async (_agent, _name, _pane, command) => {
     calls.push(command);
-    model = command.replace("/model ", "");
+    const picked = command.replace("/model ", "");
+    model = footerFor[picked] ?? picked;
     return { delivered: true, via: "command-receipt" };
   };
   const change = targetModel => runLockedClaudeModelChange({
@@ -156,6 +158,35 @@ feature("Claude model changes are compact-first and pane-local", () => {
         expect(result.ok).toBe(true);
         expect(fx.calls).toEqual(["compact", "/model claude-opus-5-5", "release"]);
         expect(paneModelSelection(fx.state, "claw", 0)?.model).toBe("claude-opus-5-5");
+      } finally { fx.cleanup(); }
+    }],
+  });
+});
+
+// claw:0 on 2026-10-19: `amux model skydive -p 1 sonnet` switched the pane, but
+// amux compared "sonnet" with the footer's Sonnet 5.5, answered
+// model-status-unverified and saved nothing, so a restart would bring Opus back.
+feature("a family alias selects the model its footer shows", () => {
+  component("switching with the alias sonnet saves the full id", {
+    given: ["an idle Opus 5.5 pane whose footer will show Sonnet 5.5", () =>
+      fixture({ liveModel: "claude-opus-5-5", footerFor: { sonnet: "Sonnet 5.5" } })],
+    when: ["running amux model with sonnet", fx => fx.change("sonnet")],
+    then: ["the switch is verified and claude-sonnet-5-5 is the pane's choice", (result, fx) => {
+      try {
+        expect(result).toMatchObject({ ok: true, model: "claude-sonnet-5-5" });
+        expect(fx.calls).toEqual(["compact", "/model sonnet", "release"]);
+        expect(paneModelSelection(fx.state, "claw", 0)?.model).toBe("claude-sonnet-5-5");
+      } finally { fx.cleanup(); }
+    }],
+  });
+  component("a pane already on Sonnet 5.5 spends nothing for the alias", {
+    given: ["a pane whose footer shows Sonnet 5.5", () => fixture({ liveModel: "Sonnet 5.5" })],
+    when: ["running amux model with sonnet", fx => fx.change("sonnet")],
+    then: ["no compact or switch, and the full id is saved", (result, fx) => {
+      try {
+        expect(result).toMatchObject({ ok: true, unchanged: true, model: "claude-sonnet-5-5" });
+        expect(fx.calls).toEqual([]);
+        expect(paneModelSelection(fx.state, "claw", 0)?.model).toBe("claude-sonnet-5-5");
       } finally { fx.cleanup(); }
     }],
   });

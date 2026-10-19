@@ -1,4 +1,4 @@
-import { normalizeClaudeModelName, resolveClaudeModel } from "./claude-model.mjs";
+import { isRequestedClaudeModel, normalizeClaudeModelName, resolveClaudeModel } from "./claude-model.mjs";
 import { readClaudeFooterModel } from "./claude-statusline.mjs";
 import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "./context-maintenance.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
@@ -13,6 +13,30 @@ const observedModelId = raw => {
   const normalized = normalizeClaudeModelName(String(raw ?? "").replace(/\s*\(1M context\)\s*$/iu, "[1m]"));
   return normalized.ok ? resolveClaudeModel(normalized.model) : null;
 };
+
+/**
+ * WHAT: Sends /model and saves the full id once the pane shows the requested model.
+ * WHY: The model-watch reads an unsaved switch to a cheaper model as a downgrade
+ *      and parks the pane (skydive:1 and claw:2, 2026-10-19).
+ */
+async function switchVerified({ agent, state, name, pane, model, current, sendSlash, wait }) {
+  const sent = await sendSlash(agent, name, pane, `/model ${model}`, { suppressReceipt: true,
+    settleMs: 200, maxRescues: 0 });
+  if (!sent.delivered || sent.via !== "command-receipt") {
+    return { ok: false, stage: "switch", reason: "model-command-unverified" };
+  }
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const actual = await current();
+    const running = observedModelId(actual?.model);
+    if (isRequestedClaudeModel(running, model)) {
+      setPaneModelSelection(state, name, pane, running,
+        actual.effort || paneModelSelection(state, name, pane)?.effort || null);
+      return { ok: true, model: running };
+    }
+    if (attempt < 9) await wait(250);
+  }
+  return { ok: false, stage: "verify", reason: "model-status-unverified" };
+}
 
 /** WHAT: Routes one idle Claude model change after an exact compact. WHY: Prevents an old conversation from crossing models without a compact receipt. */
 export async function runLockedClaudeModelChange({
@@ -37,10 +61,10 @@ export async function runLockedClaudeModelChange({
   const before = await current();
   const previousModel = observedModelId(before?.model);
   if (!previousModel) return { ok: false, stage: "status", reason: "current-model-unknown" };
-  if (previousModel === model) {
-    setPaneModelSelection(state, name, pane, model,
+  if (isRequestedClaudeModel(previousModel, model)) {
+    setPaneModelSelection(state, name, pane, previousModel,
       before.effort || paneModelSelection(state, name, pane)?.effort || null);
-    return { ok: true, unchanged: true, model };
+    return { ok: true, unchanged: true, model: previousModel };
   }
 
   const lease = queue.acquireSessionLease(name);
@@ -74,20 +98,7 @@ export async function runLockedClaudeModelChange({
       rememberContextCompact(state, name, pane, receipt);
       reusedCompact = false;
     }
-    const sent = await sendSlash(agent, name, pane, `/model ${model}`, { suppressReceipt: true,
-      settleMs: 200, maxRescues: 0 });
-    if (!sent.delivered || sent.via !== "command-receipt") {
-      return { ok: false, stage: "switch", reason: "model-command-unverified" };
-    }
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const actual = await current();
-      if (observedModelId(actual?.model) === model) {
-        setPaneModelSelection(state, name, pane, model,
-          actual.effort || paneModelSelection(state, name, pane)?.effort || null);
-        return { ok: true, model, reusedCompact };
-      }
-      if (attempt < 9) await wait(250);
-    }
-    return { ok: false, stage: "verify", reason: "model-status-unverified" };
+    const switched = await switchVerified({ agent, state, name, pane, model, current, sendSlash, wait });
+    return switched.ok ? { ...switched, reusedCompact } : switched;
   } finally { lease.release(); }
 }

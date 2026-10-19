@@ -34,6 +34,20 @@ export const MODEL_NAME_HINT =
 const spokenAsWireId = (family, version) =>
   `claude-${family.toLowerCase()}-${version.trim().replace(/[.\s-]+/gu, "-").replace(/-$/u, "")}`;
 
+/** Claude Code's family aliases, the families SPOKEN_MODEL knows. Each picks its family's newest model. */
+const FAMILY_ALIASES = new Set(["opus", "sonnet", "haiku", "fable"]);
+
+/**
+ * WHAT: Tells whether the model a pane runs is the one that was asked for.
+ * WHY: `/model sonnet` runs claude-sonnet-5-5; comparing the alias with that id
+ *      left a switch that happened unsaved (claw:0, 2026-10-19).
+ */
+export function isRequestedClaudeModel(running, requested) {
+  const id = String(running || "").toLowerCase();
+  const asked = String(requested || "").toLowerCase();
+  return Boolean(id) && (id === asked || (FAMILY_ALIASES.has(asked) && id.startsWith(`claude-${asked}-`)));
+}
+
 /**
  * WHAT: Turns what a human types into a model name Claude Code accepts.
  * WHY: The wire format is `claude-opus-4-8` but people type `opus 4.8`.
