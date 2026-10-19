@@ -2,7 +2,7 @@
 
 import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
 import { parseJsonlWindow } from "./jsonl-reader.mjs";
-import { activeClaudeLimitReceiptFromEvents, claudeLimitFromText, claudeLimitEventText } from "./claude-limit-evidence.mjs";
+import { activeClaudeLimitReceiptFromEvents, claudeLimitFromText, claudeLimitEventText, claudeLimitNote } from "./claude-limit-evidence.mjs";
 export { activeClaudeLimitReceiptFromEvents, claudeLimitFromText, parseClaudeLimitResetAt, CLAUDE_STOP_BANNER } from "./claude-limit-evidence.mjs";
 
 const DEFAULT_LIMIT_TAIL_BYTES = 8 * 1024 * 1024;
@@ -20,7 +20,7 @@ export function activeClaudeLimitReceipt(paneDir, {
   const events = parseJsonlWindow(identity.path, {
     initialBytes: Math.min(256 * 1024, tailBytes),
     maxBytes: tailBytes,
-    enough: (rows) => rows.some((event) => claudeLimitFromText(claudeLimitEventText(event)) !== null),
+    enough: (rows) => rows.some((event) => claudeLimitFromText(claudeLimitEventText(event)) !== null || claudeLimitNote(event)),
   });
   return activeClaudeLimitReceiptFromEvents(events, {
     sessionId: identity.sessionId,

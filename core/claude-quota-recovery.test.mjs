@@ -11,6 +11,7 @@ import {
   spareClaudeAccount,
 } from "./claude-quota-recovery.mjs";
 import { claudeProjectDir } from "./claude-paths.mjs";
+import { idlePaneEvidence } from "./idle-capacity-alarm.mjs";
 
 const limitEvent = ({
   uuid = "11111111-1111-4111-8111-111111111111",
@@ -210,5 +211,61 @@ feature("the spare Claude account for a spent week", () => {
       readQuota: async (candidate) => accounts[candidate.key].quota,
     })],
     then: ["there is no spare", (spare) => expect(spare).toBeNull()],
+  });
+});
+
+// 2026-10-19 08:04Z: Claude Code told claw:2 the limit was reached with a short grace
+// left; claw:2 finished, committed and ended its own turn, so no stop banner was
+// ever written. No recovery came and the idle alarm stayed quiet; it sat 33 min.
+feature("an agent that ends its turn at Claude's grace note", () => {
+  const session = "33ec8b61-8343-446a-b562-435916f76e25";
+  const at = (time) => `2026-10-19T${time}Z`;
+  const event = (uuid, time, fields) => ({ uuid, timestamp: at(time), sessionId: session, ...fields });
+  const user = (uuid, time, content, more = {}) => event(uuid, time, { type: "user", message: { role: "user", content }, ...more });
+  const assistant = (uuid, time, content, more = {}) => event(uuid, time, { type: "assistant", message: { content, ...more } });
+  const claw2 = () => [
+    assistant("a1", "08:04:11.444", [{ type: "tool_use", id: "t1", name: "Bash", input: {} }]),
+    user("r1", "08:04:11.656", [{ type: "tool_result", tool_use_id: "t1", content: "ok" }]),
+    user("grace", "08:04:11.767", "[Usage limit reached; a short grace allowance remains, then this turn is cut off without warning."
+      + " Judge what's left: if it's genuinely only a few steps, finish it properly, then stop and say so without extra polishing.]",
+    { isMeta: true }),
+    assistant("a2", "08:04:20.773", [{ type: "text", text: "Committing row 47 before I stop." }]),
+    assistant("a3", "08:04:34.723", [{ type: "tool_use", id: "t2", name: "Bash", input: {} }]),
+    user("r2", "08:04:37.782", [{ type: "tool_result", tool_use_id: "t2", content: "4acb726 row 47" }]),
+    assistant("a4", "08:04:45.828", [{ type: "text", text: "SUMMARY: Your usage limit is reached, so I stopped." }], { stop_reason: "end_turn" }),
+    event("s1", "08:04:46.103", { type: "system", subtype: "turn_duration" }),
+    // The pause rule compacted the idle pane two minutes later.
+    user("c0", "08:06:50.494", "/compact"),
+    user("c1", "08:06:50.514", "<local-command-caveat>Caveat: the command below was run directly.</local-command-caveat>", { isMeta: true }),
+    user("c2", "08:06:50.514", "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>"),
+    event("s2", "08:08:08.902", { type: "system", subtype: "compact_boundary" }),
+    user("c3", "08:08:08.545", "This session is being continued from a previous conversation.", { isCompactSummary: true, isVisibleInTranscriptOnly: true }),
+    user("c4", "08:08:09.000", "<local-command-stdout>Compacted</local-command-stdout>"),
+  ];
+  const receiptOf = (events) => activeClaudeLimitReceiptFromEvents(events, { sessionId: session, sessionPath: `/sessions/${session}.jsonl` });
+
+  unit("the grace note is the stop that recovery resumes and the idle alarm reports", {
+    when: ["reading claw:2's session after it ended its turn", () => receiptOf(claw2())],
+    then: ["a usage-limit receipt from the note, with the reset left to the quota reading", (receipt) => {
+      expect(receipt).toMatchObject({ sessionId: session, limitEventId: "grace", limitKind: "usage", resetAt: null,
+        observedAt: Date.parse(at("08:04:11.767")) });
+      expect(idlePaneEvidence({ limitReceipt: receipt })).toMatchObject({ episode: "limit:grace", reason: "stopped at its usage limit" });
+    }],
+  });
+
+  unit("an agent still finishing within the grace has not stopped", {
+    when: ["claw:2 is committing row 47 after the note", () => receiptOf(claw2().slice(0, 6))],
+    then: ["no stop yet, so nothing restarts it mid-turn", (receipt) => expect(receipt).toBeNull()],
+  });
+
+  unit("a new prompt after the grace note ends the stop", {
+    when: ["claw:0 wakes claw:2 at 08:42Z", () => receiptOf([...claw2(), user("wake", "08:42:26.000", "[from claw:0]\n\nClaude S has room again; continue row 47.")])],
+    then: ["no restart authority remains", (receipt) => expect(receipt).toBeNull()],
+  });
+
+  unit("Claude's own all-clear after the grace note ends the stop", {
+    when: ["Claude lifts the note while the agent works on", () => receiptOf([...claw2().slice(0, 4),
+      user("lifted", "08:04:30.000", "[Earlier usage-limit notes no longer apply. Continue working normally. Don't mention this to the user.]", { isMeta: true })])],
+    then: ["no stop is reported", (receipt) => expect(receipt).toBeNull()],
   });
 });
