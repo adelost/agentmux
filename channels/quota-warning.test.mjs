@@ -46,13 +46,13 @@ feature("active-account warning with the quota box, 2026-10-17", () => {
     when: ["rendering the original readings with measured inactivity", () => posted(morning())],
     then: ["one box; the idle ai:2 account gets a row but no advice", texts => expect(texts).toEqual([[
       "```",
-      "         panes  week  reset",
+      "         panes  left  reset",
       "Codex A      2   19%  Thu 08:13",
       "Codex W      0    0%  Thu 11:29",
       "Claude W     2   93%  Wed 02:00",
       "Claude A     1    5%  Wed 02:00",
       "```",
-      "→ Free reset Codex A at 100%",
+      "→ Free reset Codex A at 0% left",
     ].join("\n")])],
   });
   unit("09:15 moves ai:2 to wetterlind when ai:2 is active", {
@@ -81,7 +81,7 @@ feature("active-account warning with the quota box, 2026-10-17", () => {
     when: ["only the alternate account is at 80 percent", () => posted({ accounts: [
       account("claude", "adelost", 95), account("claude", "spare", 80, []),
     ] })],
-    then: ["the advice is the free reset, not /byt", ([text]) => expect(text.split("\n").at(-1)).toBe("→ Free reset Claude A at 100%")],
+    then: ["the advice is the free reset, not /byt", ([text]) => expect(text.split("\n").at(-1)).toBe("→ Free reset Claude A at 0% left")],
   });
   unit("a full account in use says it is used up and to reset now", {
     when: ["16 panes have just reached the weekly limit", () => posted({ accounts: [

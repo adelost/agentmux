@@ -34,7 +34,7 @@ feature("the quota warning answers the human message", () => {
     when: ["two messages arrive together", async fx => { await Promise.all([fx.warn(fx.first), fx.warn(fx.second)]); return fx; }],
     then: ["only the first channel gets the notice", fx => {
       expect(fx.first.send).toHaveBeenCalledTimes(1);
-      expect(fx.first.send.mock.calls[0]).toEqual([expect.stringMatching(/^```\n {9}panes  week  reset\nClaude A     1   15%  [A-Z][a-z]{2} \d\d:\d\d\n```$/u), { kind: "notice" }]);
+      expect(fx.first.send.mock.calls[0]).toEqual([expect.stringMatching(/^```\n {9}panes  left  reset\nClaude A     1   15%  [A-Z][a-z]{2} \d\d:\d\d\n```$/u), { kind: "notice" }]);
       expect(fx.second.send).not.toHaveBeenCalled();
     }],
   });

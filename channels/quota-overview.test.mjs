@@ -29,7 +29,7 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
     when: ["rendering the example's readings", () => render(example())],
     then: ["names, panes, week left, reset, the blocking five-hour window and when it is back", lines => expect(lines).toEqual([
       "```",
-      "         panes  week  reset",
+      "         panes  left  reset",
       "Codex A     12  100%  Sat 13:35",
       // 09:28:56Z is shown to the nearest minute.
       "Codex W      0    0%  Thu 11:29",
@@ -38,6 +38,15 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
       "Claude A     2    4%  Wed 02:00",
       "```",
       "→ Claude W back at 14:40",
+    ])],
+  });
+  // lsrc:0 2026-10-19 read Claude S's 63% as used; its detail line said 37 % used.
+  unit("the percent column is named for what it shows: the week left", {
+    when: ["Claude S has used 37 % of its week", () => render([
+      claude("attrois", 37, "2026-10-21T07:00:00Z", panes("lsrc", 3), { name: "Claude S" })])],
+    then: ["the column says left above 63%", lines => expect(lines.slice(1, 3)).toEqual([
+      "         panes  left  reset",
+      "Claude S     3   63%  Wed 09:00",
     ])],
   });
   unit("no line is wider than a phone's 32 characters", {
@@ -89,7 +98,7 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
         account: { email: "mattias.wetterlind@example.test" }, inUse: panes("test", 12) },
     ])],
     then: ["it says so, and nothing else is advised", lines => expect(lines.slice(1)).toEqual([
-      "         panes  week  reset",
+      "         panes  left  reset",
       "Codex A      1   70%  Sat 13:35",
       "Claude W    12  unreadable",
       "```",
@@ -106,7 +115,7 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
     ])],
     then: ["each line fits a phone", lines => {
       expect(lines.slice(1, -1)).toEqual([
-        "         panes  week  reset",
+        "         panes  left  reset",
         "Codex A     12   92%  Sat 13:35",
         "  renews Oct 20 · 0 free resets",
         "Claude W    15  unreadable",
@@ -127,7 +136,7 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
     ])],
     then: ["each line fits a phone", lines => {
       expect(lines.slice(1, -1)).toEqual([
-        "        panes  week  reset",
+        "        panes  left  reset",
         "Codex A    12   92%  Sat 13:35",
         "  renews Nov 3",
         "  1 free reset, ends Nov 7",

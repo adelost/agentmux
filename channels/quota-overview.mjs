@@ -107,7 +107,7 @@ function actionLine(facts, { config, now }) {
   // A free reset clears the week; a five-hour window comes back by itself.
   if (fact.week?.usedPercent >= 100) return `→ Free reset ${fact.name} now`;
   if (fact.blockedBy5h) return `→ ${fact.name} back at ${untilClock(fact.blockedBy5h.resetsAt, now)}`;
-  return `→ Free reset ${fact.name} at 100%`;
+  return `→ Free reset ${fact.name} at 0% left`;
 }
 
 /**
@@ -120,7 +120,8 @@ export function buildQuotaOverview(snapshot, { config, now = Date.now(), reading
     .sort((a, b) => (b.inUse?.length || 0) - (a.inUse?.length || 0)));
   const facts = shown.map(account => accountFact(ENGINES.find(engine => engine.provider === account.provider), account, shown, { now, readingsOf }));
   const width = Math.max(0, ...facts.map(fact => fact.name.length));
-  const table = [`${" ".repeat(width)} panes  week  reset`, ...facts.flatMap(fact => linesOf(fact, width, now))];
+  // The percent is what is left, as Mattias asked; the detail lines of amux quota give what is used.
+  const table = [`${" ".repeat(width)} panes  left  reset`, ...facts.flatMap(fact => linesOf(fact, width, now))];
   const action = actionLine(facts, { config, now });
   return { text: ["```", ...table, "```", ...(action ? [action] : [])].join("\n") };
 }
