@@ -758,6 +758,13 @@ targets them.
 workspace immediately; the bridge performs the same fleet sync at startup.
 Operator additions below the generated end marker remain intact.
 
+An agent's send (`[from project:N]`) that pastes 8 or more consecutive words
+from one of the operator's Discord messages of the last 14 days is refused
+before the queue, and the refusal lists every quoted run. Case and punctuation
+are ignored; the bridge's own tags, links, paths and ids are not counted. His
+exact words belong in the decision log, which is not a send. The operator's
+own messages are never checked. `AMUX_QUOTE_GUARD_ENABLED=false` turns it off.
+
 ## Configuration
 
 Common `.env` variables:

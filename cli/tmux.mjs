@@ -26,6 +26,7 @@ import { createAgentRouter } from "../core/agent-router.mjs";
 import { createState } from "../core/state.mjs";
 import { clearComposerAndVerify } from "./composer-clear.mjs";
 import { activeClaudeLimitForTarget, warnQuotaStoppedRecipient } from "../core/claude-quota-target.mjs";
+import { refuseHumanQuote } from "../core/human-quote-guard.mjs";
 const exec = promisify(execCb);
 /** WHAT: Builds tmux execution helpers bound to one socket. WHY: Keeps CLI process and pane state on the bridge's shared boundaries. */
 export function createTmuxContext(socket, configPath) {
@@ -351,6 +352,9 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   const mirror = opts.mirror !== false;
   const mirrorDispatch = opts.mirrorDispatch || spawnMirrorWorker;
   const sender = parseSenderHeader(text);
+  // Only an agent's send is checked; his own messages reach panes another way.
+  const quote = sender ? (ctx.humanQuote || refuseHumanQuote)(text) : null;
+  if (quote) { console.error(quote); return { delivered: false, blocked: true, reason: "human-quote" }; }
   const targetChannelId = ctx.configPath
     ? findChannelForPane(ctx.configPath, name, pane)
     : null;
@@ -432,16 +436,9 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     mirrorDispatch({ channelId: targetChannelId, content: mirrored, idempotencyKey: `mirror:${job.id}` });
   }
   mirrorSenderStatus(outcome);
-  // Channel topic is intentionally NOT touched here. Topics are a stable
-  // per-pane summary set via agentmux.yaml `labels` and propagated by
-  // /sync (core/sync-discord.mjs:topicFor). Per-send overwrite was
-  // burning Discord's 2-edits-per-10-min cap and clobbering the
-  // user's manual focus topic on every brief.
-
-  // Replies have one owner: channels/jsonl-watcher.mjs. A second detached
-  // forwarder raced that watcher and produced A,B,A,C,B,C duplicate posts
-  // for inter-agent briefs. The watcher already covers every bound pane and
-  // persists its dedupe state across bridge restarts.
+  // The channel topic is never set here: it is the stable /sync label, and a per-send
+  // edit burned Discord's 2-edits-per-10-min cap. Replies have one owner,
+  // channels/jsonl-watcher.mjs; a second forwarder duplicated inter-agent posts.
   return outcome;
 }
 

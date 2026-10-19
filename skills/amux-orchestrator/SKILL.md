@@ -47,6 +47,7 @@ Read each view for what it is:
 - Never paste the human's text into a brief, not even for a GO, a price or
   a name. State the decision in your own words and point to its entry in the
   decision log (who, when, where). His exact words live only in that log.
+  amux refuses a send with 8 or more of his consecutive words and names them.
 - Bad brief: "Mattias, verbatim: 'men förstå ni? ska ju helst vara
   generistk...' Fix the rig." Good brief: "1. Use Haunt's rig format
   (rig.js) as the shared rig. 2. Place the joints from the doll's own

@@ -4,6 +4,7 @@ import { unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { sendToPane } from "./tmux.mjs";
+import { refuseHumanQuote } from "../core/human-quote-guard.mjs";
 import { parkPane } from "../core/pane-park.mjs";
 
 const tmpPath = () => join(tmpdir(), `amux-send-test-${process.pid}-${Math.random().toString(36).slice(2)}.jsonl`);
@@ -310,6 +311,38 @@ feature("sending to a pane stopped at its limit", () => {
     then: ["the result is the ordinary queued receipt", (result) => {
       expect(result).toMatchObject({ delivered: true, pending: true });
       expect(result.notice).toBeUndefined();
+    }],
+  });
+});
+
+// 2026-10-19: one lead pasted his voice messages into 17 briefs although he had
+// asked many times that briefs never quote him.
+feature("an agent's send that quotes him", () => {
+  const his = [{ ts: Date.parse("2026-10-19T04:00:00Z"), to: "lsrc:0",
+    text: "Jag tycker att ni ska bestämma åt mig, så får jag rätta till det efteråt om något blir fel." }];
+  const sendWith = async (text) => {
+    const deliveryQueue = fakeDeliveryQueue("pending");
+    const result = await sendToPane({ configPath: null, deliveryQueue, deliveryWaitMs: 0,
+      humanQuote: (outgoing) => refuseHumanQuote(outgoing, { enabled: true, messages: () => his }) },
+    "claw", 0, text, { mirror: false });
+    return { result, enqueued: deliveryQueue.enqueue.mock.calls.length };
+  };
+
+  unit("is refused before it reaches the queue", {
+    when: ["lsrc:0 pastes his delegation into a brief", () => sendWith(
+      "[from lsrc:0]\n\nAuthority, verbatim: \"Jag tycker att ni ska bestämma åt mig, så får jag rätta till det efteråt.\"")],
+    then: ["nothing is queued and the send reports the block", ({ result, enqueued }) => {
+      expect(result).toEqual({ delivered: false, blocked: true, reason: "human-quote" });
+      expect(enqueued).toBe(0);
+    }],
+  });
+
+  unit("is not checked when no agent sent it", {
+    when: ["the same words arrive without an agent sender", () => sendWith(
+      "Jag tycker att ni ska bestämma åt mig, så får jag rätta till det efteråt.")],
+    then: ["it is queued as before", ({ result, enqueued }) => {
+      expect(result).toMatchObject({ delivered: true, pending: true });
+      expect(enqueued).toBe(1);
     }],
   });
 });
