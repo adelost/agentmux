@@ -16,6 +16,13 @@ activates an account and says it should be used, that word covers every pane.
   read from the live process). "Utloggade:" lists logins no pane uses.
 - An error text, a stopped pane or a guess is not a quota reading. Quote the
   numbers and their reset time.
+- Before any claim about what costs tokens or quota, read
+  `~/.openclaw/workspace/memory/references/claude-subagent-cache-2026-10-10.md`
+  and run `~/bin/claude-cache-report <hours>`. Quote its numbers.
+- Price weights on Opus 5.5 and Sonnet 5.5: cache read 0.05x, main-pane cache
+  write 2x (1 h cache). How the subscription quota weighs reads is not
+  documented, so API-price shares are not quota shares.
+- The compaction thresholds change only with new measurements against that study.
 
 ## 2. Cheapest action first
 
