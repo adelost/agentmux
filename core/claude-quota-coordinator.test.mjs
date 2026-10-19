@@ -404,6 +404,8 @@ feature("a spent week resumes on a logged-in account with room", () => {
 // no parked job. claw:1 sat idle until a person woke it about 21:10Z.
 const PARK_RESET_AT = Date.parse("2026-10-20T04:00:00Z");
 const userLine = (text) => `${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`;
+const endedTurn = (text) => `${JSON.stringify({ type: "assistant", message: { role: "assistant",
+  content: [{ type: "text", text }], stop_reason: "end_turn" } })}\n`;
 const claudeS = (weekUsed, fetchedAt) => ({ ok: true, provider: "claude", fetchedAt, limits: [
   { id: "session", kind: "session", usedPercent: 2, resetsAt: "2026-10-20T01:10:00Z" },
   { id: "weekly_all", kind: "weekly_all", usedPercent: weekUsed, resetsAt: "2026-10-20T04:00:00Z" },
@@ -427,7 +429,7 @@ function memoryParkStore() {
 }
 
 /** claw:1 parked at 19:53Z on Claude S; the park notice reached it and it ended its turn. */
-function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z", noticeHeld = false } = {}) {
+function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z", noticeHeld = false, noticeTurnRunning = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-park-resume-"));
   let clock = Date.parse("2026-10-19T19:53:00Z");
   const configPath = join(root, "agents.yaml");
@@ -442,14 +444,16 @@ function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z", noticeHeld = f
     identity: { engine: "claude", dir: join(root, "claw", ".agents", "1"), sessionId: "s-claw-1", path: session },
     cursor: captureJsonlAppendCursor("self-compact-request-v1", [session]) });
   // The compact ran at its turn end and the park notice reached the pane, which then ended its turn.
+  appendFileSync(session, endedTurn("Retry built; tests next."));
   clock += 60_000;
   const noticeText = quotaParkContinuation({ window: "week", resetAt: PARK_RESET_AT });
   const notice = queue.enqueue({ agentName: "claw", pane: 1, source: "self-compact", text: noticeText });
   // At the quota floor the notice is held in the queue; otherwise it reached the pane, which ended its turn.
   if (!noticeHeld) {
     queue.update(notice, { status: "acknowledged", acknowledgedAt: clock });
-    appendFileSync(session, `${userLine(noticeText)}${JSON.stringify({ type: "assistant", message: { role: "assistant",
-      content: [{ type: "text", text: "Parked until the reset; stopping here." }] } })}\n`);
+    // Claude Code 2.1.296+ records a pasted prompt inside its paste envelope, as lsrc:2's journal did at 19:46Z.
+    const recorded = noticeTurnRunning ? `\n\n<pasted_content id="883e">\n${noticeText}\n</pasted_content id="883e">\n` : noticeText;
+    appendFileSync(session, `${userLine(recorded)}${noticeTurnRunning ? "" : endedTurn("Parked until the reset; stopping here.")}`);
   }
   clock = Date.parse(at);
   const reads = [];
@@ -492,17 +496,70 @@ feature("a pane the quota park stopped resumes when its account has room again",
     }],
   });
 
-  component("a pane that started a new turn since its park is left alone", {
-    given: ["claw:1 parked, then claw:0 sent it a new task, and Claude S reads room", () => {
+  // lsrc:0 2026-10-20: a message after the park does not count; only work or a queued message when room returns does.
+  component("a parked pane that took a message after its park and went idle gets the recovery prompt", {
+    given: ["claw:1 parked, read skydive:0's report at 19:59Z and ended that turn, then Claude S reads room", () => {
+      const ctx = parkedClaw({ readings: [claudeS(0, "2026-10-19T20:26:28.265Z")] });
+      appendFileSync(ctx.session, userLine("[from skydive:0] Report: the jump log upload is fixed.")
+        + endedTurn("Noted; my own task waits for the reset."));
+      return ctx;
+    }],
+    when: ["quota recovery ticks", (ctx) => ctx.coordinator.tick()],
+    then: ["the recovery prompt is queued and the park is resumed", (_, ctx) => {
+      try {
+        expect(ctx.prompts()).toEqual([expect.objectContaining({ status: "pending", text: quotaRecoveryContinuation() })]);
+        expect(ctx.store.read("claw", 1)).toMatchObject({ state: "resumed", reason: "Claude S has 100 % of its week window left" });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a pane working on a later request when room returns is left alone", {
+    given: ["claw:1 parked, then claw:0 sent it a task it is still working on, and Claude S reads room", () => {
       const ctx = parkedClaw({ readings: [claudeS(0, "2026-10-19T20:26:28.265Z")] });
       appendFileSync(ctx.session, userLine("[from claw:0] Review the Kit view next."));
       return ctx;
     }],
     when: ["quota recovery ticks", (ctx) => ctx.coordinator.tick()],
-    then: ["no prompt, and the park says it moved on", (_, ctx) => {
+    then: ["no prompt, and the park says why", (_, ctx) => {
       try {
         expect(ctx.prompts()).toEqual([]);
-        expect(ctx.store.read("claw", 1)).toMatchObject({ state: "dropped", reason: "started a new turn since its park" });
+        expect(ctx.store.read("claw", 1)).toMatchObject({ state: "dropped", reason: "it is working on a later request" });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a message waiting in its queue when room returns leaves it alone, and the held notice never arrives", {
+    given: ["claw:1 parked at the floor with its notice and a message from claw:0 both held, and Claude S reads room", () => {
+      const ctx = parkedClaw({ noticeHeld: true, readings: [claudeS(0, "2026-10-19T20:26:28.265Z")] });
+      ctx.queue.enqueue({ agentName: "claw", pane: 1, source: "cli", text: "[from claw:0] Review the Kit view next." });
+      return ctx;
+    }],
+    when: ["quota recovery ticks", (ctx) => ctx.coordinator.tick()],
+    then: ["no prompt, the notice is cancelled and the park says why", (_, ctx) => {
+      try {
+        expect(ctx.prompts()).toEqual([]);
+        expect(ctx.queue.read("claw", 1, ctx.notice.id)).toMatchObject({ cancelRequestStatus: "requested", cancelRequestedBy: "quota-recovery" });
+        expect(ctx.store.read("claw", 1)).toMatchObject({ state: "dropped", reason: "a cli message waits in its queue" });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a pane still in its park notice turn when room returns is resumed once that turn ends", {
+    given: ["claw:1 is still answering its park notice when Claude S reads room", () => parkedClaw({ noticeTurnRunning: true,
+      readings: [claudeS(0, "2026-10-19T20:26:28.265Z"), claudeS(0, "2026-10-19T20:26:58.265Z")] })],
+    when: ["quota recovery ticks, the notice turn ends, and it ticks again", async (ctx) => {
+      await ctx.coordinator.tick();
+      const before = { prompts: ctx.prompts().length, state: ctx.store.read("claw", 1).state };
+      appendFileSync(ctx.session, endedTurn("Parked until the reset; stopping here."));
+      ctx.advance(30_000);
+      await ctx.coordinator.tick();
+      return before;
+    }],
+    then: ["it waits during the notice turn, then gets one prompt", (before, ctx) => {
+      try {
+        expect(before).toEqual({ prompts: 0, state: "parked" });
+        expect(ctx.prompts()).toHaveLength(1);
+        expect(ctx.store.read("claw", 1)).toMatchObject({ state: "resumed" });
       } finally { ctx.cleanup(); }
     }],
   });

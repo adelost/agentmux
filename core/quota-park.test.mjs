@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { parkResumeDecision, quotaFloorHold, quotaFloorPercent, quotaParkDecision } from "./quota-park.mjs";
+import { parkResumeDecision, quotaFloorHold, quotaFloorPercent, quotaParkContinuation, quotaParkDecision } from "./quota-park.mjs";
 
 const NOW = Date.parse("2026-10-19T09:30:00Z");
 const week = (usedPercent, resetsAt = "2026-10-25T18:08:00Z") => ({ kind: "week", usedPercent, resetsAt });
@@ -23,15 +23,34 @@ feature("when a parked pane resumes", () => {
   const parked = { window: "week", resetAt: Date.parse("2026-10-20T04:00:00Z"), parkedAt: "2026-10-19T19:53:00.000Z",
     account: { name: "Claude S" } };
   const at = Date.parse("2026-10-19T20:26:30Z");
-  unit("room after the park resumes; a full week, a reading from before the park or a new turn does not", {
-    when: ["four readings are decided", () => [
+  unit("room after the park resumes; a full week or a reading from before the park does not", {
+    when: ["three readings are decided", () => [
       parkResumeDecision({ park: parked, windows: [week(0)], observedAt: Date.parse("2026-10-19T20:26:28Z"), now: at }),
       parkResumeDecision({ park: parked, windows: [week(98)], observedAt: Date.parse("2026-10-19T20:26:28Z"), now: at }),
       parkResumeDecision({ park: parked, windows: [week(0)], observedAt: Date.parse("2026-10-19T19:40:00Z"), now: at }),
-      parkResumeDecision({ park: parked, windows: [week(0)], observedAt: at, newTurn: "started a new turn since its park", now: at }),
     ]],
-    then: ["resume, wait, wait, drop", decisions => expect(decisions.map(decision => decision.action))
-      .toEqual(["resume", "wait", "wait", "drop"])],
+    then: ["resume, wait, wait", decisions => expect(decisions.map(decision => decision.action))
+      .toEqual(["resume", "wait", "wait"])],
+  });
+  // lsrc:0 2026-10-20: left alone only when it works or has a queued message as room returns.
+  unit("with room, a queued message or a later running turn leaves it alone; a finished one does not count", {
+    when: ["four panes are decided at the same reading", () => {
+      const decide = (activity) => parkResumeDecision({ park: parked, windows: [week(0)], observedAt: at, activity, now: at }).action;
+      const notice = quotaParkContinuation({ window: "week", resetAt: parked.resetAt });
+      let reads = 0;
+      const unread = parkResumeDecision({ park: parked, windows: [week(98)], observedAt: at, now: at,
+        activity: () => { reads += 1; return {}; } }).action;
+      return { decided: [
+        decide(() => ({ turn: { prompt: "[from skydive:0] Report", busy: false } })),
+        decide(() => ({ queued: { source: "cli" } })),
+        decide(() => ({ turn: { prompt: "[from claw:0] Review the Kit view next.", busy: true } })),
+        decide(() => ({ turn: { prompt: notice, busy: true } })),
+      ], unread, reads };
+    }],
+    then: ["resume, drop, drop, wait; without room the pane is not read", ({ decided, unread, reads }) => {
+      expect(decided).toEqual(["resume", "drop", "drop", "wait"]);
+      expect([unread, reads]).toEqual(["wait", 0]);
+    }],
   });
 });
 

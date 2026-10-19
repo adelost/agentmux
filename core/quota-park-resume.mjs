@@ -5,12 +5,15 @@
 
 import { accountWindows, parkResumeDecision, QUOTA_PARK_HEADER, QUOTA_PARK_POLICY } from "./quota-park.mjs";
 import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
-import { authoredInputAfter } from "./self-compact-resume.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
+import { parseJsonlWindow } from "./jsonl-reader.mjs";
+import { userPromptText } from "./claude-turn-lifecycle.mjs";
+import { isClaudeTurnBusy } from "./claude-turn-busy.mjs";
 import { DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { SELF_COMPACT_POLICY } from "./self-compact.mjs";
 
 const readingTime = (quota) => Date.parse(quota?.fetchedAt || quota?.observation?.observedAt || "");
+const isParkNotice = (job) => job.source === "self-compact" && String(job.text || "").startsWith(QUOTA_PARK_HEADER);
 
 /**
  * WHAT: Checks whether the park's handoff reached the pane, still waits in its queue, or was lost.
@@ -18,8 +21,7 @@ const readingTime = (quota) => Date.parse(quota?.fetchedAt || quota?.observation
  */
 function parkNotice(park, jobs, now) {
   const parkedAt = Date.parse(park.parkedAt);
-  const job = jobs.filter((candidate) => candidate.source === "self-compact"
-    && String(candidate.text || "").startsWith(QUOTA_PARK_HEADER) && Number(candidate.createdAt) >= parkedAt)
+  const job = jobs.filter((candidate) => isParkNotice(candidate) && Number(candidate.createdAt) >= parkedAt)
     .sort((left, right) => left.createdAt - right.createdAt)[0];
   if (!job) {
     return now - parkedAt < SELF_COMPACT_POLICY.expiresMs
@@ -34,16 +36,18 @@ function parkNotice(park, jobs, now) {
   return { state: "queued", job };
 }
 
-/** WHAT: Names why a parked pane has moved on by itself, or returns null. WHY: Keeps a resume from overriding a later request. */
-function newTurnSince(park, identityFor) {
+/** WHAT: Names a session change since the park, or returns null. WHY: Keeps the same-session prompt out of another session. */
+function sessionChanged(park, identityFor) {
   const before = park.identity || {};
   const current = identityFor("claude", before.dir);
-  if (!current || current.sessionId !== before.sessionId || current.path !== before.path) return "its session changed since the park";
-  try {
-    return authoredInputAfter(before.path, park.cursor, { except: QUOTA_PARK_HEADER }) ? "started a new turn since its park" : null;
-  } catch (error) {
-    return `its session moved past the park checkpoint (${error.message})`;
-  }
+  return !current || current.sessionId !== before.sessionId || current.path !== before.path ? "its session changed since the park" : null;
+}
+
+/** WHAT: Reads the prompt of a Claude session's last turn and whether that turn still runs. WHY: Keeps a resume out of a running turn. */
+function lastTurn(path) {
+  const events = parseJsonlWindow(path);
+  const index = events.findLastIndex((event) => userPromptText(event) !== null);
+  return index < 0 ? null : { prompt: userPromptText(events[index]), busy: isClaudeTurnBusy(events, index, { sessionPath: path }) };
 }
 
 /**
@@ -88,18 +92,24 @@ export async function resumeParkedPanes({
         park = noted;
       }
     }
-    const newTurn = newTurnSince(park, identityFor);
-    const quota = newTurn ? null : await readQuota({ agentName, pane, notBefore: Date.parse(park.parkedAt) });
-    const decision = parkResumeDecision({ park, windows: quota?.ok ? accountWindows(quota) : null,
-      observedAt: readingTime(quota), newTurn, now: now(), resetGraceMs }, policy);
+    const changed = sessionChanged(park, identityFor);
+    if (changed) return settle(park, { state: "dropped", reason: changed }, "drop");
+    const idempotencyKey = `quota-park-resume:${agentName}:${pane}:${park.parkedAt}`;
+    const quota = await readQuota({ agentName, pane, notBefore: Date.parse(park.parkedAt) });
+    const decision = parkResumeDecision({ park, windows: quota?.ok ? accountWindows(quota) : null, observedAt: readingTime(quota),
+      activity: () => {
+        const queued = queue.list(agentName, pane).find((job) => !TERMINAL_DELIVERY_STATES.has(job.status)
+          && !isParkNotice(job) && job.idempotencyKey !== idempotencyKey);
+        return { queued, turn: queued ? null : lastTurn(park.identity.path) };
+      },
+      now: now(), resetGraceMs }, policy);
     if (decision.action === "wait") return waiting(unsentNotice ? `${decision.reason}; its park notice waits in the queue` : decision.reason);
-    if (decision.action === "drop") return settle(park, { state: "dropped", reason: decision.reason }, "drop");
-    // Its stale "stops you until" notice never follows the resume: the broker ends it before any paste.
+    // Room is back either way: its stale "stops you until" notice never arrives, and the broker ends it before any paste.
     if (unsentNotice) {
       queue.requestCancellation(unsentNotice.id, { requestedBy: "quota-recovery",
-        reason: "its account has room again; the same-session recovery prompt replaces the park notice" });
+        reason: `its account has room again; ${decision.action === "drop" ? decision.reason : "the same-session recovery prompt replaces the park notice"}` });
     }
-    const idempotencyKey = `quota-park-resume:${agentName}:${pane}:${park.parkedAt}`;
+    if (decision.action === "drop") return settle(park, { state: "dropped", reason: decision.reason }, "drop");
     const job = queue.enqueue({
       agentName, pane, text: quotaRecoveryContinuation(), source: "quota-recovery", idempotencyKey,
       orderKey: `0000000000000000:${idempotencyKey}`,

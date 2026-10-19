@@ -31,7 +31,9 @@ A Claude pane the quota park compacted and told to stop has no limit receipt.
 The park is recorded in `~/.agentmux/quota-parks/`, and the quota sidecar sends
 that pane the same same-session recovery prompt as soon as a reading taken after
 the park shows room on its account (a free reset, any early room) or the window's
-reset time passes. A pane that took a new prompt after its park is left alone.
+reset time passes. When that room comes, a pane that is working on a later request
+or has a message in its queue is left alone; a message it already finished does not
+count. A park notice still in the queue is cancelled either way.
 
 A message sent to a pane stopped at its Claude limit is queued as before, and
 the CLI adds a warning on stderr: the recipient cannot read it until it

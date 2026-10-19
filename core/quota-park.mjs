@@ -5,6 +5,8 @@
 // shorter than the cache (08:05-08:20Z that day, 0 expired rewrites) is left alone,
 // since a compaction would cost more than it saves and take the pane's memory.
 
+import { unwrapPastedContent } from "./claude-prompt-text.mjs";
+
 /** WHAT: Names the request origin a parked pane's self-compact carries. WHY: Keeps quota recovery's move waiting for its compact. */
 export const QUOTA_PARK_ORIGIN = "quota-park";
 
@@ -106,9 +108,24 @@ export function quotaParkContinuation({ window, resetAt }) {
  * WHAT: Returns resume, wait or drop for one parked pane, with the reason in words.
  * WHY: Keeps the recovery tick and a replay of past events on one rule.
  */
-export function parkResumeDecision({ park, windows = null, observedAt = NaN, newTurn = null, now, resetGraceMs = 15_000 },
+export function parkResumeDecision({ park, windows = null, observedAt = NaN, activity = () => ({}), now, resetGraceMs = 15_000 },
   policy = QUOTA_PARK_POLICY) {
-  if (newTurn) return { action: "drop", reason: newTurn };
+  const room = roomAfterPark({ park, windows, observedAt, now, resetGraceMs }, policy);
+  if (room.action !== "resume") return room;
+  // lsrc:0 2026-10-20: when room returns, a parked pane is left alone only if it is working or has a message in its
+  // queue. A message it got after the park and finished does not count: claw:1 did that at 19:59Z, then sat idle.
+  const { queued = null, turn = null } = activity();
+  if (queued) return { action: "drop", reason: `a ${queued.source || "queued"} message waits in its queue` };
+  if (!turn?.busy) return room;
+  // The park notice's own turn ends in exactly the wait this resume ends. Claude records a paste in an envelope.
+  if (unwrapPastedContent(String(turn.prompt ?? "")).trimStart().startsWith(QUOTA_PARK_HEADER)) {
+    return { action: "wait", reason: "its park notice turn is still running" };
+  }
+  return { action: "drop", reason: "it is working on a later request" };
+}
+
+/** WHAT: Returns whether a parked pane's account has room again, with the reason. WHY: Separates the account's room from the pane's work. */
+function roomAfterPark({ park, windows, observedAt, now, resetGraceMs }, policy) {
   const resetAt = Number(park.resetAt);
   if (now >= resetAt + resetGraceMs) {
     return { action: "resume", reason: `its ${park.window} window reset at ${new Date(resetAt).toISOString()}` };

@@ -13,21 +13,14 @@ const authoredInput = event => codexUserPrompt(event) !== null || (event.type ==
     && !/^\s*(?:\/[a-z][\w:-]*(?:\s|$)|<(?:local-command|command-))/iu.test(extractPromptFromEvent(event)))
     || event.message?.content?.some?.(part => part.type === "image")));
 
-/**
- * WHAT: Checks authored input after a checkpoint, within a read bound, skipping prompts that start with `except`.
- * WHY: Prevents an unreadable evidence window or amux's own handoff from passing as new input.
- */
-export function authoredInputAfter(path, cursor, { except = null } = {}) {
+/** WHAT: Checks input after the saved checkpoint, within a hard read bound. WHY: A missing or oversized evidence window cannot authorize stale work. */
+function inputAfter(path, cursor) {
   const offset = cursor?.positions?.[path], size = statSync(path).size;
   if (!Number.isFinite(offset) || offset < 0 || offset > size || size - offset > MAX_BYTES) {
     throw new Error("self-compact continuation evidence is unavailable or exceeds eight MiB");
   }
-  const counts = except
-    ? event => authoredInput(event) && !String(extractPromptFromEvent(event) ?? "").trimStart().startsWith(except)
-    : authoredInput;
-  return hasJsonlEventAfterCursor([path], cursor, counts, { maxScanBytes: MAX_BYTES });
+  return hasJsonlEventAfterCursor([path], cursor, authoredInput, { maxScanBytes: MAX_BYTES });
 }
-const inputAfter = (path, cursor) => authoredInputAfter(path, cursor);
 
 /** WHAT: Checks whether new input/session replaced an agent's own task. WHY: Prevents continuation from overriding a later request. */
 export function selfCompactSuperseded(request, { identityFor = latestPaneSessionIdentity, queue, ownJobId = null }) {
