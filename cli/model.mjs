@@ -25,6 +25,9 @@ export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaude
     const result = await claudeModelChanger({ agent: ctx.agent, state: ctx.state,
       queue: ctx.deliveryQueue, name, pane, paneDir: join(entry.dir, ".agents", String(pane)),
       targetModel: requested.model });
+    for (const { path, error } of result.defaultModel?.failed || []) {
+      console.error(`warning: ${path} keeps the model this switch saved as the default for new sessions: ${error}`);
+    }
     if (!result.ok) throw new Error(`model change blocked: ${result.reason || result.stage}`);
     if (readParkState(name, pane)) unparkPane({ session: name, pane, detail: `verified Claude model: ${result.model}` });
     console.log(result.unchanged ? `${name}:${pane}: already using ${result.model}; no compact`

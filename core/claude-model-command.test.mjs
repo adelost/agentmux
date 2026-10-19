@@ -1,18 +1,24 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { component, expect, feature } from "bdd-vitest";
+import { keepClaudeDefaultModel } from "./claude-default-model.mjs";
 import { paneModelSelection } from "./pane-model-state.mjs";
 import { runLockedClaudeModelChange } from "./claude-model-command.mjs";
 
 // api:2 on 2026-10-10: a fresh session's footer shows the model with no context bar.
 const FRESH_FOOTER = "❯ \n────\n  ⬆ /gsd-update │ Opus 5.5 │ 2\n  ⏵⏵ bypass permissions on";
 
+// The settings.json every account profile links to, as lsrc:0 left it at 14:38Z on 2026-10-19.
+const SETTINGS = `${JSON.stringify({ model: "opus[1m]", theme: "dark" }, null, 2)}\n`;
+
 function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5", running = true,
   screen = null, compactResult = null, footerFor = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-claude-model-change-"));
   const path = join(root, "session.jsonl");
   writeFileSync(path, "");
+  const settingsPath = join(root, "settings.json");
+  writeFileSync(settingsPath, SETTINGS);
   const data = { watcher_last_model: { "claw:0": { model: "claude-opus-5", effort: "high" } } };
   const state = { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
   const calls = [];
@@ -36,18 +42,24 @@ function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5
     appendFileSync(path, `${JSON.stringify({ type: "system", subtype: "compact_boundary" })}\n`);
     return { ok: true, sessionId: identityFor().sessionId, cursor: { positions: { [path]: 0 } }, compactBoundary: true };
   };
-  // Claude Code resolves an alias itself and shows the model in its footer.
+  // Claude Code resolves an alias itself, shows the model in its footer and
+  // saves every interactive pick as the default for new sessions (2.1.303).
   const sendSlash = async (_agent, _name, _pane, command) => {
     calls.push(command);
     const picked = command.replace("/model ", "");
     model = footerFor[picked] ?? picked;
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    writeFileSync(settingsPath, `${JSON.stringify({ ...settings, model: picked }, null, 2)}\n`);
     return { delivered: true, via: "command-receipt" };
   };
+  const keepDefault = work => keepClaudeDefaultModel(work, { files: [settingsPath],
+    lockPath: join(root, "default.lock"), wait: async () => {}, lateWriteMs: 0 });
   const change = targetModel => runLockedClaudeModelChange({
     agent, state, queue, name: "claw", pane: 0, paneDir: root, targetModel,
-    identityFor, compact, sendSlash, wait: async () => {},
+    identityFor, compact, sendSlash, wait: async () => {}, keepDefault,
   });
-  return { change, calls, state, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  return { change, calls, state, settings: () => readFileSync(settingsPath, "utf-8"),
+    cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 feature("Claude model changes are compact-first and pane-local", () => {
@@ -187,6 +199,22 @@ feature("a family alias selects the model its footer shows", () => {
         expect(result).toMatchObject({ ok: true, unchanged: true, model: "claude-sonnet-5-5" });
         expect(fx.calls).toEqual([]);
         expect(paneModelSelection(fx.state, "claw", 0)?.model).toBe("claude-sonnet-5-5");
+      } finally { fx.cleanup(); }
+    }],
+  });
+});
+
+// lsrc:0 on 2026-10-19: every switch made Claude Code save the builder's model
+// as the default in the settings.json all profiles share, so a session started
+// by hand ran Sonnet. lsrc:0 put "opus[1m]" back by hand at 14:38Z.
+feature("a pane switch leaves the default for new sessions alone", () => {
+  component("switching a builder to Sonnet keeps the shared default", {
+    given: ["an idle Opus 5.5 pane and the shared settings with opus[1m]", () => fixture({ liveModel: "claude-opus-5-5" })],
+    when: ["running amux model with claude-sonnet-5-5", fx => fx.change("claude-sonnet-5-5")],
+    then: ["the pane runs Sonnet and the settings file is byte for byte the one before", (result, fx) => {
+      try {
+        expect(result).toMatchObject({ ok: true, model: "claude-sonnet-5-5" });
+        expect(fx.settings()).toBe(SETTINGS);
       } finally { fx.cleanup(); }
     }],
   });

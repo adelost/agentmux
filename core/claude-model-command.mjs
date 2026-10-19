@@ -1,4 +1,5 @@
 import { isRequestedClaudeModel, normalizeClaudeModelName, resolveClaudeModel } from "./claude-model.mjs";
+import { keepClaudeDefaultModel } from "./claude-default-model.mjs";
 import { readClaudeFooterModel } from "./claude-statusline.mjs";
 import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "./context-maintenance.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
@@ -44,6 +45,7 @@ export async function runLockedClaudeModelChange({
   identityFor = latestClaudeSessionIdentity,
   compact = verifiedClaudeCompact,
   sendSlash = sendSlashVerified,
+  keepDefault = keepClaudeDefaultModel,
   wait = pause,
 } = {}) {
   if (!state || !queue || !paneDir || !targetModel) return { ok: false, stage: "input", reason: "model-change-boundary-missing" };
@@ -98,7 +100,8 @@ export async function runLockedClaudeModelChange({
       rememberContextCompact(state, name, pane, receipt);
       reusedCompact = false;
     }
-    const switched = await switchVerified({ agent, state, name, pane, model, current, sendSlash, wait });
-    return switched.ok ? { ...switched, reusedCompact } : switched;
+    const kept = await keepDefault(() => switchVerified({ agent, state, name, pane, model, current, sendSlash, wait }));
+    if (kept.busy) return { ok: false, stage: "default", reason: "default-model-busy" };
+    return { ...kept.result, ...(kept.result.ok ? { reusedCompact } : {}), defaultModel: kept.defaults };
   } finally { lease.release(); }
 }
