@@ -38,9 +38,8 @@ const spokenAsWireId = (family, version) =>
 const FAMILY_ALIASES = new Set(["opus", "sonnet", "haiku", "fable"]);
 
 /**
- * WHAT: Tells whether the model a pane runs is the one that was asked for.
- * WHY: `/model sonnet` runs claude-sonnet-5-5; comparing the alias with that id
- *      left a switch that happened unsaved (claw:0, 2026-10-19).
+ * WHAT: Checks whether the model a pane runs is the one that was asked for.
+ * WHY: Keeps the alias sonnet from leaving a switch to claude-sonnet-5-5 unsaved (claw:0, 2026-10-19).
  */
 export function isRequestedClaudeModel(running, requested) {
   const id = String(running || "").toLowerCase();
@@ -50,10 +49,10 @@ export function isRequestedClaudeModel(running, requested) {
 
 /**
  * WHAT: Turns what a human types into a model name Claude Code accepts.
- * WHY: The wire format is `claude-opus-4-8` but people type `opus 4.8`.
- *      Rejecting the space taught them nothing, so they blamed the version.
+ * WHY: Keeps a typed `opus 4.8` from failing as unknown; the wire id is `claude-opus-4-8`.
  */
 export function normalizeClaudeModelName(raw) {
+  // Rejecting the space taught people nothing, so they blamed the version.
   const input = String(raw ?? "").trim().replace(/\s+/gu, " ");
   if (!input) return { ok: false, reason: "empty model name", hint: MODEL_NAME_HINT };
 

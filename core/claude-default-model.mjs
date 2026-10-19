@@ -17,7 +17,7 @@ const LOCK_STALE_MS = 5 * 60_000;
 const POLL_MS = 100;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** WHAT: Lists the settings files a Claude pane saves its /model pick to. WHY: The profiles share one file today, but a profile may hold its own. */
+/** WHAT: Collects the settings files a Claude pane saves its /model pick to. WHY: Keeps a profile holding its own file from keeping a pane's pick. */
 export function claudeSettingsFiles(env = process.env) {
   const homes = [
     ...quotaProfileCatalog(env).filter((profile) => profile.provider === "claude").map((profile) => profile.home),
@@ -82,15 +82,15 @@ async function takeLock(path, { wait, now, lockWaitMs }) {
 }
 
 /**
- * WHAT: Runs one pane's /model, then puts back the default for new sessions it saved.
- * WHY: Keeps a builder's model out of every session started by hand. One switch
- *      at a time, so a second switch never saves the first one's pick as "before".
+ * WHAT: Wraps one pane's /model and puts back the default for new sessions it saved.
+ * WHY: Keeps a builder's model out of the sessions started by hand.
  */
 export async function keepClaudeDefaultModel(work, {
   files = claudeSettingsFiles(),
   lockPath = join(homedir(), ".agentmux", "claude-default-model.lock"),
   wait = pause, now = Date.now, lateWriteMs = LATE_WRITE_MS, lockWaitMs = LOCK_WAIT_MS,
 } = {}) {
+  // One switch at a time, so a second switch never records the first one's pick as the default to restore.
   const release = await takeLock(lockPath, { wait, now, lockWaitMs });
   if (!release) return { busy: true };
   try {
