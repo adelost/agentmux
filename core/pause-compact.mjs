@@ -39,6 +39,17 @@ export const pauseCompactLimit = (agentConfig, pane, policy = PAUSE_COMPACT_POLI
 
 const hold = (cell, detail) => ({ action: "hold", cell, detail });
 
+/** WHAT: Checks whether a working pane has grown to its oversize factor times its budget. WHY: Keeps the mid-turn ask for turns far past a pause-sized overshoot. */
+export const oversizeWhileWorking = ({ tokens, limit, status }, policy = PAUSE_COMPACT_POLICY) =>
+  isLiveStatus(status) && Number.isFinite(tokens) && tokens >= limit * policy.oversizeFactor;
+
+/** WHAT: Formats the ask to a working pane far past its budget. WHY: Keeps the compact the pane's own choice at its clean point. */
+export const oversizeNotice = ({ tokens, limit }, policy = PAUSE_COMPACT_POLICY) =>
+  `[pause-compact] Your context is ${Math.round(tokens / 1000)}k tokens, ${policy.oversizeFactor} times your ${Math.round(limit / 1000)}k budget,`
+  + " and it grows while you work. At your next clean point, bank your work and run"
+  + " `amux compact --self --continue-file <handoff>`, then end your turn: the compact runs then and your handoff continues."
+  + " Nothing compacts you mid-turn. One notice until you compact.";
+
 // "none" means no pause or no need; "hold" means a due compact that a guard keeps, which is logged.
 // idleLimit and idleMs give Codex its own idle rule: above the daytime budget after 25 quiet minutes.
 // cacheLifeMs ends both rules once the prompt cache has expired; a self-request, which resumes work, omits it.

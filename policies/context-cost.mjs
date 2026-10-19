@@ -30,7 +30,7 @@ export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 80_000, coldMaxTok
 // after 94k / (0.05 x (C - 94k)) calls: 313 at 100k, 34 at 150k, 7 at 370k.
 // Sessions made about 90 calls per compact, so Codex compacts from 150k.
 /** WHAT: Defines compaction at a natural pause. WHY: Keeps busy panes from growing past 700k between 50-minute rests that never come. */
-export const PAUSE_COMPACT_POLICY = Object.freeze({ builderTokens: 400_000, leaderTokens: 700_000,
+export const PAUSE_COMPACT_POLICY = Object.freeze({ builderTokens: 400_000, leaderTokens: 700_000, oversizeFactor: 1.5,
   settleMs: 60_000, spacingMs: 30 * 60_000, backgroundQuietMs: 5 * 60_000, hungJobMs: 60 * 60_000,
   codexIdleMs: 25 * 60_000, codexMinTokens: 150_000 });
 

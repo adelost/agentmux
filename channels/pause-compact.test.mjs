@@ -151,3 +151,35 @@ feature("a pane's own request to be compacted", () => {
     }],
   });
 });
+
+// lsrc:0 2026-10-19: the size rule waits for a pause and 13 attempts were refused as busy,
+// so long turns reached 943k against a 400k budget.
+feature("a working pane far past its budget", () => {
+  const working = (jobs = []) => {
+    const enqueued = [];
+    const pause = createPauseCompact({ modes: { claude: "on", codex: "on" }, now: () => NOW, state: { get: () => ({}) },
+      contextMaintenance: { run: async () => { throw new Error("compacted mid-turn"); } }, record: () => {},
+      identityFor: () => ({ path: "/projects/lsrc-2/s1.jsonl", sessionId: "s1" }),
+      backgroundFor: { claude: () => null, codex: () => null }, journalCompactFor: () => null,
+      deliveryBroker: { queue: { list: () => [...jobs, ...enqueued] }, enqueue: job => { enqueued.push({ ...job, status: "pending" }); return job; } } });
+    const poll = tokens => pause.consider({ agentConfig: lsrc, pane: 2, engine: "claude", paneDir: "/lsrc/.agents/2",
+      status: "working", inCopyMode: false, contextTokens: tokens, lastActivityMs: NOW });
+    return { enqueued, poll };
+  };
+
+  component("is asked once to bank its work and compact itself, and nothing compacts it mid-turn", {
+    given: ["builder lsrc:2 working at 600k, 1.5 times its 400k budget", () => working()],
+    when: ["polling three times while it works on", async ctx => [await ctx.poll(600_000), await ctx.poll(640_000), await ctx.poll(700_000)]],
+    then: ["one notice waits in its queue, and no compact ran", (sent, ctx) => {
+      expect(sent).toEqual([false, false, false]);
+      expect(ctx.enqueued).toHaveLength(1);
+      expect(ctx.enqueued[0]).toMatchObject({ agentName: "lsrc", pane: 2, source: "pause-compact" });
+      expect(ctx.enqueued[0].text).toContain("amux compact --self");
+    }],
+  });
+  component("waits while a delivery to it is still on its way", {
+    given: ["a brief still pending to lsrc:2", () => working([{ id: "brief", idempotencyKey: "brief", status: "pending" }])],
+    when: ["polling at 620k", ctx => ctx.poll(620_000)],
+    then: ["no notice yet", (sent, ctx) => expect(ctx.enqueued).toEqual([])],
+  });
+});

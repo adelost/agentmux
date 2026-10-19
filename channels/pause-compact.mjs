@@ -9,8 +9,9 @@ import { dirname, join } from "node:path";
 import { CONTEXT_COST_POLICY, PAUSE_COMPACT_POLICY, readContextCostPolicy } from "../policies/context-cost.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { lastContextCompactAt } from "../core/context-maintenance.mjs";
-import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, pauseCompactDecision, pauseCompactLimit,
-  sessionBackgroundActivity } from "../core/pause-compact.mjs";
+import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, oversizeNotice, oversizeWhileWorking, pauseCompactDecision,
+  pauseCompactLimit, sessionBackgroundActivity } from "../core/pause-compact.mjs";
+import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice } from "../core/self-compact.mjs";
 
 const BACKGROUND_BY_ENGINE = Object.freeze({ claude: sessionBackgroundActivity, codex: codexBackgroundActivity });
@@ -26,8 +27,10 @@ const appendJsonLine = (path, record) => {
 export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, now = Date.now,
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
   identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs,
-  selfRequests = null, notify = async () => {}, cacheLifeMs = readContextCostPolicy().coldMs }) {
+  selfRequests = null, notify = async () => {}, cacheLifeMs = readContextCostPolicy().coldMs, deliveryBroker = null }) {
   const lastLogged = new Map();
+  // The episode each working pane was asked about, so it hears once until it compacts.
+  const asked = new Map();
   // A dry run compacts nothing, so it remembers its own would-be compacts to show the spacing rule.
   const dryCompacts = new Map();
 
@@ -58,6 +61,24 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       .catch((error) => log(`${paneKey} self-compact notice failed: ${error.message}`));
   }
 
+  // A turn can run far past its budget before the pause this rule waits for (lsrc:0 2026-10-19: 943k against 400k).
+  // The pane is asked to compact itself; the queue holds the ask until no other delivery to it is on its way.
+  function askToCompact({ name, pane, paneKey, engine, paneDir, tokens, limit, base }) {
+    const identity = identityFor(engine, paneDir);
+    const episode = `${identity?.sessionId || "session"}:${lastCompactAt(name, pane, paneKey, identity?.path)}`;
+    const jobs = deliveryBroker?.queue?.list?.(name, pane);
+    if (asked.get(paneKey) === episode || !jobs) return;
+    const idempotencyKey = `pause-compact-oversize:${paneKey}:${episode}`;
+    if (!jobs.some(job => job.idempotencyKey === idempotencyKey)) {
+      if (jobs.some(job => !TERMINAL_DELIVERY_STATES.has(job.status))) return;
+      if (base.mode === "on") deliveryBroker.enqueue({ agentName: name, pane, text: oversizeNotice({ tokens, limit }, policy),
+        source: "pause-compact", idempotencyKey });
+      report(paneKey, episode, { ...base, limit, cell: "oversize", outcome: base.mode === "on" ? "asked" : "would-ask",
+        detail: `working at ${tokens} tokens, ${policy.oversizeFactor} times ${limit} or more` });
+    }
+    asked.set(paneKey, episode);
+  }
+
   async function consider({ agentConfig, pane, engine, paneDir, status, inCopyMode, contextTokens, lastActivityMs }) {
     const mode = modes[engine] || "off";
     if (mode === "off") return false;
@@ -81,6 +102,9 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const facts = { engine, tokens: contextTokens, limit, ...codexIdle, status, inCopyMode, quietMs,
       cacheLifeMs: request ? null : cacheLifeMs, now: now() };
     const first = pauseCompactDecision(facts, policy);
+    if (first.cell === "turn-running" && !request && oversizeWhileWorking(facts, policy)) {
+      askToCompact({ name, pane, paneKey, engine, paneDir, tokens: contextTokens, limit, base });
+    }
     if (first.action === "none") {
       if (request && first.cell === "within-budget" && mode === "on") {
         endRequest(paneKey, request, { ...base, outcome: "satisfied", detail: `context is ${contextTokens} tokens, under ${limit}` });

@@ -341,7 +341,7 @@ const autoCompact = createAutoCompact({
   tmux: (cmd) => tmuxExec(`tmux -S '${TMUX_SOCKET}' ${cmd}`),
   config: autoCompactConfig,
   contextMaintenance,
-  pauseCompact: createPauseCompact({ contextMaintenance, state: appState, modes: readPauseCompactModes(),
+  pauseCompact: createPauseCompact({ contextMaintenance, deliveryBroker, state: appState, modes: readPauseCompactModes(),
     log: message => console.log(`pause-compact | ${message}`), selfRequests: selfCompactRequests, notify: contextMaintenance.notify }),
 });
 autoCompact.start();
