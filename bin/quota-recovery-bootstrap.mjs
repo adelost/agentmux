@@ -16,6 +16,7 @@ import { parseQuotaWarningConfig } from "../channels/quota-warning.mjs";
 import { createClaudeQuotaLifecycle } from "../core/claude-quota-lifecycle.mjs";
 import { createClaudeQuotaCoordinator } from "../core/claude-quota-coordinator.mjs";
 import { createQuotaRecoveryLoop, parseQuotaRecoveryConfig } from "../channels/quota-recovery.mjs";
+import { startIdleCapacityAlarm } from "../channels/idle-capacity-runtime.mjs";
 import { writeQuotaRecoveryHeartbeat } from "../core/quota-recovery-heartbeat.mjs";
 import { DEFAULT_TMUX_SOCKET, runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 
@@ -70,4 +71,9 @@ if (!config.enabled) {
   const loop = createQuotaRecoveryLoop({ coordinator, config });
   globalThis[LOOP_KEY] = loop;
   loop.start();
+  // Off unless AMUX_IDLE_CAPACITY_TARGET names the pane that staffs the fleet.
+  try {
+    startIdleCapacityAlarm({ queue, state, configPath, tmuxSocket, tmuxExec,
+      activeReceipt: (agentName, pane) => lifecycle.activeReceipt(agentName, pane) });
+  } catch (error) { console.log(`idle-capacity | start failed: ${error.message}`); }
 }

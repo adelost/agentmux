@@ -15,8 +15,10 @@ const STATE_KEY = "codex_limit_recovery";
 const windows = quota => quota?.limits?.find(limit => limit.limitId === "codex")?.windows || [];
 /** WHAT: Checks a provider-confirmed exhausted weekly window. WHY: Prevents forecasts and temporary capacity from authorizing account recovery. */
 export const codexWeeklyLimitReached = quota => quota?.ok && windows(quota).some(window => window.windowMinutes === 10080 && window.usedPercent >= 100);
-const hasRoom = quota => quota.ok && windows(quota).some(window => window.windowMinutes === 10080)
+/** WHAT: Checks that a Codex account reports a weekly window and room in every window. WHY: Keeps recovery and the idle-capacity alarm on one rule. */
+export const codexAccountHasRoom = quota => Boolean(quota?.ok) && windows(quota).some(window => window.windowMinutes === 10080)
   && windows(quota).every(window => window.usedPercent < 100);
+const hasRoom = codexAccountHasRoom;
 
 /** WHAT: Builds pane-local account recovery after an actual weekly limit. WHY: Prevents predictions and temporary capacity from switching paid accounts. */
 export function createCodexLimitRecovery({ state, broker, agent, notify, log = console.warn,
