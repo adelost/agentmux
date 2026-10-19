@@ -1,8 +1,9 @@
-// Lossless archive of old daily memory files: the deterministic actor behind
-// the old-band size rule. The original moves byte-for-byte to
-// memory/archive/daily/DATE.md and a five-line stub keeps the old path, its
-// summary and pointers to the archive and that night's Dream digest. No model
-// writes anything, so nothing can be lost or paraphrased.
+// Lossless archive of finished daily memory files. The original moves
+// byte-for-byte to memory/archive/daily/DATE.md and a stub keeps the old path,
+// its summary and pointers to the archive and the Dream digest that covered
+// the day. The morning after a verified night the stub carries that night's
+// summary, so each finished day reads as a summary (Mattias 2026-10-19). No
+// model writes here, so nothing can be lost or paraphrased.
 
 import { createHash } from "crypto";
 import {
@@ -11,9 +12,10 @@ import {
 } from "fs";
 import { basename, join } from "path";
 import { tryLockDir } from "./dir-lock.mjs";
-import { dailyPolicyFor, loadMemoryPolicy } from "./memory-policy.mjs";
+import { dailyPolicyFor, localDateKey, loadMemoryPolicy } from "./memory-policy.mjs";
 
 const DAILY_RE = /^(\d{4}-\d{2}-\d{2})\.md$/;
+const DREAM_RUN_RE = /^(\d{4}-\d{2}-\d{2})-.+\.md$/;
 const ARCHIVE_DIR = "memory/archive/daily";
 const STUB_MARKER_RE = /<!-- amux-memory-archived: (\S+) sha256:([0-9a-f]{64}) -->/;
 const TEMPLATE_HEADINGS = new Set(["Händelser", "Pågående", "Dokumenterat"]);
@@ -62,26 +64,29 @@ export function archiveSummary(original, digestTexts = []) {
   return FALLBACK_SUMMARY;
 }
 
-/** WHAT: Builds the five-line stub left at the daily path. WHY: Keeps links, search and lint working while the full text lives in the archive. */
-export function buildArchiveStub({ dateKey, summary, sha, digests = [] }) {
+/** WHAT: Builds the stub left at the daily path, with the night's summary when there is one. WHY: Keeps links, search and lint working while the full text lives in the archive. */
+export function buildArchiveStub({ dateKey, summary, sha, digests = [], nightSummary = "" }) {
   const archive = archiveRel(dateKey);
   const dream = digests.map((path) => ` · Dream: \`${path}\``).join("");
+  const night = String(nightSummary).trim();
   return [
     `> summary: ${summary}`,
     `> why: Arkiverad dagfil; hela originalet ligger orört i arkivet.`,
     `<!-- amux-memory-archived: ${archive} sha256:${sha} -->`,
     `# ${dateKey}`,
+    ...(night ? ["", night, ""] : []),
     `- Original: \`${archive}\`${dream}`,
   ].join("\n") + "\n";
 }
 
+// A Dream run is named after the morning it ran and covers the day before, so
+// a day's digest is the first saved run dated after it.
 function digestsFor(workspace, dateKey) {
   const dir = join(workspace, "memory", "dream");
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => name.startsWith(`${dateKey}-`) && name.endsWith(".md"))
-    .sort()
-    .map((name) => `memory/dream/${name}`);
+  const runs = readdirSync(dir).filter((name) => DREAM_RUN_RE.test(name)).sort();
+  const covering = runs.map((name) => name.match(DREAM_RUN_RE)[1]).find((runDate) => runDate > dateKey);
+  return covering ? runs.filter((name) => name.startsWith(`${covering}-`)).map((name) => `memory/dream/${name}`) : [];
 }
 
 const lineCount = (text) => {
@@ -90,7 +95,9 @@ const lineCount = (text) => {
   return lines.length;
 };
 
-/** WHAT: Collects the old daily files the archive may move, and stubs still carrying a template summary. WHY: Keeps today's, recent, already archived and todo-carrying days where they are, and lets earlier stubs get a real summary. */
+const openTodos = (text) => String(text).split(/\r?\n/).filter((line) => line.startsWith("- [ ] ")).length;
+
+/** WHAT: Collects the finished daily files the archive may move, and stubs still carrying a template summary. WHY: Keeps today's, yesterday's, already archived, short and todo-carrying days where they are, and lets earlier stubs get a real summary. */
 export function planMemoryArchive(workspace, { now = new Date(), policy: supplied, max } = {}) {
   const policy = supplied || loadMemoryPolicy(workspace);
   const memoryDir = join(workspace, "memory");
@@ -102,8 +109,8 @@ export function planMemoryArchive(workspace, { now = new Date(), policy: supplie
   for (const name of readdirSync(memoryDir).sort()) {
     const dateKey = name.match(DAILY_RE)?.[1];
     if (!dateKey) continue;
-    const rule = dailyPolicyFor(dateKey, policy, now);
-    if (rule.protected || rule.maxLines !== policy.oldDailyMaxLines) continue;
+    // Today is still being written; yesterday leaves with its night (archiveNightDay).
+    if (dailyPolicyFor(dateKey, policy, now).protected) continue;
     const path = join(memoryDir, name);
     const text = readFileSync(path, "utf-8");
     const stub = parseArchiveStub(text);
@@ -112,8 +119,8 @@ export function planMemoryArchive(workspace, { now = new Date(), policy: supplie
       continue;
     }
     const lines = lineCount(text);
-    if (lines <= rule.maxLines) continue;
-    const todos = text.split(/\r?\n/).filter((line) => line.startsWith("- [ ] ")).length;
+    if (lines <= policy.oldDailyMaxLines) continue;
+    const todos = openTodos(text);
     const row = { dateKey, path, lines };
     if (todos) blocked.push({ ...row, reason: `${todos} open todo(s)` });
     else eligible.push(row);
@@ -138,13 +145,13 @@ function writeDurable(path, bytes, mode) {
   renameSync(tmp, path);
 }
 
-function stubFor(workspace, dateKey, original, sha) {
+function stubFor(workspace, dateKey, original, sha, nightSummary) {
   const digests = digestsFor(workspace, dateKey);
   const digestTexts = digests.map((path) => readFileSync(join(workspace, path), "utf-8"));
-  return buildArchiveStub({ dateKey, sha, digests, summary: archiveSummary(original.toString("utf-8"), digestTexts) });
+  return buildArchiveStub({ dateKey, sha, digests, nightSummary, summary: archiveSummary(original.toString("utf-8"), digestTexts) });
 }
 
-function archiveOne(workspace, row) {
+function archiveOne(workspace, row, { nightSummary } = {}) {
   const original = readFileSync(row.path);
   const mode = statSync(row.path).mode & 0o777;
   const sha = sha256(original);
@@ -157,7 +164,7 @@ function archiveOne(workspace, row) {
     writeDurable(target, original, mode);
   }
   if (sha256(readFileSync(target)) !== sha) throw new Error(`${archiveRel(row.dateKey)} does not match the original`);
-  const stub = stubFor(workspace, row.dateKey, original, sha);
+  const stub = stubFor(workspace, row.dateKey, original, sha, nightSummary);
   if (sha256(readFileSync(row.path)) !== sha) throw new Error("daily file changed during archive; left as is");
   writeDurable(row.path, stub, mode);
   return { ...row, archivePath: archiveRel(row.dateKey), sha256: sha, stubLines: lineCount(stub) };
@@ -173,13 +180,35 @@ function rebuildOne(workspace, row) {
   return { ...row, summary: summaryLine(stub) };
 }
 
-/** WHAT: Stores the planned daily files in the archive. WHY: Keeps the old-band size rule from being a warning without an actor, losing no byte. */
-export function archiveMemory(workspace, { dryRun = true, now = new Date(), max } = {}) {
-  const plan = planMemoryArchive(workspace, { now, max });
-  if (dryRun || !(plan.eligible.length || plan.rebuild.length)) return { workspace, dryRun, ...plan, archived: [], rebuilt: [], failed: [] };
+function lockArchive(workspace) {
   mkdirSync(join(workspace, ARCHIVE_DIR), { recursive: true });
   const release = tryLockDir(join(workspace, ARCHIVE_DIR, ".amux-archive.lock"), { staleMs: LOCK_STALE_MS });
   if (!release) throw new Error("memory archive is already running");
+  return release;
+}
+
+/** WHAT: Turns the day a verified night covered into that night's summary. WHY: Makes each finished day a short summary the morning after, with its full notes one link away. */
+export function archiveNightDay(workspace, dateKey, { summary, now = new Date() } = {}) {
+  const path = join(workspace, "memory", `${dateKey}.md`);
+  if (dateKey >= localDateKey(now)) return { archived: null, reason: "today is still being written" };
+  if (!existsSync(path)) return { archived: null, reason: "no daily file" };
+  const text = readFileSync(path, "utf-8");
+  if (parseArchiveStub(text)) return { archived: null, reason: "already archived" };
+  const todos = openTodos(text);
+  if (todos) return { archived: null, reason: `${todos} open todo(s)` };
+  const release = lockArchive(workspace);
+  try {
+    return { archived: archiveOne(workspace, { dateKey, path, lines: lineCount(text) }, { nightSummary: summary }) };
+  } finally {
+    release();
+  }
+}
+
+/** WHAT: Stores the planned daily files in the archive. WHY: Keeps the daily size rule from being a warning without an actor, losing no byte. */
+export function archiveMemory(workspace, { dryRun = true, now = new Date(), max } = {}) {
+  const plan = planMemoryArchive(workspace, { now, max });
+  if (dryRun || !(plan.eligible.length || plan.rebuild.length)) return { workspace, dryRun, ...plan, archived: [], rebuilt: [], failed: [] };
+  const release = lockArchive(workspace);
   const archived = [];
   const rebuilt = [];
   const failed = [];

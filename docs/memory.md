@@ -27,7 +27,7 @@ amux memory context -p project:3 --json # exact pane commands + file versions
 amux memory topics --json  # source freshness, states and deciding DSL cells
 amux memory topics --publish /path/topic-id.md # validate and atomically publish one reviewed note
 amux memory lint [--json]   # read-only policy findings
-amux memory archive --dry   # old daily files the nightly archive would move
+amux memory archive --dry   # finished daily files the nightly archive would move
 amux memory archive --apply # move them losslessly now (bounded, no model)
 amux memory bank [--dry]    # commit memory/ locally after a secret scan, never push
 amux memory compact --dry   # inspect old daily-file compaction candidates
@@ -38,18 +38,22 @@ spawned a separate model process that could rewrite memory without a visible
 AMUX prompt.
 
 Every lint warning needs an actor (Mattias 2026-07-11: "Rotorsak = varning
-utan aktör"). For old daily files that actor is the archive. A day older than
-`recentDailyDays` (30) and longer than `oldDailyMaxLines` moves byte-for-byte
-to `memory/archive/daily/DATE.md`. The old path keeps a five-line stub: its
-`> summary:` (the original's own, else that night's Dream digest headings, else
-its own `## ` headings), the archive path with its sha256 and the Dream digest
-links. Nothing is paraphrased, links to the old path still resolve and
-`amux search` still finds the full text under `memory/archive/daily/`. A day
-with an unchecked `- [ ]` todo stays in place until the todo is resolved, so
-the todo never disappears from lint. Lint warns `archive_missing` or
-`archive_mismatch` if a stub's original is gone or changed.
+utan aktör"). For daily files that actor is the archive, and the diary is a
+summary (Mattias 2026-10-19). The morning after a verified Dream night, the day
+that night covered moves byte-for-byte to `memory/archive/daily/DATE.md` and
+its path keeps a stub with that night's summary (at most 25 lines). Any other
+finished day longer than `oldDailyMaxLines` moves the same way in the next
+nightly run, with a five-line stub. A stub keeps its `> summary:` (the
+original's own, else the covering Dream digest's headings, else its own `## `
+headings), the archive path with its sha256 and the link to the Dream digest
+that covered the day: a run is named after the morning it ran, so that is the
+first saved run dated after the day. Nothing is paraphrased, links to the old
+path still resolve and `amux search` still finds the full text under
+`memory/archive/daily/`. A day with an unchecked `- [ ]` todo stays in place
+until the todo is resolved, so the todo never disappears from lint. Lint warns
+`archive_missing` or `archive_mismatch` if a stub's original is gone or changed.
 
-Recent days (2–30 days) report their total size as info only. Twenty panes
+Days not yet archived report their total size as info only. Twenty panes
 writing the ~10-line sections the agent policy asks for exceed any fixed daily
 total, and nothing should rewrite those days before the archive takes them.
 The writer can still act on today and yesterday: lint names each `## ` section
@@ -78,7 +82,8 @@ configured owner exact /compact
   -> visible Dream prompt
   -> isolated validated summary
   -> immutable Markdown snapshot + atomic daily reference
-  -> lossless archive of old daily files (archiveMaxPerRun, 30)
+  -> yesterday archived with that summary in its stub
+  -> lossless archive of other finished daily files (archiveMaxPerRun, 30)
   -> read-only memory lint
   -> local memory commit (no push)
   -> incremental search reindex
@@ -238,7 +243,7 @@ preserves unrelated hooks and cannot silently remove their private configuration
 
 - `MEMORY.md`: short curated index, never automatically compacted.
 - Today's and yesterday's daily files: never old-file compact candidates.
-- Daily files older than 30 days: archived losslessly, never rewritten.
+- Finished daily files: archived losslessly by the next nightly run, never rewritten.
 - `references/*` and `people/*`: warnings only, never automatic rewrites.
 - Session JSONL housekeeping is separate and preserves every record; it only
   shortens oversized string fields in sufficiently old inactive journals.

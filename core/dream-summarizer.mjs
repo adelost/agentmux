@@ -19,8 +19,8 @@ export const DREAM_PROMPT_BYTES = 96 * 1024;
 export const DREAM_MAX_PANES = 48;
 /** WHAT: Defines the model-product byte ceiling. WHY: Prevents one summary from bloating daily memory. */
 export const DREAM_SUMMARY_BYTES = 12 * 1024;
-/** WHAT: Defines the model-product line ceiling. WHY: Keeps the daily fleet overview scannable. */
-export const DREAM_SUMMARY_LINES = 60;
+/** WHAT: Defines the model-product line ceiling. WHY: The night's summary becomes the covered day's diary, so it must be short enough to read in one go. */
+export const DREAM_SUMMARY_LINES = 25;
 
 /** WHAT: Resolves supported journal dialects. WHY: Keeps unsupported panes from entering Dream input. */
 export function dreamPaneEngine(pane = {}) {

@@ -17,9 +17,10 @@ import {
   buildDreamBatch, collectDreamSources, DREAM_PROMPT_BYTES,
 } from "../core/dream-summarizer.mjs";
 import {
-  dreamOwnerPrompt, resolveDreamCandidates,
+  dreamOwnerPrompt, dreamSummaryBody, resolveDreamCandidates,
   writeDreamOwnerInput,
 } from "../core/dream-owner.mjs";
+import { archiveNightDay } from "../core/memory-archive.mjs";
 import { prepareDreamOwner, selectIdleOwner } from "./dream-curator.mjs";
 export { dreamCandidateBlocker } from "./dream-curator.mjs";
 import { defaultWorkspace } from "../core/runtime-defaults.mjs";
@@ -112,6 +113,17 @@ export function writeDreamGapMarker(memPath, dateKey, timeStr, reason) {
     ].join("\n"),
     new RegExp(`\n?<!-- amux-dream-failed:${escapeRegExp(dateKey)} [^\n]*-->\n(?:> DIGEST SAKNAS[^\n]*\n)?`, "g"),
   );
+}
+
+/** WHAT: Makes the day this night covered read as its summary. WHY: A failed move leaves the notes in place for the next nightly archive, so it warns instead of failing the saved night. */
+function archiveCoveredDay(workspace, dateKey, summary, now) {
+  try {
+    const { archived, reason } = archiveNightDay(workspace, dateKey, { summary, now });
+    if (archived) console.log(`Dream: ${dateKey} now holds the night's summary; the notes are in ${archived.archivePath}.`);
+    else console.log(`Dream: ${dateKey} keeps its notes (${reason}).`);
+  } catch (error) {
+    console.warn(`Dream: ${dateKey} keeps its notes; archive failed: ${error.message}`);
+  }
 }
 
 function previousDateKey(dateKey) {
@@ -392,7 +404,10 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
         console.warn(`Dream: ${observed.unreadable.length} pane journal(s) unreadable; receipts unchanged.`);
         process.exitCode = 1;
       }
-      if (!observed.unreadable.length && !flags.deferSentinel && !flags["defer-sentinel"]) committedInput = input;
+      if (!observed.unreadable.length && !flags.deferSentinel && !flags["defer-sentinel"]) {
+        committedInput = input;
+        archiveCoveredDay(workspaceDir, previousDateKey(dateKey), dreamSummaryBody(product.content), now);
+      }
       return {
         included: batch.included,
         omitted: batch.omitted,

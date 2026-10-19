@@ -128,6 +128,17 @@ feature("bounded fleet dream input", () => {
     }],
   });
 
+  unit("a night's summary fits the day's diary: at most 25 non-empty lines", {
+    when: ["checking 25 and 26 lines with the default ceiling", () => ({
+      fits: validateDreamSummary(Array.from({ length: 25 }, (_, i) => `- rad ${i}`).join("\n\n")),
+      over: validateDreamSummary(Array.from({ length: 26 }, (_, i) => `- rad ${i}`).join("\n")),
+    })],
+    then: ["25 passes and 26 is refused", ({ fits, over }) => {
+      expect(fits.ok).toBe(true);
+      expect(over.reason).toBe("summary-line-limit");
+    }],
+  });
+
   unit("the one daily block is replaced idempotently", {
     when: ["upserting twice", () => {
       const first = upsertDreamSummary("# 2026-07-21\n", "2026-07-21",

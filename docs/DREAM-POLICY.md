@@ -267,11 +267,12 @@ sources and maintenance failures remain separate from a recovered digest.
 
 ## Other memory maintenance
 
-Nightly `amux memory lint` remains read-only. Before it, `amux memory archive
---apply` moves old oversized daily files byte-for-byte to `memory/archive/daily/`
-and leaves a five-line stub; after it, `amux memory bank` commits `memory/`
-locally (secret scan first, never push). Neither uses a model. See
-[memory](memory.md).
+Nightly `amux memory lint` remains read-only. A verified night first archives
+the day it covered, with the night's summary in that day's stub. Before lint,
+`amux memory archive --apply` moves other finished oversized daily files
+byte-for-byte to `memory/archive/daily/` and leaves a stub; after it, `amux
+memory bank` commits `memory/` locally (secret scan first, never push). Neither
+uses a model. See [memory](memory.md).
 Automatic `amux memory compact` is retired: it previously used a hidden
 one-shot model process. The command now supports `--dry` for inspection and
 fails closed before touching git or memory if asked to rewrite files.

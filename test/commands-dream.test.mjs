@@ -1,5 +1,5 @@
 import { feature, component, expect } from "bdd-vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { cmdDream } from "../cli/commands.mjs";
@@ -147,6 +147,43 @@ feature("amux dream configured-pane orchestration", () => {
       expect(result.included).toHaveLength(1);
       const memory = readFileSync(result.path, "utf8");
       expect(memory.match(/amux-dream-summary:2026-07-21/g)).toHaveLength(2);
+      cleanup(fx);
+    }],
+  });
+
+  component("a committed night turns yesterday's notes into its summary", {
+    given: ["yesterday's long notes and one active source", () => {
+      const fx = fixture();
+      mkdirSync(join(fx.workspace, "memory"), { recursive: true });
+      const notes = ["# 2026-07-20", ...Array.from({ length: 40 }, (_, i) => `- anteckning ${i}`)].join("\n") + "\n";
+      writeFileSync(join(fx.workspace, "memory", "2026-07-20.md"), notes);
+      return { fx, notes };
+    }],
+    when: ["running Dream to completion", async ({ fx, notes }) => {
+      await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
+        workspace: fx.workspace, quiet: true,
+      }, {
+        ...ownerDependencies(fx),
+        nightlyCompact: async () => {},
+        recordReceipts: () => {},
+        waitForResult: async ({ outputPath, dateKey, runId, sourceSha256 }) => {
+          const content = [
+            `> Kuraterad av claw:3 efter verifierad kompaktering · run \`${runId}\` · source \`${sourceSha256}\`.`,
+            "- Fixen mergades och verifierades.",
+          ].join("\n");
+          writeFileSync(outputPath, content);
+          return { ok: true, content, dateKey };
+        },
+      });
+      return { fx, notes };
+    }],
+    then: ["yesterday is the summary with a link, and the notes are archived unchanged", ({ fx, notes }) => {
+      const diary = readFileSync(join(fx.workspace, "memory", "2026-07-20.md"), "utf8");
+      expect(diary).toContain("- Fixen mergades och verifierades.");
+      expect(diary).not.toContain("Kuraterad av");
+      expect(diary).not.toContain("anteckning 39");
+      expect(diary).toContain("`memory/archive/daily/2026-07-20.md`");
+      expect(readFileSync(join(fx.workspace, "memory", "archive", "daily", "2026-07-20.md"), "utf8")).toBe(notes);
       cleanup(fx);
     }],
   });

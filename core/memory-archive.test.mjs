@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { createHash } from "crypto";
 import { tmpdir } from "os";
 import { join } from "path";
-import { archiveMemory, archiveSummary, buildArchiveStub, parseArchiveStub } from "./memory-archive.mjs";
+import { archiveMemory, archiveNightDay, archiveSummary, buildArchiveStub, parseArchiveStub } from "./memory-archive.mjs";
 import { lintMemory } from "./memory-lint.mjs";
 
 const NOW = new Date("2026-07-11T10:00:00+02:00");
@@ -33,7 +33,8 @@ feature("memory archive", () => {
       mkdirSync(join(root, "memory", "references"), { recursive: true });
       writeFileSync(join(root, "memory", "references", "kamera.md"), "> summary: kamera\n> why: test\n");
       writeFileSync(join(root, "memory", "2026-05-01.md"), original);
-      writeFileSync(join(root, "memory", "dream", "2026-05-01-run.md"), "## Underlag och kontinuitet\n## Nattens beslut\n");
+      // A Dream run is named after the morning it ran and covers the day before.
+      writeFileSync(join(root, "memory", "dream", "2026-05-02-run.md"), "## Underlag och kontinuitet\n## Nattens beslut\n");
       return { root, original };
     }],
     when: ["archiving", ({ root }) => ({ root, result: archiveMemory(root, { dryRun: false, now: NOW }) })],
@@ -45,7 +46,7 @@ feature("memory archive", () => {
       expect(lines(stub).length).toBeLessThanOrEqual(5);
       expect(stub).toContain("> summary: Full notes for 2026-05-01.");
       expect(stub).toContain("`memory/archive/daily/2026-05-01.md`");
-      expect(stub).toContain("`memory/dream/2026-05-01-run.md`");
+      expect(stub).toContain("`memory/dream/2026-05-02-run.md`");
       expect(parseArchiveStub(stub)?.archivePath).toBe("memory/archive/daily/2026-05-01.md");
       const lint = lintMemory(root, { now: NOW, home: join(root, "home") });
       expect(lint.compactable).toEqual([]);
@@ -53,11 +54,11 @@ feature("memory archive", () => {
     }],
   });
 
-  component("today, recent, archived and todo-carrying days stay where they are", {
+  component("today, yesterday, archived and todo-carrying days stay where they are", {
     given: ["one day of each kind", () => {
       const root = workspace();
       writeFileSync(join(root, "memory", "2026-07-11.md"), day("2026-07-11", 200));
-      writeFileSync(join(root, "memory", "2026-06-30.md"), day("2026-06-30", 200));
+      writeFileSync(join(root, "memory", "2026-07-10.md"), day("2026-07-10", 200));
       writeFileSync(join(root, "memory", "2026-05-03.md"), day("2026-05-03", 60, { extra: ["- [ ] ring Erika"] }));
       writeFileSync(join(root, "memory", "2026-05-04.md"), buildArchiveStub({ dateKey: "2026-05-04", summary: "x", sha: "0".repeat(64) }));
       writeFileSync(join(root, "memory", "2026-05-05.md"), day("2026-05-05", 5));
@@ -67,6 +68,61 @@ feature("memory archive", () => {
     then: ["nothing moves and the todo day is reported as blocked", (result) => {
       expect(result.archived).toEqual([]);
       expect(result.blocked.map((row) => [row.dateKey, row.reason])).toEqual([["2026-05-03", "1 open todo(s)"]]);
+    }],
+  });
+
+  component("a finished day is archived the next night, not after 30 days", {
+    given: ["a three-day-old oversized day and the run that covered it", () => {
+      const root = workspace();
+      writeFileSync(join(root, "memory", "2026-07-08.md"), day("2026-07-08", 40));
+      writeFileSync(join(root, "memory", "dream", "2026-07-09-run.md"), "## Nattens beslut\n");
+      return { root };
+    }],
+    when: ["archiving", ({ root }) => ({ root, result: archiveMemory(root, { dryRun: false, now: NOW }) })],
+    then: ["the day moves and its stub links the covering night", ({ root, result }) => {
+      expect(result.archived.map((row) => row.dateKey)).toEqual(["2026-07-08"]);
+      const stub = readFileSync(join(root, "memory", "2026-07-08.md"), "utf-8");
+      expect(stub).toContain("`memory/dream/2026-07-09-run.md`");
+    }],
+  });
+
+  component("the night's summary becomes the covered day's diary the morning after", {
+    given: ["yesterday's notes and the night's summary", () => {
+      const root = workspace();
+      const original = day("2026-07-10", 40);
+      writeFileSync(join(root, "memory", "2026-07-10.md"), original);
+      writeFileSync(join(root, "memory", "dream", "2026-07-11-run.md"), "night\n");
+      return { root, original };
+    }],
+    when: ["archiving yesterday with that summary", ({ root, original }) => ({
+      root, original,
+      result: archiveNightDay(root, "2026-07-10", { summary: "## Dygnet\n- Kameran valdes, A före B.", now: NOW }),
+    })],
+    then: ["the diary is the summary with links, and the notes are in the archive unchanged", ({ root, original, result }) => {
+      expect(result.archived?.dateKey).toBe("2026-07-10");
+      const stub = readFileSync(join(root, "memory", "2026-07-10.md"), "utf-8");
+      expect(stub).toContain("- Kameran valdes, A före B.");
+      expect(stub).toContain("`memory/archive/daily/2026-07-10.md`");
+      expect(stub).toContain("`memory/dream/2026-07-11-run.md`");
+      expect(stub).not.toContain("detail 39");
+      expect(readFileSync(join(root, "memory", "archive", "daily", "2026-07-10.md"), "utf-8")).toBe(original);
+      expect(parseArchiveStub(stub)?.sha256).toBe(sha256(original));
+    }],
+  });
+
+  component("a day with an open todo keeps its notes even after its night", {
+    given: ["yesterday with an unchecked todo", () => {
+      const root = workspace();
+      writeFileSync(join(root, "memory", "2026-07-10.md"), day("2026-07-10", 40, { extra: ["- [ ] ring Erika"] }));
+      return { root };
+    }],
+    when: ["archiving yesterday with a summary", ({ root }) => ({
+      root, result: archiveNightDay(root, "2026-07-10", { summary: "- Sammanfattning", now: NOW }),
+    })],
+    then: ["nothing moves and the reason is named", ({ root, result }) => {
+      expect(result.archived).toBeNull();
+      expect(result.reason).toBe("1 open todo(s)");
+      expect(existsSync(join(root, "memory", "archive", "daily", "2026-07-10.md"))).toBe(false);
     }],
   });
 

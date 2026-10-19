@@ -142,7 +142,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
   }
 
   // Daily files. Every warning here has an actor: the nightly archive moves
-  // old oversized days losslessly (memory-archive.mjs), and the writer of
+  // finished oversized days losslessly (memory-archive.mjs), and the writer of
   // today's or yesterday's section can still shorten it. Recent totals are
   // info only: twenty panes writing ~10-line sections exceed any fixed total,
   // and nothing should rewrite those days before the archive takes them.
@@ -174,7 +174,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
         add("info", "daily_section_long", file, `"${section.heading}": ${section.lines} lines (rule: about 10 per section)`);
       }
     } else if (rule.maxLines === policy.recentDailyMaxLines) {
-      if (lineCount > rule.maxLines) add("info", "daily_large", file, `${lineCount} lines (archived after ${policy.recentDailyDays} days)`);
+      if (lineCount > rule.maxLines) add("info", "daily_large", file, `${lineCount} lines (the next nightly archive moves it)`);
     } else if (lineCount > rule.maxLines) {
       const todos = linesOf(text).filter((line) => line.startsWith("- [ ] ")).length;
       const finding = {

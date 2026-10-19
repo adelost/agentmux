@@ -99,6 +99,10 @@ feature("configured Dream owner", () => {
       expect(prompt).toContain("När resultatfilen är durabelt skriven");
       expect(input.memoryFormat).toBe(2);
       expect(prompt).toContain("DREAM_OK 2026-08-01 run-1");
+      expect(prompt).toContain("Sammanfatta hela dygnet, också det panelerna skrivit i dagsfilerna.");
+      expect(prompt).toContain("Inga ordagranna citat");
+      expect(prompt).toContain("högst 25 icke-tomma rader");
+      expect(prompt).not.toContain("Upprepa inte");
       rmSync(root, { recursive: true, force: true });
     }],
   });

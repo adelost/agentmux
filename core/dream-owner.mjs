@@ -6,7 +6,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { validateDreamSummary } from "./dream-summarizer.mjs";
+import { DREAM_SUMMARY_LINES, validateDreamSummary } from "./dream-summarizer.mjs";
 import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
 import { readClaudeScreenQuality } from "./claude-statusline.mjs";
@@ -177,11 +177,12 @@ export function dreamOwnerPrompt({
     "",
     `Skapa ENDAST resultatfilen ${input.outputPath} med apply_patch. Den ska innehålla:`,
     `> Kuraterad av ${owner.agent}:${owner.pane} efter verifierad kompaktering · run \`${input.runId}\` · source \`${input.sha256}\`.`,
-    "- En noggrann svensk sammanfattning i högst 60 icke-tomma rader.",
+    `- En noggrann svensk sammanfattning i högst ${DREAM_SUMMARY_LINES} icke-tomma rader. Den blir dygnets dagbok.`,
+    "- Sammanfatta hela dygnet, också det panelerna skrivit i dagsfilerna. Ange datum för arbete från ett tidigare dygn.",
+    "- Inga ordagranna citat. Skriv om det någon sagt med egna ord och ange tid och kanal.",
     "- Prioritera beslut, genomförda och verifierade resultat, blockerare, oavslutat arbete och återanvändbara lärdomar.",
     "- Slå ihop relaterat arbete men behåll pane-ID när proveniens behövs. Utelämna småprat och repetitiv status.",
     "- Om paneler motsäger varandra, skriv att uppgifterna går isär och ange båda källorna. Redovisa dem aldrig som två fakta.",
-    "- Upprepa inte det som dagsfilens manuella avsnitt redan säger. Ange datum för arbete från ett tidigare dygn.",
     ...(input.memoryRepair ? [
       "- Minnesvarningarna i payload.memoryRepair ingår i SAMMA kuratortur. Läs bara filerna; skriv aldrig minne direkt.",
       "- Föreslå endast säkra metadata-/länkrättningar för editable-fynd. Hitta aldrig på en saknad lärdom; kontrollanten gör olösta fynd till frågor.",
@@ -191,6 +192,11 @@ export function dreamOwnerPrompt({
     "Skriv inga reserverade amux-markörer i resultatet. AMUX validerar filen och skriver själv det enda tillåtna Dream-blocket atomiskt i dagens minne.",
     `När ${input.memoryFormat === 2 ? "resultatfilen är durabelt skriven" : "blocket är durabelt skrivet"}: svara exakt \`DREAM_OK ${dateKey} ${input.runId}\` och inget mer.`,
   ].join("\n");
+}
+
+/** WHAT: The curator's summary without its run receipt line. WHY: The covered day's diary shows the summary; the receipt stays in the Dream file. */
+export function dreamSummaryBody(content) {
+  return String(content).split(/\r?\n/u).slice(1).join("\n").trim();
 }
 
 /** WHAT: Reads and validates the configured pane's isolated product. WHY: Prevents the model from gaining authority to rewrite memory. */
