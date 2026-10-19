@@ -293,6 +293,7 @@ const { getMapping, overrides, channelMap, reloadConfig, ready: bridgeReady } = 
   tts,
   state: appState,
   inboundStore,
+  prepareMessage: (msg) => attachments.transcribeAhead(msg),
   // onMessage is set below after handlers are created (circular dep)
   onMessage: (...args) => handlers.onMessage(...args),
 });

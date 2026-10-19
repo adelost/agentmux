@@ -144,3 +144,50 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
     });
   }
 });
+
+// Mattias 2026-10-18: "det är bättre att Whisper kör så fort den kan". A Gemini call that runs
+// into its cap hung; the same clip hung again in 5 of 7 second tries, so whisper1 takes over at once.
+function providerFixture(fakeTranscribe) {
+  const root = mkdtempSync(join(tmpdir(), "voice-provider-"));
+  mkdirSync(join(root, "bin"));
+  writeFileSync(join(root, "bin/transcribe"), `#!/bin/bash
+backend=$(sed -n 's/.*--backend \\([a-z0-9]*\\).*/\\1/p' <<< "$*")
+echo "$backend" >> "$HOME/calls"
+${fakeTranscribe}
+`, { mode: 0o700 });
+  const audio = join(root, "clip.ogg");
+  execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-c:a", "libopus", audio]);
+  const run = (env = {}) => spawnSync("bash", [resolve("bin/transcribe-whisper.sh"), audio], {
+    env: { ...process.env, HOME: root, ...env }, encoding: "utf8", timeout: 10_000,
+  });
+  const calls = () => readFileSync(join(root, "calls"), "utf8").trim().split("\n");
+  return { run, calls, close: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+describe("a hung Gemini call, sandman:0 2026-10-18", () => {
+  it("falls back to whisper1 at once instead of hanging a second time", () => {
+    // exec: the wall cap's SIGTERM must reach the hanging call itself, not only its shell.
+    const fx = providerFixture(`[ "$backend" = gemini ] && exec sleep 30
+echo "whisper words"`);
+    try {
+      const started = Date.now();
+      const result = fx.run({ AMUX_STT_GEMINI_CAP_S: "1", AMUX_STT_HUNG_AFTER_S: "1" });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("[stt-fallback:whisper1] whisper words");
+      expect(fx.calls()).toEqual(["gemini", "whisper1"]);
+      expect(Date.now() - started).toBeLessThan(4_000);
+    } finally { fx.close(); }
+  });
+  it("still gives Gemini a second try after a fast failure", () => {
+    const fx = providerFixture(`if [ "$backend" = gemini ] && [ "$(grep -c gemini "$HOME/calls")" -eq 1 ]; then
+  echo "503 UNAVAILABLE" >&2; exit 1
+fi
+echo "$backend words"`);
+    try {
+      const result = fx.run();
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("gemini words");
+      expect(fx.calls()).toEqual(["gemini", "gemini"]);
+    } finally { fx.close(); }
+  });
+});

@@ -208,6 +208,53 @@ describe("Discord inbound reconciliation", () => {
     expect(store.read("100", "103")).toMatchObject({ status: "observed" });
   });
 
+  it("transcribes a voice message on arrival while an earlier one in its channel hangs, then delivers both in spoken order", async () => {
+    const root = tempRoot();
+    const store = createDiscordInboundStore({ rootDir: root,
+      downloadBuffer: async (url) => Buffer.from(`bytes:${url}`) });
+    let releaseFirst;
+    const firstHangs = new Promise((resolve) => { releaseFirst = resolve; });
+    const started = [];
+    const transcribe = vi.fn(async (command) => {
+      const first = command.includes("/701.");
+      started.push(first ? "first" : "second");
+      if (first) await firstHangs;
+      return { stdout: first ? "first voice" : "second voice", stderr: "" };
+    });
+    const attachmentHandler = createAttachmentHandler({ run: transcribe,
+      transcribeScript: "/transcribe", downloadBuffer: async () => {
+        throw new Error("durable cache was bypassed");
+      } });
+    const delivered = [];
+    const reconciler = createInboundReconciler({
+      onMessage: async (msg) => {
+        delivered.push(await attachmentHandler.buildPrompt(msg, []));
+        return { delivered: true };
+      },
+      prepareMessage: (msg) => attachmentHandler.transcribeAhead(msg),
+      state: state(), store, resolveTarget: target,
+    });
+    const channel = fakeChannel({});
+    const voice = (id, attachmentId) => message(id, "200", { text: "", attachments: [
+      { id: attachmentId, name: `${attachmentId}.ogg`, url: `u${attachmentId}`, contentType: "audio/ogg" }] });
+
+    const first = reconciler.enqueue(voice("301", "701"), channel);
+    const second = reconciler.enqueue(voice("302", "702"), channel);
+    try {
+      await vi.waitFor(() => expect(started).toEqual(["first", "second"]), { timeout: 500 });
+      expect(delivered).toEqual([]);
+    } finally {
+      releaseFirst();
+    }
+    await Promise.all([first, second]);
+    expect(delivered).toEqual([
+      expect.stringContaining("first voice"),
+      expect.stringContaining("second voice"),
+    ]);
+    expect(channel.transcriptReplies.map(({ messageId }) => messageId)).toEqual(["301", "302"]);
+    expect(transcribe).toHaveBeenCalledTimes(2);
+  });
+
   it("observes a queued attachment failure only when its channel turn runs", async () => {
     const root = tempRoot();
     let releaseFirst;

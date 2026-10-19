@@ -36,6 +36,32 @@ export function createAttachmentHandler({
   const downloadAttachment = (att) =>
     downloadDiscordAttachment(att, { downloadBuffer, sleep });
 
+  // One STT run per attachment: the ordered handler joins the run that
+  // started on arrival instead of starting a second one.
+  const transcriptions = new Map();
+  const transcriptionKey = (msg, att) => `${msg.channelId}:${msg.id}:${att.id}`;
+
+  /** WHAT: Starts STT for each journaled audio attachment once its bytes are durable. WHY: Keeps one hung transcription from delaying the next message's. */
+  function transcribeAhead(msg) {
+    for (const att of msg.attachments || []) {
+      if (!att.contentType?.startsWith("audio/") || !att.durablePath) continue;
+      const key = transcriptionKey(msg, att);
+      if (transcriptions.has(key) || msg.getCachedTranscript?.(att.id)) continue;
+      const transcription = transcribeAudio(msg, att, []);
+      // The ordered handler awaits this same promise and handles its failure.
+      transcription.catch(() => {});
+      transcriptions.set(key, transcription);
+    }
+  }
+
+  function takeTranscription(msg, att, tmpFiles) {
+    const key = transcriptionKey(msg, att);
+    const ahead = transcriptions.get(key);
+    if (!ahead) return transcribeAudio(msg, att, tmpFiles);
+    transcriptions.delete(key);
+    return ahead;
+  }
+
   /** WHAT: Posts a readable Discord transcript in bounded chunks. WHY: Keeps long voice notes visible without markdown noise or 2000-character failures. */
   async function replyWithTranscript(msg, attachmentId, text, viaFallback) {
     const heading = viaFallback ? "**Transcript · Whisper fallback**" : "**Transcript**";
@@ -62,7 +88,7 @@ export function createAttachmentHandler({
       const isImage = att.contentType?.startsWith("image/");
 
       if (isAudio) {
-        let transcribed = await transcribeAudio(msg, att, tmpFiles);
+        let transcribed = await takeTranscription(msg, att, tmpFiles);
         if (msg.isInboundCompleted?.()) return null;
         if (transcribed === null) return null;
         // The wrapper marks fallback-engine transcripts (gemini failed →
@@ -156,5 +182,5 @@ export function createAttachmentHandler({
     }
   }
 
-  return { buildPrompt };
+  return { buildPrompt, transcribeAhead };
 }

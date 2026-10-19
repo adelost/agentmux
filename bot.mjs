@@ -43,7 +43,7 @@ function markReady() {
  */
 export function startBot({
   channels, agentsYaml, whisperUrl, agent, tts, state, onMessage, inboundStore = null,
-  onHumanMessage = warnQuotaOnHumanMessage,
+  prepareMessage = null, onHumanMessage = warnQuotaOnHumanMessage,
 }) {
   ensureSingleInstance();
 
@@ -114,7 +114,7 @@ export function startBot({
   });
   const inbound = channels.length
     ? createInboundReconciler({
-      onMessage, state, store: inboundStore, resolveTarget: resolveInboundTarget,
+      onMessage, prepareMessage, state, store: inboundStore, resolveTarget: resolveInboundTarget,
       onUnroutable: answerUnmappedChannel,
     })
     : null;

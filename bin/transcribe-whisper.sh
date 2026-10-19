@@ -55,15 +55,21 @@ if is_silent "$MEAN" "$PEAK"; then
   exit 0
 fi
 
-# Kedja: gemini (2 försök) → whisper1 (märkt fallback) → ärligt fel.
+# Kedja: gemini → whisper1 (märkt fallback) → ärligt fel. Gemini får ett andra
+# försök bara efter ett snabbt fel. Ett försök som körde HUNG_AFTER_S eller
+# längre hängde, och samma klipp hängde igen i 5 av 7 andra försök (18-19 okt),
+# så whisper1 tar över direkt i stället för att låta klippet hänga en gång till.
 # Gemini-anrop kan stalla helt (2026-07-11: samma klipp hängde 10+ min i ett
 # anrop, tog 13 s i nästa) — därför hårt väggklockstak per försök utöver
-# SDK-timeouten inne i transcribe. Fallbacken är ALDRIG tyst: whisper1-text
+# SDK-timeouten (90 s) inne i transcribe. Fallbacken är ALDRIG tyst: whisper1-text
 # prefixas med en markör så mottagaren ser vilken motor som transkriberade
 # (whisper1 hör tech-termer sämre än gemini, se benchmark 2026-05-27).
 # Lokal faster-whisper är medvetet INTE i kedjan: den är hårdkodad mot delade
 # 3090:n (cuda) och en automatisk fallback kan inte invänta GPU-clearance.
 # API keys auto-load from ~/.env inside transcribe.
+
+GEMINI_CAP_S="${AMUX_STT_GEMINI_CAP_S:-100}"
+HUNG_AFTER_S="${AMUX_STT_HUNG_AFTER_S:-60}"
 
 try_backend() { # $1=backend $2=wall-clock-cap $3=clip
   timeout "$2" "$HOME/bin/transcribe" --backend "$1" --stdout --lang "$LANG" "$3"
@@ -75,9 +81,10 @@ has_words() { [ -n "${1//[[:space:]]/}" ]; }
 # gets the same answer, so failing the message only made every retry repeat
 # it (2026-10-17). Mark the range instead. Only an unanswered call fails.
 transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
-  local clip="$1" attempt TEXT rc heard_no_words=false
+  local clip="$1" attempt TEXT rc started heard_no_words=false
   for attempt in 1 2; do
-    if TEXT=$(try_backend gemini 100s "$clip"); then
+    started=$SECONDS
+    if TEXT=$(try_backend gemini "${GEMINI_CAP_S}s" "$clip"); then
       if has_words "$TEXT"; then printf '%s\n' "$TEXT"; return 0; fi
       heard_no_words=true
       echo "[stt] gemini attempt $attempt/2 heard no words" >&2
@@ -85,7 +92,11 @@ transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
     else
       rc=$?
     fi
-    echo "[stt] gemini attempt $attempt/2 failed (exit $rc)" >&2
+    echo "[stt] gemini attempt $attempt/2 failed (exit $rc) after $((SECONDS - started)) s" >&2
+    if [ $((SECONDS - started)) -ge "$HUNG_AFTER_S" ]; then
+      echo "[stt] gemini hung; whisper1 takes over now" >&2
+      break
+    fi
   done
   if $heard_no_words; then range_marker ohörbart "$2" "$3"; return 0; fi
   if TEXT=$(try_backend whisper1 60s "$clip"); then

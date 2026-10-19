@@ -88,11 +88,13 @@ export function durableMessage(record, store, channel, baseMessage = null) {
   };
 }
 
+// prepareMessage starts work such as STT once a message's bytes are durable,
+// before its turn; onMessage still runs in source order per channel.
 /**
  * WHAT: Builds one journaled dispatcher for live or REST-recovered Discord messages.
  * WHY: Keeps attachment, STT, and pane work behind a durable human-message identity.
  */
-export function createInboundReconciler({ onMessage, state, store, resolveTarget, onUnroutable = null }) {
+export function createInboundReconciler({ onMessage, prepareMessage = null, state, store, resolveTarget, onUnroutable = null }) {
   if (!store) throw new Error("Discord inbound reconciler requires a durable store");
   if (typeof resolveTarget !== "function") {
     throw new Error("Discord inbound reconciler requires a target resolver");
@@ -101,13 +103,24 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
   const scans = new Map();
   const preparations = new Map();
 
-  function prepare(record) {
+  function startAhead(record, channel, baseMessage) {
+    if (!prepareMessage || record.status === "completed") return;
+    try { prepareMessage(durableMessage(record, store, channel, baseMessage)); }
+    catch (error) {
+      console.warn(`inbound preparation failed for ${record.identity}; its turn does the work: ${error.message}`);
+    }
+  }
+
+  function prepare(record, channel, baseMessage = null) {
     if (record.target?.kind === "inactive") return Promise.resolve({ ok: true, value: record });
     const existing = preparations.get(record.identity);
     if (existing) return existing;
     let tracked;
     tracked = Promise.resolve().then(() => store.prepareAttachments(record)).then(
-      (value) => ({ ok: true, value }),
+      (value) => {
+        startAhead(value, channel, baseMessage);
+        return { ok: true, value };
+      },
       (error) => ({ ok: false, error }),
     ).finally(() => {
       if (preparations.get(record.identity) === tracked) preparations.delete(record.identity);
@@ -133,7 +146,7 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
     let current = store.read(record.channelId, record.messageId) || record;
     if (current.status === "completed") return { duplicate: true };
     try {
-      current = await preparedRecord(prepared || prepare(current));
+      current = await preparedRecord(prepared || prepare(current, channel, baseMessage));
       current = store.read(current.channelId, current.messageId) || current;
       if (current.status === "completed") return { duplicate: true };
       if (current.target?.kind === "inactive") {
@@ -194,7 +207,7 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
     }
     if (!record) return Promise.resolve({ ignored: msg?.isBot ? "bot" : "unmapped" });
     if (record.status === "completed") return Promise.resolve({ duplicate: true });
-    const prepared = prepare(record);
+    const prepared = prepare(record, channel, msg);
     return schedule(record, channel, msg, prepared);
   }
 
@@ -216,7 +229,7 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
     for (const record of pending) {
       const baseMessage = await messageForPending(channel, record, fetchedById);
       const refreshed = store.read(record.channelId, record.messageId) || record;
-      const result = await schedule(refreshed, channel, baseMessage, prepare(refreshed));
+      const result = await schedule(refreshed, channel, baseMessage, prepare(refreshed, channel, baseMessage));
       if (result?.delivered && (!newlyObserved || newlyObserved.has(record.messageId))) replayed++;
     }
     return { replayed, pending: store.pending(channelId).length };
@@ -261,7 +274,7 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
         fetchedById.set(record.messageId, msg);
         if (record.status === "completed") continue;
         if (!before) newlyObserved.add(record.messageId);
-        staged.push(prepare(record));
+        staged.push(prepare(record, channel, msg));
       }
       // A cursor may pass an attachment only after its bytes are private and
       // durable. If the bridge dies here, the old cursor intentionally causes
