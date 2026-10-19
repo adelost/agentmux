@@ -29,6 +29,8 @@ const TEST_ALIASES = {
   "cli/format.mjs": ["cli.test/format.test.mjs", "core/compact-quota-reset.test.mjs"],
   "core/claude-quota-target.mjs": ["core/claude-quota-lifecycle.test.mjs", "core/compact-quota-reset.test.mjs"],
   "core/delivery-wake.mjs": ["core/context-maintenance.test.mjs", "core/compact-quota-reset.test.mjs"],
+  "core/delivery-not-sent.mjs": ["core/delivery-broker.test.mjs"],
+  "test/fixtures/composer-agent.mjs": ["core/delivery-broker.test.mjs", "core/draft-withdrawal.test.mjs"],
   "bin/transcribe-whisper.sh": ["bin/transcribe-whisper.test.mjs"],
   "core/discord-inbound-store.mjs": ["core/inbound-voice-failure.test.mjs", "core/inbound-reconciler.test.mjs",
     "core/inbound-completed.test.mjs", "core/inbound-transcript-compat.test.mjs", "core/inactive-channel.test.mjs",
