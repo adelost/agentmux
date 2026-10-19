@@ -38,6 +38,17 @@ the CLI adds a warning on stderr: the recipient cannot read it until it
 recovers, so the sender keeps any role it hands over until the recipient
 acknowledges.
 
+## Quota floor
+
+At `AMUX_QUOTA_FLOOR_PERCENT` left on an account's week (default 3 %, `0` turns
+it off) amux starts no new automatic delivery to panes on that account: their
+messages wait in the queue, and the owner's own message still goes through. A
+working pane finishes its turn and the quota park compacts it there; nothing is
+cut off mid-turn. The floor lifts by itself on the first reading with more than
+the floor left, after the reset or a free reset, and parked panes then get the
+same-session recovery prompt. A pane that quota recovery moved to an account
+with room is judged by the account it runs on now.
+
 ## Idle capacity
 
 With `AMUX_IDLE_CAPACITY_TARGET=agent:pane` in the bridge environment, the

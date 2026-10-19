@@ -35,6 +35,8 @@ Busy panes keep a durable request for the existing watcher; dormant panes are se
 --continue-file is single-pane only and queues that continuation once after a verified switch.
 Quota warning: answers the human in the channel he writes in, from AMUX_QUOTA_WARN_PERCENT (default 80 %) every 6 h, from AMUX_QUOTA_RESERVE_PERCENT (default 90 %) every 3 h; amux never switches by itself.
 Warnings never switch accounts; explicit operator requests use the guarded path above.
+Quota floor: at AMUX_QUOTA_FLOOR_PERCENT left on the week (default 3, 0 is off) automatic work waits and parked panes compact;
+the owner's own message still goes through, and a reading with room lifts it and resumes parked panes.
 Codex automatic switch: only after a reached weekly limit, spare account quota and exact-session continuity.
 Disable with AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false. Predictions never switch accounts.
 Claude automatic switch: only after an actual limit banner and a later reading that shows the pane's own week spent,

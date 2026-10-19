@@ -16,7 +16,7 @@ import { parseQuotaWarningConfig } from "../channels/quota-warning.mjs";
 import { createClaudeQuotaLifecycle } from "../core/claude-quota-lifecycle.mjs";
 import { createClaudeQuotaCoordinator } from "../core/claude-quota-coordinator.mjs";
 import { createSelfCompactStore } from "../core/self-compact.mjs";
-import { parkHoldsMove } from "../core/quota-park.mjs";
+import { parkHoldsMove, quotaFloorPercent } from "../core/quota-park.mjs";
 import { createQuotaParkStore } from "../core/quota-park-store.mjs";
 import { createQuotaRecoveryLoop, parseQuotaRecoveryConfig } from "../channels/quota-recovery.mjs";
 import { startIdleCapacityAlarm } from "../channels/idle-capacity-runtime.mjs";
@@ -75,6 +75,7 @@ if (!config.enabled) {
     resetGraceMs: config.resetGraceMs,
     parkPending: (agentName, pane) => parkHoldsMove(selfRequests.read(agentName, pane), Date.now()),
     parkStore,
+    floorPercent: quotaFloorPercent(),
   });
   const loop = createQuotaRecoveryLoop({ coordinator, config });
   globalThis[LOOP_KEY] = loop;

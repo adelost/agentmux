@@ -4,6 +4,7 @@
 import { paneNeedsWake } from "./wake-admission.mjs";
 import { isOwnerChannelJob } from "./ask-origin.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
+import { quotaFloorHold } from "./quota-park.mjs";
 
 const pendingState = (drafted, ownsPaneDraft) =>
   drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending");
@@ -15,6 +16,7 @@ export async function wakeDeliveryTarget({
   wakeGate,
   wakeLifecycle,
   costAdmission,
+  quotaFloor = null,
   lease = null,
   drafted,
   ownsPaneDraft,
@@ -39,8 +41,26 @@ export async function wakeDeliveryTarget({
     return { proceed: false, job: await notifyBlocked(pending) };
   };
 
+  // lsrc:0 2026-10-19: at the floor an account's last few percent are for clean stops, compacts and handovers, so
+  // automatic work waits; a person's own message still goes through (context-maintenance.mjs, 2026-09-26).
+  // An unreadable quota never holds work; the facts reader logs its own read failures.
+  const floorReason = async () => {
+    if (!quotaFloor || isOwnerChannelJob(job)) return null;
+    const paneKey = `${job.agentName}:${job.pane}`;
+    const cached = await quotaFloor.windowsFor(paneKey).catch(() => null);
+    if (!quotaFloorHold({ windows: cached?.windows, floorPercent: quotaFloor.percent, now: now() })) return null;
+    // A pane quota recovery just moved may still be listed on its old account; re-read where it runs now.
+    const fresh = await quotaFloor.windowsFor(paneKey, { fresh: true }).catch(() => null);
+    const hold = quotaFloorHold({ windows: fresh?.windows, floorPercent: quotaFloor.percent, now: now() });
+    return hold ? `quota-floor: ${fresh.account?.name || "its account"} has ${hold.leftPercent} % of its week left`
+      + ` (floor ${quotaFloor.percent} %) until ${hold.resetsAt}` : null;
+  };
+
   const costGate = async () => {
-    if (job.kind !== "prompt" || !costAdmission) return { proceed: true, job };
+    if (job.kind !== "prompt") return { proceed: true, job };
+    const floor = await floorReason();
+    if (floor) return refuse(floor, true);
+    if (!costAdmission) return { proceed: true, job: job.costHold ? queue.update(job, { costHold: null }) : job };
     const verdict = await costAdmission(job, { lease }).catch(error => ({ ok: false, reason: error.message }));
     if (!verdict?.ok) return refuse(verdict?.reason || "context-cost-unverified", verdict?.held === true);
     return { proceed: true, job: job.costHold ? queue.update(job, { costHold: null }) : job };

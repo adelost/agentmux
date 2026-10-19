@@ -13,11 +13,12 @@ import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, oversizeN
   pauseCompactLimit, sessionBackgroundActivity } from "../core/pause-compact.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice } from "../core/self-compact.mjs";
-import { QUOTA_PARK_ORIGIN, quotaParkContinuation, quotaParkDecision } from "../core/quota-park.mjs";
+import { QUOTA_FLOOR_DEFAULT_PERCENT, QUOTA_PARK_ORIGIN, QUOTA_PARK_POLICY, quotaParkContinuation, quotaParkDecision } from "../core/quota-park.mjs";
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
 import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 export { createQuotaParkFacts } from "./quota-park.mjs";
 export { createQuotaParkStore } from "../core/quota-park-store.mjs";
+export { quotaFloorPercent } from "../core/quota-park.mjs";
 
 const BACKGROUND_BY_ENGINE = Object.freeze({ claude: sessionBackgroundActivity, codex: codexBackgroundActivity });
 
@@ -33,7 +34,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
   identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs,
   selfRequests = null, notify = async () => {}, cacheLifeMs = readContextCostPolicy().coldMs, deliveryBroker = null,
-  parkFor = null, parkStore = null, limitReceiptFor = (engine, paneDir) => (engine === "claude" ? activeClaudeLimitReceipt(paneDir) : null),
+  parkFor = null, parkStore = null, floorPercent = QUOTA_FLOOR_DEFAULT_PERCENT, limitReceiptFor = (engine, paneDir) => (engine === "claude" ? activeClaudeLimitReceipt(paneDir) : null),
   cursorFor = path => captureJsonlAppendCursor("self-compact-request-v1", [path]) }) {
   const lastLogged = new Map();
   // The episode each working pane was asked about, so it hears once until it compacts.
@@ -99,7 +100,8 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     if (!windows?.length) return false;
     const receipt = limitReceiptFor(engine, paneDir);
     if (receipt && receipt.stop !== "grace-note") return false;
-    const decision = quotaParkDecision({ engine, windows, graceNote: Boolean(receipt), now: now() });
+    // The park compacts at the floor, where new automatic work stops.
+    const decision = quotaParkDecision({ engine, windows, graceNote: Boolean(receipt), now: now() }, { ...QUOTA_PARK_POLICY, leftPercent: floorPercent });
     const episode = `${decision.window}:${decision.resetAt}`;
     if (!decision.park || parked.get(paneKey) === episode) return false;
     parked.set(paneKey, episode);

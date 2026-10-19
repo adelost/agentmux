@@ -11,7 +11,7 @@ export const IDLE_CAPACITY_STATE_KEY = "idle_capacity_alarm_v1";
 /** WHAT: Names how long a pane may stay unable to work before the dispatcher hears of it. WHY: Shorter stops recover by themselves. */
 export const IDLE_CAPACITY_AFTER_MS = 15 * 60_000;
 
-const isHeldByLimit = (job) => isQuotaParkedJob(job) || String(job.lastReason || "").includes("codex-weekly-limit");
+const isHeldByLimit = (job) => isQuotaParkedJob(job) || /codex-weekly-limit|quota-floor/u.test(String(job.lastReason || ""));
 const oldestOf = (jobs) => jobs.reduce((oldest, job) => (!oldest || job.createdAt < oldest.createdAt ? job : oldest), null);
 
 /**

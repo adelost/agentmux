@@ -80,7 +80,7 @@ export function createDeliveryBroker({
   log = (message) => console.warn(message),
   wakeAdmission = null,
   wakeLifecycle = null,
-  costAdmission = null,
+  costAdmission = null, quotaFloor = null,
   bridgeDir = null,
   memoryContextOptions = {},
 } = {}) {
@@ -429,7 +429,7 @@ export function createDeliveryBroker({
     });
     queueEvent(job, "attempt", { attempt: job.attempts });
 
-    const wake = await wakeDeliveryTarget({ agent, job, wakeGate, wakeLifecycle, costAdmission, lease,
+    const wake = await wakeDeliveryTarget({ agent, job, wakeGate, wakeLifecycle, costAdmission, quotaFloor, lease,
       drafted, ownsPaneDraft, queue, now, retryMs: blockedRetryMs,
       queueEvent, notifyBlocked: maybeNotifyBlocked });
     job = wake.job;

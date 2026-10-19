@@ -8,9 +8,27 @@
 /** WHAT: Names the request origin a parked pane's self-compact carries. WHY: Keeps quota recovery's move waiting for its compact. */
 export const QUOTA_PARK_ORIGIN = "quota-park";
 
+// lsrc:0 2026-10-19: an account's week is used until about 3 % is left; the rest is for a clean stop, the compact
+// and the handover. Parking at 4 % stopped panes too early. The floor and the park use this one number.
+/** WHAT: Defines the default percent left on the week at which work stops. WHY: Keeps the floor and the park on one number. */
+export const QUOTA_FLOOR_DEFAULT_PERCENT = 3;
+
+/**
+ * WHAT: Reads AMUX_QUOTA_FLOOR_PERCENT, the percent left on the week where new work stops; 0 turns it off.
+ * WHY: Keeps the floor an operator setting; a bad value is reported, never silently trusted.
+ */
+export function quotaFloorPercent(env = process.env, warn = console.warn) {
+  const raw = env.AMUX_QUOTA_FLOOR_PERCENT;
+  if (raw === undefined || String(raw).trim() === "") return QUOTA_FLOOR_DEFAULT_PERCENT;
+  const value = Number(raw);
+  if (Number.isFinite(value) && value >= 0 && value <= 100) return value;
+  warn(`AMUX_QUOTA_FLOOR_PERCENT=${raw} is not a percent from 0 to 100; using ${QUOTA_FLOOR_DEFAULT_PERCENT}`);
+  return QUOTA_FLOOR_DEFAULT_PERCENT;
+}
+
 /** WHAT: Defines how near a limit counts and how long a stop must outlast each engine's cache. WHY: Keeps a short stop on its warm cache. */
 export const QUOTA_PARK_POLICY = Object.freeze({
-  leftPercent: 4,
+  leftPercent: QUOTA_FLOOR_DEFAULT_PERCENT,
   // Claude's cache lives 60 minutes and Codex's about 30.
   outlastMs: Object.freeze({ claude: 50 * 60_000, codex: 25 * 60_000 }),
   // How long a pending park compact may hold quota recovery's move of a stopped pane.
@@ -53,6 +71,18 @@ export function quotaParkDecision({ engine, windows = [], graceNote = false, now
   const resetAt = Date.parse(last.resetsAt);
   if (resetAt - now <= outlastMs) return { park: false, cell: "cache-outlives-stop", window: last.kind, resetAt };
   return { park: true, cell: near.length ? "near-limit" : "grace-note", window: last.kind, resetAt };
+}
+
+/**
+ * WHAT: Returns the live week window at or under the floor, with what is left, or null.
+ * WHY: Keeps new automatic work from starting on an account its week is about to stop.
+ */
+export function quotaFloorHold({ windows = [], floorPercent = QUOTA_FLOOR_DEFAULT_PERCENT, now }) {
+  if (!(floorPercent > 0)) return null;
+  const week = windows.find((window) => window.kind === "week" && Number.isFinite(window.usedPercent)
+    && Date.parse(window.resetsAt) > now);
+  if (!week || 100 - week.usedPercent > floorPercent) return null;
+  return { leftPercent: Math.max(0, 100 - week.usedPercent), resetsAt: week.resetsAt };
 }
 
 /** WHAT: Checks whether a pane's pending self-request is a park young enough to hold a move. WHY: Keeps a compact that cannot run from holding a stopped pane. */

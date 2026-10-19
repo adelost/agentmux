@@ -3,7 +3,7 @@
 // their turns. A free reset gave the account room at 20:26Z, but limit recovery follows only limit receipts and
 // parked queue jobs, and these panes had neither, so nothing resumed them.
 
-import { accountWindows, parkResumeDecision, QUOTA_PARK_HEADER } from "./quota-park.mjs";
+import { accountWindows, parkResumeDecision, QUOTA_PARK_HEADER, QUOTA_PARK_POLICY } from "./quota-park.mjs";
 import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
 import { authoredInputAfter } from "./self-compact-resume.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
@@ -12,7 +12,10 @@ import { SELF_COMPACT_POLICY } from "./self-compact.mjs";
 
 const readingTime = (quota) => Date.parse(quota?.fetchedAt || quota?.observation?.observedAt || "");
 
-/** WHAT: Checks whether the park's handoff reached the pane, waits, or was lost. WHY: Keeps a pane that was never told to stop from a resume. */
+/**
+ * WHAT: Checks whether the park's handoff reached the pane, still waits in its queue, or was lost.
+ * WHY: Keeps a pane that was never told to stop from a resume.
+ */
 function parkNotice(park, jobs, now) {
   const parkedAt = Date.parse(park.parkedAt);
   const job = jobs.filter((candidate) => candidate.source === "self-compact"
@@ -27,7 +30,8 @@ function parkNotice(park, jobs, now) {
   if (TERMINAL_DELIVERY_STATES.has(job.status)) {
     return { state: "lost", reason: `its park notice ended ${job.status}: ${job.lastReason || "no reason given"}` };
   }
-  return { state: "waiting", reason: "its park notice waits in the queue" };
+  // The quota floor holds the notice of a pane parked at the floor until its account has room again.
+  return { state: "queued", job };
 }
 
 /** WHAT: Names why a parked pane has moved on by itself, or returns null. WHY: Keeps a resume from overriding a later request. */
@@ -48,8 +52,11 @@ function newTurnSince(park, identityFor) {
  */
 export async function resumeParkedPanes({
   store, queue, activeReceipt, readQuota,
-  identityFor = latestPaneSessionIdentity, now = Date.now, resetGraceMs = 15_000, log = () => {},
+  identityFor = latestPaneSessionIdentity, floorPercent = QUOTA_PARK_POLICY.leftPercent, now = Date.now, resetGraceMs = 15_000,
+  log = () => {},
 }) {
+  // Room means more than the floor left: the same number the park and the delivery floor use.
+  const policy = { ...QUOTA_PARK_POLICY, leftPercent: floorPercent };
   const results = [];
   for (const park of store.list()) {
     if (park.state !== "parked") continue;
@@ -69,20 +76,29 @@ export async function resumeParkedPanes({
     const waiting = (reason) => ({ agentName, pane, action: "wait", reason });
     // A pane its account stopped at the banner belongs to limit recovery, which restarts it in its session.
     if (activeReceipt(agentName, pane)) return waiting("limit recovery owns its stop");
+    let unsentNotice = null;
     if (!park.noticeJobId) {
       const notice = parkNotice(park, queue.list(agentName, pane), now());
       if (notice.state === "lost") return settle(park, { state: "dropped", reason: notice.reason }, "drop");
       if (notice.state === "waiting") return waiting(notice.reason);
-      const noted = store.update(park, { noticeJobId: notice.job.id });
-      if (noted?.parkedAt !== park.parkedAt) return waiting("a newer park replaced this one");
-      park = noted;
+      if (notice.state === "queued") unsentNotice = notice.job;
+      else {
+        const noted = store.update(park, { noticeJobId: notice.job.id });
+        if (noted?.parkedAt !== park.parkedAt) return waiting("a newer park replaced this one");
+        park = noted;
+      }
     }
     const newTurn = newTurnSince(park, identityFor);
     const quota = newTurn ? null : await readQuota({ agentName, pane, notBefore: Date.parse(park.parkedAt) });
     const decision = parkResumeDecision({ park, windows: quota?.ok ? accountWindows(quota) : null,
-      observedAt: readingTime(quota), newTurn, now: now(), resetGraceMs });
-    if (decision.action === "wait") return waiting(decision.reason);
+      observedAt: readingTime(quota), newTurn, now: now(), resetGraceMs }, policy);
+    if (decision.action === "wait") return waiting(unsentNotice ? `${decision.reason}; its park notice waits in the queue` : decision.reason);
     if (decision.action === "drop") return settle(park, { state: "dropped", reason: decision.reason }, "drop");
+    // Its stale "stops you until" notice never follows the resume: the broker ends it before any paste.
+    if (unsentNotice) {
+      queue.requestCancellation(unsentNotice.id, { requestedBy: "quota-recovery",
+        reason: "its account has room again; the same-session recovery prompt replaces the park notice" });
+    }
     const idempotencyKey = `quota-park-resume:${agentName}:${pane}:${park.parkedAt}`;
     const job = queue.enqueue({
       agentName, pane, text: quotaRecoveryContinuation(), source: "quota-recovery", idempotencyKey,

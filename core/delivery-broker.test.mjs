@@ -2875,3 +2875,72 @@ feature("a cancelled delivery never leaves its own text in a composer", () => {
     cleanup,
   });
 });
+
+// lsrc:0 2026-10-19: amux had no quota floor. An account with 3 % of its week left still got new automatic work,
+// so its panes ran it to the limit with nothing left to stop cleanly, compact and hand over.
+feature("the quota floor holds new automatic work on an account near its weekly limit", () => {
+  const RESETS = "2026-10-20T04:00:00.000Z";
+  function floorWorld({ weekUsed = 97, freshWeekUsed = weekUsed, job = {} } = {}) {
+    const rootDir = tempRoot();
+    let clock = Date.parse("2026-10-19T19:55:00Z");
+    const queue = createDeliveryQueue({ rootDir, now: () => clock });
+    const agent = acceptingAgent();
+    agent.paneProcessState = async () => ({ running: true, shell: false, dead: false, command: "claude" });
+    const reading = { used: weekUsed, freshUsed: freshWeekUsed };
+    // The bridge's reader: the cached snapshot, or with `fresh` the account the pane runs on now.
+    const quotaFloor = { percent: 3, windowsFor: async (_paneKey, { fresh = false } = {}) => ({
+      account: { name: fresh && reading.freshUsed !== reading.used ? "Claude A" : "Claude S" },
+      windows: [{ kind: "week", usedPercent: fresh ? reading.freshUsed : reading.used, resetsAt: RESETS }] }) };
+    const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {}, quotaFloor });
+    const queued = queue.enqueue({ agentName: "claw", pane: 1, text: "[from claw:0] Build the Kit view.", source: "cli", ...job });
+    return { rootDir, queue, agent, broker, reading, job: queued, current: () => queue.read("claw", 1, queued.id),
+      advance: (ms) => { clock += ms; }, cleanup: () => rmSync(rootDir, { recursive: true, force: true }) };
+  }
+
+  component("an automatic prompt to a pane whose account has 3 % of its week left waits, untyped", {
+    given: ["claw:0 sends claw:1 a brief while Claude S reads 97 % used", () => floorWorld()],
+    when: ["the broker serves claw:1", (w) => w.broker.kickTarget("claw", 1)],
+    then: ["nothing is typed and the brief waits with the floor as its reason", (_, w) => {
+      try {
+        expect(w.agent.sends).toEqual([]);
+        expect(w.current()).toMatchObject({ status: "pending", costHold: true });
+        expect(w.current().lastReason).toMatch(/quota-floor: Claude S has 3 % of its week left \(floor 3 %\) until 2026-10-20T04:00/u);
+      } finally { w.cleanup(); }
+    }],
+  });
+
+  component("the person's own message still reaches the pane at the floor", {
+    given: ["a Discord message from the owner to claw:1 at 97 % used", () => floorWorld({
+      job: { text: "Hur går det med Kit?", source: "discord" } })],
+    when: ["the broker serves claw:1", (w) => w.broker.kickTarget("claw", 1)],
+    then: ["it is typed", (_, w) => {
+      try { expect(w.agent.sends.map((send) => send.text)).toEqual(["Hur går det med Kit?"]); } finally { w.cleanup(); }
+    }],
+  });
+
+  component("the floor lifts by itself once the reading shows room", {
+    given: ["the brief held at 97 % used", async () => {
+      const w = floorWorld();
+      await w.broker.kickTarget("claw", 1);
+      return w;
+    }],
+    when: ["a free reset makes Claude S read 0 % and the brief's retry comes", async (w) => {
+      w.reading.used = 0;
+      w.reading.freshUsed = 0;
+      w.advance(30 * 60_000);
+      await w.broker.kickTarget("claw", 1);
+    }],
+    then: ["the brief is typed with no human step", (_, w) => {
+      try { expect(w.agent.sends.map((send) => send.text)).toEqual(["[from claw:0] Build the Kit view."]); } finally { w.cleanup(); }
+    }],
+  });
+
+  component("a pane quota recovery moved to an account with room keeps working", {
+    given: ["the cached reading still lists claw:1 on Claude S at 97 %, but it now runs on Claude A at 40 %",
+      () => floorWorld({ weekUsed: 97, freshWeekUsed: 40 })],
+    when: ["the broker serves claw:1", (w) => w.broker.kickTarget("claw", 1)],
+    then: ["the brief is typed", (_, w) => {
+      try { expect(w.agent.sends.map((send) => send.text)).toEqual(["[from claw:0] Build the Kit view."]); } finally { w.cleanup(); }
+    }],
+  });
+});

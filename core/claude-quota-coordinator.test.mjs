@@ -427,7 +427,7 @@ function memoryParkStore() {
 }
 
 /** claw:1 parked at 19:53Z on Claude S; the park notice reached it and it ended its turn. */
-function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z" } = {}) {
+function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z", noticeHeld = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-park-resume-"));
   let clock = Date.parse("2026-10-19T19:53:00Z");
   const configPath = join(root, "agents.yaml");
@@ -445,9 +445,12 @@ function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z" } = {}) {
   clock += 60_000;
   const noticeText = quotaParkContinuation({ window: "week", resetAt: PARK_RESET_AT });
   const notice = queue.enqueue({ agentName: "claw", pane: 1, source: "self-compact", text: noticeText });
-  queue.update(notice, { status: "acknowledged", acknowledgedAt: clock });
-  appendFileSync(session, `${userLine(noticeText)}${JSON.stringify({ type: "assistant", message: { role: "assistant",
-    content: [{ type: "text", text: "Parked until the reset; stopping here." }] } })}\n`);
+  // At the quota floor the notice is held in the queue; otherwise it reached the pane, which ended its turn.
+  if (!noticeHeld) {
+    queue.update(notice, { status: "acknowledged", acknowledgedAt: clock });
+    appendFileSync(session, `${userLine(noticeText)}${JSON.stringify({ type: "assistant", message: { role: "assistant",
+      content: [{ type: "text", text: "Parked until the reset; stopping here." }] } })}\n`);
+  }
   clock = Date.parse(at);
   const reads = [];
   const coordinator = createClaudeQuotaCoordinator({
@@ -457,7 +460,7 @@ function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z" } = {}) {
     readQuota: async (request) => { reads.push(request); return readings.shift() ?? { ok: false, error: "no reading yet" }; },
   });
   const prompts = () => queue.list("claw", 1).filter((job) => job.source === "quota-recovery");
-  return { park, store, queue, session, coordinator, reads, prompts, advance: (ms) => { clock += ms; },
+  return { park, store, queue, session, coordinator, reads, prompts, notice, advance: (ms) => { clock += ms; },
     cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -472,6 +475,19 @@ feature("a pane the quota park stopped resumes when its account has room again",
         expect(ctx.prompts()).toEqual([expect.objectContaining({ status: "pending", text: quotaRecoveryContinuation() })]);
         expect(ctx.queue.list("claw", 1).filter((job) => job.status === "pending")[0].orderKey).toMatch(/^0{16}:/u);
         expect(ctx.store.read("claw", 1)).toMatchObject({ state: "resumed", reason: "Claude S has 100 % of its week window left" });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a park notice the floor still holds is replaced by the recovery prompt when room returns", {
+    given: ["claw:1 parked at the floor, its notice held in the queue, and Claude S reads room",
+      () => parkedClaw({ noticeHeld: true, readings: [claudeS(0, "2026-10-19T20:26:28.265Z")] })],
+    when: ["quota recovery ticks", (ctx) => ctx.coordinator.tick()],
+    then: ["the stale notice is cancelled and the recovery prompt is queued", (_, ctx) => {
+      try {
+        expect(ctx.queue.read("claw", 1, ctx.notice.id)).toMatchObject({ cancelRequestStatus: "requested", cancelRequestedBy: "quota-recovery" });
+        expect(ctx.prompts()).toEqual([expect.objectContaining({ status: "pending", text: quotaRecoveryContinuation() })]);
+        expect(ctx.store.read("claw", 1)).toMatchObject({ state: "resumed" });
       } finally { ctx.cleanup(); }
     }],
   });

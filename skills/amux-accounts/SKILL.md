@@ -39,6 +39,10 @@ one pane to the logged-in Claude account with the most weekly room below
 `AMUX_QUOTA_RESERVE_PERCENT`, in its exact session; its parked messages follow.
 A session window never moves a pane. `AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false`
 disables it. Other rotations still require his instruction.
+At `AMUX_QUOTA_FLOOR_PERCENT` left on the week (default 3 %, 0 is off) amux
+starts no new automatic delivery to panes on that account and the quota park
+compacts them at their turn end; the owner's own message still goes through.
+A reading with room (a reset or a free reset) lifts it and resumes parked panes.
 With `AMUX_IDLE_CAPACITY_TARGET=agent:pane` the bridge tells that pane once per
 episode when a pane has been stopped or parked for 15 minutes while an account
 of its engine has room. It never wakes or moves anything itself.

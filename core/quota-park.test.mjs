@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { parkResumeDecision, quotaParkDecision } from "./quota-park.mjs";
+import { parkResumeDecision, quotaFloorHold, quotaFloorPercent, quotaParkDecision } from "./quota-park.mjs";
 
 const NOW = Date.parse("2026-10-19T09:30:00Z");
 const week = (usedPercent, resetsAt = "2026-10-25T18:08:00Z") => ({ kind: "week", usedPercent, resetsAt });
@@ -32,5 +32,36 @@ feature("when a parked pane resumes", () => {
     ]],
     then: ["resume, wait, wait, drop", decisions => expect(decisions.map(decision => decision.action))
       .toEqual(["resume", "wait", "wait", "drop"])],
+  });
+});
+
+// lsrc:0 2026-10-19: a week is used until about 3 % is left; parking at 4 % stopped panes too early.
+feature("the quota floor", () => {
+  const reset = "2026-10-20T04:00:00Z";
+  unit("the park waits for the floor: 4 % left keeps working, 3 % parks", {
+    when: ["Claude S reads 96 % and 97 % with the reset 18 h away", () => [96, 97].map((used) =>
+      quotaParkDecision({ engine: "claude", windows: [week(used, reset)], now: NOW }).park)],
+    then: ["no park, then a park", parks => expect(parks).toEqual([false, true])],
+  });
+  unit("only a live week at or under the floor holds work; 0 turns the floor off", {
+    when: ["four readings", () => [
+      quotaFloorHold({ windows: [week(97, reset)], now: NOW }),
+      quotaFloorHold({ windows: [week(96, reset)], now: NOW }),
+      quotaFloorHold({ windows: [week(99, "2026-10-19T09:00:00Z")], now: NOW }),
+      quotaFloorHold({ windows: [week(99, reset)], floorPercent: 0, now: NOW }),
+    ]],
+    then: ["held at 3 % left, open at 4 %, open after the reset, open when off", holds => expect(holds)
+      .toEqual([{ leftPercent: 3, resetsAt: reset }, null, null, null])],
+  });
+  unit("the setting is a percent left on the week, 3 by default; a bad value is reported", {
+    when: ["five environments", () => {
+      const warnings = [];
+      const read = (value) => quotaFloorPercent(value === undefined ? {} : { AMUX_QUOTA_FLOOR_PERCENT: value }, (line) => warnings.push(line));
+      return { values: [read(undefined), read("2"), read("0"), read("abc"), read("150")], warnings };
+    }],
+    then: ["3, 2, 0, then the default twice with a warning each", ({ values, warnings }) => {
+      expect(values).toEqual([3, 2, 0, 3, 3]);
+      expect(warnings).toHaveLength(2);
+    }],
   });
 });

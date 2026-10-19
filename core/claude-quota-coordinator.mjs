@@ -73,6 +73,7 @@ export function createClaudeQuotaCoordinator({
   // A pane the quota park stopped has no limit receipt; its park record says when its account has room again.
   parkStore = null,
   identityFor = undefined,
+  floorPercent = undefined,
   switchAccounts = process.env.AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED !== "false",
   now = () => Date.now(),
   resetGraceMs = 15_000,
@@ -332,7 +333,7 @@ export function createClaudeQuotaCoordinator({
       results.push({ ...target, readiness, ...(spare ? { switchedTo: spare.profile.key } : {}), outcome });
     }
     if (parkStore) {
-      const parks = await resumeParkedPanes({ store: parkStore, queue, readQuota, identityFor, now, resetGraceMs, log,
+      const parks = await resumeParkedPanes({ store: parkStore, queue, readQuota, identityFor, floorPercent, now, resetGraceMs, log,
         activeReceipt: (agentName, pane) => lifecycle.activeReceipt(agentName, pane) });
       for (const park of parks) results.push({ agentName: park.agentName, pane: park.pane, park });
     }
