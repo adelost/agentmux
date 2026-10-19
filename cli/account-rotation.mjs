@@ -22,12 +22,16 @@ import {
 } from "../core/runtime-account-profiles.mjs";
 import { readClaudeQuotaBudgeted } from "../core/claude-quota-budget.mjs";
 import { readClaudeProfileIdentity } from "../core/claude-account-quota.mjs";
+import { isQuotaParkedJob } from "../core/claude-quota-coordinator.mjs";
+import { activeClaudeLimitForTarget } from "../core/claude-quota-target.mjs";
 import { assertRotationContinuity, readRotationContinuity } from "../core/rotation-continuity.mjs";
 import { accountSwitchPlan } from "../policies/account-switch-cost.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
 import { compactBeforeSwitch, observeSwitchContext } from "./account-switch-compact.mjs";
 
 const paneKey = (agentName, pane) => `${agentName}:${pane}`;
+// Modes whose switch is only a new selection: an ordinary wake or quota recovery starts the process.
+const SELECT_ONLY = new Set(["dormant", "quota-stopped"]);
 
 function configuredClaudePanes(agents) {
   return agents.flatMap((agent) => (agent.panes || []).flatMap((definition, pane) =>
@@ -36,13 +40,20 @@ function configuredClaudePanes(agents) {
       : []));
 }
 
-function liveDeliveryCount(queue, agentName, pane) {
+// A job parked by the pane's own limit waits for its exact-session restart; it is not live delivery
+// (2026-10-18 22:33Z: parked messages blocked skyvw, skybar and sandman from Claude S for 5.8 h).
+function liveDeliveryCount(queue, agentName, pane, { quotaStopped = false } = {}) {
   try {
     return queue.list(agentName, pane)
-      .filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status)).length;
+      .filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status) && !(quotaStopped && isQuotaParkedJob(job))).length;
   } catch {
     return NaN;
   }
+}
+
+function hasLimitReceipt(deps, agentName, pane) {
+  try { return Boolean(deps.limitReceipt(agentName, pane)); }
+  catch { return false; }
 }
 
 async function observePane(ctx, entry, catalog, target, deps) {
@@ -65,7 +76,8 @@ async function observePane(ctx, entry, catalog, target, deps) {
     ])
     : [null, null];
   const identity = running || pending ? deps.latestIdentity(paneDir) : null;
-  const liveDeliveryJobs = liveDeliveryCount(ctx.deliveryQueue, agentName, pane);
+  const quotaStopped = hasLimitReceipt(deps, agentName, pane);
+  const liveDeliveryJobs = liveDeliveryCount(ctx.deliveryQueue, agentName, pane, { quotaStopped });
   let continuity = null, continuityError = null;
   if (identity) {
     try { continuity = deps.readContinuity(identity); }
@@ -77,6 +89,7 @@ async function observePane(ctx, entry, catalog, target, deps) {
     transportState: transport?.state || null,
     liveDeliveryJobs,
     sessionId: identity?.sessionId || null,
+    quotaStopped,
   });
   if (pending) {
     if (pending.provider !== "claude" || pending.targetProfileId !== target.id) {
@@ -94,7 +107,7 @@ async function observePane(ctx, entry, catalog, target, deps) {
       verdict = { allow: false, mode: "blocked", reason: "pending-process-ambiguous" };
     }
   }
-  if (verdict.allow && verdict.mode !== "dormant" && !continuity) {
+  if (verdict.allow && !SELECT_ONLY.has(verdict.mode) && !continuity) {
     verdict = { allow: false, mode: "blocked", reason: continuityError || "rotation-session-unproven" };
   }
   return {
@@ -136,7 +149,7 @@ function paneChangeReason(before, after, deps) {
       || after.pending?.targetProfileId !== before.pending?.targetProfileId) {
     return "rotation-transition-changed";
   }
-  if (before.mode === "dormant" || before.mode === "keep") return null;
+  if (SELECT_ONLY.has(before.mode) || before.mode === "keep") return null;
   try { deps.assertContinuity(before.continuity, after.identity); }
   catch (error) { return error.message; }
   return null;
@@ -155,7 +168,7 @@ const planReason = ({ reason, tokens, idleMs }) => [reason,
   .filter(Boolean).join(" ");
 
 // Dormant and already-selected rows keep the wording they always had.
-const DRY_STATUS = { SELECT: (pane) => `would-${pane.mode}`,
+const DRY_STATUS = { SELECT: (pane) => (pane.mode === "quota-stopped" ? "would-select-for-quota-recovery" : `would-${pane.mode}`),
   RESTART: (pane) => `would-${pane.mode}`, COMPACT_THEN_RESTART: () => "would-compact-then-restart" };
 
 const keepReason = (pane, target) => pane.currentProfile?.id === target.id ? pane.reason : "same-account";
@@ -223,9 +236,10 @@ async function switchPanes(ctx, observed, target, deps, rows, prepareOnce) {
       rows.push({ ...pane, status: "already-selected", reason: pane.currentProfile?.id === target.id ? null : "same-account" });
       continue;
     }
-    if (pane.mode === "dormant") {
+    if (SELECT_ONLY.has(pane.mode)) {
       setRuntimeProfile(ctx.state, pane.agentName, pane.pane, "claude", target.id);
-      rows.push({ ...pane, status: "selected-for-next-wake", reason: null });
+      rows.push({ ...pane, status: pane.mode === "dormant" ? "selected-for-next-wake" : "selected-for-quota-recovery",
+        reason: null });
       continue;
     }
     rows.push(await restartOnTarget(ctx, pane, target, deps));
@@ -343,6 +357,8 @@ export async function rotateClaudeFleet(ctx, requested, {
     observeContext: dependencies.observeContext || ((context, pane) => observeSwitchContext(context, pane)),
     compactPane: dependencies.compactPane || ((context, compactTarget) => compactBeforeSwitch(context, compactTarget)),
     identityOf: dependencies.identityOf || readClaudeProfileIdentity,
+    limitReceipt: dependencies.limitReceipt || ((agentName, pane) => (ctx.configPath
+      ? activeClaudeLimitForTarget(agentName, pane, { configPath: ctx.configPath }) : null)),
     output: dependencies.output || console.log,
     setExitCode: dependencies.setExitCode || ((code) => { process.exitCode = code; }),
   };

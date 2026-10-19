@@ -70,6 +70,7 @@ function fixture({ busy = false, restart = async () => ({ ok: true }) } = {}) {
       compacted: false, target: { agent: { name: "lsrc" }, pane: { index: 0 } } })),
     compactPane: vi.fn(async () => ({ ok: true, status: "within-budget" })),
     latestIdentity: () => ({ sessionId, cwd, path }),
+    limitReceipt: () => null,
     output: (line) => output.push(line),
     setExitCode: () => {},
   };
@@ -131,6 +132,54 @@ feature("Claude fleet account rotation", () => {
       });
       expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:0": "2" });
       expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+    }],
+  });
+
+  // 2026-10-18 22:33Z: `amux accounts rotate claude:attrois` left skyvw on the spent
+  // Claude W, because the messages parked by its own limit counted as live delivery.
+  unit("a pane stopped at its limit moves with its parked messages instead of blocking its project", {
+    given: ["skyvw:0 at its weekly limit with a parked handoff and its limit menu open, skyvw:1 asleep", () => {
+      const fx = fixture();
+      fx.deps.agents = [{ name: "skyvw", dir: "/work/skyvw", panes: [
+        { cmd: "claude --continue", accountProfile: 1 },
+        { cmd: "claude --continue", accountProfile: 1 },
+      ] }];
+      const parked = { id: "handoff", status: "pending", nextAttemptAt: Number.MAX_SAFE_INTEGER,
+        metadata: { quotaLimitEventId: "limit-1", quotaSessionId: "11111111-1111-4111-8111-111111111111" } };
+      fx.ctx.deliveryQueue.list = (_name, pane) => (pane === 0 ? [parked] : []);
+      fx.deps.limitReceipt = (_name, pane) => (pane === 0 ? { sessionId: parked.metadata.quotaSessionId, limitKind: "weekly" } : null);
+      fx.ctx.agent.promptTransportState = async (_name, pane) => ({ state: pane === 0 ? "limit-menu" : "empty-idle", busy: false });
+      fx.ctx.agent.paneProcessState = async (_name, pane) => pane === 0
+        ? { command: "claude", running: true, shell: false, dead: false }
+        : { command: "bash", running: false, shell: true, dead: false };
+      fx.ctx.agent.restartClaudeAccount = vi.fn();
+      return fx;
+    }],
+    when: ["rotating to the account with room", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["both panes select it; quota recovery, not rotation, restarts the stopped one", (result, fx) => {
+      expect(result.status).toBe("RECOVERED");
+      expect(result.rows.map((row) => [row.key, row.status])).toEqual([
+        ["skyvw:0", "selected-for-quota-recovery"],
+        ["skyvw:1", "selected-for-next-wake"],
+      ]);
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "skyvw:0": "2", "skyvw:1": "2" });
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+      expect(fx.deps.prepare).toHaveBeenCalledTimes(1);
+    }],
+  });
+
+  unit("a live job beside the limit still blocks the pane", {
+    given: ["a stopped pane with one job already submitted", () => {
+      const fx = fixture();
+      fx.ctx.deliveryQueue.list = (_name, pane) => (pane === 0 ? [{ status: "submitted" }] : []);
+      fx.deps.limitReceipt = (_name, pane) => (pane === 0 ? { sessionId: "s", limitKind: "weekly" } : null);
+      return fx;
+    }],
+    when: ["preflighting", fx => rotateClaudeFleet(fx.ctx, "2", { dry: true }, fx.deps)],
+    then: ["the submitted fence keeps its pane and project on the source", (result) => {
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({
+        status: "blocked", reason: "live-or-unknown-delivery",
+      });
     }],
   });
 

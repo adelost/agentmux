@@ -9,10 +9,14 @@ export function classifyClaudeRotationPane({
   transportState,
   liveDeliveryJobs,
   sessionId,
+  quotaStopped = false,
 } = {}) {
   if (Number(liveDeliveryJobs) !== 0) {
     return { allow: false, mode: "blocked", reason: "live-or-unknown-delivery" };
   }
+  // A pane stopped at its limit cannot answer, so its composer and turn prove
+  // nothing; quota recovery owns its exact-session restart on the new account.
+  if (quotaStopped) return { allow: true, mode: "quota-stopped", reason: "limit-receipt" };
   if (!processState || processState.dead || !processState.command) {
     return { allow: true, mode: "dormant", reason: "pane-offline" };
   }
@@ -40,6 +44,7 @@ export function accountRotationOutcome(rows = []) {
   const rolledBack = rows.filter((row) => row.status === "rolled-back");
   const available = rows.some((row) => row.status === "switched"
     || row.status === "selected-for-next-wake"
+    || row.status === "selected-for-quota-recovery"
     || row.status === "already-selected"
     || row.status.startsWith("would-"));
   if (failed.length || rolledBack.length) {

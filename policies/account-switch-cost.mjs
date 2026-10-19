@@ -13,6 +13,8 @@ import { CONTEXT_COST_POLICY } from "./context-cost.mjs";
 // selection for its next ordinary wake. A source that can no longer answer
 // (usage limit, access disabled) cannot compact; restarting there is the only
 // way back to work, and the plan says so instead of blocking the pane forever.
+// A pane with a persisted limit receipt is planned like a dormant one: the
+// switch only selects the target, and quota recovery resumes its exact session.
 
 /** WHAT: Names the decision table for one pane's account switch. WHY: Keeps every switch path inspectable before any process or model change. */
 export const accountSwitchCostRules = defineDecisionTable({
@@ -62,7 +64,8 @@ const SOURCE_LIMITS = new Set(["provider-usage-limited", "claude-subscription-ac
  */
 export function accountSwitchPlan({ mode, alreadySelected = false, facts = null, compactRefusal = null, compacted = false },
   policy = CONTEXT_COST_POLICY) {
-  const process = mode === "dormant" ? "DORMANT" : mode === "recovering" ? "RECOVERING" : "RUNNING";
+  const process = mode === "dormant" || mode === "quota-stopped" ? "DORMANT"
+    : mode === "recovering" ? "RECOVERING" : "RUNNING";
   const tokens = Number.isFinite(facts?.tokens) ? facts.tokens : null;
   const idleMs = Number.isFinite(facts?.idleMs) ? facts.idleMs : null;
   // A verified compact receipt proves the context was summarized even when its size is not measured yet.
