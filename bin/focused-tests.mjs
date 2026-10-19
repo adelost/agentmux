@@ -42,6 +42,7 @@ const TEST_ALIASES = {
   "cli/config.mjs": ["cli.test/config.test.mjs"],
   "cli/tmux.mjs": ["cli.test/layout-contract.test.mjs"],
   "cli/dream.mjs": ["core/dream-eligibility.test.mjs", "test/commands-dream.test.mjs"],
+  "core/file-prefix.mjs": ["core/native-session-identity.test.mjs", "core/codex-session-transfer.test.mjs"],
   "cli/native-runtime-service.mjs": ["test/native-runtime-service.test.mjs"],
   "cli/runtime.mjs": ["cli.test/commands.test.mjs", "test/native-runtime-service.test.mjs"],
   "core/hints-tool-guide.mjs": ["cli/hints-sync.test.mjs"],
