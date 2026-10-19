@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { component, expect, feature } from "bdd-vitest";
 import { keepClaudeDefaultModel } from "./claude-default-model.mjs";
+import { sendSlashVerified } from "./delivery.mjs";
 import { paneModelSelection } from "./pane-model-state.mjs";
 import { runLockedClaudeModelChange } from "./claude-model-command.mjs";
 
@@ -13,7 +14,7 @@ const FRESH_FOOTER = "❯ \n────\n  ⬆ /gsd-update │ Opus 5.5 │ 2\n
 const SETTINGS = `${JSON.stringify({ model: "opus[1m]", theme: "dark" }, null, 2)}\n`;
 
 function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5", running = true,
-  screen = null, compactResult = null, footerFor = {} } = {}) {
+  screen = null, compactResult = null, footerFor = {}, recordsAfterMs = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-claude-model-change-"));
   const path = join(root, "session.jsonl");
   writeFileSync(path, "");
@@ -44,19 +45,36 @@ function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5
   };
   // Claude Code resolves an alias itself, shows the model in its footer and
   // saves every interactive pick as the default for new sessions (2.1.303).
-  const sendSlash = async (_agent, _name, _pane, command) => {
-    calls.push(command);
+  const pick = (command) => {
     const picked = command.replace("/model ", "");
     model = footerFor[picked] ?? picked;
     const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
     writeFileSync(settingsPath, `${JSON.stringify({ ...settings, model: picked }, null, 2)}\n`);
+  };
+  const sendSlash = async (_agent, _name, _pane, command) => {
+    calls.push(command);
+    pick(command);
     return { delivered: true, via: "command-receipt" };
   };
+  // It records the command in the session only after the pick is saved.
+  let typed = null, waited = 0;
+  const recordsLate = {
+    dismissBlockingPrompt: async () => {},
+    captureSlashReceiptCursor: async () => ({ positions: { [path]: 0 } }),
+    sendOnly: async (_name, command) => { calls.push(command); typed = command; waited = 0; },
+    waitForSlashReceipt: async (_name, _pane, _command, timeoutMs) => {
+      waited += timeoutMs;
+      if (waited < recordsAfterMs) return false;
+      if (typed) { pick(typed); typed = null; }
+      return true;
+    },
+  };
+  if (recordsAfterMs != null) Object.assign(agent, recordsLate);
   const keepDefault = work => keepClaudeDefaultModel(work, { files: [settingsPath],
     lockPath: join(root, "default.lock"), wait: async () => {}, lateWriteMs: 0 });
   const change = targetModel => runLockedClaudeModelChange({
     agent, state, queue, name: "claw", pane: 0, paneDir: root, targetModel,
-    identityFor, compact, sendSlash, wait: async () => {}, keepDefault,
+    identityFor, compact, sendSlash: recordsAfterMs == null ? sendSlash : sendSlashVerified, wait: async () => {}, keepDefault,
   });
   return { change, calls, state, settings: () => readFileSync(settingsPath, "utf-8"),
     cleanup: () => rmSync(root, { recursive: true, force: true }) };
@@ -214,6 +232,24 @@ feature("a pane switch leaves the default for new sessions alone", () => {
     then: ["the pane runs Sonnet and the settings file is byte for byte the one before", (result, fx) => {
       try {
         expect(result).toMatchObject({ ok: true, model: "claude-sonnet-5-5" });
+        expect(fx.settings()).toBe(SETTINGS);
+      } finally { fx.cleanup(); }
+    }],
+  });
+});
+
+// skyvw:2 on 2026-10-19 at 17:40Z: Claude Code switched the pane and saved Sonnet as the
+// default, but recorded /model about 3.3 s after it was typed. amux had looked once after
+// 0.2 s, answered model-command-unverified and left the choice and the default unsaved.
+feature("a /model Claude Code records late is still the switch", () => {
+  component("a switch recorded 3.3 s after it was typed is saved and keeps the default", {
+    given: ["an idle Opus 5.5 pane whose Claude Code records /model 3.3 s after it was typed", () => fixture({
+      liveModel: "claude-opus-5-5", footerFor: { "claude-sonnet-5-5": "Sonnet 5.5" }, recordsAfterMs: 3_300 })],
+    when: ["running amux model with claude-sonnet-5-5", fx => fx.change("claude-sonnet-5-5")],
+    then: ["the switch is verified and saved, and the shared default is the one before", (result, fx) => {
+      try {
+        expect(result).toMatchObject({ ok: true, model: "claude-sonnet-5-5" });
+        expect(paneModelSelection(fx.state, "claw", 0)?.model).toBe("claude-sonnet-5-5");
         expect(fx.settings()).toBe(SETTINGS);
       } finally { fx.cleanup(); }
     }],

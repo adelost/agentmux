@@ -59,14 +59,17 @@ export function setPaneModelSelection(state, name, pane, model, effort = null) {
 // amux model marks the switch it is making before it sends /model, so the
 // model-watch never reads the pane's own switch as a silent downgrade. On
 // 2026-10-19 claw:2 was stopped and parked by its own switch and lost 33 min.
+// A switch amux could not verify stays marked: Claude Code may still run it,
+// as it did on skyvw:2 a moment after amux gave up.
 const PANE_MODEL_SWITCH_KEY = "pane_model_switch_v1";
-// A switch that outlives this died with its process; a real downgrade must alarm again.
+// A mark older than this belongs to a switch that died with its process or never ran;
+// a real downgrade must alarm again.
 const PANE_MODEL_SWITCH_MS = 2 * 60_000;
 
 /** WHAT: Stores the model switch amux is making on one pane. WHY: Keeps the model-watch from alarming on a switch made on purpose. */
-export function beginPaneModelSwitch(state, name, pane, { from, to }, now = Date.now()) {
+export function beginPaneModelSwitch(state, name, pane, { from, to, keep = null }, now = Date.now()) {
   const map = { ...(state.get(PANE_MODEL_SWITCH_KEY, {}) || {}) };
-  map[paneModelKey(name, pane)] = { from, to, at: now };
+  map[paneModelKey(name, pane)] = { from, to, keep, at: now };
   state.set(PANE_MODEL_SWITCH_KEY, map);
 }
 
@@ -77,10 +80,21 @@ export function endPaneModelSwitch(state, name, pane) {
   state.set(PANE_MODEL_SWITCH_KEY, map);
 }
 
+const markedSwitch = (state, name, pane, now) => {
+  const change = state?.get?.(PANE_MODEL_SWITCH_KEY, {})?.[paneModelKey(name, pane)];
+  return change && now - change.at < PANE_MODEL_SWITCH_MS ? change : null;
+};
+
 /** WHAT: Checks whether a reading shows the old or new model of a switch in progress. WHY: Keeps either side of the switch from reading as a downgrade. */
 export function isPaneModelSwitchReading(state, name, pane, reading, now = Date.now()) {
-  const change = state?.get?.(PANE_MODEL_SWITCH_KEY, {})?.[paneModelKey(name, pane)];
-  if (!change || !(now - change.at < PANE_MODEL_SWITCH_MS)) return false;
+  const change = markedSwitch(state, name, pane, now);
+  if (!change) return false;
   const running = launchModelId(reading?.model);
   return [change.from, change.to].some((model) => isRequestedClaudeModel(running, model));
+}
+
+/** WHAT: Returns the marked switch a reading shows has landed. WHY: Keeps a switch that lands after amux model gave up from staying half done. */
+export function landedPaneModelSwitch(state, name, pane, reading, now = Date.now()) {
+  const change = markedSwitch(state, name, pane, now);
+  return change && isRequestedClaudeModel(launchModelId(reading?.model), change.to) ? change : null;
 }

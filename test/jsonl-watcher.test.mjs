@@ -1,10 +1,11 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { afterAll, vi } from "vitest";
-import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "fs";
+import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createJsonlWatcher } from "../channels/jsonl-watcher.mjs";
 import { buildClaudeLaunchCommand } from "../core/agent-launch-command.mjs";
+import { keepClaudeDefaultModel } from "../core/claude-default-model.mjs";
 import { runLockedClaudeModelChange } from "../core/claude-model-command.mjs";
 import { readParkState, shouldBlockSend } from "../core/pane-park.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
@@ -1131,8 +1132,12 @@ function builderOnOpus() {
 }
 
 // `amux model testagent -p 0 sonnet` on an idle pane; `duringSwitch` runs after
-// Claude has switched and before amux has saved the choice.
-function amuxModelSonnet(ctx, duringSwitch = async () => {}) {
+// Claude has switched and before amux has saved the choice. `recorded: false` is a
+// /model Claude Code has not run yet when amux stops waiting for it.
+function amuxModelSonnet(ctx, duringSwitch = async () => {}, {
+  recorded = true,
+  keepDefault = async (work) => ({ result: await work(), defaults: { restored: [], failed: [] } }),
+} = {}) {
   let live = "Opus 5.5";
   const sessionId = "11111111-1111-4111-8111-111111111111";
   return runLockedClaudeModelChange({
@@ -1146,8 +1151,11 @@ function amuxModelSonnet(ctx, duringSwitch = async () => {}) {
     queue: { acquireSessionLease: () => ({ release: () => {} }), list: () => [] },
     identityFor: () => ({ sessionId, path: ctx.jsonlPath }),
     compact: async () => ({ ok: false, nothingToCompact: true, sessionId }),
-    sendSlash: async () => { live = "Sonnet 5.5"; await duringSwitch(); return { delivered: true, via: "command-receipt" }; },
-    keepDefault: async (work) => ({ result: await work(), defaults: { restored: [], failed: [] } }),
+    sendSlash: async () => {
+      if (!recorded) return { delivered: false, rescues: 0 };
+      live = "Sonnet 5.5"; await duringSwitch(); return { delivered: true, via: "command-receipt" };
+    },
+    keepDefault,
     wait: async () => {},
   });
 }
@@ -1187,6 +1195,37 @@ feature("watcher: a model chosen with amux model is no downgrade", () => {
         expect(notifyUser).not.toHaveBeenCalled();
         expect(ctx.discord.sends.some((send) => String(send.payload?.content ?? send.payload).includes("Downgrade"))).toBe(false);
         expect(switched).toMatchObject({ ok: true, model: "claude-sonnet-5-5" });
+      } finally {
+        ctx.cleanup();
+      }
+    }],
+  });
+  // skyvw:2 on 2026-10-19: amux model stopped waiting for a /model that Claude Code ran a
+  // moment later. The watcher stopped and parked the pane at 17:42Z, and Sonnet stayed the
+  // default for new sessions until lsrc:0 put opus[1m] back by hand at 17:44Z.
+  unit("a switch amux model could not verify lands without an alarm and puts the default back", {
+    given: ["an Opus 5.5 pane, settings with opus[1m], and amux model sonnet run out before Claude Code ran it", async () => {
+      const ctx = builderOnOpus();
+      const settingsPath = join(ctx.agentRootDir, "..", "settings.json");
+      const settings = { model: "opus[1m]", theme: "dark" };
+      writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+      const keepDefault = (work) => keepClaudeDefaultModel(work, { files: [settingsPath],
+        lockPath: join(ctx.agentRootDir, "..", "default.lock"), wait: async () => {}, lateWriteMs: 0 });
+      const switched = await amuxModelSonnet(ctx, async () => {}, { recorded: false, keepDefault });
+      // Claude Code runs it now: it saves the pick, and its footer shows Sonnet 5.5.
+      writeFileSync(settingsPath, `${JSON.stringify({ ...settings, model: "sonnet" }, null, 2)}\n`);
+      return { ctx, switched, settingsPath, before: `${JSON.stringify(settings, null, 2)}\n` };
+    }],
+    when: ["the watcher mirrors the builder's first finished turn on Sonnet", async (fx) => {
+      await fx.ctx.watcher.checkPane("testagent", 0, fx.ctx.agentRootDir);
+      return fx;
+    }],
+    then: ["no alarm or park, and the settings file is the one before", ({ ctx, switched, settingsPath, before }) => {
+      try {
+        expect(switched).toMatchObject({ ok: false });
+        expect(messagesFlow()).toBe(true);
+        expect(notifyUser).not.toHaveBeenCalled();
+        expect(readFileSync(settingsPath, "utf-8")).toBe(before);
       } finally {
         ctx.cleanup();
       }

@@ -60,6 +60,10 @@ async function restoreDefaults(before, { wait, now, lateWriteMs }) {
   // A pick Claude Code has not finished saving shows up within its own write window.
   const deadline = now() + lateWriteMs;
   while (now() < deadline && !before.some((entry) => defaultState(entry) === "changed")) await wait(POLL_MS);
+  return putBackChanged(before);
+}
+
+function putBackChanged(before) {
   const restored = [], failed = [];
   for (const entry of before) {
     const state = defaultState(entry);
@@ -98,9 +102,22 @@ export async function keepClaudeDefaultModel(work, {
       try { return [{ path, saved: savedDefault(path) }]; }
       catch { return []; } // Claude Code cannot save into a file it cannot parse either.
     });
-    const outcome = await work().then((result) => ({ result }), (error) => ({ error }));
+    // The work gets what to keep, so a switch that lands after this returns can still put it back.
+    const outcome = await work({ files: before, lockPath }).then((result) => ({ result }), (error) => ({ error }));
     const defaults = await restoreDefaults(before, { wait, now, lateWriteMs });
     if (outcome.error) throw outcome.error;
     return { result: outcome.result, defaults };
   } finally { release(); }
+}
+
+/**
+ * WHAT: Saves the kept default back over a /model pick saved after keepClaudeDefaultModel returned.
+ * WHY: Keeps a switch amux could not verify from leaving its pick as the default (skyvw:2, 2026-10-19).
+ */
+export function putBackLandedDefault({ files = [], lockPath = null } = {}) {
+  if (!lockPath) return { restored: [], failed: [] }; // nothing was kept
+  // A switch in progress holds the lock and puts back its own default.
+  const release = tryLockDir(lockPath, { staleMs: LOCK_STALE_MS });
+  if (!release) return { busy: true };
+  try { return putBackChanged(files); } finally { release(); }
 }

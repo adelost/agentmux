@@ -1,14 +1,16 @@
 import { isRequestedClaudeModel, normalizeClaudeModelName, resolveClaudeModel } from "./claude-model.mjs";
-import { keepClaudeDefaultModel } from "./claude-default-model.mjs";
+import { keepClaudeDefaultModel, putBackLandedDefault } from "./claude-default-model.mjs";
 import { readClaudeFooterModel } from "./claude-statusline.mjs";
 import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "./context-maintenance.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
-import { beginPaneModelSwitch, endPaneModelSwitch, paneModelSelection, setPaneModelSelection } from "./pane-model-state.mjs";
+import { beginPaneModelSwitch, endPaneModelSwitch, landedPaneModelSwitch, paneModelSelection, setPaneModelSelection } from "./pane-model-state.mjs";
 import { verifiedClaudeCompact } from "./verified-compact.mjs";
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Claude Code records /model in the session only once it has saved the default: 3.3 s on skyvw:2 (2026-10-19).
+const MODEL_RECEIPT_MS = 15_000;
 const observedModelId = raw => {
   // The footer's "Opus 5.5 (1M context)" is the 1M-context variant of the same model id.
   const normalized = normalizeClaudeModelName(String(raw ?? "").replace(/\s*\(1M context\)\s*$/iu, "[1m]"));
@@ -20,27 +22,40 @@ const observedModelId = raw => {
  * WHY: The model-watch reads an unsaved switch to a cheaper model as a downgrade
  *      and parks the pane (skydive:1 and claw:2, 2026-10-19).
  */
-async function switchVerified({ agent, state, name, pane, from, model, current, sendSlash, wait }) {
-  // A turn the watcher mirrors before the choice is saved shows the new model.
-  beginPaneModelSwitch(state, name, pane, { from, to: model });
-  try {
-    const sent = await sendSlash(agent, name, pane, `/model ${model}`, { suppressReceipt: true,
-      settleMs: 200, maxRescues: 0 });
-    if (!sent.delivered || sent.via !== "command-receipt") {
-      return { ok: false, stage: "switch", reason: "model-command-unverified" };
+async function switchVerified({ agent, state, name, pane, from, model, keep, current, sendSlash, wait }) {
+  // A turn the watcher mirrors before the choice is saved shows the new model, and Claude Code
+  // may still run a /model amux stopped waiting for, so only a verified switch ends the mark.
+  beginPaneModelSwitch(state, name, pane, { from, to: model, keep });
+  const sent = await sendSlash(agent, name, pane, `/model ${model}`, { suppressReceipt: true,
+    settleMs: 200, maxRescues: 0, receiptTimeoutMs: MODEL_RECEIPT_MS });
+  // The footer proves the switch even when its record is missing.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const actual = await current();
+    const running = observedModelId(actual?.model);
+    if (isRequestedClaudeModel(running, model)) {
+      setPaneModelSelection(state, name, pane, running,
+        actual.effort || paneModelSelection(state, name, pane)?.effort || null);
+      endPaneModelSwitch(state, name, pane);
+      return { ok: true, model: running };
     }
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const actual = await current();
-      const running = observedModelId(actual?.model);
-      if (isRequestedClaudeModel(running, model)) {
-        setPaneModelSelection(state, name, pane, running,
-          actual.effort || paneModelSelection(state, name, pane)?.effort || null);
-        return { ok: true, model: running };
-      }
-      if (attempt < 9) await wait(250);
-    }
-    return { ok: false, stage: "verify", reason: "model-status-unverified" };
-  } finally { endPaneModelSwitch(state, name, pane); }
+    if (attempt < 9) await wait(250);
+  }
+  return sent.delivered && sent.via === "command-receipt"
+    ? { ok: false, stage: "verify", reason: "model-status-unverified" }
+    : { ok: false, stage: "switch", reason: "model-command-unverified" };
+}
+
+/**
+ * WHAT: Resolves a marked switch that landed after amux model returned, saving back the default it kept.
+ * WHY: Keeps a switch amux could not verify from staying half done (skyvw:2, 2026-10-19).
+ */
+export function settleLandedClaudeModelSwitch(state, name, pane, reading, { putBack = putBackLandedDefault } = {}) {
+  const change = landedPaneModelSwitch(state, name, pane, reading);
+  if (!change) return null;
+  const defaults = putBack(change.keep || {});
+  // A switch still in progress holds the lock and ends its own mark.
+  if (!defaults.busy) endPaneModelSwitch(state, name, pane);
+  return defaults;
 }
 
 /** WHAT: Routes one idle Claude model change after an exact compact. WHY: Prevents an old conversation from crossing models without a compact receipt. */
@@ -104,8 +119,8 @@ export async function runLockedClaudeModelChange({
       rememberContextCompact(state, name, pane, receipt);
       reusedCompact = false;
     }
-    const kept = await keepDefault(() => switchVerified({ agent, state, name, pane, from: previousModel, model,
-      current, sendSlash, wait }));
+    const kept = await keepDefault((keep) => switchVerified({ agent, state, name, pane, from: previousModel, model,
+      keep, current, sendSlash, wait }));
     if (kept.busy) return { ok: false, stage: "default", reason: "default-model-busy" };
     return { ...kept.result, ...(kept.result.ok ? { reusedCompact } : {}), defaultModel: kept.defaults };
   } finally { lease.release(); }
