@@ -4,11 +4,9 @@
 // His exact words with provenance belong in the decision log (the day file or
 // PRIORITIES.md). Those files are not sends and stay free to hold them.
 
-import {
-  closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync,
-} from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { defaultAskLedgerPath } from "./ask-ledger.mjs";
+import { ledgerFiles, readScanCache, readWholeLinesFrom, writeScanCache } from "./ask-ledger-scan.mjs";
 
 /** WHAT: Names the shortest run of his consecutive words that counts as a quote. WHY: Shorter runs are ordinary phrases. */
 export const QUOTE_MIN_WORDS = 8;
@@ -69,19 +67,6 @@ export function findHumanQuotes(text, messages, { minWords = QUOTE_MIN_WORDS } =
 /** WHAT: Returns the longest quoted run, or null. WHY: Keeps a single-answer caller simple. */
 export const findHumanQuote = (text, messages, options) => findHumanQuotes(text, messages, options)[0] || null;
 
-// The live ledger and the archives renamed beside it: ask-ledger.jsonl, ask-ledger.<when>.<id>.jsonl.
-function ledgerFiles(ledgerPath) {
-  const dir = dirname(ledgerPath), live = basename(ledgerPath), stem = live.replace(/\.jsonl$/u, "");
-  try {
-    return readdirSync(dir).filter((name) => name === live
-      || (name.startsWith(`${stem}.`) && name.endsWith(".jsonl"))).map((name) => {
-      const path = join(dir, name);
-      const stat = statSync(path);
-      return { path, size: stat.size, ino: stat.ino, mtimeMs: stat.mtimeMs };
-    });
-  } catch { return []; }
-}
-
 // Most ledger lines are posts; only his Discord asks are parsed.
 function humanAsksIn(chunk) {
   const messages = [];
@@ -99,32 +84,6 @@ function humanAsksIn(chunk) {
   return messages;
 }
 
-function readFrom(file, offset) {
-  const length = Math.max(0, file.size - offset);
-  const buffer = Buffer.alloc(length);
-  const fd = openSync(file.path, "r");
-  try { readSync(fd, buffer, 0, length, offset); } finally { closeSync(fd); }
-  // Only whole lines advance the offset; a line still being written is read next time.
-  const end = buffer.lastIndexOf(0x0a) + 1;
-  return { text: buffer.subarray(0, end).toString("utf8"), offset: offset + end };
-}
-
-function readCache(path) {
-  try {
-    const cache = JSON.parse(readFileSync(path, "utf8"));
-    return cache?.version === CACHE_VERSION && cache.files ? cache : { version: CACHE_VERSION, files: {} };
-  } catch { return { version: CACHE_VERSION, files: {} }; }
-}
-
-function writeCache(path, cache) {
-  try {
-    mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
-    const temporary = `${path}.${process.pid}.tmp`;
-    writeFileSync(temporary, JSON.stringify(cache), { mode: 0o600 });
-    renameSync(temporary, path);
-  } catch { /* the cache only saves time; the next send reads the ledger again */ }
-}
-
 /**
  * WHAT: Reads his Discord messages of the last two weeks from every ask ledger, through an offset cache.
  * WHY: Keeps a send from parsing hundreds of megabytes; rotated files are read once, the live one incrementally.
@@ -136,19 +95,19 @@ export function readRecentHumanMessages({
   windowMs = QUOTE_WINDOW_MS,
 } = {}) {
   const since = now - windowMs;
-  const cache = readCache(cachePath);
+  const cache = readScanCache(cachePath, CACHE_VERSION);
   const next = { version: CACHE_VERSION, files: {} };
   let changed = false;
   for (const file of ledgerFiles(ledgerPath).filter((candidate) => candidate.mtimeMs >= since)) {
     const prior = cache.files[file.path];
     const reusable = prior && prior.ino === file.ino && prior.offset <= file.size;
-    const read = reusable && prior.offset === file.size ? null : readFrom(file, reusable ? prior.offset : 0);
+    const read = reusable && prior.offset === file.size ? null : readWholeLinesFrom(file, reusable ? prior.offset : 0);
     const messages = [...(reusable ? prior.messages : []), ...(read ? humanAsksIn(read.text) : [])]
       .filter((message) => message.ts >= since);
     next.files[file.path] = { ino: file.ino, offset: read ? read.offset : prior.offset, messages };
     changed ||= !reusable || Boolean(read?.text) || messages.length !== prior.messages.length;
   }
-  if (changed || Object.keys(next.files).length !== Object.keys(cache.files).length) writeCache(cachePath, next);
+  if (changed || Object.keys(next.files).length !== Object.keys(cache.files).length) writeScanCache(cachePath, next);
   return Object.values(next.files).flatMap((entry) => entry.messages).filter((message) => message.ts <= now);
 }
 

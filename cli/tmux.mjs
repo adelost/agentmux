@@ -27,6 +27,7 @@ import { createState } from "../core/state.mjs";
 import { clearComposerAndVerify } from "./composer-clear.mjs";
 import { activeClaudeLimitForTarget, warnQuotaStoppedRecipient } from "../core/claude-quota-target.mjs";
 import { refuseHumanQuote } from "../core/human-quote-guard.mjs";
+import { warnUnfamiliarProject } from "../core/project-history.mjs";
 const exec = promisify(execCb);
 /** WHAT: Builds tmux execution helpers bound to one socket. WHY: Keeps CLI process and pane state on the bridge's shared boundaries. */
 export function createTmuxContext(socket, configPath) {
@@ -355,6 +356,7 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   // Only an agent's send is checked; his own messages reach panes another way.
   const quote = sender ? (ctx.humanQuote || refuseHumanQuote)(text) : null;
   if (quote) { console.error(quote); return { delivered: false, blocked: true, reason: "human-quote" }; }
+  if (sender) (ctx.projectHistory || warnUnfamiliarProject)(text, `${name}:${pane}`);
   const targetChannelId = ctx.configPath
     ? findChannelForPane(ctx.configPath, name, pane)
     : null;

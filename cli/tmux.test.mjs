@@ -1,6 +1,6 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
-import { unlinkSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { sendToPane } from "./tmux.mjs";
@@ -342,6 +342,42 @@ feature("an agent's send that quotes him", () => {
       "Jag tycker att ni ska bestämma åt mig, så får jag rätta till det efteråt.")],
     then: ["it is queued as before", ({ result, enqueued }) => {
       expect(result).toMatchObject({ delivered: true, pending: true });
+      expect(enqueued).toBe(1);
+    }],
+  });
+});
+
+// 2026-10-19: lsrc:0 staffed ai:0-2 on Cutkit and Haunt, where none of them had
+// worked, while other panes had hundreds of replies about both.
+feature("an agent's brief about a project the target never worked in", () => {
+  const briefAi0 = async () => {
+    const home = mkdtempSync(join(tmpdir(), "amux-history-"));
+    for (const repo of ["cutkit", "haunt-lab", "skybar"]) mkdirSync(join(home, "lsrc", repo, ".git"), { recursive: true });
+    const reply = (agent, pane, text) => JSON.stringify({ kind: "reply", agent, pane, text, ts: "2026-10-18T12:00:00Z" });
+    writeFileSync(join(home, "ask-ledger.jsonl"), [...Array(25).fill(reply("skyvw", 1, "Cutkit export is live")),
+      ...Array(21).fill(reply("skydive", 2, "Haunt step 4 is done")), reply("ai", 0, "Skybar menu fixed"), ""].join("\n"));
+    vi.stubEnv("AMUX_ASK_LEDGER_PATH", join(home, "ask-ledger.jsonl"));
+    vi.stubEnv("AMUX_PROJECTS_ROOT", join(home, "lsrc"));
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+    const deliveryQueue = fakeDeliveryQueue("pending");
+    try {
+      await sendToPane({ configPath: null, deliveryQueue, deliveryWaitMs: 0, humanQuote: () => null }, "ai", 0,
+        "[from lsrc:0]\n\nTake the Cutkit export bug, then the Haunt movement plan.", { mirror: false });
+      return { warnings: stderr.mock.calls.map(([line]) => String(line)), enqueued: deliveryQueue.enqueue.mock.calls.length };
+    } finally {
+      stderr.mockRestore();
+      vi.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    }
+  };
+
+  unit("warns the sender who has the history, and the brief still goes", {
+    when: ["lsrc:0 briefs ai:0 on Cutkit and Haunt", briefAi0],
+    then: ["one warning per project names the panes that know it, and the brief is queued", ({ warnings, enqueued }) => {
+      expect(warnings).toEqual([
+        expect.stringMatching(/ai:0 has no conversation history in cutkit\b.*skyvw:1 \(25\)/su),
+        expect.stringMatching(/ai:0 has no conversation history in haunt-lab\b.*skydive:2 \(21\)/su),
+      ]);
       expect(enqueued).toBe(1);
     }],
   });
