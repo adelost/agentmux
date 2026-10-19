@@ -192,6 +192,31 @@ feature("quota polling", () => {
     }],
   });
 
+  component("a restart that throws for one pane still lets the next limited pane recover", {
+    given: ["two limited panes whose first tmux session is gone", () => {
+      const ctx = fixture();
+      writeFileSync(ctx.configPath, ["lsrc:", `  dir: ${join(ctx.cwd, "../..")}`, "  panes:",
+        "    - { name: first, cmd: claude }", "    - { name: second, cmd: claude }", ""].join("\n"));
+      ctx.lifecycle.restart = async (agentName, pane, ...rest) => {
+        ctx.restarts.push([agentName, pane, ...rest]);
+        if (pane === 0) throw new Error("can't find session: lsrc");
+        return { ok: true, sessionId: receipt.sessionId };
+      };
+      return ctx;
+    }],
+    when: ["one poll runs", ({ coordinator }) => coordinator.tick()],
+    then: ["the second pane restarts and the first records why it did not", (results, ctx) => {
+      try {
+        expect(results.map((result) => result.outcome)).toMatchObject([
+          { recovered: false, reason: "can't find session: lsrc" },
+          { recovered: true, restarted: true },
+        ]);
+        expect(ctx.queue.list("lsrc", 0).find((job) => job.source === "quota-recovery"))
+          .toMatchObject({ lastReason: "Claude exact-session restart failed: can't find session: lsrc" });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
   component("a temporary composer guard is retried after fresh quota telemetry", {
     given: ["one limited pane whose composer becomes safe after the first poll", () => {
       const ctx = fixture();

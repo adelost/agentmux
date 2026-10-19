@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { getAgent } from "../cli/config.mjs";
 import { buildClaudeLaunchCommand } from "./agent-launch-command.mjs";
 import { createTmuxAdapter } from "./tmux.mjs";
-import { findBlockingPrompt, hasEmptyClaudeComposer } from "./dismiss.mjs";
+import { findBlockingPrompt, hasEmptyClaudeComposer, isClaudeLimitChoiceMenu } from "./dismiss.mjs";
 import { latestClaudeSessionIdentity, persistedSessionIdentity } from "./native-session-identity.mjs";
 import { runtimeProfileCatalog, runtimeProfileLaunchHome, selectedRuntimeProfile } from "./runtime-account-profiles.mjs";
 import { getContextPercent } from "./context.mjs";
@@ -106,6 +106,18 @@ export function createClaudeQuotaLifecycle({
     return false;
   }
 
+  // Esc closes the menu without choosing: Enter there could confirm "Switch to
+  // usage credits". Returns the screen it closed onto, or "" if it stayed.
+  async function closeLimitChoiceMenu(target) {
+    await tmux.sendKeys(target, "Escape");
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await delay(100);
+      const screen = await tmux.captureScreen(target).catch(() => "");
+      if (!isClaudeLimitChoiceMenu(screen)) return screen;
+    }
+    return "";
+  }
+
   async function waitForComposer(target) {
     for (let attempt = 0; attempt < 120; attempt++) {
       const [command, screen] = await Promise.all([
@@ -149,10 +161,16 @@ export function createClaudeQuotaLifecycle({
     if (expectedProfileKey && profile?.key !== expectedProfileKey) return { ok: false, reason: "quota-profile-changed" };
 
     const target = `${agentName}:.${Number(pane) || 0}`;
-    const [command, screen] = await Promise.all([
+    // After a host restart sessions start on demand; a parked pane has no demand.
+    if (!await tmux.hasSession(agentName)) return { ok: false, reason: "tmux-session-missing" };
+    const [command, shown] = await Promise.all([
       tmux.currentCommand(target).catch(() => ""),
       tmux.captureScreen(target).catch(() => ""),
     ]);
+    // A limited process that stays open shows the limit menu over its composer.
+    const screen = CLAUDE_PROCESS.test(command) && isClaudeLimitChoiceMenu(shown)
+      ? await closeLimitChoiceMenu(target)
+      : shown;
     if (CLAUDE_PROCESS.test(command) && !hasEmptyClaudeComposer(screen)) {
       const blocker = findBlockingPrompt(screen);
       const recentHistory = blocker?.name === "resume"

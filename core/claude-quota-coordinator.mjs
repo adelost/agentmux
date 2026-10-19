@@ -152,6 +152,18 @@ export function createClaudeQuotaCoordinator({
     }
   }
 
+  // A process boundary that throws is a failed restart of this pane only, so
+  // the same poll still reaches every later limited pane.
+  async function restartExactSession(agentName, pane, receipt, expectedProfileKey) {
+    try {
+      return expectedProfileKey
+        ? await lifecycle.restart(agentName, pane, receipt, expectedProfileKey)
+        : await lifecycle.restart(agentName, pane, receipt);
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   async function recoverTarget(agentName, pane, receipt, cwd, expectedProfileKey = null) {
     const lease = queue.acquireSessionLease(agentName, pane);
     if (!lease) return { recovered: false, reason: "delivery-session-busy" };
@@ -190,9 +202,7 @@ export function createClaudeQuotaCoordinator({
         else pause(job, receipt);
       }
 
-      const restart = expectedProfileKey
-        ? await lifecycle.restart(agentName, pane, receipt, expectedProfileKey)
-        : await lifecycle.restart(agentName, pane, receipt);
+      const restart = await restartExactSession(agentName, pane, receipt, expectedProfileKey);
       if (!restart.ok) {
         continuation = queue.update(continuation, {
           nextAttemptAt: PAUSED_UNTIL_RECOVERY,

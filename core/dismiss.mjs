@@ -43,6 +43,18 @@ function activeWorkspaceTrustCursor(text) {
   return cursor === exit && trust === exit + 1 ? "exit-above-trust" : null;
 }
 
+// Not a BLOCKING_PROMPTS entry: one option switches to paid usage credits, so
+// no caller may confirm an option. Only the quota lifecycle closes it, with Esc,
+// right before it replaces the limited process.
+/** WHAT: Checks for Claude Code's live usage-limit menu. WHY: Keeps the menu from blocking quota recovery or reaching its paid option. */
+export function isClaudeLimitChoiceMenu(paneText) {
+  const lines = tailLines(String(paneText || ""), 10);
+  if (!/^Enter to confirm\s*·\s*Esc to cancel$/u.test(lines.at(-1)?.trim() || "")) return false;
+  const block = lines.join("\n");
+  return /What do you want to do\?/u.test(block)
+    && /1\.\s*Stop and wait for limit to reset/u.test(block);
+}
+
 // Codex overlays put the hint above the composer (0.162), or inside the
 // status row below a composer shared with option 2 (0.163).
 const OVERLAY_HINT = /\benter select\s*·\s*esc back\b/iu;

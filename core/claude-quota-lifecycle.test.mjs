@@ -8,7 +8,8 @@ import { assertClaudeQuotaAvailable } from "./claude-quota-target.mjs";
 import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
 
 function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch = false,
-  selected = null, configuredCmd = "claude", observed = null, selectedProfile = "1", liveSessionId = null } = {}) {
+  selected = null, configuredCmd = "claude", observed = null, selectedProfile = "1", liveSessionId = null,
+  sessionExists = true, afterLimitMenu = "❯  " } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-quota-lifecycle-"));
   const homeDir = join(root, "home");
   const repoDir = join(root, "repo");
@@ -52,6 +53,15 @@ function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch =
   const commands = [];
   const tmuxExec = async (command) => {
     commands.push(command);
+    if (!sessionExists && /\b(?:has-session|display-message|capture-pane|respawn-pane|send-keys)\b/u.test(command)) {
+      throw new Error("can't find session: claw");
+    }
+    if (command.includes("send-keys") && /\sEscape$/u.test(command)
+        && screen.includes("Stop and wait for limit to reset")) {
+      screen = afterLimitMenu;
+      history = screen;
+      return { stdout: "" };
+    }
     if (command.includes("display-message") && command.includes("pane_current_command")) {
       return { stdout: `${currentCommand}\n` };
     }
@@ -131,6 +141,20 @@ function pendingResumeFixture({ exact = true } = {}) {
     scrollback: `claude --resume ${sessionId}\n${menu}`,
   });
 }
+
+// The menu over a limited session, as captured on sandman:0 on 2026-10-19.
+const LIMIT_MENU = [
+  "  ⎿  You've hit your weekly limit · resets Oct 21, 9am (Europe/Stockholm)",
+  "",
+  "✻ Worked for 8m 2s · done Sunday 7:35 PM",
+  "   What do you want to do?",
+  "",
+  "   ❯ 1. Stop and wait for limit to reset",
+  "     2. Wait here, then continue automatically at Oct 21, 9am",
+  "     3. Switch to usage credits",
+  "",
+  "   Enter to confirm · Esc to cancel",
+].join("\n");
 
 feature("Claude quota process boundary", () => {
   component("quota restart keeps the selected account instead of borrowing the default login", {
@@ -296,6 +320,44 @@ feature("Claude quota process boundary", () => {
       expect(result).toEqual({ ok: false, reason: "pane-has-no-empty-claude-composer" });
       expect(ctx.commands.some((command) => command.includes("respawn-pane"))).toBe(false);
       ctx.cleanup();
+    }],
+  });
+
+  component("the usage-limit menu is closed without a choice and the exact session relaunches", {
+    given: ["a limited Claude process showing its limit menu", () => fixture({ composer: LIMIT_MENU })],
+    when: ["the recovery reaches the boundary", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt)],
+    then: ["only Esc reaches the menu, and the pane resumes its session", (result, ctx) => {
+      try {
+        expect(result).toMatchObject({ ok: true, sessionId: ctx.sessionId, limitEventId: ctx.limitEventId });
+        const respawn = ctx.commands.findIndex((command) => command.includes("respawn-pane"));
+        expect(respawn).toBeGreaterThan(-1);
+        expect(ctx.commands.slice(0, respawn).filter((command) => command.includes("send-keys")))
+          .toEqual([expect.stringMatching(/\sEscape$/u)]);
+        const launch = ctx.commands.find((command) => command.includes("ANTHROPIC_DISABLE_SURVEY"));
+        expect(launch).toContain(`--resume '${ctx.sessionId}'`);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a draft under the usage-limit menu still blocks the restart", {
+    given: ["a limit menu that closes onto an unsent draft", () => fixture({ composer: LIMIT_MENU, afterLimitMenu: "❯ manual draft" })],
+    when: ["the recovery reaches the boundary", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt)],
+    then: ["the draft survives", (result, ctx) => {
+      try {
+        expect(result).toEqual({ ok: false, reason: "pane-has-no-empty-claude-composer" });
+        expect(ctx.commands.some((command) => command.includes("respawn-pane"))).toBe(false);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a pane whose tmux session is gone fails the restart with that reason", {
+    given: ["a limited pane after its tmux session disappeared", () => fixture({ sessionExists: false })],
+    when: ["the recovery reaches the boundary", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt)],
+    then: ["no respawn is attempted", (result, ctx) => {
+      try {
+        expect(result).toEqual({ ok: false, reason: "tmux-session-missing" });
+        expect(ctx.commands.some((command) => command.includes("respawn-pane"))).toBe(false);
+      } finally { ctx.cleanup(); }
     }],
   });
 });
