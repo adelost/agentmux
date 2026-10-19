@@ -11,10 +11,12 @@ import { tryLockDir } from "./dir-lock.mjs";
 const LOCK_STALE_MS = 10 * 60_000;
 
 // Token shapes worth stopping a commit for. Only added lines are scanned, so a
-// value already in history does not block every later night.
+// value already in history does not block every later night. A key starts at
+// a word boundary: "feat/ask-..." in a branch name blocked banking for four
+// nights (2026-10-15 to 10-19).
 const SECRET_PATTERNS = [
-  ["anthropic-key", /sk-ant-[A-Za-z0-9_-]{20,}/],
-  ["openai-key", /sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}/],
+  ["anthropic-key", /(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_-]{20,}/],
+  ["openai-key", /(?<![A-Za-z0-9])sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}/],
   ["github-token", /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}/],
   ["aws-access-key", /AKIA[0-9A-Z]{16}/],
   ["slack-token", /xox[abprs]-[0-9A-Za-z-]{10,}/],

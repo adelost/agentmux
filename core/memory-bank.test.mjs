@@ -9,6 +9,7 @@ import { lintMemory } from "./memory-lint.mjs";
 const git = (root, ...args) => execFileSync("git", args, { cwd: root, encoding: "utf-8" }).trim();
 // Built at runtime so this file itself never carries a token-shaped string.
 const FAKE_KEY = ["sk", "ant", "x".repeat(30)].join("-");
+const FAKE_OPENAI_KEY = ["sk", "proj", "y".repeat(40)].join("-");
 
 function repo() {
   const root = mkdtempSync(join(tmpdir(), "amux-memory-bank-"));
@@ -80,6 +81,18 @@ feature("memory bank", () => {
     given: ["a clean repo", () => repo()],
     when: ["banking", (root) => bankMemory(root)],
     then: ["banked 0", (result) => { expect(result.banked).toBe(0); }],
+  });
+
+  unit("a word ending in sk, like a branch named ask-..., is not a key", {
+    given: ["a diff adding a branch name and a real-looking key", () => [
+      "+++ b/memory/a.md", "@@ -3 +3 @@",
+      `+bank 6e3748b3 (origin/feat/a${["sk", "z".repeat(40)].join("-")})`,
+      `+OPENAI_API_KEY=${FAKE_OPENAI_KEY}`,
+    ].join("\n")],
+    when: ["scanning", (diff) => scanAddedSecrets(diff)],
+    then: ["only the key is reported", (hits) => {
+      expect(hits.map((hit) => [hit.kind ?? hit.type ?? hit.name, hit.line])).toEqual([["openai-key", 4]]);
+    }],
   });
 
   unit("only added lines count, so an old value in history never blocks a night", {
