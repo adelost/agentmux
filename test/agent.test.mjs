@@ -489,6 +489,27 @@ feature("generated agent policy", () => {
     }],
   });
 
+  // 2026-10-18/19: a lead was handed to a stopped pane, questions he could not
+  // answer at night waited 4-5 h, and rule 10 made 17 briefs quote him.
+  unit("keeps a lead until the receiver acknowledges, decides a parked question and never quotes him in a brief", {
+    when: ["generating fresh agent hints and reading the orchestrator skill", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      const skill = readFileSync(new URL("../skills/amux-orchestrator/SKILL.md", import.meta.url), "utf-8");
+      return { content, skill };
+    }],
+    then: ["the three rules hold and the old quote rule is gone everywhere", ({ content, skill }) => {
+      expect(content).toMatch(/Hand a lead role only to a running pane that acknowledged it; until\s+then\s+the sender keeps it/u);
+      expect(content).toMatch(/needing neither his hands \(a login\) nor new money,\s+is decided by its owner, or by the lead after 30 minutes unanswered; log why/u);
+      expect(content).toMatch(/restate it in the sender's words; never paste his text/u);
+      expect(content).not.toContain("keeps the human quote byte-for-byte");
+      expect(skill).toContain("Never paste the human's text into a brief");
+      expect(skill).not.toContain("Quote the human verbatim only when the wording is the decision");
+    }],
+  });
+
   // Mattias 2026-10-17: a complaint about the quota notice removed his transcripts, tool lines and footers.
   unit("separates his request from a manager's additions and routes a busy recipient's request", {
     when: ["generating fresh agent hints", () => {

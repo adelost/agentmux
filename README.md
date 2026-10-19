@@ -586,6 +586,13 @@ take effect at the next normal start and never wake a pane. Single-pane
 Actual weekly-limit recovery works in either direction; forecasts never
 switch accounts. `AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false` disables it.
 
+A Claude pane stopped at a spent week resumes its exact session on the
+logged-in Claude account with the most weekly room, and `amux accounts rotate`
+moves such a pane together with the messages its limit parked
+(`AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false` disables the automatic move).
+Sending to a stopped pane warns the sender, and `AMUX_IDLE_CAPACITY_TARGET`
+names the pane told when capacity sits unused; see [docs/accounts.md](docs/accounts.md).
+
 `//switch` remains pane-local and native `//status` shows the actual account.
 Model launch overrides are process-local rather than persisted by the TUI
 picker into the account-wide `config.toml`.

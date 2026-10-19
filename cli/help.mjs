@@ -169,6 +169,8 @@ Usage:
   agent accounts                  Same account overview, grouped by provider profile
                                   Codex auto-switches only at a reached weekly limit, with room and exact-session continuity
                                   AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false disables automatic switching
+                                  Claude moves a pane at a spent week to the logged-in account with most room
+                                  AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false disables that
   agent accounts login TYPE:ID    Print a login command for a slot, login dir or new login name; never exposes tokens\n  agent accounts rotate claude:ID Switch idle Claude panes to a slot, login or email; warm large contexts compact first (--dry)
   agent r                         Resume last agent
   agent help                      Show this message

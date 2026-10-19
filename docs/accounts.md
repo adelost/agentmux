@@ -15,6 +15,34 @@ switches likewise skip a source compact only at a confirmed reached weekly
 limit (`would-resume-after-weekly-limit`); other switches still compact first.
 `AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false` disables automatic switching.
 
+## Reached Claude limit
+
+An actual Claude limit banner, plus a usage reading taken after it that shows
+the pane's own week spent, moves that one pane to the logged-in Claude account
+with the most weekly room below `AMUX_QUOTA_RESERVE_PERCENT` (default 90 %).
+Another dir of the same login is the same spent week and does not count. The
+quota sidecar selects the account under the pane's delivery lease and resumes
+the exact session there; its parked messages follow the continuation in FIFO
+order. A failed restart retries on the new account at the next poll. A session
+window never moves a pane, and forecasts never do.
+`AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false` disables it.
+
+A message sent to a pane stopped at its Claude limit is queued as before, and
+the CLI adds a warning on stderr: the recipient cannot read it until it
+recovers, so the sender keeps any role it hands over until the recipient
+acknowledges.
+
+## Idle capacity
+
+With `AMUX_IDLE_CAPACITY_TARGET=agent:pane` in the bridge environment, the
+bridge checks every configured Claude and Codex pane every five minutes. A pane
+with a persisted limit receipt, messages parked by a usage limit, or a stopped
+process with queued messages for 15 minutes, while an account of its engine has
+room below the reserve, earns one notice to that pane per episode. The notice
+names the pane, the reason, the account and the command that moves it. It never
+wakes, moves or restarts a pane. `AMUX_IDLE_CAPACITY_ALERT_ENABLED=false` turns
+it off.
+
 ## Which account is in use
 
 Under each account `amux quota` prints the panes that run on it right now, for
@@ -79,6 +107,7 @@ on the limits `policies/context-cost.mjs` documents (80k tokens, one hour):
 |---|---|---|
 | already on the target account, in any of its dirs | stays where it is | `would-already-selected (same-account)` |
 | asleep or offline | selection only, for its next ordinary wake | `would-dormant` / `selected-for-next-wake` |
+| stopped at its limit, with only the messages that limit parked | selection only; quota recovery restarts its exact session on the target | `would-select-for-quota-recovery` / `selected-for-quota-recovery` |
 | idle for an hour or more | restart on the target, no compact (its cache is cold anyway) | `would-running (cache-cold …)` |
 | warm and at most 80k | restart on the target, no compact | `would-running (context-small …)` |
 | warm and above 80k | verified `/compact` on the source, then restart | `would-compact-then-restart` |

@@ -36,7 +36,9 @@ Busy panes keep a durable request for the existing watcher; dormant panes are se
 Quota warning: answers the human in the channel he writes in, from AMUX_QUOTA_WARN_PERCENT (default 80 %) every 6 h, from AMUX_QUOTA_RESERVE_PERCENT (default 90 %) every 3 h; amux never switches by itself.
 Warnings never switch accounts; explicit operator requests use the guarded path above.
 Codex automatic switch: only after a reached weekly limit, spare account quota and exact-session continuity.
-Disable with AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false. Predictions never switch accounts.`;
+Disable with AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false. Predictions never switch accounts.
+Claude automatic switch: only after an actual limit banner and a later reading that shows the pane's own week spent,
+to the logged-in account with most weekly room below AMUX_QUOTA_RESERVE_PERCENT. Disable with AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false.`;
 
 /** WHAT: Builds the quota box Discord shows plus every slot's detail, or the JSON. WHY: Keeps text and JSON views on one collection pass. */
 export async function runQuotaCommand(args, {

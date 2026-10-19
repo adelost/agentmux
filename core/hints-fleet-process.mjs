@@ -145,6 +145,8 @@ function's own branching or state. Do a small split in the same change.
    instructions. \`amux reconcile\` repairs service/shell panes; it is not a
    staffing command and never wakes coding agents. Delivery is proven by the recipient's
    receipt, not enqueue time; that receipt starts the owner's clock.
+   Hand a lead role only to a running pane that acknowledged it; until then
+   the sender keeps it.
 
    Opus designs; Codex implements (Mattias, 2026-10-17): Opus owns
    architecture, gameplay and UX, reviews and merges; free Codex panes build
@@ -157,9 +159,8 @@ function's own branching or state. Do a small split in the same change.
    \`amux model PROJECT -p N sol\` (see its help); a raw \`/model\` is refused.
    Dormant panes switch at their next work prompt, never by a fleet wake-up.
    Read model and tokens from the exact pane. Quota is paid capacity.
-   Codex account recovery switches only after a reached weekly limit, with
-   verified room and exact-session transfer, or a saved fresh-session handover.
-   Forecasts never switch accounts.
+   Account recovery moves a pane only at a reached weekly limit, to verified
+   room, in its exact session; forecasts never switch.
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, in a modal, or between tool calls.
    A blocked task does not reserve its pane indefinitely:
@@ -199,23 +200,23 @@ function's own branching or state. Do a small split in the same change.
    dependency or evidence that clears it, in the board's typed states when
    there is one, never only in a private note. Silence
    is not a worker failure.
-10. **Human direction is authoritative and remains direct.** A decision relayed
-    as authority (a GO, a price, a name) keeps the human quote byte-for-byte with
-    provenance. A work brief is the orchestrator's interpretation: numbered
-    executable steps, not the human's text (see the amux-orchestrator skill).
-    His words go to the decision log. Mark each item as his request or your own
+10. **Human direction is authoritative and remains direct.** His exact words,
+    with provenance, live only in the decision log (the day file or
+    \`~/.agentmux/PRIORITIES.md\`). Briefs and relayed decisions cite that
+    entry and restate it in the sender's words; never paste his text.
+    Mark each item as his request or your own
     addition; only his request may remove something he sees or change a
     test's expected output.
     No manager, memory note or older topology rule may narrow,
     delay or override a current direct instruction. Human language stays UTF-8
-    end to end: preserve literal \`åäö\` and quoted text byte-for-byte. Board
-    mutations containing human text use the canonical \`amux-suggest\` body-file
-    and \`--expect-file\` path instead of lossy inline rewrites.
+    end to end: the log and board bodies keep literal \`åäö\` and his text
+    byte-for-byte via the \`amux-suggest\` body-file and \`--expect-file\` path.
 11. **Make reversible product calls yourself.** Pick the option best supported
-    by the user's history, ship it, and explain the choice. Ask first only for
+    by the user's history, ship it, and report the choice in one line. Ask first only for
     irreversible, external-facing, money-spending or genuinely risky decisions.
-    Decide design, order and measurement questions yourself; act and report
-    the choice in one line. Do not prepare decision material.
+    Design, order and measurement questions are yours. A question a
+    recommendation answers, needing neither his hands (a login) nor new money,
+    is decided by its owner, or by the lead after 30 minutes unanswered; log why.
 12. **A drained backlog is healthy idle.** On DONE or BLOCKED, re-read the existing queue.
     Re-evaluate conditional deferrals against completed prerequisites.
     Take the next authorised independent READY item; a blocker holds only its

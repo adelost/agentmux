@@ -6,7 +6,8 @@ description: Read subscription quota and switch or log in Claude/Codex accounts 
 # AMUX accounts and quota
 
 Mattias pays per account, and a switch costs a full prompt-cache miss. Read
-first, recommend the cheapest action, switch only on his word.
+first, recommend the cheapest action, and switch on his word. When he
+activates an account and says it should be used, that word covers every pane.
 
 ## 1. Read before any quota claim
 
@@ -31,10 +32,25 @@ Mattias authorized Codex automatic recovery on 2026-10-12: an actual usage
 refusal plus reached weekly quota and verified spare capacity may switch that
 one pane. Transfer its exact session, or save its task and replies before a
 labeled fresh Sol/xhigh session. `AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false`
-disables this recovery. Other rotations still require his instruction.
+disables this recovery.
+Mattias authorized Claude automatic recovery on 2026-10-19: an actual limit
+banner plus a reading after it that shows the pane's own week spent moves that
+one pane to the logged-in Claude account with the most weekly room below
+`AMUX_QUOTA_RESERVE_PERCENT`, in its exact session; its parked messages follow.
+A session window never moves a pane. `AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false`
+disables it. Other rotations still require his instruction.
+With `AMUX_IDLE_CAPACITY_TARGET=agent:pane` the bridge tells that pane once per
+episode when a pane has been stopped or parked for 15 minutes while an account
+of its engine has room. It never wakes or moves anything itself.
 
 ## 3. Switch only on Mattias's word
 
+- When Mattias activates an account and says it should be used, that is his
+  word for all panes: move the quota-stopped panes in the same turn with
+  `amux accounts rotate claude:<login>`, and do not ask him again
+  (2026-10-18: six panes waited 5.8 h on a spent account for that question).
+- Make an account decision about a pane on the `amux quota` "i bruk" line,
+  never on a note or an earlier reading.
 - Show the plan first: `amux accounts rotate claude:<login|email> --dry`,
   or have him write `/byt <login>` in Discord. Nothing changes.
 - He confirms with `/byt <login> ok` within 10 minutes, or tells you to run
@@ -43,7 +59,10 @@ disables this recovery. Other rotations still require his instruction.
   - `would-dormant` / `would-already-selected`: new account at the next start, free.
   - `would-running`: restart now, cold cache or small context, so the miss is small.
   - `would-compact-then-restart`: verified compact on the old account, then restart.
-  - `blocked`: left alone (working, queued delivery, unknown context).
+  - `would-select-for-quota-recovery`: a pane stopped at its limit gets the new
+    account; quota recovery restarts its exact session there within a poll.
+  - `blocked`: left alone (working, live delivery, unknown context). Messages
+    parked by the pane's own limit do not block it.
 - Codex: `amux accounts switch codex:2 PROJECT -p N --dry`, then the same
   command without `--dry` after the operator's instruction. Omit `-p N` for
   the project, or use `--all` instead of PROJECT for the configured Codex fleet.

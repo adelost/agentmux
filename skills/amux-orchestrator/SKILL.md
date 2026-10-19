@@ -44,9 +44,9 @@ Read each view for what it is:
 
 - Numbered steps a worker can run without reading the human's message.
 - Each step: input, exact output (path, name), constraint, where to report.
-- Quote the human verbatim only when the wording is the decision (a GO, a
-  price, a name). Provenance in one line: who and when. The full quote goes
-  to the decision log.
+- Never paste the human's text into a brief, not even for a GO, a price or
+  a name. State the decision in your own words and point to its entry in the
+  decision log (who, when, where). His exact words live only in that log.
 - Bad brief: "Mattias, verbatim: 'men förstå ni? ska ju helst vara
   generistk...' Fix the rig." Good brief: "1. Use Haunt's rig format
   (rig.js) as the shared rig. 2. Place the joints from the doll's own
