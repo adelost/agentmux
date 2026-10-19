@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { component, expect, feature } from "bdd-vitest";
 import { keepClaudeDefaultModel } from "./claude-default-model.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
-import { paneModelSelection } from "./pane-model-state.mjs";
+import { isPaneModelSwitchReading, paneModelSelection } from "./pane-model-state.mjs";
 import { runLockedClaudeModelChange } from "./claude-model-command.mjs";
 
 // api:2 on 2026-10-10: a fresh session's footer shows the model with no context bar.
@@ -250,6 +250,20 @@ feature("a /model Claude Code records late is still the switch", () => {
       try {
         expect(result).toMatchObject({ ok: true, model: "claude-sonnet-5-5" });
         expect(paneModelSelection(fx.state, "claw", 0)?.model).toBe("claude-sonnet-5-5");
+        expect(fx.settings()).toBe(SETTINGS);
+      } finally { fx.cleanup(); }
+    }],
+  });
+  // A /model Claude Code has queued or left in its composer can run long after amux stopped
+  // waiting. The pick was asked for, so its landing stays expected for half an hour.
+  component("a switch amux could not verify still expects its landing 10 minutes later", {
+    given: ["an idle Opus 5.5 pane whose Claude Code does not record /model while amux waits", () =>
+      fixture({ liveModel: "claude-opus-5-5", recordsAfterMs: Infinity })],
+    when: ["running amux model with claude-sonnet-5-5", fx => fx.change("claude-sonnet-5-5")],
+    then: ["amux answers unverified, and Sonnet 5.5 on the pane 10 minutes later is the switch", (result, fx) => {
+      try {
+        expect(result).toMatchObject({ ok: false, reason: "model-command-unverified" });
+        expect(isPaneModelSwitchReading(fx.state, "claw", 0, { model: "Sonnet 5.5" }, Date.now() + 10 * 60_000)).toBe(true);
         expect(fx.settings()).toBe(SETTINGS);
       } finally { fx.cleanup(); }
     }],

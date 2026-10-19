@@ -62,14 +62,14 @@ export function setPaneModelSelection(state, name, pane, model, effort = null) {
 // A switch amux could not verify stays marked: Claude Code may still run it,
 // as it did on skyvw:2 a moment after amux gave up.
 const PANE_MODEL_SWITCH_KEY = "pane_model_switch_v1";
-// A mark older than this belongs to a switch that died with its process or never ran;
-// a real downgrade must alarm again.
+// A switch whose mark outlives this died with its process; a real downgrade must alarm again.
+// amux model gives a switch it could not verify a longer life of its own.
 const PANE_MODEL_SWITCH_MS = 2 * 60_000;
 
 /** WHAT: Stores the model switch amux is making on one pane. WHY: Keeps the model-watch from alarming on a switch made on purpose. */
-export function beginPaneModelSwitch(state, name, pane, { from, to, keep = null }, now = Date.now()) {
+export function beginPaneModelSwitch(state, name, pane, { from, to, keep = null, lifeMs = PANE_MODEL_SWITCH_MS }, now = Date.now()) {
   const map = { ...(state.get(PANE_MODEL_SWITCH_KEY, {}) || {}) };
-  map[paneModelKey(name, pane)] = { from, to, keep, at: now };
+  map[paneModelKey(name, pane)] = { from, to, keep, at: now, until: now + lifeMs };
   state.set(PANE_MODEL_SWITCH_KEY, map);
 }
 
@@ -82,7 +82,7 @@ export function endPaneModelSwitch(state, name, pane) {
 
 const markedSwitch = (state, name, pane, now) => {
   const change = state?.get?.(PANE_MODEL_SWITCH_KEY, {})?.[paneModelKey(name, pane)];
-  return change && now - change.at < PANE_MODEL_SWITCH_MS ? change : null;
+  return change && now < (change.until ?? change.at + PANE_MODEL_SWITCH_MS) ? change : null;
 };
 
 /** WHAT: Checks whether a reading shows the old or new model of a switch in progress. WHY: Keeps either side of the switch from reading as a downgrade. */

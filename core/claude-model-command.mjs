@@ -11,6 +11,8 @@ import { verifiedClaudeCompact } from "./verified-compact.mjs";
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 // Claude Code records /model in the session only once it has saved the default: 3.3 s on skyvw:2 (2026-10-19).
 const MODEL_RECEIPT_MS = 15_000;
+// A /model Claude Code queued or left in its composer may run long after; the pick was asked for.
+const UNVERIFIED_SWITCH_MS = 30 * 60_000;
 const observedModelId = raw => {
   // The footer's "Opus 5.5 (1M context)" is the 1M-context variant of the same model id.
   const normalized = normalizeClaudeModelName(String(raw ?? "").replace(/\s*\(1M context\)\s*$/iu, "[1m]"));
@@ -40,6 +42,7 @@ async function switchVerified({ agent, state, name, pane, from, model, keep, cur
     }
     if (attempt < 9) await wait(250);
   }
+  beginPaneModelSwitch(state, name, pane, { from, to: model, keep, lifeMs: UNVERIFIED_SWITCH_MS });
   return sent.delivered && sent.via === "command-receipt"
     ? { ok: false, stage: "verify", reason: "model-status-unverified" }
     : { ok: false, stage: "switch", reason: "model-command-unverified" };
