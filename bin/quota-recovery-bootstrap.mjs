@@ -9,6 +9,10 @@ import { parseEnv } from "../lib.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { createState } from "../core/state.mjs";
 import { readClaudeQuotaBudgeted } from "../core/claude-quota-budget.mjs";
+import { readClaudeProfileIdentity } from "../core/claude-account-quota.mjs";
+import { spareClaudeAccount } from "../core/claude-quota-recovery.mjs";
+import { runtimeProfileAuthenticated, runtimeProfileCatalog } from "../core/runtime-account-profiles.mjs";
+import { parseQuotaWarningConfig } from "../channels/quota-warning.mjs";
 import { createClaudeQuotaLifecycle } from "../core/claude-quota-lifecycle.mjs";
 import { createClaudeQuotaCoordinator } from "../core/claude-quota-coordinator.mjs";
 import { createQuotaRecoveryLoop, parseQuotaRecoveryConfig } from "../channels/quota-recovery.mjs";
@@ -37,8 +41,8 @@ if (!config.enabled) {
     env: { ...process.env, PATH: shellPath },
   });
   const queue = createDeliveryQueue();
-  const lifecycle = createClaudeQuotaLifecycle({ configPath, tmuxSocket, tmuxExec,
-    state: createState(process.env.STATE_FILE || "/tmp/agentmux-state.json") });
+  const state = createState(process.env.STATE_FILE || "/tmp/agentmux-state.json");
+  const lifecycle = createClaudeQuotaLifecycle({ configPath, tmuxSocket, tmuxExec, state });
   const coordinator = createClaudeQuotaCoordinator({
     queue,
     lifecycle,
@@ -48,6 +52,18 @@ if (!config.enabled) {
     readQuota: ({ agentName, pane, receipt }) => readClaudeQuotaBudgeted({
       profile: lifecycle.profileFor(agentName, pane),
       notBefore: Number.isFinite(receipt?.observedAt) ? receipt.observedAt : 0,
+    }),
+    // The same shared budget reads the other logins, and only for a pane whose week is spent.
+    findSpareAccount: ({ current, receipt }) => spareClaudeAccount({
+      current,
+      catalog: runtimeProfileCatalog("claude"),
+      authenticated: runtimeProfileAuthenticated,
+      emailOf: (profile) => readClaudeProfileIdentity(profile)?.email?.toLowerCase() || null,
+      readQuota: (profile) => readClaudeQuotaBudgeted({
+        profile,
+        notBefore: Number.isFinite(receipt?.observedAt) ? receipt.observedAt : 0,
+      }),
+      reservePercent: parseQuotaWarningConfig().reservePercent,
     }),
     resetGraceMs: config.resetGraceMs,
   });

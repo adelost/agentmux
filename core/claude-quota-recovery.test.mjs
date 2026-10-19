@@ -8,6 +8,7 @@ import {
   claudeQuotaRecoveryReadiness,
   parseClaudeLimitResetAt,
   quotaRecoveryJobKey,
+  spareClaudeAccount,
 } from "./claude-quota-recovery.mjs";
 import { claudeProjectDir } from "./claude-paths.mjs";
 
@@ -168,5 +169,46 @@ feature("Claude's current stop wording starts recovery", () => {
     )],
     then: ["no resume, so no paid usage", (result) =>
       expect(result).toEqual({ ready: false, reason: "weekly-limit-still-exhausted" })],
+  });
+});
+
+// The night of 2026-10-18: Claude W spent, Claude A at 97 %, Claude S (in two dirs) at 0 %.
+feature("the spare Claude account for a spent week", () => {
+  const usage = (weekly) => ({ ok: true, limits: [{ kind: "session", usedPercent: 0 },
+    { kind: "weekly_all", usedPercent: weekly, isActive: true }] });
+  const accounts = {
+    "claude:login:wetterlind": { email: "w@example.test", quota: usage(100) },
+    "claude:2": { email: "a@example.test", quota: usage(97) },
+    "claude:1": { email: "s@example.test", quota: usage(0) },
+    "claude:login:2": { email: "s@example.test", quota: usage(0) },
+    "claude:login:old": { email: "old@example.test", quota: usage(0), loggedOut: true },
+  };
+  const profile = (key) => ({ key, id: key.split(":").at(-1) });
+
+  unit("the account with the most weekly room wins, not one at its reserve", {
+    given: ["the pane runs on the spent Claude W", () => ({ reads: [] })],
+    when: ["the spare account is chosen", (ctx) => spareClaudeAccount({
+      current: profile("claude:login:wetterlind"),
+      catalog: Object.keys(accounts).map(profile),
+      authenticated: (candidate) => !accounts[candidate.key].loggedOut,
+      emailOf: (candidate) => accounts[candidate.key].email,
+      readQuota: async (candidate) => { ctx.reads.push(candidate.key); return accounts[candidate.key].quota; },
+      reservePercent: 90,
+    }).then((spare) => ({ ...ctx, spare }))],
+    then: ["Claude S in its first dir; the spent and logged-out logins are never read", ({ spare, reads }) => {
+      expect(spare).toMatchObject({ profile: { key: "claude:1" }, usedPercent: 0 });
+      expect(reads).toEqual(["claude:2", "claude:1", "claude:login:2"]);
+    }],
+  });
+
+  unit("no account below the reserve means no move", {
+    when: ["every other account is at 97 % or spent", () => spareClaudeAccount({
+      current: profile("claude:login:wetterlind"),
+      catalog: ["claude:login:wetterlind", "claude:2"].map(profile),
+      authenticated: () => true,
+      emailOf: (candidate) => accounts[candidate.key].email,
+      readQuota: async (candidate) => accounts[candidate.key].quota,
+    })],
+    then: ["there is no spare", (spare) => expect(spare).toBeNull()],
   });
 });

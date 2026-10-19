@@ -120,9 +120,11 @@ export function runtimeProfileLaunchHome(profile) {
 export function setRuntimeProfile(state, agentName, pane, provider, profileId) {
   if (!state?.set) throw new Error("account profile state is unavailable");
   const key = codexPaneKey(agentName, pane);
-  const profiles = { ...(state.get(ACCOUNT_PROFILE_STATE_KEY, {}) || {}) };
-  profiles[key] = String(profileId);
-  state.set(ACCOUNT_PROFILE_STATE_KEY, profiles);
+  const select = (current) => ({ ...(current || {}), [key]: String(profileId) });
+  // The bridge, its quota sidecar and the CLI write this map; a locked update keeps each other's panes.
+  const profiles = state.updateKey
+    ? state.updateKey(ACCOUNT_PROFILE_STATE_KEY, select)
+    : state.set(ACCOUNT_PROFILE_STATE_KEY, select(state.get(ACCOUNT_PROFILE_STATE_KEY, {})));
   if (provider === "codex") setCodexProfile(state, agentName, pane, profileId);
   return profiles;
 }

@@ -11,11 +11,17 @@ import { rewriteModelSlash } from "./claude-model.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue.mjs";
 import {
   claudeQuotaRecoveryReadiness,
+  claudeWeekSpent,
   quotaRecoveryContinuation,
   quotaRecoveryJobKey,
 } from "./claude-quota-recovery.mjs";
 
 const PAUSED_UNTIL_RECOVERY = Number.MAX_SAFE_INTEGER;
+
+/** WHAT: Recognises a job held by an active Claude limit. WHY: Lets rotation and alarms tell a quota fence from live delivery. */
+export function isQuotaParkedJob(job) {
+  return job?.nextAttemptAt === PAUSED_UNTIL_RECOVERY && Boolean(job.metadata?.quotaLimitEventId);
+}
 
 function sameReceipt(left, right) {
   return Boolean(left && right
@@ -58,6 +64,10 @@ export function createClaudeQuotaCoordinator({
   lifecycle,
   configPath,
   readQuota,
+  // A pane whose own week is spent moves to the logged-in account with the most
+  // room (Mattias 2026-10-19: "Alla ska köra på Claude S."), like Codex since 12 Oct.
+  findSpareAccount = null,
+  switchAccounts = process.env.AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED !== "false",
   now = () => Date.now(),
   resetGraceMs = 15_000,
   log = (message) => console.log(`quota-recovery | ${message}`),
@@ -101,9 +111,7 @@ export function createClaudeQuotaCoordinator({
       .filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status));
   }
 
-  function isQuotaParked(job) {
-    return job.nextAttemptAt === PAUSED_UNTIL_RECOVERY && Boolean(job.metadata?.quotaLimitEventId);
-  }
+  const isQuotaParked = isQuotaParkedJob;
 
   function resumeScheduling(job, reason) {
     const current = queue.read(job.agentName, job.pane, job.id);
@@ -164,12 +172,17 @@ export function createClaudeQuotaCoordinator({
     }
   }
 
-  async function recoverTarget(agentName, pane, receipt, cwd, expectedProfileKey = null) {
+  async function recoverTarget(agentName, pane, receipt, cwd, expectedProfileKey = null, { switchTo = null } = {}) {
     const lease = queue.acquireSessionLease(agentName, pane);
     if (!lease) return { recovered: false, reason: "delivery-session-busy" };
     try {
       if (!sameReceipt(lifecycle.activeReceipt(agentName, pane), receipt)) {
         return { recovered: false, reason: "limit-receipt-superseded" };
+      }
+      // The selection changes under the lease; a failed restart retries on the new account next poll.
+      if (switchTo) {
+        try { lifecycle.selectProfile(agentName, pane, switchTo); }
+        catch (error) { return { recovered: false, reason: `account-select-failed:${error.message}` }; }
       }
       if (expectedProfileKey && lifecycle.profileFor?.(agentName, pane)?.key !== expectedProfileKey) {
         return { recovered: false, reason: "quota-profile-changed" };
@@ -247,6 +260,18 @@ export function createClaudeQuotaCoordinator({
     }
   }
 
+  // Only an actual limit receipt plus a reading after it that shows the pane's own
+  // week spent moves a pane; forecasts and session windows never do.
+  async function spareAccountFor(target, readiness) {
+    if (readiness.ready || !switchAccounts || !findSpareAccount || !claudeWeekSpent(readiness)) return null;
+    try {
+      return await findSpareAccount({ ...target, current: lifecycle.profileFor?.(target.agentName, target.pane) });
+    } catch (error) {
+      log(`${target.agentName}:${target.pane} spare account read failed: ${error.message}`);
+      return null;
+    }
+  }
+
   async function runTick() {
     let agents;
     try { agents = listAgents(configPath); }
@@ -287,13 +312,16 @@ export function createClaudeQuotaCoordinator({
         now: now(),
         resetGraceMs,
       });
+      const spare = await spareAccountFor(target, readiness);
       const outcome = readiness.ready
         ? await recoverTarget(target.agentName, target.pane, target.receipt, cwd, quota?.profile?.key || null)
-        : parkTarget(target.agentName, target.pane, target.receipt, cwd);
+        : spare
+          ? await recoverTarget(target.agentName, target.pane, target.receipt, cwd, spare.profile.key, { switchTo: spare.profile })
+          : parkTarget(target.agentName, target.pane, target.receipt, cwd);
       if (outcome.restarted) {
-        log(`${target.agentName}:${target.pane} resumed ${target.receipt.sessionId} via ${readiness.via}`);
+        log(`${target.agentName}:${target.pane} resumed ${target.receipt.sessionId} via ${spare ? `account ${spare.profile.key}` : readiness.via}`);
       }
-      results.push({ ...target, readiness, outcome });
+      results.push({ ...target, readiness, ...(spare ? { switchedTo: spare.profile.key } : {}), outcome });
     }
     return results;
   }

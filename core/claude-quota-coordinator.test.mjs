@@ -15,7 +15,10 @@ const receipt = {
   resetAt: 20_000,
 };
 
-function fixture({ readQuota = async () => ({ ok: true, limits: [{ kind: "session", usedPercent: 7 }] }) } = {}) {
+function fixture({
+  readQuota = async () => ({ ok: true, limits: [{ kind: "session", usedPercent: 7 }] }),
+  coordinatorOptions = {},
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-quota-coordinator-"));
   const repoDir = join(root, "repo");
   const cwd = join(repoDir, ".agents", "0");
@@ -47,6 +50,7 @@ function fixture({ readQuota = async () => ({ ok: true, limits: [{ kind: "sessio
     readQuota,
     now: () => clock,
     log: () => {},
+    ...coordinatorOptions,
   });
   return {
     root, cwd, configPath, queue, lifecycle, coordinator, restarts,
@@ -302,6 +306,78 @@ feature("quota polling", () => {
         expect(ctx.queue.read("lsrc", 0, ctx.first.job.id).nextAttemptAt).toBe(30_000);
         expect(ctx.queue.read("lsrc", 0, ctx.job.id).nextAttemptAt).toBe(30_000);
         expect(ctx.queue.list("lsrc", 0).filter(job => job.source === "quota-recovery")).toHaveLength(1);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+});
+
+// 2026-10-18 22:34–04:22Z: skyvw:0 waited on Claude W's spent week, with the lead
+// handoff parked behind it, while Claude S had its whole week free.
+feature("a spent week resumes on a logged-in account with room", () => {
+  const weekly = { ...receipt, limitKind: "weekly" };
+  const spentWeek = async () => ({ ok: true, profile: { key: "claude:login:wetterlind" },
+    limits: [{ kind: "session", usedPercent: 0 }, { kind: "weekly_all", usedPercent: 100, isActive: true }] });
+  const claudeS = { id: "1", key: "claude:1" };
+  function spentFixture(coordinatorOptions) {
+    const ctx = fixture({ readQuota: spentWeek, coordinatorOptions: {
+      findSpareAccount: async ({ current }) => (current?.key === claudeS.key ? null : { profile: claudeS, usedPercent: 0 }),
+      ...coordinatorOptions,
+    } });
+    ctx.setActiveReceipt(weekly);
+    ctx.selected = { id: "wetterlind", key: "claude:login:wetterlind" };
+    ctx.lifecycle.profileFor = () => ctx.selected;
+    ctx.lifecycle.selectProfile = (_agentName, _pane, profile) => { ctx.selected = profile; };
+    ctx.handoff = ctx.queue.enqueue({ agentName: "lsrc", pane: 0, text: "[from skyvw:3] the lead is yours again" });
+    return ctx;
+  }
+
+  component("the exact session restarts on the spare account and its parked handoff is next", {
+    given: ["a pane stopped by its weekly limit while another login has room", () => spentFixture()],
+    when: ["the coordinator polls", ({ coordinator }) => coordinator.tick()],
+    then: ["the pane moved and resumed once; nothing waits for the reset", (results, ctx) => {
+      try {
+        expect(results[0]).toMatchObject({ switchedTo: "claude:1", outcome: { recovered: true, restarted: true } });
+        expect(ctx.selected).toBe(claudeS);
+        expect(ctx.restarts).toEqual([["lsrc", 0, weekly, "claude:1"]]);
+        const jobs = ctx.queue.list("lsrc", 0);
+        expect(jobs[0]).toMatchObject({ source: "quota-recovery", status: "pending", nextAttemptAt: 30_000 });
+        expect(ctx.queue.read("lsrc", 0, ctx.handoff.id)).toMatchObject({ status: "pending", nextAttemptAt: 30_000 });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("the off switch keeps the old behaviour: parked until the account resets", {
+    given: ["the same night with automatic account recovery disabled", () => spentFixture({ switchAccounts: false })],
+    when: ["the coordinator polls", ({ coordinator }) => coordinator.tick()],
+    then: ["no account change and no restart", (results, ctx) => {
+      try {
+        expect(results[0].outcome).toMatchObject({ parked: true });
+        expect(ctx.selected.key).toBe("claude:login:wetterlind");
+        expect(ctx.restarts).toEqual([]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a spent session window does not move accounts", {
+    given: ["a session limit while the week still has room", () => {
+      const ctx = spentFixture();
+      ctx.setActiveReceipt(receipt);
+      return ctx;
+    }],
+    when: ["the coordinator reads a still-spent session", (ctx) => {
+      ctx.spareReads = 0;
+      return createClaudeQuotaCoordinator({
+        queue: ctx.queue, lifecycle: ctx.lifecycle, configPath: ctx.configPath, now: () => 30_000, log: () => {},
+        readQuota: async () => ({ ok: true, limits: [{ kind: "session", usedPercent: 100 }, { kind: "weekly_all", usedPercent: 40 }] }),
+        findSpareAccount: async () => { ctx.spareReads++; return { profile: claudeS, usedPercent: 0 }; },
+      }).tick();
+    }],
+    then: ["the pane waits for its own session window and no other account is read", (results, ctx) => {
+      try {
+        expect(results[0].outcome).toMatchObject({ parked: true });
+        expect(ctx.spareReads).toBe(0);
+        expect(ctx.selected.key).toBe("claude:login:wetterlind");
+        expect(ctx.restarts).toEqual([]);
       } finally { ctx.cleanup(); }
     }],
   });

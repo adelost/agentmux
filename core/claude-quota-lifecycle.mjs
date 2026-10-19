@@ -7,7 +7,13 @@ import { buildClaudeLaunchCommand } from "./agent-launch-command.mjs";
 import { createTmuxAdapter } from "./tmux.mjs";
 import { findBlockingPrompt, hasEmptyClaudeComposer, isClaudeLimitChoiceMenu } from "./dismiss.mjs";
 import { latestClaudeSessionIdentity, persistedSessionIdentity } from "./native-session-identity.mjs";
-import { runtimeProfileCatalog, runtimeProfileLaunchHome, selectedRuntimeProfile } from "./runtime-account-profiles.mjs";
+import {
+  prepareRuntimeProfile,
+  runtimeProfileCatalog,
+  runtimeProfileLaunchHome,
+  selectedRuntimeProfile,
+  setRuntimeProfile,
+} from "./runtime-account-profiles.mjs";
 import { getContextPercent } from "./context.mjs";
 import { paneModelSelection } from "./pane-model-state.mjs";
 import {
@@ -78,6 +84,28 @@ export function createClaudeQuotaLifecycle({
   function profileFor(agentName, pane) {
     return selectedRuntimeProfile({ state, agentName, pane, provider: "claude", catalog: profiles(),
       paneConfig: getAgent(configPath, agentName).panes?.[Number(pane) || 0] });
+  }
+
+  /**
+   * WHAT: Selects another logged-in Claude account for one limited pane.
+   * WHY: Lets the exact-session restart resume where the subscription still has room;
+   * the shared project history makes the same session resumable there.
+   */
+  function selectProfile(agentName, pane, profile) {
+    const previous = profileFor(agentName, pane);
+    prepareRuntimeProfile(profile, profiles());
+    setRuntimeProfile(state, agentName, pane, "claude", profile.id);
+    try {
+      record({
+        ts: new Date().toISOString(),
+        event: "quota_recovery",
+        session: agentName,
+        pane: Number(pane) || 0,
+        state: "account_selected",
+        detail: `${previous?.key || "unknown"} -> ${profile.key}`,
+      });
+    } catch { /* diagnostics never undo a stored selection */ }
+    return { previous, selected: profile };
   }
 
   /** WHAT: Verifies an already resumed exact session. WHY: A vanished banner alone cannot release another session's queue. */
@@ -244,5 +272,5 @@ export function createClaudeQuotaLifecycle({
     };
   }
 
-  return { activeReceipt, profileFor, recoveredSession, restart };
+  return { activeReceipt, profileFor, selectProfile, recoveredSession, restart };
 }

@@ -28,6 +28,12 @@ export function activeClaudeLimitReceipt(paneDir, {
   });
 }
 
+// Every plan window must have room, whichever one stopped the pane: a fresh
+// session in a spent week would run on paid usage (15 Sep: €20 in 1 min 43 s).
+const planWindows = (quota) => (quota?.ok && Array.isArray(quota.limits) ? quota.limits : [])
+  .filter((limit) => (limit?.isActive === true || limit?.kind === "session" || limit?.kind === "weekly_all")
+    && Number.isFinite(limit.usedPercent));
+
 /**
  * WHAT: Checks whether fresh quota telemetry or the exact reset permits recovery.
  * WHY: Prevents automatic restart while Claude still reports exhausted capacity.
@@ -38,10 +44,7 @@ export function claudeQuotaRecoveryReadiness(receipt, quota, {
 } = {}) {
   if (!receipt) return { ready: false, reason: "no-active-limit-receipt" };
   if (quota?.ok && Array.isArray(quota.limits)) {
-    // Every plan window must have room, whichever one stopped the pane: a fresh
-    // session in a spent week would run on paid usage (15 Sep: €20 in 1 min 43 s).
-    const windows = quota.limits.filter((limit) => (limit?.isActive === true
-      || limit?.kind === "session" || limit?.kind === "weekly_all") && Number.isFinite(limit.usedPercent));
+    const windows = planWindows(quota);
     const spent = windows.find((limit) => Number(limit.usedPercent) >= 100);
     if (spent) return { ready: false, reason: `${spent.kind === "session" ? "session" : "weekly"}-limit-still-exhausted` };
     const session = windows.find((limit) => limit.kind === "session");
@@ -55,6 +58,49 @@ export function claudeQuotaRecoveryReadiness(receipt, quota, {
     return { ready: true, via: "reset-clock" };
   }
   return { ready: false, reason: quota?.error || "quota-not-yet-available" };
+}
+
+/**
+ * WHAT: Tells whether a parked pane's own account has spent its week, per a reading taken after the limit.
+ * WHY: Only a reached weekly limit moves a pane to another account; a session window returns within hours.
+ */
+export const claudeWeekSpent = (readiness) => readiness?.reason === "weekly-limit-still-exhausted";
+
+/**
+ * WHAT: Returns an account's used weekly percent when every plan window has room, else null.
+ * WHY: An account at its reserve level would stop a moved pane again within minutes, after a full cache miss.
+ */
+export function claudeWeeklyRoom(quota, { reservePercent = 90 } = {}) {
+  const windows = planWindows(quota);
+  if (windows.some((limit) => Number(limit.usedPercent) >= 100)) return null;
+  const weekly = windows.find((limit) => limit.kind === "weekly_all");
+  return weekly && Number(weekly.usedPercent) < reservePercent ? Number(weekly.usedPercent) : null;
+}
+
+/**
+ * WHAT: Picks the logged-in Claude account with the most weekly room, other than the pane's own login.
+ * WHY: A pane stopped at a spent week resumes where the paid subscription can still answer
+ * (2026-10-18: six panes waited 5.8 h on Claude W while Claude S had 100 % free).
+ */
+export async function spareClaudeAccount({
+  current,
+  catalog,
+  authenticated,
+  readQuota,
+  emailOf,
+  reservePercent = 90,
+}) {
+  const ownEmail = current ? emailOf(current) : null;
+  let best = null;
+  for (const profile of catalog) {
+    if (!profile || profile.key === current?.key || !authenticated(profile)) continue;
+    // Another dir of the spent login is the same spent week.
+    if (ownEmail && emailOf(profile) === ownEmail) continue;
+    const quota = await readQuota(profile);
+    const usedPercent = claudeWeeklyRoom(quota, { reservePercent });
+    if (usedPercent !== null && (!best || usedPercent < best.usedPercent)) best = { profile, quota, usedPercent };
+  }
+  return best;
 }
 
 /** WHAT: Builds one stable recovery job identity. WHY: Prevents duplicate continuation turns across polls. */
