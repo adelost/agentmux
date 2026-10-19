@@ -44,6 +44,39 @@ export function activeClaudeLimitForTarget(agentName, pane = 0, options = {}) {
 }
 
 /**
+ * WHAT: Words the sender's warning for a message queued to a pane stopped at its Claude limit.
+ * WHY: A queued handoff reads as delivered; on 2026-10-18 a lead role sat 5.8 h in a stopped pane.
+ */
+export function quotaStopSendNotice(agentName, pane, receipt) {
+  if (!receipt) return null;
+  const key = `${agentName}:${Number(pane) || 0}`;
+  return `WARNING: ${key} is stopped at its Claude ${receipt.limitKind || "usage"} limit`
+    + `${receipt.text ? ` (${receipt.text})` : ""}. The message waits in its queue until the pane recovers. `
+    + `Keep any role you hand over until ${key} acknowledges.`;
+}
+
+/**
+ * WHAT: Adds the stopped-recipient warning to a queued send's outcome and prints it for the sender.
+ * WHY: Keeps the CLI send path from reporting only "queued" for a pane that cannot read it.
+ */
+export function warnQuotaStoppedRecipient(outcome, agentName, pane, {
+  configPath = null,
+  recipientLimit = null,
+} = {}, warn = console.error) {
+  let receipt = null;
+  try {
+    receipt = recipientLimit ? recipientLimit(agentName, pane)
+      : configPath ? activeClaudeLimitForTarget(agentName, pane, { configPath }) : null;
+  } catch { receipt = null; }
+  const notice = quotaStopSendNotice(agentName, pane, receipt);
+  if (notice) {
+    outcome.notice = notice;
+    warn(notice);
+  }
+  return outcome;
+}
+
+/**
  * WHAT: Checks a continuation against its durable restart authorization.
  * WHY: Prevents copied recovery prose from bypassing an active quota fence.
  */

@@ -25,7 +25,7 @@ import { createNativeRuntimeClient } from "../core/native-runtime-client.mjs";
 import { createAgentRouter } from "../core/agent-router.mjs";
 import { createState } from "../core/state.mjs";
 import { clearComposerAndVerify } from "./composer-clear.mjs";
-import { activeClaudeLimitForTarget } from "../core/claude-quota-target.mjs";
+import { activeClaudeLimitForTarget, warnQuotaStoppedRecipient } from "../core/claude-quota-target.mjs";
 const exec = promisify(execCb);
 /** WHAT: Builds tmux execution helpers bound to one socket. WHY: Keeps CLI process and pane state on the bridge's shared boundaries. */
 export function createTmuxContext(socket, configPath) {
@@ -362,7 +362,7 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     const status = result?.unverified
       ? "delivery unverified"
       : result?.delivered
-      ? (result.pending ? "durably queued" : "delivered")
+      ? (result.pending ? (result.notice ? "durably queued, recipient stopped at its limit" : "durably queued") : "delivered")
       : "NOT delivered";
     mirrorDispatch({ channelId: senderChannelId, content: `\`amux ${name} -p ${pane} …\` → ${status}.` });
   };
@@ -417,6 +417,7 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
       jobId: job.id,
       queueState: settled?.status || job.status,
     };
+  if (outcome.delivered && outcome.pending) warnQuotaStoppedRecipient(outcome, name, pane, ctx);
 
   // 2. Best-effort mirror. Failure here is a transparency degradation,
   //    not a correctness issue — the pane already got the text.

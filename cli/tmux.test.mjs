@@ -274,3 +274,42 @@ feature("sendToPane delivery outcome", () => {
     }],
   });
 });
+
+// 2026-10-18 22:38Z: skyvw:3 handed the Cutkit lead to skyvw:0, which sat at its weekly
+// limit; the send said only "queued", so the sender let go of the role for 5.8 h.
+feature("sending to a pane stopped at its limit", () => {
+  const nightReceipt = { sessionId: "s", limitEventId: "l", limitKind: "weekly",
+    text: "You've hit your weekly limit · resets Oct 21, 9am (Europe/Stockholm)" };
+  const send = async (receipt) => {
+    const path = tmpPath();
+    writeFileSync(path, "");
+    const oldPath = process.env.AMUX_PARK_STATE_PATH;
+    process.env.AMUX_PARK_STATE_PATH = path;
+    try {
+      return await sendToPane({ configPath: null, deliveryQueue: fakeDeliveryQueue("pending"), deliveryWaitMs: 0,
+        recipientLimit: () => receipt }, "skyvw", 0, "[from skyvw:3] the lead is yours again", { mirror: false });
+    } finally {
+      if (oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
+      else process.env.AMUX_PARK_STATE_PATH = oldPath;
+      try { unlinkSync(path); } catch {}
+    }
+  };
+
+  unit("the sender is told the recipient cannot read it and keeps the role", {
+    when: ["handing over a role to skyvw:0 at its weekly limit", () => send(nightReceipt)],
+    then: ["the result names the stop, its reset and who keeps the role", (result) => {
+      expect(result).toMatchObject({ delivered: true, pending: true });
+      expect(result.notice).toBe("WARNING: skyvw:0 is stopped at its Claude weekly limit (You've hit your weekly limit"
+        + " · resets Oct 21, 9am (Europe/Stockholm)). The message waits in its queue until the pane recovers."
+        + " Keep any role you hand over until skyvw:0 acknowledges.");
+    }],
+  });
+
+  unit("a recipient without a limit gets no warning", {
+    when: ["sending to a pane that can read", () => send(null)],
+    then: ["the result is the ordinary queued receipt", (result) => {
+      expect(result).toMatchObject({ delivered: true, pending: true });
+      expect(result.notice).toBeUndefined();
+    }],
+  });
+});
