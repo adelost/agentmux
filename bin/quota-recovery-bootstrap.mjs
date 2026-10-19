@@ -15,6 +15,8 @@ import { runtimeProfileAuthenticated, runtimeProfileCatalog } from "../core/runt
 import { parseQuotaWarningConfig } from "../channels/quota-warning.mjs";
 import { createClaudeQuotaLifecycle } from "../core/claude-quota-lifecycle.mjs";
 import { createClaudeQuotaCoordinator } from "../core/claude-quota-coordinator.mjs";
+import { createSelfCompactStore } from "../core/self-compact.mjs";
+import { parkHoldsMove } from "../core/quota-park.mjs";
 import { createQuotaRecoveryLoop, parseQuotaRecoveryConfig } from "../channels/quota-recovery.mjs";
 import { startIdleCapacityAlarm } from "../channels/idle-capacity-runtime.mjs";
 import { writeQuotaRecoveryHeartbeat } from "../core/quota-recovery-heartbeat.mjs";
@@ -44,6 +46,7 @@ if (!config.enabled) {
   const queue = createDeliveryQueue();
   const state = createState(process.env.STATE_FILE || "/tmp/agentmux-state.json");
   const lifecycle = createClaudeQuotaLifecycle({ configPath, tmuxSocket, tmuxExec, state });
+  const selfRequests = createSelfCompactStore();
   const coordinator = createClaudeQuotaCoordinator({
     queue,
     lifecycle,
@@ -67,6 +70,7 @@ if (!config.enabled) {
       reservePercent: parseQuotaWarningConfig().reservePercent,
     }),
     resetGraceMs: config.resetGraceMs,
+    parkPending: (agentName, pane) => parkHoldsMove(selfRequests.read(agentName, pane), Date.now()),
   });
   const loop = createQuotaRecoveryLoop({ coordinator, config });
   globalThis[LOOP_KEY] = loop;

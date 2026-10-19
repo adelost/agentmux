@@ -202,6 +202,8 @@ export function activeClaudeLimitReceiptFromEvents(events, {
     sessionPath,
     limitEventId: found.event.uuid,
     limitKind: found.limit.kind,
+    // Where the stop was read: Claude's grace note or its stop banner.
+    stop: found.resumedBy === isNewPromptAfterNote ? "grace-note" : "banner",
     text: found.text,
     observedAt: found.observedAt,
     resetAt: parseClaudeLimitResetAt(found.text, found.observedAt),

@@ -13,6 +13,10 @@ import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, oversizeN
   pauseCompactLimit, sessionBackgroundActivity } from "../core/pause-compact.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice } from "../core/self-compact.mjs";
+import { QUOTA_PARK_ORIGIN, quotaParkContinuation, quotaParkDecision } from "../core/quota-park.mjs";
+import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
+import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
+export { createQuotaParkFacts } from "./quota-park.mjs";
 
 const BACKGROUND_BY_ENGINE = Object.freeze({ claude: sessionBackgroundActivity, codex: codexBackgroundActivity });
 
@@ -27,10 +31,14 @@ const appendJsonLine = (path, record) => {
 export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, now = Date.now,
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
   identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs,
-  selfRequests = null, notify = async () => {}, cacheLifeMs = readContextCostPolicy().coldMs, deliveryBroker = null }) {
+  selfRequests = null, notify = async () => {}, cacheLifeMs = readContextCostPolicy().coldMs, deliveryBroker = null,
+  parkFor = null, limitReceiptFor = (engine, paneDir) => (engine === "claude" ? activeClaudeLimitReceipt(paneDir) : null),
+  cursorFor = path => captureJsonlAppendCursor("self-compact-request-v1", [path]) }) {
   const lastLogged = new Map();
   // The episode each working pane was asked about, so it hears once until it compacts.
   const asked = new Map();
+  // The stop each pane was parked for, so it is parked once per stop.
+  const parked = new Map();
   // A dry run compacts nothing, so it remembers its own would-be compacts to show the spacing rule.
   const dryCompacts = new Map();
 
@@ -79,15 +87,46 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     asked.set(paneKey, episode);
   }
 
+  // A pane its account is about to stop for longer than its cache lives files a self-request: the compact runs
+  // at its turn end with the usual guards. A pane already stopped at the grace note gets no handoff, since quota
+  // recovery resumes it; one stopped at the banner is not parked, since its account refuses the compact.
+  async function park({ name, pane, paneKey, engine, paneDir, tokens, quietMs, base }) {
+    // The compact pays only while the cache is warm; past its life it would read the whole context cold once more.
+    if (!(quietMs < (engine === "codex" ? policy.codexIdleMs : cacheLifeMs))) return false;
+    const windows = await parkFor(paneKey);
+    if (!windows?.length) return false;
+    const receipt = limitReceiptFor(engine, paneDir);
+    if (receipt && receipt.stop !== "grace-note") return false;
+    const decision = quotaParkDecision({ engine, windows, graceNote: Boolean(receipt), now: now() });
+    const episode = `${decision.window}:${decision.resetAt}`;
+    if (!decision.park || parked.get(paneKey) === episode) return false;
+    parked.set(paneKey, episode);
+    const line = { ...base, cell: "quota-park",
+      detail: `${decision.cell}: ${decision.window} window stops it until ${new Date(decision.resetAt).toISOString()}` };
+    if (base.mode !== "on") { report(paneKey, episode, { ...line, outcome: "would-park" }); return false; }
+    const identity = receipt ? null : identityFor(engine, paneDir);
+    const result = selfRequests.request({ agent: name, pane, tokens, origin: QUOTA_PARK_ORIGIN,
+      lastCompactAt: lastCompactAt(name, pane, paneKey, identity?.path),
+      ...(identity?.path ? { continuation: quotaParkContinuation(decision), identity: { ...identity, engine, dir: paneDir },
+        cursor: cursorFor(identity.path) } : {}) });
+    report(paneKey, episode, result.ok ? { ...line, outcome: "parked" } : { ...line, outcome: "not-parked", detail: result.detail });
+    return result.ok;
+  }
+
   async function consider({ agentConfig, pane, engine, paneDir, status, inCopyMode, contextTokens, lastActivityMs }) {
     const mode = modes[engine] || "off";
     if (mode === "off") return false;
     const name = agentConfig.name;
     const paneKey = `${name}:${pane}`;
     const base = { at: new Date(now()).toISOString(), pane: paneKey, mode, tokens: contextTokens, cell: "self-request" };
-    const request = selfRequests?.read(name, pane, {
+    const readRequest = () => selfRequests?.read(name, pane, {
       onExpired: (expired) => report(paneKey, expired.requestedAt, { ...base, outcome: "dropped", detail: "self-request expired unrun after 2 h" }),
     }) ?? null;
+    let request = readRequest();
+    const quietMs = Number.isFinite(lastActivityMs) ? now() - lastActivityMs : NaN;
+    if (!request && parkFor && selfRequests && await park({ name, pane, paneKey, engine, paneDir, tokens: contextTokens, quietMs, base })) {
+      request = readRequest();
+    }
     if (request && contextMaintenance.selfRequestSuperseded?.(request)) {
       selfRequests.clear(name, pane);
       report(paneKey, request.requestedAt, { ...base, outcome: "dropped", detail: "new input or session superseded the saved handoff" });
@@ -95,7 +134,6 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     }
     // A pane that asked at a stage boundary is compacted from about 80k, the size rule waits for 400k or 700k.
     const limit = request ? SELF_COMPACT_POLICY.minTokens : pauseCompactLimit(agentConfig, pane, policy);
-    const quietMs = Number.isFinite(lastActivityMs) ? now() - lastActivityMs : NaN;
     // Codex's cache lives about 30 minutes, so its idle rule is 25 minutes instead of the shared 50.
     const codexIdle = engine === "codex" ? { idleLimit: policy.codexMinTokens, idleMs: policy.codexIdleMs } : {};
     // A self-request resumes work at once, so its compact is due even on a cold cache.

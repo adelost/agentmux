@@ -67,6 +67,8 @@ export function createClaudeQuotaCoordinator({
   // A pane whose own week is spent moves to the logged-in account with the most
   // room (Mattias 2026-10-19: "Alla ska köra på Claude S."), like Codex since 12 Oct.
   findSpareAccount = null,
+  // Moving a pane is a full cache miss, so a pending quota-park compact runs first, as rotation compacts first.
+  parkPending = () => false,
   switchAccounts = process.env.AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED !== "false",
   now = () => Date.now(),
   resetGraceMs = 15_000,
@@ -312,12 +314,14 @@ export function createClaudeQuotaCoordinator({
         now: now(),
         resetGraceMs,
       });
-      const spare = await spareAccountFor(target, readiness);
+      const found = await spareAccountFor(target, readiness);
+      const compactFirst = Boolean(found) && parkPending(target.agentName, target.pane);
+      const spare = compactFirst ? null : found;
       const outcome = readiness.ready
         ? await recoverTarget(target.agentName, target.pane, target.receipt, cwd, quota?.profile?.key || null)
         : spare
           ? await recoverTarget(target.agentName, target.pane, target.receipt, cwd, spare.profile.key, { switchTo: spare.profile })
-          : parkTarget(target.agentName, target.pane, target.receipt, cwd);
+          : { ...parkTarget(target.agentName, target.pane, target.receipt, cwd), ...(compactFirst ? { waiting: "compact-before-move" } : {}) };
       if (outcome.restarted) {
         log(`${target.agentName}:${target.pane} resumed ${target.receipt.sessionId} via ${spare ? `account ${spare.profile.key}` : readiness.via}`);
       }

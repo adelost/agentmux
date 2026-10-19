@@ -29,7 +29,7 @@ import { startBot } from "./bot.mjs";
 import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
-import { createPauseCompact } from "./channels/pause-compact.mjs";
+import { createPauseCompact, createQuotaParkFacts } from "./channels/pause-compact.mjs";
 import { readPauseCompactModes } from "./core/pause-compact.mjs";
 import { createLeaderReview, leaderFromConfig } from "./core/leader-review.mjs";
 import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
@@ -341,7 +341,7 @@ const autoCompact = createAutoCompact({
   tmux: (cmd) => tmuxExec(`tmux -S '${TMUX_SOCKET}' ${cmd}`),
   config: autoCompactConfig,
   contextMaintenance,
-  pauseCompact: createPauseCompact({ contextMaintenance, deliveryBroker, state: appState, modes: readPauseCompactModes(),
+  pauseCompact: createPauseCompact({ contextMaintenance, deliveryBroker, parkFor: createQuotaParkFacts(), state: appState, modes: readPauseCompactModes(),
     log: message => console.log(`pause-compact | ${message}`), selfRequests: selfCompactRequests, notify: contextMaintenance.notify }),
 });
 autoCompact.start();

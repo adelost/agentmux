@@ -1,5 +1,5 @@
 import { component, expect, feature } from "bdd-vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPauseCompact } from "./pause-compact.mjs";
@@ -181,5 +181,51 @@ feature("a working pane far past its budget", () => {
     given: ["a brief still pending to lsrc:2", () => working([{ id: "brief", idempotencyKey: "brief", status: "pending" }])],
     when: ["polling at 620k", ctx => ctx.poll(620_000)],
     then: ["no notice yet", (sent, ctx) => expect(ctx.enqueued).toEqual([])],
+  });
+});
+
+// lsrc:0 2026-10-19: a pane its account will stop for longer than its prompt cache lives
+// compacts first, so the restart after the reset is not a cold read of a huge context.
+feature("a pane whose account is about to stop it", () => {
+  const nearLimit = resetInMs => {
+    let now = NOW;
+    const dir = mkdtempSync(join(tmpdir(), "amux-quota-park-"));
+    const session = join(dir, "s1.jsonl");
+    writeFileSync(session, "{}\n");
+    const requests = createSelfCompactStore({ dir, now: () => now });
+    const runs = [], lines = [];
+    const pause = createPauseCompact({ modes: { claude: "on", codex: "on" }, now: () => now, state: { get: () => ({}) },
+      contextMaintenance: { run: async (name, pane, options) => { runs.push({ pane: `${name}:${pane}`, ...options }); return { ok: true, compacted: true }; } },
+      record: line => lines.push(line), identityFor: () => ({ path: session, sessionId: "s1" }),
+      backgroundFor: { claude: () => null, codex: () => null }, journalCompactFor: () => null, selfRequests: requests,
+      parkFor: async () => [{ kind: "session", usedPercent: 97, resetsAt: new Date(NOW + resetInMs).toISOString() }],
+      limitReceiptFor: () => null });
+    const poll = facts => pause.consider({ agentConfig: lsrc, pane: 2, engine: "claude", paneDir: "/lsrc/.agents/2",
+      status: "idle", inCopyMode: false, contextTokens: 150_000, ...facts });
+    return { runs, lines, requests, poll, turnEndsThenWait: async () => { const ended = now; now += 61_000; return poll({ lastActivityMs: ended }); },
+      cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+
+  component("with 3 % left and the reset 4 h away it is compacted at its turn end", {
+    given: ["builder lsrc:2 at 150k, its account at 97 % until 4 h from now", () => nearLimit(4 * 3_600_000)],
+    when: ["polling a minute after its turn ended", ctx => ctx.turnEndsThenWait()],
+    then: ["one compact through the self-request path", (sent, ctx) => {
+      try {
+        expect(sent).toBe(true);
+        expect(ctx.runs).toEqual([expect.objectContaining({ pane: "lsrc:2", pauseTokens: 80_000, dry: false })]);
+        expect(ctx.lines.map(line => `${line.outcome}:${line.cell}`)).toEqual(["parked:quota-park", "compacted:self-request"]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("with the reset 15 min away it is left alone, since its cache outlives the stop", {
+    given: ["the same pane, the reset 15 min away", () => nearLimit(15 * 60_000)],
+    when: ["polling a minute after its turn ended", ctx => ctx.turnEndsThenWait()],
+    then: ["no compact and no request", (sent, ctx) => {
+      try {
+        expect(sent).toBe(false);
+        expect(ctx.runs).toEqual([]);
+        expect(ctx.requests.list()).toEqual([]);
+      } finally { ctx.cleanup(); }
+    }],
   });
 });

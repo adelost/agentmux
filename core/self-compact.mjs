@@ -48,10 +48,10 @@ export function createSelfCompactStore({ dir = DEFAULT_DIR, now = Date.now, poli
 
   return {
     /** Stores one request when admitted. A second request replaces the first, so the latest focus wins. */
-    request({ agent, pane, focus = "", tokens, lastCompactAt = null, continuation = "", identity = null, cursor = null }) {
+    request({ agent, pane, focus = "", tokens, lastCompactAt = null, continuation = "", identity = null, cursor = null, origin = null }) {
       const admission = selfCompactAdmission({ tokens, lastCompactAt, now: now() }, policy);
       if (!admission.ok) return admission;
-      const request = { agent, pane, focus: String(focus || ""), tokens, requestedAt: new Date(now()).toISOString() };
+      const request = { agent, pane, focus: String(focus || ""), tokens, requestedAt: new Date(now()).toISOString(), ...(origin ? { origin } : {}) };
       if (continuation) {
         if (!identity?.sessionId || !identity?.path || !Number.isFinite(cursor?.positions?.[identity.path])) {
           throw new Error("self-compact continuation requires the exact session and checkpoint cursor");

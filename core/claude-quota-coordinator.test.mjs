@@ -358,6 +358,20 @@ feature("a spent week resumes on a logged-in account with room", () => {
     }],
   });
 
+  // lsrc:0 2026-10-19: a move is a full cache miss, so the pane's pending quota-park compact runs first.
+  component("a pending quota-park compact runs before the move", {
+    given: ["the same pane while its park compact is still pending", () => spentFixture({ parkPending: () => true })],
+    when: ["the coordinator polls", ({ coordinator }) => coordinator.tick()],
+    then: ["it stays parked on its account until the compact has run", (results, ctx) => {
+      try {
+        expect(results[0].outcome).toMatchObject({ parked: true, waiting: "compact-before-move" });
+        expect(results[0].switchedTo).toBeUndefined();
+        expect(ctx.selected.key).toBe("claude:login:wetterlind");
+        expect(ctx.restarts).toEqual([]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
   component("a spent session window does not move accounts", {
     given: ["a session limit while the week still has room", () => {
       const ctx = spentFixture();
