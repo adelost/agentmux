@@ -19,3 +19,11 @@ process.env.AMUX_ASK_LEDGER_PATH = join(
   mkdtempSync(join(tmpdir(), "amux-test-asks-")),
   "ask-ledger.jsonl",
 );
+
+// Same for the generated pane config and the bridge state. On 2026-10-19 a
+// test started the checkout's CLI under a temporary HOME with the shell's
+// AGENTS_YAML, and it regenerated the live channel map from the checkout's
+// July agentmux.yaml. Explicit env also beats the checkout's own .env.
+const runtime = mkdtempSync(join(tmpdir(), "amux-test-runtime-"));
+process.env.AGENTS_YAML = join(runtime, "agents.yaml");
+process.env.STATE_FILE = join(runtime, "state.json");
