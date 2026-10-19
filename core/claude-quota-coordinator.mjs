@@ -15,6 +15,7 @@ import {
   quotaRecoveryContinuation,
   quotaRecoveryJobKey,
 } from "./claude-quota-recovery.mjs";
+import { resumeParkedPanes } from "./quota-park-resume.mjs";
 
 const PAUSED_UNTIL_RECOVERY = Number.MAX_SAFE_INTEGER;
 
@@ -69,6 +70,9 @@ export function createClaudeQuotaCoordinator({
   findSpareAccount = null,
   // Moving a pane is a full cache miss, so a pending quota-park compact runs first, as rotation compacts first.
   parkPending = () => false,
+  // A pane the quota park stopped has no limit receipt; its park record says when its account has room again.
+  parkStore = null,
+  identityFor = undefined,
   switchAccounts = process.env.AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED !== "false",
   now = () => Date.now(),
   resetGraceMs = 15_000,
@@ -326,6 +330,11 @@ export function createClaudeQuotaCoordinator({
         log(`${target.agentName}:${target.pane} resumed ${target.receipt.sessionId} via ${spare ? `account ${spare.profile.key}` : readiness.via}`);
       }
       results.push({ ...target, readiness, ...(spare ? { switchedTo: spare.profile.key } : {}), outcome });
+    }
+    if (parkStore) {
+      const parks = await resumeParkedPanes({ store: parkStore, queue, readQuota, identityFor, now, resetGraceMs, log,
+        activeReceipt: (agentName, pane) => lifecycle.activeReceipt(agentName, pane) });
+      for (const park of parks) results.push({ agentName: park.agentName, pane: park.pane, park });
     }
     return results;
   }

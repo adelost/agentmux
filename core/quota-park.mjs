@@ -59,10 +59,37 @@ export function quotaParkDecision({ engine, windows = [], graceNote = false, now
 export const parkHoldsMove = (request, now, policy = QUOTA_PARK_POLICY) =>
   request?.origin === QUOTA_PARK_ORIGIN && now - Date.parse(request.requestedAt) < policy.moveWaitMs;
 
+/** WHAT: Names the first line of every park handoff. WHY: Keeps the handoff itself from counting as a pane's new turn. */
+export const QUOTA_PARK_HEADER = "[AMUX QUOTA PARK · SAME SESSION]";
+
 /** WHAT: Formats the handoff a parked pane continues from after its compact. WHY: Keeps the task going instead of starting it over. */
 export function quotaParkContinuation({ window, resetAt }) {
-  return "[AMUX QUOTA PARK · SAME SESSION]\n"
+  return `${QUOTA_PARK_HEADER}\n`
     + `Your account's ${window} window stops you until ${new Date(resetAt).toISOString().slice(0, 16).replace("T", " ")}Z,`
     + " so this session was compacted at your turn end to keep the restart after the reset small."
     + " Continue the task you were on from the compact summary. Do not repeat an external side effect that already has a receipt.";
+}
+
+// lsrc:0 2026-10-19: ten Claude S panes read "stops you until 03:59Z" and ended their turns. A free reset gave the
+// account room at 20:26Z and nothing told them; two sat idle about 45 minutes until a person woke them.
+/**
+ * WHAT: Returns resume, wait or drop for one parked pane, with the reason in words.
+ * WHY: Keeps the recovery tick and a replay of past events on one rule.
+ */
+export function parkResumeDecision({ park, windows = null, observedAt = NaN, newTurn = null, now, resetGraceMs = 15_000 },
+  policy = QUOTA_PARK_POLICY) {
+  if (newTurn) return { action: "drop", reason: newTurn };
+  const resetAt = Number(park.resetAt);
+  if (now >= resetAt + resetGraceMs) {
+    return { action: "resume", reason: `its ${park.window} window reset at ${new Date(resetAt).toISOString()}` };
+  }
+  // A reading from before the park cannot show room the park did not see.
+  if (!windows || !(observedAt > Date.parse(park.parkedAt))) return { action: "wait", reason: "no reading of its account since the park" };
+  const spent = windows.find((window) => window.usedPercent >= 100);
+  if (spent) return { action: "wait", reason: `its ${spent.kind} window is spent` };
+  const parked = windows.find((window) => window.kind === park.window);
+  if (!parked) return { action: "wait", reason: `the reading has no ${park.window} window` };
+  const left = 100 - parked.usedPercent;
+  if (left <= policy.leftPercent) return { action: "wait", reason: `its ${park.window} window has ${left} % left` };
+  return { action: "resume", reason: `${park.account?.name || "its account"} has ${left} % of its ${park.window} window left` };
 }

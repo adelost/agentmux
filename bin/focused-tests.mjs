@@ -30,6 +30,8 @@ const TEST_ALIASES = {
   "core/claude-quota-target.mjs": ["core/claude-quota-lifecycle.test.mjs", "core/compact-quota-reset.test.mjs"],
   "core/delivery-wake.mjs": ["core/context-maintenance.test.mjs", "core/compact-quota-reset.test.mjs"],
   "core/delivery-not-sent.mjs": ["core/delivery-broker.test.mjs"],
+  "core/quota-park-resume.mjs": ["core/claude-quota-coordinator.test.mjs"],
+  "channels/quota-park.mjs": ["channels/pause-compact.test.mjs"],
   "test/fixtures/composer-agent.mjs": ["core/delivery-broker.test.mjs", "core/draft-withdrawal.test.mjs"],
   "bin/transcribe-whisper.sh": ["bin/transcribe-whisper.test.mjs"],
   "core/discord-inbound-store.mjs": ["core/inbound-voice-failure.test.mjs", "core/inbound-reconciler.test.mjs",

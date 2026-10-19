@@ -6,7 +6,7 @@ import { quotaAccountCatalog } from "../core/quota-profiles.mjs";
 import { accountWindows } from "../core/quota-park.mjs";
 
 /**
- * WHAT: Returns a reader of one pane's account windows from a snapshot at most five minutes old.
+ * WHAT: Returns a reader of one pane's account and windows from a snapshot under five minutes old.
  * WHY: Keeps the minute poll from reading quota and pane homes for every pane.
  */
 export function createQuotaParkFacts({
@@ -25,6 +25,8 @@ export function createQuotaParkFacts({
   }
   return async (paneKey) => {
     const account = (await fresh())?.accounts?.find((candidate) => candidate.ok && candidate.inUse?.includes(paneKey));
-    return account ? accountWindows(account) : null;
+    return account
+      ? { account: { name: account.name || account.profile?.key || null, key: account.profile?.key || null }, windows: accountWindows(account) }
+      : null;
   };
 }

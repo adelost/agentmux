@@ -88,3 +88,53 @@ feature("the idle-capacity alarm", () => {
     }],
   });
 });
+
+// lsrc:0 2026-10-19: after the Claude S free reset the notice told the dispatcher to rotate claw:2 to Claude S,
+// the account it already ran on, and a pane the quota park stopped (no receipt, empty queue) was never reported.
+const CLAUDE_S = { name: "Claude S", profileId: "1", usedPercent: 0, profileKeys: ["claude:1", "claude:login:2"] };
+const CLAUDE_A = { name: "Claude A", profileId: "2", usedPercent: 40, profileKeys: ["claude:2"] };
+
+function evening(observation, room, at = "2026-10-19T20:45:00Z") {
+  const fx = { clock: Date.parse(at), notices: [], values: {} };
+  fx.alarm = createIdleCapacityAlarm({
+    target: "lsrc:0",
+    panes: () => [{ key: "claw:2", engine: "claude" }],
+    observe: async () => observation,
+    roomFor: async () => room,
+    notify: async (text) => { fx.notices.push(text); },
+    state: { get: (key, fallback) => fx.values[key] ?? fallback, set: (key, value) => { fx.values[key] = value; } },
+    now: () => fx.clock,
+  });
+  return fx;
+}
+
+feature("the idle-capacity notice and the account a pane is on", () => {
+  unit("room on the pane's own account never suggests a rotate; the notice names what amux did", {
+    given: ["claw:2 stopped on Claude S since 18:20Z, its recovery prompt cancelled, and Claude S has room", () => evening({
+      limitReceipt: { limitEventId: "limit-claw-2", limitKind: "weekly", observedAt: Date.parse("2026-10-19T18:20:39Z") },
+      jobs: [], processStopped: false, profileKey: "claude:1",
+      resume: "amux's recovery prompt is cancelled: not sent: cancellation requested by claw:0 before submit.",
+    }, CLAUDE_S)],
+    when: ["the alarm checks", async (fx) => { await fx.alarm.tick(); return fx; }],
+    then: ["no rotate command, and the cancelled recovery is named", (fx) => {
+      expect(fx.notices).toEqual(["[idle-capacity] claw:2 has not been able to work for 2 h 24 min: stopped at its weekly limit. "
+        + "Claude S, the account it is on, has room (0 % of the week used), so a rotate would change nothing. "
+        + "amux's recovery prompt is cancelled: not sent: cancellation requested by claw:0 before submit. "
+        + "One notice per pane and episode."]);
+    }],
+  });
+
+  unit("a pane the quota park stopped is reported once it has been idle 15 minutes", {
+    given: ["claw:2 got its park notice at 20:10Z with nothing queued, and Claude A has room", () => evening({
+      limitReceipt: null, jobs: [], processStopped: false, profileKey: "claude:1",
+      park: { state: "parked", parkedAt: "2026-10-19T20:10:00.000Z", window: "week", noticeJobId: "notice-1" },
+      resume: "amux has not resumed it yet.",
+    }, CLAUDE_A, "2026-10-19T20:26:00Z")],
+    when: ["the alarm checks", async (fx) => { await fx.alarm.tick(); return fx; }],
+    then: ["the dispatcher hears of the park and where the room is", (fx) => {
+      expect(fx.notices).toEqual(["[idle-capacity] claw:2 has not been able to work for 16 min: "
+        + "parked by the quota park until its week window has room. Claude A has room (40 % of the week used). "
+        + "Move it with `amux accounts rotate claude:2`, or record why it stays. One notice per pane and episode."]);
+    }],
+  });
+});

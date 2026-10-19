@@ -1,11 +1,13 @@
 import { feature, component, expect } from "bdd-vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createClaudeQuotaCoordinator } from "./claude-quota-coordinator.mjs";
 import { isClaudeQuotaContinuationAuthorized } from "./claude-quota-target.mjs";
 import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
+import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
+import { quotaParkContinuation } from "./quota-park.mjs";
 
 const receipt = {
   sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -392,6 +394,120 @@ feature("a spent week resumes on a logged-in account with room", () => {
         expect(ctx.spareReads).toBe(0);
         expect(ctx.selected.key).toBe("claude:login:wetterlind");
         expect(ctx.restarts).toEqual([]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+});
+
+// lsrc:0 2026-10-19: the quota park told ten Claude S panes their week stopped them until 04:00Z, and they ended
+// their turns. A free reset gave Claude S room at 20:26Z; nothing resumed them, since they had no limit receipt and
+// no parked job. claw:1 sat idle until a person woke it about 21:10Z.
+const PARK_RESET_AT = Date.parse("2026-10-20T04:00:00Z");
+const userLine = (text) => `${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`;
+const claudeS = (weekUsed, fetchedAt) => ({ ok: true, provider: "claude", fetchedAt, limits: [
+  { id: "session", kind: "session", usedPercent: 2, resetsAt: "2026-10-20T01:10:00Z" },
+  { id: "weekly_all", kind: "weekly_all", usedPercent: weekUsed, resetsAt: "2026-10-20T04:00:00Z" },
+] });
+
+/** The park store's API, kept in memory: record, read, list, and update that never overwrites a newer park. */
+function memoryParkStore() {
+  const records = new Map();
+  const key = (agentName, pane) => `${agentName}:${pane}`;
+  return {
+    record: (park) => { records.set(key(park.agentName, park.pane), { ...park, state: "parked" }); return records.get(key(park.agentName, park.pane)); },
+    read: (agentName, pane) => records.get(key(agentName, pane)) || null,
+    list: () => [...records.values()],
+    update(park, fields) {
+      const current = records.get(key(park.agentName, park.pane));
+      if (current?.parkedAt !== park.parkedAt) return current || null;
+      records.set(key(park.agentName, park.pane), { ...current, ...fields });
+      return records.get(key(park.agentName, park.pane));
+    },
+  };
+}
+
+/** claw:1 parked at 19:53Z on Claude S; the park notice reached it and it ended its turn. */
+function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z" } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "amux-park-resume-"));
+  let clock = Date.parse("2026-10-19T19:53:00Z");
+  const configPath = join(root, "agents.yaml");
+  writeFileSync(configPath, ["claw:", `  dir: ${join(root, "claw")}`, "  panes:",
+    "    - { name: lead, cmd: claude }", "    - { name: builder, cmd: claude }", ""].join("\n"));
+  const queue = createDeliveryQueue({ rootDir: join(root, "queue"), now: () => clock });
+  const session = join(root, "claw-1.jsonl");
+  writeFileSync(session, userLine("Build the transcription retry."));
+  const store = memoryParkStore();
+  const park = store.record({ agentName: "claw", pane: 1, account: { name: "Claude S", key: "claude:1" }, window: "week",
+    resetAt: PARK_RESET_AT, parkedAt: new Date(clock).toISOString(),
+    identity: { engine: "claude", dir: join(root, "claw", ".agents", "1"), sessionId: "s-claw-1", path: session },
+    cursor: captureJsonlAppendCursor("self-compact-request-v1", [session]) });
+  // The compact ran at its turn end and the park notice reached the pane, which then ended its turn.
+  clock += 60_000;
+  const noticeText = quotaParkContinuation({ window: "week", resetAt: PARK_RESET_AT });
+  const notice = queue.enqueue({ agentName: "claw", pane: 1, source: "self-compact", text: noticeText });
+  queue.update(notice, { status: "acknowledged", acknowledgedAt: clock });
+  appendFileSync(session, `${userLine(noticeText)}${JSON.stringify({ type: "assistant", message: { role: "assistant",
+    content: [{ type: "text", text: "Parked until the reset; stopping here." }] } })}\n`);
+  clock = Date.parse(at);
+  const reads = [];
+  const coordinator = createClaudeQuotaCoordinator({
+    queue, configPath, now: () => clock, log: () => {}, parkStore: store,
+    identityFor: () => ({ sessionId: "s-claw-1", path: session }),
+    lifecycle: { activeReceipt: () => null, profileFor: () => ({ key: "claude:1" }) },
+    readQuota: async (request) => { reads.push(request); return readings.shift() ?? { ok: false, error: "no reading yet" }; },
+  });
+  const prompts = () => queue.list("claw", 1).filter((job) => job.source === "quota-recovery");
+  return { park, store, queue, session, coordinator, reads, prompts, advance: (ms) => { clock += ms; },
+    cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+feature("a pane the quota park stopped resumes when its account has room again", () => {
+  component("a parked pane with an empty queue gets the same-session recovery prompt once Claude S reads room", {
+    given: ["claw:1 parked at 19:53Z, and Claude S reads 0 % used at 20:26:28Z after the free reset",
+      () => parkedClaw({ readings: [claudeS(0, "2026-10-19T20:26:28.265Z")] })],
+    when: ["quota recovery ticks at 20:26:30Z", (ctx) => ctx.coordinator.tick()],
+    then: ["the recovery prompt waits first in claw:1's queue and the park says why it was resumed", (_, ctx) => {
+      try {
+        expect(ctx.reads).toEqual([expect.objectContaining({ agentName: "claw", pane: 1, notBefore: Date.parse(ctx.park.parkedAt) })]);
+        expect(ctx.prompts()).toEqual([expect.objectContaining({ status: "pending", text: quotaRecoveryContinuation() })]);
+        expect(ctx.queue.list("claw", 1).filter((job) => job.status === "pending")[0].orderKey).toMatch(/^0{16}:/u);
+        expect(ctx.store.read("claw", 1)).toMatchObject({ state: "resumed", reason: "Claude S has 100 % of its week window left" });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("a pane that started a new turn since its park is left alone", {
+    given: ["claw:1 parked, then claw:0 sent it a new task, and Claude S reads room", () => {
+      const ctx = parkedClaw({ readings: [claudeS(0, "2026-10-19T20:26:28.265Z")] });
+      appendFileSync(ctx.session, userLine("[from claw:0] Review the Kit view next."));
+      return ctx;
+    }],
+    when: ["quota recovery ticks", (ctx) => ctx.coordinator.tick()],
+    then: ["no prompt, and the park says it moved on", (_, ctx) => {
+      try {
+        expect(ctx.prompts()).toEqual([]);
+        expect(ctx.store.read("claw", 1)).toMatchObject({ state: "dropped", reason: "started a new turn since its park" });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  component("no room yet, or only a reading from before the park, keeps it parked until its window resets", {
+    given: ["Claude S still at 98 %, then a reading taken before the park", () => parkedClaw({ readings: [
+      claudeS(98, "2026-10-19T20:26:28.265Z"), claudeS(0, "2026-10-19T19:40:00.000Z")] })],
+    when: ["recovery ticks twice, then once after the reset", async (ctx) => {
+      await ctx.coordinator.tick();
+      const afterFull = ctx.prompts().length;
+      await ctx.coordinator.tick();
+      const afterStale = ctx.prompts().length;
+      ctx.advance(PARK_RESET_AT + 20_000 - Date.parse("2026-10-19T20:26:30Z"));
+      await ctx.coordinator.tick();
+      return { afterFull, afterStale };
+    }],
+    then: ["no prompt before the reset, one prompt after it", ({ afterFull, afterStale }, ctx) => {
+      try {
+        expect([afterFull, afterStale]).toEqual([0, 0]);
+        expect(ctx.prompts()).toHaveLength(1);
+        expect(ctx.store.read("claw", 1)).toMatchObject({ state: "resumed", reason: "its week window reset at 2026-10-20T04:00:00.000Z" });
       } finally { ctx.cleanup(); }
     }],
   });

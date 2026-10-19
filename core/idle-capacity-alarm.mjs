@@ -15,10 +15,10 @@ const isHeldByLimit = (job) => isQuotaParkedJob(job) || String(job.lastReason ||
 const oldestOf = (jobs) => jobs.reduce((oldest, job) => (!oldest || job.createdAt < oldest.createdAt ? job : oldest), null);
 
 /**
- * WHAT: Names why one pane cannot take work and since when, or null when it can or nothing waits.
+ * WHAT: Names why one pane cannot work and since when, or null when nothing holds it.
  * WHY: Keeps a dormant pane with an empty queue out of the alarm.
  */
-export function idlePaneEvidence({ limitReceipt = null, jobs = [], processStopped = false } = {}) {
+export function idlePaneEvidence({ limitReceipt = null, jobs = [], processStopped = false, park = null } = {}) {
   const live = jobs.filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status));
   if (limitReceipt) {
     return { episode: `limit:${limitReceipt.limitEventId}`, since: limitReceipt.observedAt, waiting: live.length,
@@ -29,6 +29,12 @@ export function idlePaneEvidence({ limitReceipt = null, jobs = [], processStoppe
     const oldest = oldestOf(held);
     return { episode: `parked:${oldest.id}`, since: oldest.createdAt, waiting: live.length,
       reason: "its messages are parked by a usage limit" };
+  }
+  // A pane the quota park stopped has no receipt and an empty queue; only its park record shows the stop.
+  // It counts once the park notice reached the pane: before that the pane was never told to stop.
+  if (park?.state === "parked" && park.noticeJobId && !live.length) {
+    return { episode: `park:${park.parkedAt}`, since: Date.parse(park.parkedAt), waiting: 0,
+      reason: `parked by the quota park until its ${park.window} window has room` };
   }
   if (processStopped && live.length) {
     const oldest = oldestOf(live);
@@ -43,14 +49,34 @@ const duration = (ms) => {
   return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`;
 };
 
-/** WHAT: Words one notice for the dispatcher. WHY: Names the pane, why it is stuck, where the room is and the command that moves it. */
-export function idleCapacityNotice({ key, engine, evidence, room, now }) {
+/**
+ * WHAT: Describes what amux did to resume one pane: its park record, else its newest recovery prompt.
+ * WHY: Keeps a notice about a pane on an account with room from suggesting a rotate that changes nothing.
+ */
+export function resumeStatus({ park = null, history = [] } = {}) {
+  if (park?.state === "resumed") return `amux sent it the same-session recovery prompt at ${park.resumedAt} (${park.reason}).`;
+  if (park?.state === "dropped") return `amux did not resume it after its quota park: ${park.reason}.`;
+  if (park?.state === "parked") return `amux has not resumed it yet; its quota park of ${park.parkedAt} is still open.`;
+  const recovery = history.filter((job) => job.source === "quota-recovery")
+    .reduce((newest, job) => (!newest || job.createdAt > newest.createdAt ? job : newest), null);
+  if (!recovery) return "amux has no automatic resume on record for it.";
+  if (recovery.status === "acknowledged") return `amux's recovery prompt reached it at ${new Date(recovery.acknowledgedAt).toISOString()}.`;
+  return `amux's recovery prompt is ${recovery.status}: ${recovery.lastReason || "no reason given"}.`;
+}
+
+/** WHAT: Formats one notice for the dispatcher. WHY: Keeps the pane, its stop, the room and the next step in one message. */
+export function idleCapacityNotice({ key, engine, evidence, room, now, own = null }) {
+  const waiting = evidence.waiting ? `, ${evidence.waiting} message(s) waiting` : "";
+  const stuck = `[idle-capacity] ${key} has not been able to work for ${duration(now - evidence.since)}: ${evidence.reason}${waiting}. `;
+  // The pane already runs on the account with room, so a rotate there would change nothing.
+  if (own?.profileKey && room.profileKeys?.includes(own.profileKey)) {
+    return `${stuck}${room.name}, the account it is on, has room (${room.usedPercent} % of the week used), so a rotate would change nothing. `
+      + `${own.resume || resumeStatus()} One notice per pane and episode.`;
+  }
   const move = engine === "codex"
     ? `\`//switch ${room.profileId}\` in ${key}'s channel`
     : `\`amux accounts rotate claude:${room.profileId}\``;
-  const waiting = evidence.waiting ? `, ${evidence.waiting} message(s) waiting` : "";
-  return `[idle-capacity] ${key} has not been able to work for ${duration(now - evidence.since)}: `
-    + `${evidence.reason}${waiting}. ${room.name} has room (${room.usedPercent} % of the week used). `
+  return `${stuck}${room.name} has room (${room.usedPercent} % of the week used). `
     + `Move it with ${move}, or record why it stays. One notice per pane and episode.`;
 }
 
@@ -82,14 +108,15 @@ export function createIdleCapacityAlarm({
     for (const pane of panes()) {
       // The dispatcher cannot read a notice about its own stop.
       if (pane.key === target) continue;
-      const evidence = idlePaneEvidence(await observe(pane));
+      const observation = await observe(pane);
+      const evidence = idlePaneEvidence(observation);
       if (!evidence || !(now() - evidence.since >= afterMs)) continue;
       stuck.add(pane.key);
       if (sent[pane.key]?.episode === evidence.episode) continue;
       if (!rooms.has(pane.engine)) rooms.set(pane.engine, await roomFor(pane.engine));
       const room = rooms.get(pane.engine);
       if (!room) continue;
-      await notify(idleCapacityNotice({ key: pane.key, engine: pane.engine, evidence, room, now: now() }),
+      await notify(idleCapacityNotice({ key: pane.key, engine: pane.engine, evidence, room, now: now(), own: observation }),
         `idle-capacity:${pane.key}:${evidence.episode}`);
       sent[pane.key] = { episode: evidence.episode, at: now() };
       log(`${pane.key} reported to ${target}: ${evidence.reason}`);

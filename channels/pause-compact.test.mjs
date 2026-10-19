@@ -2,7 +2,7 @@ import { component, expect, feature } from "bdd-vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPauseCompact } from "./pause-compact.mjs";
+import { createPauseCompact, createQuotaParkStore } from "./pause-compact.mjs";
 import { createSelfCompactStore } from "../core/self-compact.mjs";
 
 const NOW = Date.parse("2026-10-11T03:36:00Z");
@@ -193,16 +193,18 @@ feature("a pane whose account is about to stop it", () => {
     const session = join(dir, "s1.jsonl");
     writeFileSync(session, "{}\n");
     const requests = createSelfCompactStore({ dir, now: () => now });
+    const parks = createQuotaParkStore({ dir: join(dir, "parks") });
     const runs = [], lines = [];
     const pause = createPauseCompact({ modes: { claude: "on", codex: "on" }, now: () => now, state: { get: () => ({}) },
       contextMaintenance: { run: async (name, pane, options) => { runs.push({ pane: `${name}:${pane}`, ...options }); return { ok: true, compacted: true }; } },
       record: line => lines.push(line), identityFor: () => ({ path: session, sessionId: "s1" }),
       backgroundFor: { claude: () => null, codex: () => null }, journalCompactFor: () => null, selfRequests: requests,
-      parkFor: async () => [{ kind: "session", usedPercent: 97, resetsAt: new Date(NOW + resetInMs).toISOString() }],
-      limitReceiptFor: () => null });
+      parkFor: async () => ({ account: { name: "Claude S", key: "claude:1" },
+        windows: [{ kind: "session", usedPercent: 97, resetsAt: new Date(NOW + resetInMs).toISOString() }] }),
+      parkStore: parks, limitReceiptFor: () => null });
     const poll = facts => pause.consider({ agentConfig: lsrc, pane: 2, engine: "claude", paneDir: "/lsrc/.agents/2",
       status: "idle", inCopyMode: false, contextTokens: 150_000, ...facts });
-    return { runs, lines, requests, poll, turnEndsThenWait: async () => { const ended = now; now += 61_000; return poll({ lastActivityMs: ended }); },
+    return { runs, lines, requests, parks, poll, turnEndsThenWait: async () => { const ended = now; now += 61_000; return poll({ lastActivityMs: ended }); },
       cleanup: () => rmSync(dir, { recursive: true, force: true }) };
   };
 
@@ -214,6 +216,9 @@ feature("a pane whose account is about to stop it", () => {
         expect(sent).toBe(true);
         expect(ctx.runs).toEqual([expect.objectContaining({ pane: "lsrc:2", pauseTokens: 80_000, dry: false })]);
         expect(ctx.lines.map(line => `${line.outcome}:${line.cell}`)).toEqual(["parked:quota-park", "compacted:self-request"]);
+        // Quota recovery resumes it from this record once Claude S has room (lsrc:0, 2026-10-19).
+        expect(ctx.parks.list()).toEqual([expect.objectContaining({ agentName: "lsrc", pane: 2, state: "parked",
+          account: { name: "Claude S", key: "claude:1" }, window: "session", resetAt: NOW + 4 * 3_600_000 })]);
       } finally { ctx.cleanup(); }
     }],
   });
@@ -225,6 +230,7 @@ feature("a pane whose account is about to stop it", () => {
         expect(sent).toBe(false);
         expect(ctx.runs).toEqual([]);
         expect(ctx.requests.list()).toEqual([]);
+        expect(ctx.parks.list()).toEqual([]);
       } finally { ctx.cleanup(); }
     }],
   });

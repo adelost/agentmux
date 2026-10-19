@@ -17,6 +17,7 @@ import { QUOTA_PARK_ORIGIN, quotaParkContinuation, quotaParkDecision } from "../
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
 import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 export { createQuotaParkFacts } from "./quota-park.mjs";
+export { createQuotaParkStore } from "../core/quota-park-store.mjs";
 
 const BACKGROUND_BY_ENGINE = Object.freeze({ claude: sessionBackgroundActivity, codex: codexBackgroundActivity });
 
@@ -32,7 +33,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
   identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs,
   selfRequests = null, notify = async () => {}, cacheLifeMs = readContextCostPolicy().coldMs, deliveryBroker = null,
-  parkFor = null, limitReceiptFor = (engine, paneDir) => (engine === "claude" ? activeClaudeLimitReceipt(paneDir) : null),
+  parkFor = null, parkStore = null, limitReceiptFor = (engine, paneDir) => (engine === "claude" ? activeClaudeLimitReceipt(paneDir) : null),
   cursorFor = path => captureJsonlAppendCursor("self-compact-request-v1", [path]) }) {
   const lastLogged = new Map();
   // The episode each working pane was asked about, so it hears once until it compacts.
@@ -93,7 +94,8 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   async function park({ name, pane, paneKey, engine, paneDir, tokens, quietMs, base }) {
     // The compact pays only while the cache is warm; past its life it would read the whole context cold once more.
     if (!(quietMs < (engine === "codex" ? policy.codexIdleMs : cacheLifeMs))) return false;
-    const windows = await parkFor(paneKey);
+    const facts = await parkFor(paneKey);
+    const windows = facts?.windows;
     if (!windows?.length) return false;
     const receipt = limitReceiptFor(engine, paneDir);
     if (receipt && receipt.stop !== "grace-note") return false;
@@ -105,10 +107,16 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       detail: `${decision.cell}: ${decision.window} window stops it until ${new Date(decision.resetAt).toISOString()}` };
     if (base.mode !== "on") { report(paneKey, episode, { ...line, outcome: "would-park" }); return false; }
     const identity = receipt ? null : identityFor(engine, paneDir);
+    const cursor = identity?.path ? cursorFor(identity.path) : null;
     const result = selfRequests.request({ agent: name, pane, tokens, origin: QUOTA_PARK_ORIGIN,
       lastCompactAt: lastCompactAt(name, pane, paneKey, identity?.path),
       ...(identity?.path ? { continuation: quotaParkContinuation(decision), identity: { ...identity, engine, dir: paneDir },
-        cursor: cursorFor(identity.path) } : {}) });
+        cursor } : {}) });
+    // Quota recovery resumes a Claude pane told to stop here as soon as this account has room again.
+    if (result.ok && engine === "claude" && identity?.path) {
+      parkStore?.record({ agentName: name, pane, account: facts.account || null, window: decision.window, resetAt: decision.resetAt,
+        parkedAt: result.request.requestedAt, identity: { engine, dir: paneDir, sessionId: identity.sessionId, path: identity.path }, cursor });
+    }
     report(paneKey, episode, result.ok ? { ...line, outcome: "parked" } : { ...line, outcome: "not-parked", detail: result.detail });
     return result.ok;
   }

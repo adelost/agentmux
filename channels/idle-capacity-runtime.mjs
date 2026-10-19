@@ -8,7 +8,7 @@ import { readQuotaSnapshot } from "../core/quota-usage.mjs";
 import { quotaAccountCatalog } from "../core/quota-profiles.mjs";
 import { claudeWeeklyRoom } from "../core/claude-quota-recovery.mjs";
 import { codexAccountHasRoom } from "../core/codex-limit-recovery.mjs";
-import { createIdleCapacityAlarm } from "../core/idle-capacity-alarm.mjs";
+import { createIdleCapacityAlarm, resumeStatus } from "../core/idle-capacity-alarm.mjs";
 import { parseQuotaWarningConfig } from "./quota-warning.mjs";
 
 const SHELL_PROCESS = /^(bash|zsh|fish|sh|dash)$/u;
@@ -46,7 +46,8 @@ export function accountWithRoom(accounts, engine, { reservePercent = 90 } = {}) 
       ? claudeWeeklyRoom(account, { reservePercent })
       : codexAccountHasRoom(account) && Number(weekly) < reservePercent ? Number(weekly) : null;
     if (usedPercent !== null && (!best || usedPercent < best.usedPercent)) {
-      best = { name: account.name || account.profile?.key, profileId: account.profile?.id, usedPercent };
+      best = { name: account.name || account.profile?.key, profileId: account.profile?.id, usedPercent,
+        profileKeys: [account.profile?.key, ...(account.sharedBy || []).map((member) => member.key)].filter(Boolean) };
     }
   }
   return best;
@@ -64,8 +65,8 @@ function enginePanes(configPath) {
 }
 
 /**
- * WHAT: Starts the alarm on its own timer next to quota recovery.
- * WHY: Reports a pane that cannot work while paid capacity sits unused; it never wakes or moves panes.
+ * WHAT: Schedules the alarm on its own timer next to quota recovery.
+ * WHY: Keeps unused paid capacity from going unreported; the alarm never wakes or moves panes.
  */
 export function startIdleCapacityAlarm({
   queue,
@@ -74,6 +75,8 @@ export function startIdleCapacityAlarm({
   tmuxSocket,
   tmuxExec,
   activeReceipt,
+  profileFor = () => null,
+  parkStore = null,
   config = parseIdleCapacityConfig(),
   readSnapshot = () => readQuotaSnapshot({ profiles: quotaAccountCatalog().filter((profile) => profile.provider !== "kimi") }),
   log = (message) => console.log(`idle-capacity | ${message}`),
@@ -101,11 +104,15 @@ export function startIdleCapacityAlarm({
       return enginePanes(configPath);
     },
     observe: async (pane) => {
-      const jobs = queue.list(pane.agentName, pane.pane).filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status));
-      const limitReceipt = pane.engine === "claude" ? activeReceipt(pane.agentName, pane.pane) : null;
+      const history = queue.list(pane.agentName, pane.pane);
+      const jobs = history.filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status));
+      const claude = pane.engine === "claude";
+      const limitReceipt = claude ? activeReceipt(pane.agentName, pane.pane) : null;
+      const park = claude ? parkStore?.read(pane.agentName, pane.pane) ?? null : null;
       // A pane with nothing queued and no limit is idle by choice; tmux is read only for waiting work.
       const stopped = !limitReceipt && jobs.length ? await processStopped(pane) : false;
-      return { limitReceipt, jobs, processStopped: stopped };
+      return { limitReceipt, jobs, processStopped: stopped, park,
+        profileKey: claude ? profileFor(pane.agentName, pane.pane)?.key ?? null : null, resume: resumeStatus({ park, history }) };
     },
     roomFor: async (engine) => {
       snapshot ||= await readSnapshot();

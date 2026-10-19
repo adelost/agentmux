@@ -16,10 +16,11 @@ feature("the account the idle-capacity alarm points to", () => {
   unit("each engine names its account with the most weekly room below the reserve", {
     when: ["reading the night's accounts", () => ["claude", "codex", "kimi"]
       .map((engine) => accountWithRoom(night, engine, { reservePercent: 90 }))],
-    then: ["Claude S and Codex W; nothing for an engine without room", (rooms) => {
+    then: ["Claude S and Codex W, with the logins that share each; nothing for an engine without room", (rooms) => {
+      // The profile keys let the notice see a pane that already runs there (lsrc:0, 2026-10-19).
       expect(rooms).toEqual([
-        { name: "Claude S", profileId: "1", usedPercent: 13 },
-        { name: "Codex W", profileId: "2", usedPercent: 68 },
+        { name: "Claude S", profileId: "1", usedPercent: 13, profileKeys: ["claude:1"] },
+        { name: "Codex W", profileId: "2", usedPercent: 68, profileKeys: ["codex:2"] },
         null,
       ]);
     }],

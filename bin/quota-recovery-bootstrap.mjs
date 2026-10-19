@@ -17,6 +17,7 @@ import { createClaudeQuotaLifecycle } from "../core/claude-quota-lifecycle.mjs";
 import { createClaudeQuotaCoordinator } from "../core/claude-quota-coordinator.mjs";
 import { createSelfCompactStore } from "../core/self-compact.mjs";
 import { parkHoldsMove } from "../core/quota-park.mjs";
+import { createQuotaParkStore } from "../core/quota-park-store.mjs";
 import { createQuotaRecoveryLoop, parseQuotaRecoveryConfig } from "../channels/quota-recovery.mjs";
 import { startIdleCapacityAlarm } from "../channels/idle-capacity-runtime.mjs";
 import { writeQuotaRecoveryHeartbeat } from "../core/quota-recovery-heartbeat.mjs";
@@ -47,15 +48,17 @@ if (!config.enabled) {
   const state = createState(process.env.STATE_FILE || "/tmp/agentmux-state.json");
   const lifecycle = createClaudeQuotaLifecycle({ configPath, tmuxSocket, tmuxExec, state });
   const selfRequests = createSelfCompactStore();
+  const parkStore = createQuotaParkStore();
   const coordinator = createClaudeQuotaCoordinator({
     queue,
     lifecycle,
     configPath,
     // A parked pane polls every 30 s; the shared budget keeps that to one usage call per
     // account per five minutes, and never answers with a reading older than the limit.
-    readQuota: ({ agentName, pane, receipt }) => readClaudeQuotaBudgeted({
+    // A quota park asks for a reading taken after the park, a limit for one taken after the limit.
+    readQuota: ({ agentName, pane, receipt, notBefore = 0 }) => readClaudeQuotaBudgeted({
       profile: lifecycle.profileFor(agentName, pane),
-      notBefore: Number.isFinite(receipt?.observedAt) ? receipt.observedAt : 0,
+      notBefore: Number.isFinite(receipt?.observedAt) ? receipt.observedAt : notBefore,
     }),
     // The same shared budget reads the other logins, and only for a pane whose week is spent.
     findSpareAccount: ({ current, receipt }) => spareClaudeAccount({
@@ -71,13 +74,15 @@ if (!config.enabled) {
     }),
     resetGraceMs: config.resetGraceMs,
     parkPending: (agentName, pane) => parkHoldsMove(selfRequests.read(agentName, pane), Date.now()),
+    parkStore,
   });
   const loop = createQuotaRecoveryLoop({ coordinator, config });
   globalThis[LOOP_KEY] = loop;
   loop.start();
   // Off unless AMUX_IDLE_CAPACITY_TARGET names the pane that staffs the fleet.
   try {
-    startIdleCapacityAlarm({ queue, state, configPath, tmuxSocket, tmuxExec,
-      activeReceipt: (agentName, pane) => lifecycle.activeReceipt(agentName, pane) });
+    startIdleCapacityAlarm({ queue, state, configPath, tmuxSocket, tmuxExec, parkStore,
+      activeReceipt: (agentName, pane) => lifecycle.activeReceipt(agentName, pane),
+      profileFor: (agentName, pane) => lifecycle.profileFor(agentName, pane) });
   } catch (error) { console.log(`idle-capacity | start failed: ${error.message}`); }
 }

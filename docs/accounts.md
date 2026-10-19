@@ -27,6 +27,12 @@ order. A failed restart retries on the new account at the next poll. A session
 window never moves a pane, and forecasts never do.
 `AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false` disables it.
 
+A Claude pane the quota park compacted and told to stop has no limit receipt.
+The park is recorded in `~/.agentmux/quota-parks/`, and the quota sidecar sends
+that pane the same same-session recovery prompt as soon as a reading taken after
+the park shows room on its account (a free reset, any early room) or the window's
+reset time passes. A pane that took a new prompt after its park is left alone.
+
 A message sent to a pane stopped at its Claude limit is queued as before, and
 the CLI adds a warning on stderr: the recipient cannot read it until it
 recovers, so the sender keeps any role it hands over until the recipient
@@ -36,10 +42,12 @@ acknowledges.
 
 With `AMUX_IDLE_CAPACITY_TARGET=agent:pane` in the bridge environment, the
 bridge checks every configured Claude and Codex pane every five minutes. A pane
-with a persisted limit receipt, messages parked by a usage limit, or a stopped
-process with queued messages for 15 minutes, while an account of its engine has
-room below the reserve, earns one notice to that pane per episode. The notice
-names the pane, the reason, the account and the command that moves it. It never
+with a persisted limit receipt, messages parked by a usage limit, an open quota
+park, or a stopped process with queued messages for 15 minutes, while an account
+of its engine has room below the reserve, earns one notice to that pane per
+episode. The notice names the pane, the reason, the account and the command that
+moves it. When the room is on the account the pane already runs on, it names the
+resume amux sent, or why it did not, instead of a rotate. It never
 wakes, moves or restarts a pane. `AMUX_IDLE_CAPACITY_ALERT_ENABLED=false` turns
 it off.
 
