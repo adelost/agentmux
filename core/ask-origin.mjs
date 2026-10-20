@@ -27,6 +27,15 @@ export function inferAskOrigin({
   return "human";
 }
 
+/** WHAT: Names the ask sources a person answers through. WHY: Keeps the answer statistic and the search of his words on one list. */
+const HUMAN_ASK_SOURCES = new Set(["discord", "pane-hook"]);
+
+/** WHAT: Checks whether a ledger ask is a message a person wrote. WHY: Keeps agents' briefs, wrappers and automation out of everything that counts or quotes his words. */
+export function isHumanAsk(ask) {
+  return HUMAN_ASK_SOURCES.has(ask?.source)
+    && inferAskOrigin({ source: ask.source, sender: ask.sender, prompt: ask.verbatim }) === "human";
+}
+
 const OWNER_CHANNELS = new Set(["discord", "voice-pwa"]);
 
 /** WHAT: Checks whether a person sent the job from their own channel. WHY: Lets a pane whose compact failed take its owner's message while automatic work waits. */

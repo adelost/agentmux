@@ -5,13 +5,11 @@
 // or panes without posted work.
 
 import { DREAM_SETTLE_MS } from "./dream-turn-selection.mjs";
-import { inferAskOrigin } from "./ask-origin.mjs";
+import { inferAskOrigin, isHumanAsk } from "./ask-origin.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 /** WHAT: Names the post kinds that carry a pane's own output. WHY: Mirrors and notices repeat an ask or report status; they are not the answer. */
 export const DREAM_ANSWER_KINDS = new Set(["reply", "file", "voice"]);
-/** WHAT: Names the ask sources a person answers through. WHY: The shadow's coverage share is measured on human-facing asks. */
-const HUMAN_ASK_SOURCES = new Set(["discord", "pane-hook"]);
 
 const tsMs = (row) => Date.parse(row?.ts || "");
 const paneKey = (row) => `${row.agent}:${row.pane}`;
@@ -100,8 +98,7 @@ export function answeredShare(log, { sinceMs = log.coverageStartMs, nowMs = Date
     for (const turn of conversationPaneTurns(asks, posts)) for (const id of turn.logIds) {
       const ask = byId.get(id);
       const atMs = tsMs(ask);
-      if (!HUMAN_ASK_SOURCES.has(ask.source) || originOf(ask) !== "human"
-        || atMs < sinceMs || nowMs - atMs < DREAM_SETTLE_MS) continue;
+      if (!isHumanAsk(ask) || atMs < sinceMs || nowMs - atMs < DREAM_SETTLE_MS) continue;
       asked++;
       if (turn.items.length) answered++;
       else unanswered[key] = (unanswered[key] || 0) + 1;
