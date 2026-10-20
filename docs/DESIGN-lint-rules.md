@@ -1,13 +1,15 @@
 # amux lint --only rules: the repos' rule files checked against trunk
 
-Version: 1 · 2026-10-20 07:55Z · owner of the design: api:0 · page: none yet
+Version: 2 · 2026-10-20 09:10Z · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
 
 lsrc:0's order to api:0 of 20 Oct 07:5xZ, from his request in the daily log 2026-10-20 ("lsrc:0: Claude läser nu
 repots AGENTS.md"). He asked whether the repos' rule files are still needed, named the global layer the most
-important, and said the repo files may be outdated and must become trustworthy and fixed. ai:0's audit of 17 repos
+important, and said the repo files may be outdated and must become trustworthy and fixed. At 07:14:57Z and
+07:17:39Z he asked for them to be linted and fixed; lsrc:0's reading in the same log puts this lint in scope at P2,
+after the search release, narrowed to ai:0's ten checks and with no new tool stage. ai:0's audit of 17 repos
 the same morning (`~/lsrc/.artifacts/rules-audit-2026-10-20/INDEX.md`) found KEEP 415, DUP 22, DUP-PARTIAL 22,
 STALE 33, CONFLICT 1 and FLAG 116. Most STALE rows were dead paths, scripts and targets, and the audit lists ten checks
 a tool could run.
@@ -354,3 +356,5 @@ None for him. Calls made by api:0:
 ## 15. Changes
 
 - v1, 2026-10-20 07:55Z: first version, from lsrc:0's order and ai:0's audit.
+- v2, 2026-10-20 09:10Z: his 07:14:57Z and 07:17:39Z ask and lsrc:0's scope (P2, after the search release, ai:0's
+  ten checks) in §1. My note to lsrc:3 that he never asked for a tool was wrong.
