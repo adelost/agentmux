@@ -20,6 +20,10 @@ measured 09:2xZ: his units never hold his name, so "vad sa Mattias om …" favou
 thought over several messages; and 1 398 of the 8 303 units were automation typed into panes. lsrc:0's order of
 09:3xZ adds outcome 4 and asks how Dream's answer statistic moves, with the same proof before and after.
 
+After 1.25.279 (v14 to v16 hit@3 33 to 67 %, hit@1 33 to 0 %), lsrc:0 asked at 12:2xZ that a question for his words
+rank his own units above agent rows that quote him, with those rows kept below as context: v14 to v16 at hit@1 and
+no loss on the 47, the same proof (outcome 5, row 53).
+
 The outcome:
 
 1. The daemon follows the canonical conversation log incrementally and reads only new lines. His messages become
@@ -30,6 +34,8 @@ The outcome:
    closes when free memory falls under a floor.
 4. His units name him, his messages to one pane within about 2 minutes also form one joined unit (the single units
    stay), and no automation counts as his: amux's own notices, and long prompts repeated 3 or more times.
+5. A question for his words (what he said, asked, wrote or decided; his words, his decision; verbatim) lists his own
+   units first, in the order the ranking gave them. Notes, the conversation log and the ledger follow as context.
 
 Principles, in the order they decide:
 
@@ -92,6 +98,14 @@ n/a: a command-line tool with no screens. The result lists keep their form. What
   - Questions get the cold answer with the guard's notice until 13 GB is free; none of them starts the daemon.
   - Cost: cold answers (70 % hit@3) while memory is short. Stage v2. No sequence: each process reads
     `/proc/meminfo` itself, no new boundary.
+- **UC-7 A question for his words.** An agent asks for his words on the quota floor (v14), with his name and
+  "ordagrant" in the question.
+  - On 1.25.279 the top 9 are agents' notes and ledger rows; his 19 Oct message with the words ranks 26th of 40.
+  - After: `asksForHisWords` holds, so his units in the reranked list come first, in their order, and the notes
+    follow. The prototype on 1.25.279 (*estimated*, §10): v14 from no hit to 1, v15 from 3 to 1, v16 stays at 2.
+  - A question without that intent keeps today's order; none of the 47 has it.
+  - Cost: one regular expression over the question and a stable partition, under 1 ms. Stage v9. No sequence:
+    inside `collectSearchHits`, no new boundary.
 - **Unhappy cases:**
   - Log rotation (a 32 MB file is renamed and a new `ask-ledger.jsonl` starts): the reader follows the renamed file
     by inode to its end, then starts the new file at 0.
@@ -124,6 +138,7 @@ flowchart LR
   D --> C[cli/search.mjs collectSearchHits]
   P --> C
   V --> C
+  Q[search-his-words.mjs: his units first for a question for his words] ==> C
   %% solid = exists, thick = new
 ```
 
@@ -158,6 +173,10 @@ flowchart LR
   - **I-4** The daemon never starts without room for its peak, and never stays more than 30 s under the floor, plus a question in flight.
     Enforced in `core/search-embedder.mjs` (`memoryRoom`), guarded by `core/search-embedder-lifecycle.test.mjs`,
     "does not start without room for its peak" and "closes when free memory falls under the floor".
+  - **I-5** (v9) A question for his words reorders the ranked hits and drops none: his units first in their order,
+    then every other hit in its order. Any other question keeps today's order. Enforced in `search-his-words.mjs`,
+    guarded by `core/search-his-words.test.mjs`, "puts his units first and keeps every hit", and
+    `cli/search.test.mjs`, "keeps the order of every other question".
 
 ## 5. Behaviour (UML)
 
@@ -308,6 +327,33 @@ daemon, every 30 s while up (unref'd timer):
   #        "closes when free memory falls under the floor", "a floor of 0 turns the guard off",
   #        "reports the owner as busy, not memory, while another process loads",
   #        "keeps the daemon's log and moves it aside past 1 MiB"
+
+asksForHisWords(query, name):                        # search-his-words.mjs (v9)
+  name = cleanHumanName(name); name empty -> false     # no configured name, no intent
+  who = name | "han" | "he"
+  true when the query holds, case-insensitive and as whole words, any of:
+    ("vad" | "hur") + ("sa" | "sade" | "skrev" | "bad" | "tyckte" | "ville" | "menade" | "beslutade" | "bestämde") + who
+    name + ("ordagrant" | "exakt" | "citat")
+    "hans" + optional ("egna" | "exakta") + ("ord" | "beslut")
+    "sa han"
+    name + optional "s" + "beslut"
+    "what did" + who + ("say" | "ask" | "write" | "decide" | "want")
+    (name + "'s" | "his") + optional ("own" | "exact") + ("words" | "decision")
+    name + "verbatim"
+  # tests: search-his-words.test.mjs "finds each Swedish and English form",
+  #        "is false for another pane's words and a word that only contains his name", "is false without a name"
+
+hisWordsFirst(hits, humanDir):                       # search-his-words.mjs
+  his = hits whose path is under humanDir; rest = the others
+  return his + rest, each in its own order               # I-5: nothing dropped, nothing added
+  # tests: search-his-words.test.mjs "puts his units first and keeps every hit"
+
+collectSearchHits, his words:                        # cli/search.mjs
+  intent = asksForHisWords(query, the human root's humanName)   # the question as typed, before temporalIntent
+  intent -> ranked = hisWordsFirst(ranked) before the cut to max, so a unit of his ranked 26th still enters;
+            after the merge with lexical, ledger and conversation hits, hits = hisWordsFirst(hits)
+  # tests: search.test (cli) "puts his units above agent rows for a question for his words",
+  #        "keeps the order of every other question"
 ```
 
 ## 7. Platform limits
@@ -389,6 +435,15 @@ when he asks for less.
   - Mitigation: the 30-minute timer still bounds the time the memory is held.
   - Detection: none in the code. His report, or the Windows task manager's figure for the WSL VM.
   - Fallback: a lower `AMUX_EMBEDDER_IDLE_MIN`. Owner api:0.
+- **R-9 A weakly related unit of his leads a question for his words** (v9), above the note that answers it.
+  Possible: the rule lifts any unit of his in the reranked pool of 30 to 40.
+  - Mitigation: only units the first stage and the reranker already let into the pool; the notes stay right below.
+  - Detection: v14 to v16 and the 47 before and after (§10); each new miss becomes a verbatim eval question.
+  - Fallback: install the previous release. Owner api:0.
+- **R-10 The intent fires on a question that is not about his words** (v9), such as one about another pane's words.
+  - Mitigation: every form needs his configured name or "han", "hans", "he" or "his" beside the verb or noun.
+  - Detection: "is false for another pane's words and a word that only contains his name"; none of the 47 fires.
+  - Fallback: narrow the form in `search-his-words.mjs`. Owner api:0.
 
 ## 10. Cost and time
 
@@ -484,6 +539,19 @@ start and end of each run.
   generator carried only `agents`, `search` and `dream`. 1.25.279 carries `human` too (c1b5284d, a test red
   before), and Dream's section parsing moved unchanged to `core/dream-config.mjs` to keep `sync.mjs` under 500 lines.
 
+### Row 53, his units first for a question for his words
+
+- Prototype, *estimated*: the installed 1.25.279 at 12:3xZ, 40 hits per question, the partition applied outside
+  the code, scored by the eval's own `firstAnswerRank` over the first 12. v14 to v16: hit@1 0 to 2 of 3, hit@3 2 to 3
+  of 3 (v14 from no hit to 1, v15 from 3 to 1, v16 stays at 2). The 47: no question has the intent, hit@1 41 and
+  hit@3 44 unchanged.
+- v16 stays at 2: both top hits are his. The first is his 07:11 to 07:12Z run to api:0 about the search, the second
+  his 05:00Z voice message with the expected words. Their order is the reranker's; both texts fit its 800-character
+  input with the words at characters 81 and 245, so no cut explains it. Not tuned: three questions do not justify
+  a rule that orders his own units.
+- Time, from the file list: new `core/search-his-words.mjs` (40 lines) and its test (60 lines), 40 min;
+  `cli/search.mjs` (6 lines) and two tests, 20 min; the proof before and after, 15 min. Total *estimated* 1.3h.
+
 ## 11. Rollout and rollback
 
 - Order: release, install, stop the daemon, one `amux search --reindex` on the GPU for the backfill, then the
@@ -510,6 +578,7 @@ start and end of each run.
 | `core/search-semantic.mjs` | `core/search-semantic.test.mjs` |
 | `sync.mjs` (row 49 fix, `human` in the generated config) | `sync.test.mjs` |
 | `core/dream-config.mjs` (moved from `sync.mjs` unchanged) | `sync.test.mjs` |
+| `core/search-his-words.mjs` (v9) | `core/search-his-words.test.mjs`, `cli/search.test.mjs` |
 
 | Test | Guards | Level | Write min | Run s |
 |---|---|---|---|---|
@@ -522,6 +591,7 @@ start and end of each run.
 | `core/search-semantic.test.mjs` | UC-5 | component | 3 | 3 |
 | `existing ask-origin and dream-conversation tests` | existing, R-2 | unit | 0 | 2 |
 | `sync.test.mjs` | UC-2 (his name reaches the CLI), existing Dream section tests | component | 5 | 2 |
+| `core/search-his-words.test.mjs` | UC-7, I-5, R-10 | unit | 20 | 1 |
 
 - Budget: write 78 min of the 330 min of build in chapter 13 (rows 43, 44 and 46; 24 %); targeted run 17 s.
 - Full proof: none: no money, sign-in, deletion of user data or migration. The derived files are a private copy of
@@ -556,6 +626,7 @@ start and end of each run.
 | 46 | Memory guard: the daemon starts only with room for its peak and closes under the floor | api:0 | done: 7ecf4e59 |  | 0.7h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | under 8 GB free the daemon closes within 30 s, and none starts under 12 GB; tests red before, green after |
 | 47 | QMD's hybrid mode against the 47 blind questions | api:0 | dropped: no yes from him for a tool |  | 1h | [Search §8](DESIGN-search-daemon.md#8-alternatives) | QMD hybrid's hit@1, hit@3 and median on the 47 questions stand beside ours in §8, with the choice |
 | 49 | His units name him, join a run of messages to one pane, and leave automation out | api:0 | done: b41ec5f6 (1.25.279) | P1 | 2h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | the 47 and v14 to v16 before and after in §10, and Dream's answer share before and after |
+| 53 | His units first for a question for his words; agent rows stay below as context | api:0 | open: after row 50 | P1 | 1.3h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | v14 to v16 at hit@1 warm and no loss on the 47, before and after in §10 |
 
 ## 14. Open questions
 
@@ -588,3 +659,6 @@ None for him. Calls made by api:0:
   joined units within 2 minutes, automation out through one `humanAsksOf` that Dream's answer share uses too.
 - v8, 2026-10-20 12:1xZ: row 49's results in §10 and row 49 done. 1.25.278 left his name out, because the generated
   config never carried `human`; 1.25.279 fixes that. lsrc:0 told.
+- v9, 2026-10-20 12:4xZ: outcome 5, UC-7, I-5, R-9, R-10 and row 53 from lsrc:0's order of 12:2xZ: his units first
+  for a question for his words. The prototype in §10 reaches 2 of 3 at hit@1; v16's order between two of his own
+  messages is left to the reranker. The row's builder starts after row 50's.
