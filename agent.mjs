@@ -107,7 +107,7 @@ export function paneDir(rootDir, pane) {
 // The marker lets ensureAgentHints detect stale copies on spawn; bump it
 // whenever AGENT_HINTS content changes. Appended content survives upgrades.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
-export const HINTS_VERSION = "1.25.275";
+export const HINTS_VERSION = "1.25.276";
 /** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 

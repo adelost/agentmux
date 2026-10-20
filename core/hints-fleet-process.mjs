@@ -174,7 +174,11 @@ function's own branching or state. Do a small split in the same change.
    checkpoint it and release its active resources before taking independent work.
    Honor the project's concurrency limit; invent no extra parallelism. A board lease alone does not prove a pane is free.
 5. **A configured board is a shared work list, not an orchestration ceremony.**
-   Keep task, owner, state, blocker/reason and completion SHA/PR. Comments go to
+   Keep task, owner, state, priority, blocker/reason and completion SHA/PR, in
+   the repo's canonical ledger (\`docs/TASKS.md\`, which stats.v1d.io reads).
+   Priority: P0 stops the current main flow or threatens data/access, P1 next
+   delivery work, P2 later; missing means unknown, not lowest. State and
+   dependencies decide what can run. Comments go to
    the owner; managers read the aggregate. Workers do not need a manager round-trip to claim, update or
    finish their own work.
    Link current canonical Markdown in Spec/Design when creating/updating tasks;

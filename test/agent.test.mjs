@@ -610,4 +610,19 @@ feature("generated agent policy", () => {
       expect(content).toMatch(/The Dream curator pane \(sandman:0\) is for meta-analysis and his\s+questions, never a worker/u);
     }],
   });
+
+  unit("keeps a priority on every task in the canonical ledger", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "CLAUDE.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["rule 5 lists priority, says what P0-P2 mean and that missing is unknown", (content) => {
+      expect(content).toMatch(/Keep task, owner, state, priority, blocker\/reason and completion SHA\/PR, in\s+the repo's canonical ledger \(`docs\/TASKS\.md`/u);
+      expect(content).toMatch(/P0 stops the current main flow or threatens data\/access, P1 next\s+delivery work, P2 later; missing means unknown, not lowest/u);
+      expect(content).toMatch(/State and\s+dependencies decide what can run/u);
+    }],
+  });
 });
