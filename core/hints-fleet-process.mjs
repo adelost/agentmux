@@ -14,14 +14,13 @@ export const FLEET_PROCESS_HINTS = `## Rule layers: who owns what
 
 Keep each rule in one layer. Fix duplicate rules instead of obeying stale copies.
 
-1. **This file (amux layer):** fleet process, ownership, delivery and memory
-   logging. Edit the shared source in agentmux, never its per-project copies.
-2. **An optional work-board integration:** repository workflow/API docs own
-   ticket states and wire mechanics. Without a configured board, board rules
-   do not apply.
+1. **This file (amux):** fleet process, ownership, delivery and memory logging;
+   edit its shared source in agentmux, never per-project copies.
+2. **An optional work board:** its workflow/API docs own ticket states and wire
+   mechanics; without a configured board, board rules do not apply.
 3. **Each code repo:** \`AGENTS.md\` and linked docs own data, gates, commands
-   and deploy contracts. Current user instructions and repo/workspace checkout
-   restrictions stay authoritative.
+   and deploy contracts. Current user instructions and checkout restrictions
+   stay authoritative.
 
 ## Always lead with a recommendation
 
@@ -106,14 +105,13 @@ Belägg: \`~/.openclaw/workspace/memory/references/claude-subagent-cache-2026-10
 
 ## Hotspot reflection
 
-A function with 6+ trunk commits among its lines in 60 days is a hotspot.
-Before changing one, read it and its fix diffs and record
-\`amux churn verdict '<path>::<name>' REWRITE|SPLIT|KEEP "<why>"\`.
-Claude panes are held at \`git commit\` until the verdict exists; other
-engines run \`amux churn check\` before committing. The verdict is
-reflection, not a rewrite: KEEP when fixes came from constants, copy,
-upstream values or features; SPLIT or REWRITE when they came from the
-function's own branching or state. Do a small split in the same change.
+A function with 6+ trunk commits among its lines in 60 days is a hotspot:
+before changing it, read it and its fix diffs, then record
+\`amux churn verdict '<path>::<name>' REWRITE|SPLIT|KEEP "<why>"\` (Claude
+panes are held at \`git commit\` until it exists; other engines run
+\`amux churn check\` first). It is reflection, not a rewrite: KEEP when fixes
+came from constants, copy, upstream values or features, SPLIT or REWRITE when
+from its own branching or state; a small split goes in the same change.
 
 ## Kommunikationsdisciplin
 
@@ -131,12 +129,11 @@ function's own branching or state. Do a small split in the same change.
    one busy with another feature hands it to one free owner with a brief.
    A capable idle agent may also self-claim one READY or explicitly
    claimable board ticket. The owner plans, builds, verifies, rebases,
-   self-merges, deploys when needed and records the completion commit.
-   Scope follows the full root-fix seam.
-   Before handing work on, find who already built, measured or planned
-   that area (\`~/.agentmux/ROSTER.md\` first, then \`amux search\`, the
-   daily files, the repo's history). Prefer that owner when it is free;
-   otherwise point the new owner at its plans, evals and artifacts, so
+   self-merges, deploys when needed and records the completion commit;
+   scope follows the full root-fix seam. Before handing work on, find who
+   built, measured or planned that area (\`~/.agentmux/ROSTER.md\` first, then
+   \`amux search\`, day files, repo history); prefer that owner when free,
+   else point the new owner at its plans, evals and artifacts, so
    nobody redoes a measurement that exists.
    The Dream curator pane (sandman:0) is for meta-analysis and his
    questions, never a worker.
@@ -144,30 +141,28 @@ function's own branching or state. Do a small split in the same change.
    delivery failure or idle-capacity gap. Work, decisions, merge and delivery
    need no manager round-trip.
 3. **Do not wake a fleet to look busy.** A durable task wakes its exact owner;
-   dormant panes stay dormant. "Sync/check all panels" authorizes reading
-   status and evidence, not prompting them. FYI messages also spend quota:
-   contact only an owner who needs an action or handoff. An idle panel or unused provider is not permission to activate it.
-   A pane back after 7+ days first re-anchors with
+   dormant panes stay dormant. "Sync/check all panels" means reading status
+   and evidence, not prompting. FYI messages spend quota too: contact only
+   owners who need an action or handoff; idle panels or unused providers are
+   no permission to activate them. A pane back after 7+ days first re-reads
    \`amux done --week\`, \`amux asks --open\`, this policy and the repo's
-   instructions. \`amux reconcile\` repairs service/shell panes; it is not a
-   staffing command and never wakes coding agents. Delivery is proven by the recipient's
-   receipt, not enqueue time; that receipt starts the owner's clock.
-   Hand a lead role only to a running pane that acknowledged it; until then
-   the sender keeps it.
+   instructions. \`amux reconcile\` repairs service/shell panes; it is no
+   staffing command and never wakes coding agents. The recipient's receipt,
+   not enqueue time, proves delivery and starts the owner's clock.
+   Hand a lead role only to a running pane that acknowledged it; until
+   then the sender keeps it.
 
    Opus designs; Codex implements (Mattias, 2026-10-17): Opus owns
-   architecture, gameplay and UX, reviews and merges; free Codex panes build
-   a finished design from a brief, never Claude
-   subagents.
-
-   Codex models (Mattias, 2026-09-20 and 2026-10-11): default
-   \`gpt-6.1-sol\`, never Astra; Claude and Kimi keep theirs. A pane
-   choice survives restart. Change models only with Discord \`/model sol\` or
-   \`amux model PROJECT -p N sol\` (see its help); a raw \`/model\` is refused.
-   Dormant panes switch at their next work prompt, never by a fleet wake-up.
-   Read model and tokens from the exact pane. Quota is paid capacity.
-   Account recovery moves a pane only at a reached weekly limit, to verified
-   room, in its exact session; forecasts never switch.
+   architecture, gameplay, UX, reviews and merges; free Codex panes build a
+   finished design from a brief, never Claude subagents.
+   Codex models (Mattias, 2026-09-20, 2026-10-11): default \`gpt-6.1-sol\`,
+   never Astra; Claude and Kimi keep theirs; a pane's choice survives restart.
+   Change models only with Discord \`/model sol\` or \`amux model PROJECT -p N
+   sol\` (a raw \`/model\` is refused); dormant panes switch at their next work
+   prompt, never by a fleet wake-up. Read model and tokens from the exact
+   pane; quota is paid capacity. Account recovery moves a pane only at a
+   reached weekly limit, to verified room, in its exact session; forecasts
+   never switch.
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, in a modal, or between tool calls.
    A blocked task does not reserve its pane indefinitely:
@@ -188,22 +183,20 @@ function's own branching or state. Do a small split in the same change.
    (file, date, and time to the precision the log proves, or a stable message
    id), \`own\` plus the mandate it rests on, or \`inferred:\` before the pointer
    when the row rests on your reading of his words.
-6. **Merge by fresh proof.** Just before merge, fetch and rebase on
-   current trunk in the allowed checkout. On that exact source run the
+6. **Merge by fresh proof.** Just before merge, fetch and rebase on current
+   trunk in the allowed checkout. On that exact source run the
    test plan's tests (testing-philosophy.md) and lint, exercise the feature
-   by hand, and run one relevant local smoke of at most 5 minutes. Heavy CI,
-   full-repo suites, browser matrices and perf sweeps run only on explicit
-   human request or scheduled/manual infrastructure. A green pre-rebase check
-   proves nothing. Visual work: one smallest scenario and screenshot. Preserve
-   repo correctness and security requirements: never hide a real failure or
-   add file-size exceptions to make a gate green. If a required check cannot
-   fit this budget, report that instead of claiming success.
-   GitHub-hosted CI is optional evidence, never release authority; add no
-   PR ceremony to a clean, locally verified change. Deploy by
-   the repo's local-first release contract (exact source and rollback SHA,
-   build, live check). Do not duplicate gates.
-   Test the hardest representative case early in the actual engine; focused
-   unit tests cannot close a task while that feature exercise fails.
+   by hand, and run one relevant local smoke of at most 5 minutes. A green
+   pre-rebase check proves nothing. Visual work: one smallest scenario and
+   screenshot. Preserve repo correctness and security requirements: never
+   hide a real failure or add file-size exceptions to make a gate green;
+   report a required check that cannot fit this budget instead of claiming
+   success. Heavy CI and GitHub checks: testing-philosophy.md (never a gate);
+   GitHub-hosted CI is optional evidence, never release authority, no PR
+   ceremony for a clean, locally verified change. Deploy by the repo's
+   local-first release contract (exact source and rollback SHA, build, live
+   check); no duplicate gates. Test the hardest representative case early in
+   the actual engine; unit tests cannot close a task while that exercise fails.
 7. **Owners self-merge and self-deliver.** A normal green change does not need
    peer review. Human-requested review is welcome; a red gate or high-risk seam
    needs resolution, not a review loop.
