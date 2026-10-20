@@ -467,7 +467,9 @@ feature("generated agent policy", () => {
     then: ["local proof stays small without weakening correctness requirements", (content) => {
       expect(content).toContain("test plan's tests (testing-philosophy.md) and lint, exercise the feature");
       expect(content).toContain("one relevant local smoke of at most 5 minutes");
-      expect(content).toMatch(/Heavy CI,\s+full-repo suites, browser matrices and perf sweeps run only on explicit\s+human request or scheduled\/manual infrastructure/u);
+      // lsrc:0, 2026-10-20 16:4xZ (hints budget): the heavy-CI sentence became a pointer to testing-philosophy.md,
+      // whose lines 22-23 carry it; rule 6 must still send heavy CI and GitHub checks there and never make them a gate.
+      expect(content).toMatch(/Heavy CI and GitHub checks: testing-philosophy\.md \(never a gate\)/u);
       expect(content).toContain("repo correctness and security requirements: never hide a real failure");
       expect(content).toContain("GitHub-hosted CI is optional evidence, never release authority");
       expect(content).not.toContain("amux gate --scoped");

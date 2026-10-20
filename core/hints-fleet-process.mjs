@@ -130,8 +130,9 @@ from its own branching or state; a small split goes in the same change.
    A capable idle agent may also self-claim one READY or explicitly
    claimable board ticket. The owner plans, builds, verifies, rebases,
    self-merges, deploys when needed and records the completion commit;
-   scope follows the full root-fix seam. Before handing work on, find who
-   built, measured or planned that area (\`~/.agentmux/ROSTER.md\` first, then
+   scope follows the full root-fix seam.
+   Before handing work on, find who already built, measured or planned
+   that area (\`~/.agentmux/ROSTER.md\` first, then
    \`amux search\`, day files, repo history); prefer that owner when free,
    else point the new owner at its plans, evals and artifacts, so
    nobody redoes a measurement that exists.
@@ -146,7 +147,7 @@ from its own branching or state; a small split goes in the same change.
    owners who need an action or handoff; idle panels or unused providers are
    no permission to activate them. A pane back after 7+ days first re-reads
    \`amux done --week\`, \`amux asks --open\`, this policy and the repo's
-   instructions. \`amux reconcile\` repairs service/shell panes; it is no
+   instructions. \`amux reconcile\` repairs service/shell panes; it is not a
    staffing command and never wakes coding agents. The recipient's receipt,
    not enqueue time, proves delivery and starts the owner's clock.
    Hand a lead role only to a running pane that acknowledged it; until
@@ -188,10 +189,11 @@ from its own branching or state; a small split goes in the same change.
    test plan's tests (testing-philosophy.md) and lint, exercise the feature
    by hand, and run one relevant local smoke of at most 5 minutes. A green
    pre-rebase check proves nothing. Visual work: one smallest scenario and
-   screenshot. Preserve repo correctness and security requirements: never
-   hide a real failure or add file-size exceptions to make a gate green;
-   report a required check that cannot fit this budget instead of claiming
-   success. Heavy CI and GitHub checks: testing-philosophy.md (never a gate);
+   screenshot.
+   Preserve repo correctness and security requirements: never hide a real failure
+   or add file-size exceptions to make a gate green; report a required check
+   that cannot fit this budget instead of claiming success.
+   Heavy CI and GitHub checks: testing-philosophy.md (never a gate);
    GitHub-hosted CI is optional evidence, never release authority, no PR
    ceremony for a clean, locally verified change. Deploy by the repo's
    local-first release contract (exact source and rollback SHA, build, live
