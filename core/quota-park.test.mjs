@@ -4,6 +4,12 @@ import { accountWindows, codexCreditsAllowed, parkResumeDecision, quotaFloorHold
 
 const NOW = Date.parse("2026-10-19T09:30:00Z");
 const week = (usedPercent, resetsAt = "2026-10-25T18:08:00Z") => ({ kind: "week", usedPercent, resetsAt });
+// A Claude S reading in the shape the bridge stores it.
+const read = (session, week) => accountWindows({ ok: true, provider: "claude", limits: [
+  { id: "session", kind: "session", scopeName: null, ...session },
+  { id: "weekly_all", kind: "weekly_all", scopeName: null, ...week },
+  { id: "weekly_fable", kind: "weekly_scoped", scopeName: "Fable", usedPercent: 0, resetsAt: "2026-10-27T04:00:00+00:00" },
+] });
 
 // 2026-10-19 09:2xZ: Codex W's week was spent with ten Codex panes stopped on it;
 // parking them would only have sent ten compacts the account refuses.
@@ -58,11 +64,6 @@ feature("parking a pane while there is still time to compact it", () => {
 // with 36 % left. The bridge held a reading taken at 16:01:37Z, before the reset, then one taken at 16:10:01Z, before
 // any pane used the new session; Claude reports an unused session as Claude A and W read it, 0 % with no reset.
 feature("a grace note after its session reset", () => {
-  const read = (session, week) => accountWindows({ ok: true, provider: "claude", limits: [
-    { id: "session", kind: "session", scopeName: null, ...session },
-    { id: "weekly_all", kind: "weekly_all", scopeName: null, ...week },
-    { id: "weekly_fable", kind: "weekly_scoped", scopeName: "Fable", usedPercent: 0, resetsAt: "2026-10-27T04:00:00+00:00" },
-  ] });
   const stopped = (note, now, lastActivity) => ({ engine: "claude", graceNote: true, graceNoteAt: Date.parse(note), working: false,
     lastActivityAt: Date.parse(lastActivity), now: Date.parse(now) });
   unit("a reading taken before the reset parks nothing after it", {
@@ -83,6 +84,18 @@ feature("a grace note after its session reset", () => {
       ...stopped("2026-10-20T15:29:39Z", "2026-10-20T16:11:21Z", "2026-10-20T15:30:20Z"),
       windows: read({ usedPercent: 0, resetsAt: null }, { usedPercent: 100, resetsAt: "2026-10-27T03:59:59.848858+00:00" }) })],
     then: ["parked for the week", decision => expect(decision).toMatchObject({ park: true, window: "week" })],
+  });
+});
+
+// 2026-10-20 21:03:20Z: lsrc:2, idle 51 min, was parked and compacted for Claude S's session with 6 % left. At the
+// session's average pace it ran out at 21:22Z, after its own reset at 21:10Z, and no pane was stopped that evening.
+feature("a forecast stop after its window resets", () => {
+  unit("is no stop, so nothing is parked", {
+    when: ["lsrc:2 at 21:03:20Z, idle since 20:12:05Z, with the 21:03:08Z reading and its park record's session", () => quotaParkDecision({
+      engine: "claude", working: false, lastActivityAt: Date.parse("2026-10-20T20:12:05Z"), now: Date.parse("2026-10-20T21:03:20.854Z"),
+      windows: read({ usedPercent: 94, resetsAt: "2026-10-20T21:10:00.262+00:00" },
+        { usedPercent: 89, resetsAt: "2026-10-27T04:00:00.262187+00:00" }) })],
+    then: ["no park, since the session resets first", decision => expect(decision).toEqual({ park: false, cell: "room" })],
   });
 });
 

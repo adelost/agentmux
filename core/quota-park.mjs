@@ -59,15 +59,18 @@ export function accountWindows(account) {
 }
 
 /**
- * WHAT: Returns when a window runs out at its average pace since it opened.
+ * WHAT: Returns when a window runs out at its average pace, or Infinity when it resets first.
  * WHY: Keeps a fast window from stopping panes before any reading shows its last 3 %.
  */
 export function predictedStopAt(window, now, policy = QUOTA_PARK_POLICY) {
   if (window.usedPercent >= 100) return now;
-  const elapsed = now - (Date.parse(window.resetsAt) - policy.windowMs[window.kind]);
+  const resetsAt = Date.parse(window.resetsAt);
+  const elapsed = now - (resetsAt - policy.windowMs[window.kind]);
   // The first minutes of a window say too little about its pace.
   if (!(elapsed >= policy.leadMs) || !(window.usedPercent > 0)) return Infinity;
-  return now + (100 - window.usedPercent) * (elapsed / window.usedPercent);
+  const stopAt = now + (100 - window.usedPercent) * (elapsed / window.usedPercent);
+  // lsrc:2 was parked at 21:03:20Z on 2026-10-20 for a session forecast to run out at 21:22Z; it reset at 21:10Z.
+  return stopAt < resetsAt ? stopAt : Infinity;
 }
 
 /** WHAT: Checks whether a window reset after a moment. WHY: Keeps a note read before a reset from describing the new window. */
