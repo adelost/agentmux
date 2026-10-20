@@ -36,8 +36,9 @@ const HUMAN_ASK_SOURCES = new Set(["discord", "pane-hook"]);
  * I-2b). The pane-hook records it like a typed prompt, so only its start tells it apart. `sender` is a path in this
  * repository, or under ~/ for a script outside it. Left out on purpose: tags that follow a message ([amux
  * orientation, memory …], [amux leader review], [amux-phone-turn:…]) cannot start a prompt; his own [image attached:
- * …], [file attached: …] and the voice prefix are his; [from …] is an agent's brief and inferAskOrigin already tells
- * it. core/search-human-words.test.mjs finds each tag in its sender's file.
+ * …], [file attached: …], the voice prefix and the Link marker line are his (humanMessageText takes that line off his
+ * words); [from …] is an agent's brief and inferAskOrigin already tells it. core/search-human-words.test.mjs finds
+ * each tag in its sender's file.
  * WHAT: Names every bracket tag amux types into a pane, with the file that sends it.
  * WHY: Keeps amux's own notices from counting as a person's messages.
  */
@@ -46,7 +47,6 @@ export const AMUX_PANE_TAGS = Object.freeze([
   ["[keeper", "bin/task-keeper-cron.sh"],
   ["[fleet-watch", "bin/fleet-progress-cron.sh"],
   ["[board-curator", "bin/board-curator-cron.sh"],
-  ["[amux-link-turn", "channels/link-connector.mjs"],
   ["[AMUX-SLEEP-CHECK", "cli/sleep.mjs"],
   ["[AMUX leveransstopp", "core/delivery-handoff.mjs"],
   ["[AMUX delivery outcome]", "core/delivery-notices.mjs"],
@@ -78,10 +78,13 @@ export function isHumanAsk(ask) {
 }
 
 const VOICE_TAG = /^\[transcribed voice[^\]]*\]\s*/u;
+// His message from the phone reaches a pane as one marker line with the turn's id, then his words (channels/link-connector.mjs, linkTurnPrompt).
+const LINK_TURN_MARKER = /^\[amux-link-turn:[^\]\n]*\][ \t]*(?:\r?\n|$)/u;
 
-/** WHAT: Returns the words of one of his messages and whether he spoke them. WHY: Keeps every word of his and drops only the bridge's own tag in front of a transcript. */
+// The tags in front of his words are the Link marker line, which comes first, and the voice prefix.
+/** WHAT: Returns the words of one of his messages and whether he spoke them. WHY: Keeps every word of his and drops only the bridge's own tags in front of them. */
 export function humanMessageText(ask) {
-  const authored = authoredPromptText(ask.verbatim);
+  const authored = authoredPromptText(ask.verbatim).replace(LINK_TURN_MARKER, "");
   const spoken = VOICE_TAG.test(authored);
   return { text: spoken ? authored.replace(VOICE_TAG, "") : authored, spoken };
 }
@@ -105,14 +108,64 @@ export function repeatedKeys(keys) {
   return new Set([...counts].filter(([, copies]) => copies >= REPEAT_COPIES).map(([key]) => key));
 }
 
+// The rule of coalesceAskLedger: a pane-hook row is the copy of a delivery of the same agent, pane and authored text within a quarter of an hour.
+/** WHAT: Names the longest gap between a delivery and the pane's copy of it. WHY: Keeps the copy rule of coalesceAskLedger and of the sync on one number. */
+export const COPY_MATCH_MS = 15 * 60_000;
+
+/** WHAT: Names the authored text of an ask by a short hash. WHY: Keeps a delivery and the pane's copy of it matchable without keeping any words. */
+export const askTextHash = (ask) => createHash("sha256").update(authoredPromptText(ask.verbatim)).digest("hex").slice(0, 16);
+
+const copyKey = ({ agent, pane, hash }) => `${agent}\u0000${pane}\u0000${hash}`;
+const isLinkTurn = (ask) => LINK_TURN_MARKER.test(authoredPromptText(ask.verbatim));
+
 /**
- * `earlier` lists the keys of messages already counted outside `asks`, such as the ones a sync placed before. A delivery
- * and its pane-hook copy are one message, so pass asks with their copies merged (readWindow does).
- * WHAT: Returns the asks a person wrote, without amux's notices and prompts repeated three times.
+ * Returns null for a pane-hook row and for a delivery of his. His Link turn is one: the connector passes no source, so
+ * its row says "unknown". A delivery whose words would not pass for his if typed in a pane (an agent's brief, a notice
+ * with its tag) needs no entry either: the pane's copy of it fails isHumanAsk by its words.
+ * WHAT: Describes a delivery no person wrote by what the pane's copy of it carries.
+ * WHY: Keeps the pane's copy of what amux typed from passing for a message he typed.
+ */
+export function automatedDeliveryOf(ask) {
+  if (ask.source === "pane-hook" || isHumanAsk(ask) || isLinkTurn(ask)) return null;
+  if (!isHumanAsk({ source: "pane-hook", verbatim: ask.verbatim })) return null;
+  return { agent: ask.agent, pane: ask.pane, hash: askTextHash(ask), ms: Date.parse(ask.ts) };
+}
+
+/**
+ * `delivered` lists deliveries seen outside `asks` (automatedDeliveryOf), such as the ones a sync read before. The
+ * pane's hook records what amux typed (a self-compact continuation, a script's message, a delivery notice) like a
+ * prompt a person typed, so only the delivery it copies tells them apart. Every copy within the quarter hour goes,
+ * not one per delivery.
+ * WHAT: Returns the pane-hook rows among `asks` that copy a delivery no person wrote.
+ * WHY: Keeps what amux typed into a pane from counting as his.
+ */
+export function automatedCopies(asks, delivered = []) {
+  const times = new Map();
+  for (const entry of [...delivered, ...asks.map(automatedDeliveryOf).filter(Boolean)]) {
+    const key = copyKey(entry);
+    if (times.has(key)) times.get(key).push(entry.ms); else times.set(key, [entry.ms]);
+  }
+  const copies = new Set();
+  if (!times.size) return copies;
+  for (const ask of asks) {
+    if (ask.source !== "pane-hook") continue;
+    const ms = Date.parse(ask.ts);
+    const sent = times.get(copyKey({ agent: ask.agent, pane: ask.pane, hash: askTextHash(ask) })) || [];
+    if (sent.some((at) => Math.abs(ms - at) <= COPY_MATCH_MS)) copies.add(ask);
+  }
+  return copies;
+}
+
+/**
+ * `earlier` lists the keys of messages already counted outside `asks`, such as the ones a sync placed before, and
+ * `delivered` the deliveries a sync read before (automatedDeliveryOf). A delivery and its pane-hook copy are one message,
+ * so pass asks with their copies merged (readWindow does).
+ * WHAT: Returns the asks a person wrote, leaving out amux's notices, delivery copies and repeated prompts.
  * WHY: Keeps Dream's answer statistic and the search of his words from counting automation as his.
  */
-export function humanAsksOf(asks, { earlier = [] } = {}) {
-  const human = asks.filter(isHumanAsk);
+export function humanAsksOf(asks, { earlier = [], delivered = [] } = {}) {
+  const copies = automatedCopies(asks, delivered);
+  const human = asks.filter((ask) => isHumanAsk(ask) && !copies.has(ask));
   const keys = human.map(repeatKeyOf);
   const repeated = repeatedKeys([...earlier, ...keys]);
   return human.filter((ask, index) => !repeated.has(keys[index]));

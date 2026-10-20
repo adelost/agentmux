@@ -145,6 +145,17 @@ the incomplete index. A full rebuild of about 39 000 units takes about six
 minutes on an RTX 3090.
 Reindexing is never an implicit side effect of a query.
 
+His messages of the last 30 days, from Discord and typed in the panes, are
+units too. Each message is one unit, copied word for word (a message over 1 600
+characters is split there) to `~/.agentmux/search-human/YYYY-MM-DD.md` with the
+time, `human.name` from the amux config and the pane in its header
+(`**07:07:54Z <name> to lsrc:0 voice**`; with no `human.name` the header has no
+name). A run of his messages to one pane, each within 2 minutes of the one
+before, is also one joined unit, in `YYYY-MM-DD.joined.md`. amux's own notices,
+the pane's copy of a prompt amux delivered, and a prompt of 40 characters or
+more typed 3 or more times are not his. The files are derived from the
+conversation log and can be deleted; `AMUX_SEARCH_HUMAN=0` turns them off.
+
 `--deep` adds the much larger raw session archives. Result state is isolated per
 terminal or tmux pane, so one agent cannot replace another agent's `--show N`
 list. `--eval FILE` scores a private golden set (hit@1, hit@3, MRR, latency per

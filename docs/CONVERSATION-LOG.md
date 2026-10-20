@@ -95,13 +95,22 @@ writer now records accepted content rather than the pre-send payload.
   The warm search daemon answers from a word index it keeps in memory and
   follows the log by inode and byte offset, so a question never rescans the
   log; a cold answer leaves these rows out and says so. His messages are also
-  copied word for word to `~/.agentmux/search-human/YYYY-MM-DD.md`, a derived
-  copy that can be deleted and rebuilt (`AMUX_SEARCH_HUMAN=0` turns it off).
+  copied word for word to `~/.agentmux/search-human/YYYY-MM-DD.md`, one unit
+  per message with its time, `human.name` from the amux config and the pane in
+  the header. A run of his messages to one pane, each within 2 minutes of the
+  one before, is also one joined unit, in `YYYY-MM-DD.joined.md`. amux's own
+  notices, the pane's copy of a prompt amux delivered, and a prompt of 40
+  characters or more typed 3 or more times are not his. The files are a
+  derived copy that can be deleted and rebuilt (`AMUX_SEARCH_HUMAN=0` turns it
+  off).
   `--source conversation` scans the log itself, without starting neural
   readers. `--show N` expands the immutable row id and event time, preserving
   its source and Discord id after rotation. The log stays the only source.
 - `amux memory status` shows the file sizes, the last day's posts and posting
   panes, failed sends, and the share of settled human asks answered by a post.
+  The same rule as the search of his words decides what a human ask is: amux's
+  own notices, the pane's copy of a prompt amux delivered, and a prompt typed
+  3 or more times are not.
   It warns when meaningful settled input has no later successful post for ten
   minutes. This is an observable gap, not proof that the writer caused it.
 - `amux dream` reads the log first by default.

@@ -4,18 +4,17 @@
 // bullet per run of messages to one pane, is in core/search-human-days.mjs.
 //
 // This module is the only writer of the folder. Everything it needs to carry from one sync to the next lives in
-// `state.json`, saved only after every day file was written. A state of another format, or one made under another name
-// of his, means the day files and the state are deleted and written again from the log.
+// `state.json`, saved only after every day file was written: where it stopped in the log, each message of his it placed,
+// and the deliveries amux typed that no person wrote, whose pane-hook copies are not his. A state of another format, or
+// one made under another name of his, means the day files and the state are deleted and written again from the log.
 
-import { createHash } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defaultAskLedgerPath } from "./ask-ledger.mjs";
-import { humanAsksOf, humanMessageText, isHumanAsk, repeatedKeys, repeatKeyOf } from "./ask-origin.mjs";
+import { askTextHash, automatedDeliveryOf, COPY_MATCH_MS, humanAsksOf, humanMessageText, isHumanAsk, repeatedKeys, repeatKeyOf } from "./ask-origin.mjs";
 import { acquireFileLease } from "./file-lease.mjs";
 import { tailLedger } from "./ledger-tail.mjs";
 import { cleanHumanName, humanWordsDir, humanWordsEnabled } from "./search.mjs";
-import { authoredPromptText } from "./system-noise.mjs";
 import {
   bulletOf, clockOfMs, DAY_FILE, dayFileName, dayHeading, dayOfMs, dayText, joinedDayText, joinedFileName, parseDay, withoutRepeated,
 } from "./search-human-days.mjs";
@@ -24,12 +23,10 @@ const WINDOW_MS = 30 * 86_400_000;
 // A sync that found nothing new about his messages saves its place in the log only after this many bytes, so a
 // question about the log does not rewrite a megabyte of state to say that agents posted something.
 const CHECKPOINT_BYTES = 1024 * 1024;
-// The rule of coalesceAskLedger: a pane-hook copy belongs to a delivery of the same words within a quarter of an hour.
-const COPY_MATCH_MS = 15 * 60_000;
-// 2: the header carries his name, the joined files exist, and a text repeated three times is not his.
+// 2: the header carries his name, the joined files exist, a text repeated three times is not his, and the state lists the
+// deliveries amux typed (a state that lacks the list is read as having none).
 const STATE_VERSION = 2;
 
-const textHash = (ask) => createHash("sha256").update(authoredPromptText(ask.verbatim)).digest("hex").slice(0, 16);
 const sameWords = (entry) => `${entry.agent}\u0000${entry.pane}\u0000${entry.hash}`;
 const dayOf = (ask) => dayOfMs(Date.parse(ask.ts));
 
@@ -67,7 +64,7 @@ function placeMessages(asks, memory) {
   let placed = 0;
   for (const ask of [...asks.filter((row) => !isCopy(row)), ...asks.filter(isCopy)]) {
     if (memory.keys[ask.id]) continue;
-    const entry = { agent: ask.agent, pane: ask.pane, hash: textHash(ask), ms: Date.parse(ask.ts), kind: isCopy(ask) ? "copy" : "delivery", claimed: false };
+    const entry = { agent: ask.agent, pane: ask.pane, hash: askTextHash(ask), ms: Date.parse(ask.ts), kind: isCopy(ask) ? "copy" : "delivery", claimed: false };
     const partner = nearestUnclaimed(memory, entry, isCopy(ask) ? "delivery" : "copy");
     if (partner) { partner.claimed = true; entry.claimed = true; } else {
       const rk = repeatKeyOf(ask);
@@ -187,7 +184,7 @@ function openState(dir, name) {
   const wanted = name === undefined ? undefined : cleanHumanName(name);
   const changed = Boolean(state) && (state.version !== STATE_VERSION || (wanted !== undefined && (state.name ?? "") !== wanted));
   if (changed) { wipeFolder(dir); state = null; }
-  return { state: state || { version: STATE_VERSION, name: wanted ?? "", tail: {}, keys: {} }, wiped: changed };
+  return { state: state || { version: STATE_VERSION, name: wanted ?? "", tail: {}, keys: {}, delivered: [] }, wiped: changed };
 }
 
 function saveState(dir, state) {
@@ -198,18 +195,24 @@ function movedBytes(before, after) {
   return Object.entries(after).reduce((sum, [key, entry]) => sum + entry.offset - (before[key]?.offset ?? 0), 0);
 }
 
-function newHumanAsks(tail, tailState, { path, sinceMs }) {
+// `asks` are the new rows a person may have written. `delivered` describes the new deliveries that amux typed and no person
+// wrote: the pane's copy of one reads like a typed prompt, so it is told from his by the delivery it belongs to.
+function newAsks(tail, tailState, { path, sinceMs }) {
   const asks = [];
+  const delivered = [];
   let next = tailState;
   for (let done = false; !done;) {
     const tailed = tail(next, { path, sinceMs });
     next = tailed.state;
     done = tailed.done;
     for (const { row } of tailed.rows) {
-      if (row.event === "ask" && typeof row.verbatim === "string" && isHumanAsk(row) && Date.parse(row.ts) > sinceMs) asks.push(row);
+      if (row.event !== "ask" || typeof row.verbatim !== "string" || !(Date.parse(row.ts) > sinceMs)) continue;
+      if (isHumanAsk(row)) { asks.push(row); continue; }
+      const delivery = automatedDeliveryOf(row);
+      if (delivery) delivered.push(delivery);
     }
   }
-  return { asks, tailState: next };
+  return { asks, delivered, tailState: next };
 }
 
 function syncOwned({ dir, ledgerPath, nowMs, tail, append, name }) {
@@ -217,9 +220,11 @@ function syncOwned({ dir, ledgerPath, nowMs, tail, append, name }) {
   const sinceMs = nowMs - WINDOW_MS;
   const memory = openMemory(state.keys);
   const earlier = Object.values(memory.keys).filter((entry) => entry.rk && entry.ms > sinceMs).map((entry) => entry.rk);
-  const { asks, tailState } = newHumanAsks(tail, state.tail, { path: ledgerPath, sinceMs });
+  const { asks, delivered, tailState } = newAsks(tail, state.tail, { path: ledgerPath, sinceMs });
+  // A copy can come in a later sync than its delivery, so the deliveries of the window travel in the state.
+  const sent = [...(state.delivered || []).filter((entry) => entry.ms > sinceMs), ...delivered];
   const { placed, messages } = placeMessages(asks, memory);
-  const kept = humanAsksOf(messages, { earlier });
+  const kept = humanAsksOf(messages, { earlier, delivered: sent });
   const keptIds = new Set(kept.map((ask) => ask.id));
   for (const ask of messages) if (!keptIds.has(ask.id)) memory.keys[ask.id].gone = true;
   const written = appendDays(dir, kept, append, state.name);
@@ -231,7 +236,7 @@ function syncOwned({ dir, ledgerPath, nowMs, tail, append, name }) {
   let forgotten = 0;
   for (const [id, entry] of Object.entries(memory.keys)) if (entry.ms <= sinceMs) { delete memory.keys[id]; forgotten++; }
   if (wiped || placed || forgotten || movedBytes(state.tail, tailState) >= CHECKPOINT_BYTES) {
-    saveState(dir, { version: STATE_VERSION, name: state.name, tail: tailState, keys: memory.keys });
+    saveState(dir, { version: STATE_VERSION, name: state.name, tail: tailState, keys: memory.keys, delivered: sent });
   }
   return { written };
 }

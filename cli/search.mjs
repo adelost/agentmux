@@ -63,7 +63,12 @@ amux memory topics --json to inspect states and decision cells. Topic text is
 derived, not a new instruction or proof that no later correction exists.
 His messages of the last 30 days, from Discord and typed in the panes, are
 searchable units, one per message, copied word for word to
-~/.agentmux/search-human/YYYY-MM-DD.md (AMUX_SEARCH_HUMAN=0 turns this off).
+~/.agentmux/search-human/YYYY-MM-DD.md, each headed with the time, human.name
+from the amux config and the pane. A run of his messages to one pane, each
+within 2 minutes of the one before, is also one joined unit, in
+YYYY-MM-DD.joined.md. amux's own notices, what amux typed into a pane, and
+prompts of 40+ characters repeated 3 or more times are not his
+(AMUX_SEARCH_HUMAN=0 turns this off).
 The canonical conversation log (last 30 days) is searched by the warm daemon
 from memory. A cold answer leaves the agents' rows out and says so.
 Use --source conversation to scan the log itself for exact posted words;
