@@ -15,7 +15,9 @@ feature("search includes exact posted conversation, not only the event ledger", 
         payload: "Hirohiko som tecknar Jojo, ett exakt åäö-citat.", ts: Date.now() - 60000 }, { path });
       return { root, path, previous, row };
     }],
-    when: ["searching the actual CLI collector without note or journal roots", fx => collectSearchHits("Hirohiko som tecknar Jojo", [], fx.root, { raw, lexical: true }, {
+    // A cold answer leaves the log out unless it is asked for by name (docs/DESIGN-search-daemon.md, chapter 6), so the
+    // phrase is searched with --source conversation, which is also how the log is documented to be searched alone.
+    when: ["searching the actual CLI collector without note or journal roots", fx => collectSearchHits("Hirohiko som tecknar Jojo", [], fx.root, { raw, lexical: true, source: "conversation" }, {
       semantic: { passages: () => { throw Error("No note roots, no neural or passage reader needed"); } },
     })],
     then: ["the complete canonical row is identified by its stable id and real timestamp", (result, fx) => {

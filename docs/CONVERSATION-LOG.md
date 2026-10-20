@@ -92,9 +92,14 @@ writer now records accepted content rather than the pre-send payload.
   `--raw` is the explicit old-reader diagnostic. Engine compact summaries,
   task notifications and relays do not become human asks.
 - `amux search "exact words"` includes canonical rows from the last 30 days.
-  `--source conversation` restricts the search to this source without starting
-  neural readers. `--show N` expands the immutable row id and event time,
-  preserving its source and Discord id after rotation. No second index exists.
+  The warm search daemon answers from a word index it keeps in memory and
+  follows the log by inode and byte offset, so a question never rescans the
+  log; a cold answer leaves these rows out and says so. His messages are also
+  copied word for word to `~/.agentmux/search-human/YYYY-MM-DD.md`, a derived
+  copy that can be deleted and rebuilt (`AMUX_SEARCH_HUMAN=0` turns it off).
+  `--source conversation` scans the log itself, without starting neural
+  readers. `--show N` expands the immutable row id and event time, preserving
+  its source and Discord id after rotation. The log stays the only source.
 - `amux memory status` shows the file sizes, the last day's posts and posting
   panes, failed sends, and the share of settled human asks answered by a post.
   It warns when meaningful settled input has no later successful post for ten

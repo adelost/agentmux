@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { vi } from "vitest";
-import { cmdSearch } from "./search.mjs";
+import { cmdSearch, collectSearchHits } from "./search.mjs";
+import { createHumanDir, createThreeFileLog, NOW_MS } from "../test/fixtures/conversation-log.mjs";
 
 // The semantic layer needs a model and a daemon; these tests pin the lexical
 // contract, so the layer reports itself unavailable instead of starting one.
@@ -227,6 +228,121 @@ feature("search CLI contract", () => {
       expect(text).toContain("Skriv klockan ovanför soluret");
       expect(text).toContain("skyvw:6");
       rmSync(fixture.root, { recursive: true, force: true });
+    }],
+  });
+});
+
+// The conversation log is searched by the warm daemon; a cold answer leaves it out (docs/DESIGN-search-daemon.md, chapter 6).
+const COLD_WARNING = "ℹ conversation log is searched by the warm search daemon; it is starting, so this answer leaves it out";
+
+// The root of his day files, as the design shapes it; cmdSearch adds it by itself (last test below).
+const humanRootOf = (path) => ({ name: "human", path, glob: "*.md", exclude: [], semanticExclude: [], weight: 3, semantic: true, kind: "human-words" });
+
+const conversationWorld = async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW_MS);
+  const log = createThreeFileLog();
+  log.unfinished.finish();
+  const human = createHumanDir();
+  vi.stubEnv("AMUX_ASK_LEDGER_PATH", log.path);
+  vi.stubEnv("AMUX_SEARCH_HUMAN_DIR", human.dir);
+  return { log, human, roots: [humanRootOf(human.dir)], workspace: human.dir };
+};
+const endWorld = ({ log, human }) => { vi.useRealTimers(); vi.unstubAllEnvs(); human.remove(); log.remove(); };
+const ask = (world, query, flags, semantic) => {
+  const warned = [];
+  return collectSearchHits(query, world.roots, world.workspace, flags, { warn: (message) => warned.push(message), semantic })
+    .then((result) => ({ ...result, warned }));
+};
+
+feature("the conversation log in the search CLI", () => {
+  component("uses the daemon's conversation hits when it is warm", {
+    given: ["a warm daemon that answers with one row, while the log itself holds another row with the same words", async () => {
+      const world = await conversationWorld();
+      const fromDaemon = { path: "/daemon/ledger", line: 0, root: "conversation", weight: 2, layer: "L1", date: "2026-10-20", timestamp: "2026-10-20T07:00:00.000Z",
+        conversationId: "row-from-the-daemon", agent: "api", pane: 0, eventKind: "post", dedupeKey: "conversation:row-from-the-daemon", matches: 4, score: 9,
+        snippet: "Svaret om genomförandet enligt planen kom från daemonens minne" };
+      const asked = [];
+      const semantic = { ...noSemantic, conversation: async (query, options) => { asked.push({ query, ...options }); return [fromDaemon]; } };
+      return { ...world, asked, semantic };
+    }],
+    when: ["asking for those words", (world) => ask(world, "Sonnet genomförandet enligt planen", { lexical: true }, world.semantic)],
+    then: ["the daemon was asked once for at most 12 rows, its row is in the answer, the log was not scanned, and nothing says the log was left out", (result, world) => {
+      try {
+        expect(world.asked).toHaveLength(1);
+        expect(world.asked[0]).toMatchObject({ query: "Sonnet genomförandet enligt planen", max: 12 });
+        expect(result.top.filter((hit) => hit.conversationId).map((hit) => hit.conversationId)).toEqual(["row-from-the-daemon"]);
+        expect(result.warned.join("\n")).not.toContain("conversation log is searched");
+      } finally { endWorld(world); }
+    }],
+  });
+
+  component("leaves the scan out when cold unless --source conversation", {
+    given: ["the three-file log and no warm daemon", async () => {
+      const world = await conversationWorld();
+      return { ...world, semantic: { ...noSemantic, conversation: async () => null } };
+    }],
+    when: ["asking the same words cold, then with --source conversation, then with --source human", async (world) => ({
+      cold: await ask(world, "Sonnet genomförandet enligt planen", { lexical: true }, world.semantic),
+      named: await ask(world, "Sonnet genomförandet enligt planen", { source: "conversation" }, world.semantic),
+      human: await ask(world, "Sonnet genomförandet enligt planen", { source: "human" }, world.semantic),
+    })],
+    then: ["the cold answer warns in the exact words, has none of the agents' rows and still finds his message; naming the log scans it", ({ cold, named, human }, world) => {
+      try {
+        expect(cold.warned).toContain(COLD_WARNING);
+        expect(cold.top.some((hit) => hit.conversationId)).toBe(false);
+        expect(cold.top.some((hit) => hit.path.endsWith("2026-10-05.md"))).toBe(true);
+        expect(named.warned).not.toContain(COLD_WARNING);
+        expect(named.top.some((hit) => hit.conversationId && hit.snippet.includes("enligt planen"))).toBe(true);
+        expect(human.warned).not.toContain(COLD_WARNING);
+        expect(human.top.every((hit) => !hit.conversationId)).toBe(true);
+        expect(human.top.some((hit) => hit.path.endsWith("2026-10-05.md"))).toBe(true);
+      } finally { endWorld(world); }
+    }],
+  });
+
+  component("starts the daemon when a lookup finds it cold, unless the reader asked for lexical search", {
+    given: ["no warm daemon and a recorder for its start", async () => {
+      const world = await conversationWorld();
+      const starts = [];
+      return { ...world, starts, semantic: { ...noSemantic, conversation: async () => null, start: (options) => starts.push(options) } };
+    }],
+    when: ["looking up one word, then the same with --lexical", async (world) => {
+      await ask(world, "Sonnet", {}, world.semantic);
+      const afterLookup = world.starts.length;
+      await ask(world, "Sonnet", { lexical: true }, world.semantic);
+      return { afterLookup, afterLexical: world.starts.length };
+    }],
+    then: ["the lookup started it once, with the roots to warm, and the lexical question did not", ({ afterLookup, afterLexical }, world) => {
+      try {
+        expect(afterLookup).toBe(1);
+        expect(world.starts[0].roots.map((root) => root.name)).toEqual(["human"]);
+        expect(afterLexical).toBe(1);
+      } finally { endWorld(world); }
+    }],
+  });
+
+  component("every search sees his day files as a root, with no configuration", {
+    given: ["a config with no roots, the three-file log and a folder for his messages", async () => {
+      const world = await conversationWorld();
+      const configPath = join(world.human.dir, "config.yaml");
+      writeFileSync(configPath, "search:\n  roots: []\nagents: {}\n");
+      return { ...world, configPath };
+    }],
+    when: ["asking through the command", async (world) => {
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await cmdSearch({ configPath: world.configPath }, "Sonnet genomförandet", { lexical: true, workspace: world.workspace },
+          { statePath: join(world.human.dir, "result.json"), semantic: { ...noSemantic, conversation: async () => null } });
+        return output.mock.calls.flat().join("\n");
+      } finally { output.mockRestore(); warnings.mockRestore(); }
+    }],
+    then: ["his message of 5 October is in the answer", (text, world) => {
+      try {
+        expect(text).toContain("2026-10-05.md");
+        expect(text).toContain("Opus planerar");
+      } finally { endWorld(world); }
     }],
   });
 });

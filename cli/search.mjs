@@ -7,6 +7,7 @@ import { searchConversationLog, expandConversationHit } from "../core/search-con
 import {
   loadSearchRoots,
   withEventLedgerRoot,
+  withHumanWordsRoot,
   searchEventLedger,
   lexicalSearch,
   formatHits,
@@ -22,7 +23,8 @@ import { expandPassage, mergePassageHits, phraseUnits, searchPassages, topPassag
 import { preferDates, temporalIntent } from "../core/search-time.mjs";
 import { documentWindow, firstAnswerRank, formatEvalReport, parseGoldenCases, summarizeEval } from "../core/search-eval.mjs";
 import { classifyQuery, fuseRankings, semanticSearchHits } from "../core/search-fusion.mjs";
-import { daemonAlive, daemonPassages, daemonRerank, semanticQuery } from "../core/search-embedder.mjs";
+import { daemonAlive, daemonConversation, daemonPassages, daemonRerank, semanticQuery, startEmbedder } from "../core/search-embedder.mjs";
+import { syncHumanWords } from "../core/search-human-words.mjs";
 import { exitAfterGpu, gpuEnv, holdReindexLock } from "../core/search-gpu.mjs";
 import { spawnSync } from "node:child_process";
 import { blendRerank, RERANK_CANDIDATES, rerankText } from "../core/search-rerank.mjs";
@@ -48,17 +50,23 @@ the local semantic layer (bge-m3), then a cross-encoder reorders the candidates
 smaller CPU model, and the output says so); identifiers
 and one- or two-word names stay lexical, and an exact hit opens the units that
 hold the phrase. Relative time ("i går", "i förmiddags", "last week") prefers
-that day's notes. The semantic layer runs in a small background process that
-loads on the first question, follows notes edited since the nightly index and
-exits when idle; until it is warm a question is answered lexically and says
-so. A passage expands with its section around it.
+that day's notes. The semantic layer runs in a small background process, the
+search daemon. It loads on the first question, follows notes edited since the
+nightly index and stays loaded for 30 minutes after the last question; until it
+is warm a question is answered lexically and says so. A passage expands with
+its section around it.
 Validated memory/topics pages provide compact orientation alongside original sources.
 --raw disables these layers. Topic/paragraph expansion rechecks source hashes; use
 amux memory topics --json to inspect states and decision cells. Topic text is
 derived, not a new instruction or proof that no later correction exists.
-Lexical search includes the canonical conversation log (last30days) and delivery events.
-Use --source conversation for exact posted words; --show expands the immutable row id.
---deep adds large raw session archives.
+His messages of the last 30 days, from Discord and typed in the panes, are
+searchable units, one per message, copied word for word to
+~/.agentmux/search-human/YYYY-MM-DD.md (AMUX_SEARCH_HUMAN=0 turns this off).
+The canonical conversation log (last 30 days) is searched by the warm daemon
+from memory. A cold answer leaves the agents' rows out and says so.
+Use --source conversation to scan the log itself for exact posted words;
+--show expands the immutable row id. Lexical search also covers the
+durable AMUX delivery ledger. --deep adds large raw session archives.
 
 Journal hits show event time (unknown if absent), role and exact source line.
 USER means authored journal input, not proof of a human order or current policy.
@@ -100,13 +108,33 @@ const SEMANTIC_K_MAX = 100;
 const SEMANTIC_RESERVED = 50;
 
 /** WHAT: Names the warm-daemon semantic layer. WHY: Keeps tests and callers able to substitute it without a model. */
-export const SEMANTIC_LAYER = Object.freeze({ query: semanticQuery, passages: daemonPassages, rerank: daemonRerank });
+export const SEMANTIC_LAYER = Object.freeze({ query: semanticQuery, passages: daemonPassages, rerank: daemonRerank,
+  conversation: daemonConversation, start: startEmbedder });
+
+const COLD_CONVERSATION_WARNING = "ℹ conversation log is searched by the warm search daemon; it is starting, so this answer leaves it out";
+const CONVERSATION_MAX = 12;
+
+/**
+ * WHAT: Returns the conversation log's hits for one question: the warm daemon's, else a scan when the reader named the log, else none and a warning.
+ * WHY: Keeps a question from scanning 238 MB of log. A cold answer says what it left out, and the CLI brings his day files up to date itself.
+ */
+async function conversationStep(content, flags, { semantic, warn }) {
+  if (flags.source && !"conversation".includes(flags.source)) return { hits: [], answered: false, cold: false };
+  const warm = await semantic.conversation?.(content, { max: CONVERSATION_MAX });
+  if (warm) {
+    if (warm.warning) warn(`⚠ ${warm.warning}`);
+    return { hits: warm, answered: true, cold: false };
+  }
+  if (flags.source) return { hits: searchConversationLog(content), answered: false, cold: false };
+  warn(COLD_CONVERSATION_WARNING);
+  return { hits: [], answered: false, cold: true };
+}
 
 /**
  * WHAT: Returns the ranked overview from every search layer for one query.
  * WHY: Keeps printing and the golden-set eval on exactly the same retrieval.
  */
-export async function collectSearchHits(query, allRoots, workspace, flags = {}, { warn = console.warn, semantic = SEMANTIC_LAYER } = {}) {
+export async function collectSearchHits(query, allRoots, workspace, flags = {}, { warn = console.warn, semantic = SEMANTIC_LAYER, syncHuman = syncHumanWords } = {}) {
   const roots = flags.source ? allRoots.filter((root) => root.name.includes(flags.source)) : allRoots;
   const startedAt = Date.now();
   // Stage timings (ms) for --eval profiling; the daemon adds its own parts.
@@ -115,8 +143,14 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   const lap = (stage) => { const now = performance.now(); timing[stage] = (timing[stage] || 0) + now - clock; clock = now; };
   const { query: content, dates } = temporalIntent(query, flags.now ? new Date(flags.now) : new Date());
   const ledgerRoot = roots.find((root) => root.kind === "event-ledger");
-  const ledgerHits = [...(ledgerRoot ? searchEventLedger(content, ledgerRoot.path) : []),
-    ...(!flags.source || "conversation".includes(flags.source) ? searchConversationLog(content) : [])];
+  const conversation = await conversationStep(content, flags, { semantic, warn });
+  Object.assign(timing, conversation.hits.timing || {});
+  // The daemon brings his day files up to date when it answers; otherwise this process does, before they are read.
+  const humanRoot = roots.find((root) => root.kind === "human-words");
+  if (humanRoot && !conversation.answered) {
+    try { syncHuman({ dir: humanRoot.path }); } catch (error) { warn(`⚠ his messages could not be brought up to date: ${error.message}`); }
+  }
+  const ledgerHits = [...(ledgerRoot ? searchEventLedger(content, ledgerRoot.path) : []), ...conversation.hits];
   lap("ledger");
   // A relevant per-event receipt is higher-quality than file-level AND over
   // giant transcripts, and avoids a multi-second scan through unrelated
@@ -152,7 +186,13 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   const exactDocument = hits.some(hit => hit.layer === "L1" && !hit.path.endsWith(".jsonl"));
   let semanticHits = [];
   let reranker = null;
-  const useSemantic = lexicalRoots.length > 0 && !flags.raw && !flags.lexical && !flags.fast && (flags.semantic || classifyQuery(content) === "natural");
+  const semanticAllowed = !flags.raw && !flags.lexical && !flags.fast;
+  const useSemantic = lexicalRoots.length > 0 && semanticAllowed && (flags.semantic || classifyQuery(content) === "natural");
+  // A question that does not ask the semantic layer would never start the daemon, and the warning says it is starting.
+  if (conversation.cold && semanticAllowed && !useSemantic) {
+    const started = semantic.start?.({ roots: lexicalRoots });
+    if (started?.unavailable) warn(`⚠ ${started.unavailable}`);
+  }
   if (useSemantic) {
     const allowedRoots = new Set(roots.map(root => root.name));
     const result = await semantic.query(content, { k: SEMANTIC_K_MAX, roots: lexicalRoots, waitMs: flags.semanticWaitMs ?? 0 });
@@ -363,7 +403,7 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
 
   const config = loadConfig(ctx.configPath);
   const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE || defaultWorkspace(process.env.HOME);
-  const roots = withEventLedgerRoot(loadSearchRoots(config), eventsPath());
+  const roots = withHumanWordsRoot(withEventLedgerRoot(loadSearchRoots(config), eventsPath()));
 
   if (flags.reindex) return reindexOnBestDevice(roots);
 
