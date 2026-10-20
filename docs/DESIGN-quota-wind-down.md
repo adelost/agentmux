@@ -1,6 +1,6 @@
 # Quota wind-down: notice at 5 %, nudge at 3 %, compact, then a move to room
 
-Version: 1 · 2026-10-20 17:3xZ · owner of the design: api:0 · page: none yet
+Version: 1 · 2026-10-20 16:5xZ · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -323,5 +323,5 @@ None for him; his yes covers the moves. Calls made by api:0:
 
 ## 15. Changes
 
-- v1, 2026-10-20 17:3xZ: first version, from his 14:5xZ request and lsrc:0's row 55 order; the replay of both 20 Oct
+- v1, 2026-10-20 16:5xZ: first version, from his 14:5xZ request and lsrc:0's row 55 order; the replay of both 20 Oct
   stops in §10.
