@@ -238,7 +238,8 @@ function pathMessage(token, facts, ctx) {
   const inside = candidates.filter((c) => c !== ".." && !c.startsWith("../"));
   if (!inside.length) return null;
   const found = inside.some((c) => { const bare = c.replace(/\/$/, ""); return facts.suffix(bare) || facts.underGitlink(bare); });
-  return found ? null : `\`${token}\` is not on ${ctx.trunk}`;
+  // A path the checkout's ignore rules cover is build output or local state, never on trunk.
+  return found || inside.some((c) => ctx.ignored?.(c)) ? null : `\`${token}\` is not on ${ctx.trunk}`;
 }
 
 function linkMessage(ref, facts, ctx) {

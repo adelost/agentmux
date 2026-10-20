@@ -91,7 +91,7 @@ const snapshot = (repo) => ({
   index: statSync(join(repo.root, ".git", "index")).mtimeMs,
   fetchHead: existsSync(join(repo.root, ".git", "FETCH_HEAD")) ? statSync(join(repo.root, ".git", "FETCH_HEAD")).mtimeMs : null,
 });
-const READ_ONLY = ["rev-parse", "symbolic-ref", "for-each-ref", "ls-tree", "show", "cat-file", "rev-list", "log", "grep", "config"];
+const READ_ONLY = ["rev-parse", "symbolic-ref", "for-each-ref", "ls-tree", "show", "cat-file", "rev-list", "log", "grep", "config", "check-ignore"];
 
 feature("rules lint trunk and checkout", () => {
   component("follows origin/HEAD", {
@@ -149,9 +149,9 @@ feature("rules lint trunk and checkout", () => {
     }],
     then: ["the named trunk decides what exists and the default trunk reports the file", ({ named, plain }) => {
       expect(named.repos[0].trunk).toMatchObject({ ref: "origin/preview", source: "rules.trunk" });
-      expect(findings(named, "exists")).toEqual([]);
+      expect(findings(named, "path")).toEqual([]);
       expect(plain.repos[0].trunk.ref).toBe("origin/main");
-      expect(findings(plain, "exists")).toHaveLength(1);
+      expect(findings(plain, "path")).toHaveLength(1);
     }],
   });
 
@@ -266,7 +266,7 @@ feature("rules lint trunk and checkout", () => {
     when: ["linting the repo", ({ world, repo }) => lint(world, repo)],
     then: ["it is linted, not skipped", (run) => {
       expect(run.repos[0].skipped).toBeNull();
-      expect(findings(run, "exists")).toHaveLength(1);
+      expect(findings(run, "path")).toHaveLength(1);
     }],
   });
 });
@@ -300,6 +300,23 @@ feature("rules lint severity, reach and read-only", () => {
       expect(forbidden.every((message) => /read-only/.test(message || ""))).toBe(true);
       expect(snapshot(repo)).toEqual(before);
       expect(run.repos[0].findings.length).toBeGreaterThan(5);
+    }],
+  });
+
+  // Design v3 (20 Oct): 25 of 26 missing-path errors over 18 repos were false; 11 were outputs the checkout ignores.
+  component("warns on a missing path and skips one the checkout ignores", {
+    given: ["a rule file naming a missing doc and a build output its .gitignore covers", () => {
+      const world = newWorld();
+      const repo = pushedRepo(world, "ignored", {
+        "AGENTS.md": "# Rules\nSee `docs/gone.md`; the build writes `dist/app.js`.\n",
+        ".gitignore": "dist/\n",
+      });
+      return { world, repo };
+    }],
+    when: ["linting the repo", ({ world, repo }) => lint(world, repo)],
+    then: ["the missing doc is one warning, the ignored output nothing, and no error", (run) => {
+      expect(findings(run, "path")).toEqual([expect.objectContaining({ sev: "warn", line: 2, msg: "`docs/gone.md` is not on origin/main" })]);
+      expect(run.repos[0].findings.filter((f) => f.sev === "error")).toEqual([]);
     }],
   });
 
@@ -353,10 +370,11 @@ feature("rules lint severity, reach and read-only", () => {
       const tally = {};
       for (const f of run.repos[0].findings) tally[`${f.tag}:${f.sev}`] = (tally[`${f.tag}:${f.sev}`] || 0) + 1;
       expect(tally).toEqual({
-        "exists:error": 3, "link:error": 1, "removed:error": 1,
-        "count:warn": 2, "status:warn": 1, "size:warn": 1, "layer-dup:warn": 1,
+        "exists:error": 2, "link:error": 1, "removed:error": 1,
+        "path:warn": 1, "count:warn": 2, "status:warn": 1, "size:warn": 1, "layer-dup:warn": 1,
       });
-      expect(findings(run, "exists").map((f) => f.line)).toEqual([2, 2, 3]);
+      expect(findings(run, "exists").map((f) => f.line)).toEqual([2, 2]);
+      expect(findings(run, "path").map((f) => f.line)).toEqual([3]);
     }],
   });
 
@@ -384,7 +402,7 @@ feature("rules lint command", () => {
   component("exits 1 on an error with or without --strict and 0 on warnings only", {
     given: ["one repo with a dead path and one clean repo", () => {
       const world = newWorld();
-      const bad = pushedRepo(world, "bad", { "AGENTS.md": "# Rules\nSee `docs/gone.md`.\n" });
+      const bad = pushedRepo(world, "bad", { "AGENTS.md": "# Rules\nRun `npm run gone`.\n" });
       const good = pushedRepo(world, "good");
       const imported = pushedRepo(world, "imported", { "AGENTS.md": SIX_RULES, "CLAUDE.md": "@AGENTS.md\n" });
       return { world, bad, good, imported };
@@ -403,7 +421,7 @@ feature("rules lint command", () => {
     then: ["errors exit 1 either way, a missing setting too, and the report shows both repos and a summary", ({ both, plainExit, strictExit, cleanExit, machineExit }, { bad }) => {
       expect([plainExit, strictExit, machineExit]).toEqual([1, 1, 1]);
       expect(cleanExit).toBe(0);
-      expect(both).toContain("✗ AGENTS.md:2 `docs/gone.md` is not on origin/main [exists]");
+      expect(both).toContain("✗ AGENTS.md:2 script `gone` is not in any package.json on origin/main [exists]");
       expect(both).toMatch(/2 repos · 1 error · \d+ warnings? · \d+\.\d s/);
       expect(both).toContain(bad.root);
     }],
@@ -458,7 +476,7 @@ feature("rules lint command", () => {
   component("suppresses baselined findings and keeps other checks in the baseline file", {
     given: ["a repo with one error and a baseline that already holds a contract finding", () => {
       const world = newWorld();
-      const repo = pushedRepo(world, "baselined", { "AGENTS.md": "# Rules\nSee `docs/gone.md`.\n" });
+      const repo = pushedRepo(world, "baselined", { "AGENTS.md": "# Rules\nRun `npm run gone`.\n" });
       const baseline = join(world.dir, "baseline.json");
       writeFileSync(baseline, JSON.stringify({ version: 1, findings: ["x.mjs:CONTRACT010:class A: missing WHAT: tag"] }));
       return { world, repo, baseline };
@@ -473,7 +491,7 @@ feature("rules lint command", () => {
       expect(exit).toBe(0);
       expect(again).toMatch(/1 baselined/);
       expect(saved).toContain("x.mjs:CONTRACT010:class A: missing WHAT: tag");
-      expect(saved.some((key) => /^AGENTS\.md:rules\.exists:`docs\/gone\.md` is not on origin\/main$/.test(key))).toBe(true);
+      expect(saved.some((key) => /^AGENTS\.md:rules\.exists:script `gone` is not in any package\.json on origin\/main$/.test(key))).toBe(true);
     }],
   });
 

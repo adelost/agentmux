@@ -18,7 +18,7 @@ const SETTING_KEY = "cc-plugin-agents-md@builtin";
 const SETTING_VALUE = "claude-md-and-agents-md";
 const RULE_FILES = ["AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md"];
 const FAR_BEHIND = 50;
-const GIT_READ_ONLY = new Set(["rev-parse", "symbolic-ref", "for-each-ref", "ls-tree", "show", "cat-file", "rev-list", "log", "grep"]);
+const GIT_READ_ONLY = new Set(["rev-parse", "symbolic-ref", "for-each-ref", "ls-tree", "show", "cat-file", "rev-list", "log", "grep", "check-ignore"]);
 const GIT_UNSAFE_FLAG = /^(?:--output(?:=|$)|-O$|--open-files-in-pager|--ext-diff$|--textconv$)/;
 const GIT_REPO_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_PREFIX"];
 const ICONS = { error: "✗", warn: "⚠", info: "ℹ" };
@@ -29,7 +29,8 @@ const ICONS = { error: "✗", warn: "⚠", info: "ℹ" };
  */
 export const SEVERITY = Object.freeze({
   exists: "error", link: "error", shape: "error", codex: "error", reach: "error", checkout: "error", removed: "error",
-  branch: "warn", loaded: "warn", trunk: "warn", count: "warn", status: "warn", size: "warn", "layer-dup": "warn",
+  // A missing path was right 1 time in 26 over 18 repos (20 Oct): outputs, planned files, other repos, examples.
+  path: "warn", branch: "warn", loaded: "warn", trunk: "warn", count: "warn", status: "warn", size: "warn", "layer-dup": "warn",
   protected: "info",
 });
 
@@ -195,10 +196,11 @@ function loadedFindings(top, trunk, rules) {
 function fileFindings(rule, shared) {
   const { git, trunk, facts, home, layers } = shared;
   const out = [];
-  const ctx = { trunk: trunk.ref, ruleFile: rule.file, home, pathExists: existsSync };
+  const ignored = (path) => git(["check-ignore", "--quiet", "--no-index", "--", path]).ok;
+  const ctx = { trunk: trunk.ref, ruleFile: rule.file, home, pathExists: existsSync, ignored };
   for (const ref of references(rule.text)) {
     const msg = exists(ref, facts, ctx);
-    if (msg) out.push({ tag: ref.kind === "link" ? "link" : "exists", file: rule.file, line: ref.line, msg });
+    if (msg) out.push({ tag: ref.kind === "link" || ref.kind === "path" ? ref.kind : "exists", file: rule.file, line: ref.line, msg });
   }
   for (const h of heuristicFindings(rule.text)) out.push({ ...h, file: rule.file });
   for (const d of layerDuplicates(rule.text, layers)) {
