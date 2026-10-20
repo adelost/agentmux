@@ -7,13 +7,12 @@ import { randomUUID } from "crypto";
 import { resolveTmuxLayout } from "./core/layout.mjs";
 import { resolveClaudeEffort } from "./core/claude-model.mjs";
 import { buildClaudePaneDescriptor } from "./core/agent-launch-command.mjs";
-import { nightlyCompactPolicy } from "./core/nightly-compact.mjs";
+import { parseDreamSection } from "./core/dream-config.mjs";
 import { CODEX_AUTONOMOUS_FLAGS, KIMI_AUTONOMOUS_FLAGS, QWEN_AUTONOMOUS_FLAGS } from "./core/execution-safety.mjs";
 import {
   generateSourceChannelNames as generateChannelNames,
   sourceCodingPaneSlots,
   sourcePaneChannelName as paneChannelName,
-  sourcePaneDialect as paneDialect,
   sourcePaneSlot,
 } from "./core/source-pane-plan.mjs";
 export { generateChannelNames };
@@ -171,51 +170,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
     });
   }
 
-  let dream = null;
-  if (doc.dream !== undefined) {
-    const validateDreamPane = (agent, pane, label) => {
-      const target = agents.get(agent);
-      if (!agent || !Number.isSafeInteger(pane) || pane < 0 || !target || !sourcePaneSlot(target, pane)) {
-        throw new Error(`agentmux.yaml: '${label}' must name one configured agent and pane`);
-      }
-      if (target.backend !== "tmux") {
-        throw new Error(`agentmux.yaml: '${label}' target must be a tmux pane`);
-      }
-      const dialect = paneDialect(target, pane);
-      if (dialect !== "claude" && dialect !== "codex") {
-        throw new Error(`agentmux.yaml: '${label}' target must be a Claude or Codex pane`);
-      }
-    };
-    const agent = String(doc.dream?.agent || "").trim();
-    const pane = Number(doc.dream?.pane);
-    validateDreamPane(agent, pane, "dream");
-    dream = { agent, pane };
-    if (doc.dream.compact !== undefined) dream.compact = nightlyCompactPolicy(doc.dream.compact);
-
-    // Optional ordered fallback curators. Validated here, at the same bar as the
-    // primary, so a typo fails `amux sync` instead of quietly shrinking the list
-    // at 04:00 and costing the night the list exists to protect.
-    if (doc.dream?.candidates !== undefined) {
-      if (!Array.isArray(doc.dream.candidates)) {
-        throw new Error("agentmux.yaml: 'dream.candidates' must be a list of agent:pane entries");
-      }
-      const candidates = [];
-      for (const ref of doc.dream.candidates) {
-        const parsed = typeof ref === "object" && ref !== null
-          ? { agent: String(ref.agent || "").trim(), pane: Number(ref.pane) }
-          : (() => {
-            const [refAgent, refPane, ...rest] = String(ref ?? "").trim().split(":");
-            return rest.length
-              ? { agent: "", pane: Number.NaN }
-              : { agent: String(refAgent || "").trim(), pane: refPane === undefined ? Number.NaN : Number(refPane) };
-          })();
-        validateDreamPane(parsed.agent, parsed.pane, `dream.candidates entry ${JSON.stringify(ref)}`);
-        if (candidates.some((known) => known.agent === parsed.agent && known.pane === parsed.pane)) continue;
-        candidates.push({ agent: parsed.agent, pane: parsed.pane });
-      }
-      if (candidates.length) dream.candidates = candidates.map((entry) => `${entry.agent}:${entry.pane}`);
-    }
-  }
+  const dream = parseDreamSection(doc.dream, agents);
 
   return {
     guild: doc.guild ? String(doc.guild) : null,
@@ -225,8 +180,8 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
     // survives every regeneration of agents.yaml. A hand-added section in
     // the generated file dies on the next /sync or `amux label`.
     search: doc.search ?? null,
-    // Dream is an operator-selected existing pane. It is never allowed to
-    // fall back to a hidden one-shot model process.
+    // `human.name` heads his search units; the CLI reads it from the generated file, like `search`.
+    human: doc.human ?? null,
     dream,
   };
 }
@@ -339,7 +294,7 @@ export function buildSyncPlan(desired, existing) {
 
 /** WHAT: Builds runtime pane configuration. WHY: Keeps labels and channel bindings stable across regeneration. */
 export function generateAgentsYaml(
-  agents, channelMap, agentIds, existingYaml = null, search = null, dream = null,
+  agents, channelMap, agentIds, existingYaml = null, search = null, dream = null, human = null,
 ) {
   // `search:` is emitted first: it is fleet config, not an agent entry.
   // Consumers enumerate agents by filtering on `dir`, so the key is inert
@@ -347,6 +302,7 @@ export function generateAgentsYaml(
   const result = {};
   if (search) result.search = search;
   if (dream) result.dream = dream;
+  if (human) result.human = human;
   const sortedNames = [...agents.keys()].sort();
 
   for (const name of sortedNames) {
@@ -481,7 +437,7 @@ export function generateAgentsYaml(
 
 /** WHAT: Builds local runtime configuration. WHY: Keeps Discord bindings unchanged during local edits. */
 export function regenerateAgentsYaml(sourceYaml, existingAgentsYaml) {
-  const { agents, search, dream } = parseConfig(sourceYaml);
+  const { agents, search, dream, human } = parseConfig(sourceYaml);
   const existing = existingAgentsYaml ? yaml.load(existingAgentsYaml) : null;
 
   // Carry over channelMap + agentIds from existing agents.yaml. If none
@@ -503,5 +459,5 @@ export function regenerateAgentsYaml(sourceYaml, existingAgentsYaml) {
     }
   }
 
-  return generateAgentsYaml(agents, channelMap, agentIds, existing, search, dream);
+  return generateAgentsYaml(agents, channelMap, agentIds, existing, search, dream, human);
 }

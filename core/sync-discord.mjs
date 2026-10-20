@@ -136,7 +136,7 @@ export async function executeSync({ guild, configYaml, state, agentsYamlPath }) 
     catch (err) { console.warn(`sync: could not parse existing ${agentsYamlPath}: ${err.message}`); }
   }
   const yamlContent = generateAgentsYaml(
-    config.agents, channelMap, agentIds, existingYaml, config.search, config.dream,
+    config.agents, channelMap, agentIds, existingYaml, config.search, config.dream, config.human,
   );
   mkdirSync(dirname(agentsYamlPath), { recursive: true });
   writeFileSync(agentsYamlPath, yamlContent);

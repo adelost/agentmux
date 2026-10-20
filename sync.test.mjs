@@ -11,6 +11,7 @@ import {
   classifyExistingChannels,
   buildMigrationPlan,
 } from "./sync.mjs";
+import { humanNameOf } from "./core/search.mjs";
 
 // --- Helpers ---
 
@@ -584,6 +585,23 @@ agents:
       expect(parsed.dream).toEqual({ agent: "claw", pane: 1 });
       expect(generated.dream).toEqual({ agent: "claw", pane: 1 });
       expect(generated.dream.dir).toBeUndefined();
+    }],
+  });
+
+  component("carries his name from source into the generated runtime config, where search reads it", {
+    given: ["a source naming the human", () => `
+guild: "1"
+human:
+  name: Mattias
+agents:
+  claw:
+    dir: /tmp/claw
+    claude: 1
+`],
+    when: ["regenerating agents.yaml", (source) => yaml.load(regenerateAgentsYaml(source, null))],
+    then: ["the CLI's config gives search his name, without an agent entry", (generated) => {
+      expect(humanNameOf(generated)).toBe("Mattias");
+      expect(generated.human.dir).toBeUndefined();
     }],
   });
 
