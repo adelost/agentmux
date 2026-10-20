@@ -107,6 +107,9 @@ const TEST_ALIASES = {
   "index.mjs": ["core/delivery-notices.test.mjs", "test/audio-inbox-android-contract.test.mjs"],
   "package.json": ["core/release-install.test.mjs"],
   "package-lock.json": ["core/release-install.test.mjs"],
+  "cli/lint.mjs": ["core/rules-lint.test.mjs", "test/lint-size-guards.test.mjs"],
+  "core/lint-ratchet.mjs": ["core/rules-lint.test.mjs", "test/lint-size-guards.test.mjs"],
+  "test/rules-lint-world.mjs": ["core/rules-lint.test.mjs", "core/rules-lint-text.test.mjs"],
 };
 
 /** WHAT: Maps one changed file to its related fast test files. WHY: Keeps the PR gate focused instead of full-suite. */
