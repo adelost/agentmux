@@ -625,4 +625,20 @@ feature("generated agent policy", () => {
       expect(content).toMatch(/State and\s+dependencies decide what can run/u);
     }],
   });
+
+  // ai:0, 2026-10-20: trace-pattern v2.1 (workspace 189adca, after lsrc:3's final review, lsrc:0's go) gives a ledger
+  // row a Source pointer to his decision-log entry, or own with its mandate, or inferred: before the pointer.
+  unit("lets a ledger row name the source of its request", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "CLAUDE.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["rule 5 ends with the exact Source sentence", (content) => {
+      const rule5 = content.slice(content.indexOf("5. **A configured board"), content.indexOf("6. **Merge by fresh proof"));
+      expect(rule5.replace(/\s+/gu, " ").trim()).toMatch(/A row may carry a `Source` column: a pointer to his decision-log entry \(file, date, and time to the precision the log proves, or a stable message id\), `own` plus the mandate it rests on, or `inferred:` before the pointer when the row rests on your reading of his words\.$/u);
+    }],
+  });
 });

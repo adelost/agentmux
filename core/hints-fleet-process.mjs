@@ -184,6 +184,10 @@ function's own branching or state. Do a small split in the same change.
    Link current canonical Markdown in Spec/Design when creating/updating tasks;
    keep version, verification and dated approval scope there. Date artifacts
    separately; changed requirements need new evidence.
+   A row may carry a \`Source\` column: a pointer to his decision-log entry
+   (file, date, and time to the precision the log proves, or a stable message
+   id), \`own\` plus the mandate it rests on, or \`inferred:\` before the pointer
+   when the row rests on your reading of his words.
 6. **Merge by fresh proof.** Just before merge, fetch and rebase on
    current trunk in the allowed checkout. On that exact source run the
    test plan's tests (testing-philosophy.md) and lint, exercise the feature
