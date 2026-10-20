@@ -1,6 +1,6 @@
 # amux search: his messages as units, the conversation log in the daemon, 30 minutes warm while memory is free
 
-Version: 2 · 2026-10-20 07:35Z · owner of the design: api:0 · page: none yet
+Version: 3 · 2026-10-20 08:20Z · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -45,7 +45,7 @@ n/a: a command-line tool with no screens. The result lists keep their form. What
 
 | Place | Product text | Max length | Stage |
 |---|---|---|---|
-| Result source of a message of his | `~/.agentmux/search-human/2026-10-20.md:14` and the snippet `**05:39:58Z api:0 voice** Okej, ja men …` | 220 | v1 |
+| Result source of a message of his | `~/.agentmux/search-human/2026-10-20.md:14` and the snippet `**HH:MM:SSZ agent:pane voice** <his words>` | 220 | v1 |
 | Warning when the daemon is cold and no `--source conversation` | `ℹ conversation log is searched by the warm search daemon; it is starting, so this answer leaves it out` | 110 | v1 |
 | `amux search --help` | "The search daemon stays loaded for 30 minutes after the last question" in place of "exits when idle" | 80 | v1 |
 | `amux search --help`, appended to the line above | ", while at least 8 GB RAM is free" | 40 | v2 |
@@ -59,9 +59,10 @@ n/a: a command-line tool with no screens. The result lists keep their form. What
   - After: the daemon answers the conversation step from memory in under 50 ms, and the median is about 1.6 s
     (*estimated*: 5.46 − 3.9).
   - Cost: no network, no money. Stage v1. Sequence: §5 seq-warm.
-- **UC-2 His exact words in step one.** He asks "vad sa Mattias exakt om att Opus planerar och Sonnet utför".
-  - His 19 Oct message "… genomföras utav Sonnet 5.5 istället …" is a unit in `search-human/2026-10-19.md`. It
-    competes in BM25, bge-m3 and the reranker like a note bullet, and `--show N` prints it whole with its time and pane.
+- **UC-2 His exact words in step one.** An agent asks `amux search "vad sa Mattias exakt om att Opus planerar och
+  Sonnet utför"`.
+  - His 19 Oct message on who carries out plans is a unit in `search-human/2026-10-19.md`. It competes in BM25,
+    bge-m3 and the reranker like a note bullet, and `--show N` prints it whole with its time and pane.
   - Today the same words come only from the word-AND step, after the agents' rows.
   - Stage v1. Sequence: §5 seq-warm.
 - **UC-3 A new message.** He writes to a pane at 10:00:00Z, and an agent searches for it at 10:00:40Z.
@@ -469,3 +470,5 @@ None for him. Calls made by api:0:
 - v2, 2026-10-20 07:35Z: outcome 3 and the memory guard (principle 2, I-4, UC-6, R-7, R-8, row 46) after his
   questions on memory at 07:12Z and his answer at 07:26Z; measured RSS, VRAM, CPU and the timer table in §7 and §10;
   QMD as option E and row 47. Row 43's builder is not affected; row 46 gets its own brief.
+- v3, 2026-10-20 08:20Z: two fragments of his words removed from §2 and UC-2. A public repo carries none of his
+  text (fleet rule 10); they were mine in v1.
