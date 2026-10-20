@@ -70,9 +70,14 @@ export function predictedStopAt(window, now, policy = QUOTA_PARK_POLICY) {
   return now + (100 - window.usedPercent) * (elapsed / window.usedPercent);
 }
 
-/** WHAT: Checks whether any window opened after a moment. WHY: Keeps a note read before a reset from describing the new window. */
-const openedSince = (windows, at, policy) => Number.isFinite(at)
-  && windows.some((window) => Date.parse(window.resetsAt) - policy.windowMs[window.kind] > at);
+/** WHAT: Checks whether a window reset after a moment. WHY: Keeps a note read before a reset from describing the new window. */
+function resetSince(window, at, now, policy) {
+  // A window in use has a reset; Claude names none for one unused since it reset (Claude S read at 16:10:01Z on 2026-10-20).
+  if (window.resetsAt == null) return true;
+  const resetsAt = Date.parse(window.resetsAt);
+  // A reading taken before the reset still shows the old window (the 16:01:37Z reading, used at 16:10:04Z).
+  return resetsAt <= now ? resetsAt > at : resetsAt - policy.windowMs[window.kind] > at;
+}
 
 /**
  * WHAT: Checks whether a pane's account is about to stop it for longer than its cache lives.
@@ -83,10 +88,13 @@ export function quotaParkDecision({ engine, windows = [], graceNote = false, gra
   const outlastMs = policy.outlastMs[engine];
   if (!outlastMs) return { park: false, cell: "engine" };
   const live = windows.filter((window) => Number.isFinite(window.usedPercent) && Date.parse(window.resetsAt) > now);
-  // A note read before a window reset belongs to a stop that is over (skybar:1 at 11:10:11Z on 2026-10-20).
-  const note = graceNote && !openedSince(live, graceNoteAt, policy);
+  const spent = live.some((window) => window.usedPercent >= 100);
+  // A note read before a window reset belongs to a stop that is over (skybar:1 at 11:10:11Z, eight panes at 16:10Z on
+  // 2026-10-20). A spent window keeps the note: a spent week stops the pane past its session's reset.
+  const note = graceNote && (spent || !(Number.isFinite(graceNoteAt)
+    && windows.some((window) => Number.isFinite(window.usedPercent) && resetSince(window, graceNoteAt, now, policy))));
   // A spent window has stopped the pane already and its account refuses the compact; within Claude's grace it still runs.
-  if (!note && live.some((window) => window.usedPercent >= 100)) return { park: false, cell: "already-stopped" };
+  if (!note && spent) return { park: false, cell: "already-stopped" };
   const atFloor = (window) => 100 - window.usedPercent <= policy.leftPercent;
   const near = live.filter((window) => atFloor(window) || predictedStopAt(window, now, policy) - now <= policy.leadMs);
   // At the grace note a fresh reading may not show the window full yet; the fullest one is stopping the pane.

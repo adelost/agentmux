@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { parkResumeDecision, quotaFloorHold, quotaFloorPercent, quotaParkContinuation, quotaParkDecision } from "./quota-park.mjs";
+import { accountWindows, parkResumeDecision, quotaFloorHold, quotaFloorPercent, quotaParkContinuation, quotaParkDecision } from "./quota-park.mjs";
 
 const NOW = Date.parse("2026-10-19T09:30:00Z");
 const week = (usedPercent, resetsAt = "2026-10-25T18:08:00Z") => ({ kind: "week", usedPercent, resetsAt });
@@ -50,6 +50,38 @@ feature("parking a pane while there is still time to compact it", () => {
     when: ["a session 5 min old has used 25 %", () => quotaParkDecision({ engine: "claude", now: at,
       windows: [session(25, new Date(at + 295 * 60_000).toISOString())] })],
     then: ["no park", decision => expect(decision).toEqual({ park: false, cell: "room" })],
+  });
+});
+
+// 2026-10-20 16:10Z: Claude S's session reset, and eight panes stopped at their grace notes were parked for a week
+// with 36 % left. The bridge held a reading taken at 16:01:37Z, before the reset, then one taken at 16:10:01Z, before
+// any pane used the new session; Claude reports an unused session as Claude A and W read it, 0 % with no reset.
+feature("a grace note after its session reset", () => {
+  const read = (session, week) => accountWindows({ ok: true, provider: "claude", limits: [
+    { id: "session", kind: "session", scopeName: null, ...session },
+    { id: "weekly_all", kind: "weekly_all", scopeName: null, ...week },
+    { id: "weekly_fable", kind: "weekly_scoped", scopeName: "Fable", usedPercent: 0, resetsAt: "2026-10-27T04:00:00+00:00" },
+  ] });
+  const stopped = (note, now, lastActivity) => ({ engine: "claude", graceNote: true, graceNoteAt: Date.parse(note), working: false,
+    lastActivityAt: Date.parse(lastActivity), now: Date.parse(now) });
+  unit("a reading taken before the reset parks nothing after it", {
+    when: ["skyvw:1 at 16:10:04Z, its note of 15:30:11Z, the 16:01:37Z reading", () => quotaParkDecision({
+      ...stopped("2026-10-20T15:30:11Z", "2026-10-20T16:10:04Z", "2026-10-20T15:34:02Z"),
+      windows: read({ usedPercent: 100, resetsAt: "2026-10-20T16:10:00.495+00:00" },
+        { usedPercent: 64, resetsAt: "2026-10-27T03:59:59.549917+00:00" }) })],
+    then: ["no park, since the account has room", decision => expect(decision).toEqual({ park: false, cell: "room" })],
+  });
+  unit("a session unused since its reset parks nothing", {
+    when: ["claw:0 at 16:11:21Z, its note of 15:29:39Z, the 16:10:01Z reading", () => quotaParkDecision({
+      ...stopped("2026-10-20T15:29:39Z", "2026-10-20T16:11:21Z", "2026-10-20T15:30:20Z"),
+      windows: read({ usedPercent: 0, resetsAt: null }, { usedPercent: 64, resetsAt: "2026-10-27T03:59:59.848858+00:00" }) })],
+    then: ["no park, since the account has room", decision => expect(decision).toEqual({ park: false, cell: "room" })],
+  });
+  unit("a spent week still parks at its grace note after the session reset", {
+    when: ["the week reads 100 % and the session is unused since its reset", () => quotaParkDecision({
+      ...stopped("2026-10-20T15:29:39Z", "2026-10-20T16:11:21Z", "2026-10-20T15:30:20Z"),
+      windows: read({ usedPercent: 0, resetsAt: null }, { usedPercent: 100, resetsAt: "2026-10-27T03:59:59.848858+00:00" }) })],
+    then: ["parked for the week", decision => expect(decision).toMatchObject({ park: true, window: "week" })],
   });
 });
 
