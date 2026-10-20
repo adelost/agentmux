@@ -138,3 +138,74 @@ feature("the idle-capacity notice and the account a pane is on", () => {
     }],
   });
 });
+
+// lsrc:0 2026-10-20 11:15Z: claw:1, lsrc:1 and lsrc:2 were reported as unable to work for 21 to 52 minutes while amux ps
+// showed all three working (claw:1 thinking for 2m51s). At 11:16Z the notices for skyvw:1 and skyvw:2 named recovery
+// receipts from 19 Oct while skyvw:1 was posting: resumeStatus took the newest recovery job of any episode.
+const STOP_AT = Date.parse("2026-10-20T09:30:00Z");
+const weeklyStop = { limitEventId: "limit-w", limitKind: "weekly", observedAt: STOP_AT };
+const recoveryJob = (createdAt, status = "acknowledged") => ({ id: `recovery-${createdAt}`, source: "quota-recovery", status,
+  createdAt: Date.parse(createdAt), acknowledgedAt: Date.parse(createdAt) + 60_000, lastReason: null });
+
+feature("the idle-capacity alarm and the state of a pane now", () => {
+  unit("sends no idle notice about a working pane", {
+    given: ["claw:2 with a weekly-limit receipt from 09:30Z, thinking at 11:15Z", () => {
+      const observation = { limitReceipt: weeklyStop, jobs: [], processStopped: false, profileKey: "claude:9", paneStatus: "working" };
+      return { observation, fx: evening(observation, CLAUDE_S, "2026-10-20T11:15:00Z") };
+    }],
+    when: ["the alarm checks while it works, then once it is idle", async ({ observation, fx }) => {
+      await fx.alarm.tick();
+      const whileWorking = [...fx.notices];
+      observation.paneStatus = "idle";
+      fx.clock += 5 * 60_000;
+      await fx.alarm.tick();
+      return { whileWorking, afterIdle: fx.notices };
+    }],
+    then: ["nothing was said about it while it worked, and one notice follows when it stopped", ({ whileWorking, afterIdle }) => {
+      expect(whileWorking).toEqual([]);
+      expect(afterIdle).toHaveLength(1);
+      expect(afterIdle[0]).toContain("[idle-capacity] claw:2 has not been able to work for 1 h 50 min");
+    }],
+  });
+
+  unit("closes the episode when the recovery prompt is acknowledged", {
+    given: ["claw:2 stopped at 09:30Z, its recovery prompt created 10:05Z and acknowledged, and the receipt still open at 11:15Z", () => {
+      const observation = { limitReceipt: weeklyStop, jobs: [], processStopped: false, profileKey: "claude:9", paneStatus: "idle",
+        history: [recoveryJob("2026-10-20T10:05:00Z")] };
+      return { observation, fx: evening(observation, CLAUDE_S, "2026-10-20T11:15:00Z") };
+    }],
+    when: ["the alarm checks, then again after the queue has forgotten the prompt", async ({ observation, fx }) => {
+      await fx.alarm.tick();
+      const first = [...fx.notices];
+      observation.history = [];
+      fx.clock += 5 * 60_000;
+      await fx.alarm.tick();
+      return { first, second: fx.notices };
+    }],
+    then: ["it never reports the episode, even after the evidence of the prompt is gone", ({ first, second }) => {
+      expect(first).toEqual([]);
+      expect(second).toEqual([]);
+    }],
+  });
+
+  unit("reports only this episode's recovery", {
+    given: ["claw:2 stopped at 09:30Z whose only recovery prompt is from 19 Oct, and the same stop with a prompt from 09:40Z that is still pending", () => ({
+      old: { limitReceipt: weeklyStop, jobs: [], processStopped: false, profileKey: "claude:1", paneStatus: "idle",
+        history: [recoveryJob("2026-10-19T18:24:00Z")] },
+      pending: { limitReceipt: weeklyStop, jobs: [], processStopped: false, profileKey: "claude:1", paneStatus: "idle",
+        history: [recoveryJob("2026-10-19T18:24:00Z"), recoveryJob("2026-10-20T09:40:00Z", "pending")] },
+    })],
+    when: ["the alarm reports each", async ({ old, pending }) => {
+      const oldRun = evening(old, CLAUDE_S, "2026-10-20T11:15:00Z");
+      const pendingRun = evening(pending, CLAUDE_S, "2026-10-20T11:15:00Z");
+      await oldRun.alarm.tick();
+      await pendingRun.alarm.tick();
+      return { oldText: oldRun.notices[0], pendingText: pendingRun.notices[0] };
+    }],
+    then: ["the 19 Oct prompt is not claimed for this stop, and the prompt of this stop is", ({ oldText, pendingText }) => {
+      expect(oldText).toContain("amux has no resume for this stop yet.");
+      expect(oldText).not.toContain("2026-10-19");
+      expect(pendingText).toContain("amux's recovery prompt is pending");
+    }],
+  });
+});

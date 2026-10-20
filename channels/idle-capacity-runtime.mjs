@@ -1,6 +1,7 @@
 // Runs the idle-capacity alarm against the configured fleet, its delivery queue, tmux and the quota snapshot.
 
 import { listAgents } from "../cli/config.mjs";
+import { getPaneStatus } from "../cli/tmux.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import { accountEngineForCommand } from "../core/runtime-account-profiles.mjs";
 import { createTmuxAdapter } from "../core/tmux.mjs";
@@ -8,7 +9,7 @@ import { readQuotaSnapshot } from "../core/quota-usage.mjs";
 import { quotaAccountCatalog } from "../core/quota-profiles.mjs";
 import { claudeWeeklyRoom } from "../core/claude-quota-recovery.mjs";
 import { codexAccountHasRoom } from "../core/codex-limit-recovery.mjs";
-import { createIdleCapacityAlarm, resumeStatus } from "../core/idle-capacity-alarm.mjs";
+import { createIdleCapacityAlarm } from "../core/idle-capacity-alarm.mjs";
 import { parseQuotaWarningConfig } from "./quota-warning.mjs";
 
 const SHELL_PROCESS = /^(bash|zsh|fish|sh|dash)$/u;
@@ -77,6 +78,7 @@ export function startIdleCapacityAlarm({
   activeReceipt,
   profileFor = () => null,
   parkStore = null,
+  readPaneStatus = null,
   config = parseIdleCapacityConfig(),
   readSnapshot = () => readQuotaSnapshot({ profiles: quotaAccountCatalog().filter((profile) => profile.provider !== "kimi") }),
   log = (message) => console.log(`idle-capacity | ${message}`),
@@ -90,6 +92,8 @@ export function startIdleCapacityAlarm({
     return null;
   }
   const tmux = createTmuxAdapter({ socket: tmuxSocket, exec: tmuxExec });
+  // What tmux shows now: a pane that works or thinks is not stuck, whatever its receipt or park record still says.
+  const livePaneStatus = readPaneStatus ?? (({ agentName, pane }) => getPaneStatus({ tmux: tmux.raw, configPath }, agentName, pane).catch(() => "unknown"));
   const { reservePercent } = parseQuotaWarningConfig();
   const processStopped = async ({ agentName, pane }) => {
     if (!await tmux.hasSession(agentName).catch(() => false)) return true;
@@ -111,8 +115,9 @@ export function startIdleCapacityAlarm({
       const park = claude ? parkStore?.read(pane.agentName, pane.pane) ?? null : null;
       // A pane with nothing queued and no limit is idle by choice; tmux is read only for waiting work.
       const stopped = !limitReceipt && jobs.length ? await processStopped(pane) : false;
-      return { limitReceipt, jobs, processStopped: stopped, park,
-        profileKey: claude ? profileFor(pane.agentName, pane.pane)?.key ?? null : null, resume: resumeStatus({ park, history }) };
+      const paneStatus = limitReceipt || jobs.length || park?.state === "parked" ? await livePaneStatus(pane) : "unknown";
+      return { limitReceipt, jobs, processStopped: stopped, park, history, paneStatus,
+        profileKey: claude ? profileFor(pane.agentName, pane.pane)?.key ?? null : null };
     },
     roomFor: async (engine) => {
       snapshot ||= await readSnapshot();
