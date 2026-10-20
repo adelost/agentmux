@@ -1,6 +1,6 @@
 # amux quiet: why a pane went quiet, and the one obvious action
 
-Version: 2 · 2026-10-20 11:30Z · owner of the design: api:0 · page: none yet
+Version: 3 · 2026-10-20 11:40Z · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -15,7 +15,8 @@ across 7 projects today, mostly noise; lsrc:0 counted about 70 in its view.
 
 lsrc:0's input at 11:2xZ: at 11:15Z idle-capacity notices said claw:1, lsrc:1 and lsrc:2 could not work for 21 to
 52 minutes while `amux ps` showed all three working (claw:1 thinking for 2m51s). After the 11:10Z window reset the
-notices fired on stale park and limit state.
+notices fired on stale park and limit state. At 11:16Z the notices for skyvw:1 and skyvw:2 reported recovery receipts
+from 19 Oct (18:24Z and 13:25Z) while skyvw:1 was posting: `resumeStatus` takes the newest recovery job of any episode.
 
 The outcome:
 
@@ -201,6 +202,9 @@ act(episode, seen, send, now):                        # cli/quiet.mjs
 idlePaneEvidence(..., paneStatus, recovery):          # idle-capacity-alarm.mjs
   isLiveStatus(paneStatus) -> null                    # working or thinking: no episode, no notice
   recovery acknowledged -> the episode is closed and never notified again
+resumeStatus(park, history, since):                   # idle-capacity-alarm.mjs
+  only quota-recovery jobs created at or after the episode's since count; none -> "no resume for this stop yet"
+  # test: idle-capacity-alarm.test.mjs "reports only this episode's recovery"
   # tests: idle-capacity-alarm.test.mjs "sends no idle notice about a working pane",
   #        "closes the episode when the recovery prompt is acknowledged"
 act(...) also returns before any send when isLiveStatus(the pane's status) is true.
@@ -254,7 +258,7 @@ classifyAskTurn(turn):                                # ask-history.mjs
 - **R-6 A stale park or limit record makes notices about working panes.** Happened at 11:15Z (claw:1, lsrc:1,
   lsrc:2).
   - Mitigation: I-4, the live status before every notice; an acknowledged recovery closes the episode.
-  - Detection: "sends no idle notice about a working pane".
+  - Detection: "sends no idle notice about a working pane" and "reports only this episode's recovery".
   - Fallback: none needed beyond the switch. Owner api:0.
 - **R-5 needs-you hides something he must see.** Possible.
   - Mitigation: decisions show as `↪ delegate`, not hidden; his hands stay needs-you.
@@ -340,3 +344,4 @@ None for him. Calls made by api:0:
 
 - v1, 2026-10-20 10:05Z: first version, from his 10:1xZ request and lsrc:0's order.
 - v2, 2026-10-20 11:30Z: outcome 3, UC-7, I-4 and R-6 from lsrc:0's input on stale idle-capacity notices at 11:15Z.
+- v3, 2026-10-20 11:40Z: `resumeStatus` counts only this episode's recovery (lsrc:0's 11:16Z skyvw:1 and skyvw:2 case).
