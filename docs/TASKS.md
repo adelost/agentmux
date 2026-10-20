@@ -6,6 +6,7 @@ Historical runtime receipt (2026-09-20): **1.25.84 / 4241763cd9acae64bf6de40305b
 
 | # | Outcome | Owner | Done when | State | Closed on |
 |---|---|---|---|---|---|
+| 50 | `amux quiet`: classify why a pane went quiet and take only the obvious action ([Quiet §6](DESIGN-quiet-panes.md#6-pseudocode)) | api:0 | The replay of 06:00–10:00Z forwards claw:0's 156 line once and needs-you falls to the real few, counts in §10 | Open · P1: after row 49 | |
 | 49 | His search units name him, join a run of his messages to one pane, and leave automation out ([Search §6](DESIGN-search-daemon.md#6-pseudocode)) | api:0 | The 47 and v14 to v16 before and after in §10, and Dream's answer share before and after | In progress · P1: Sonnet builds, api:0 reviews | |
 | 48 | `amux lint --only rules`: the rules audit's ten checks over the repos' rule files ([Rules lint §6](DESIGN-lint-rules.md#6-pseudocode)) | api:0 | Installed; one run over the 18 repos in §10 with every error checked against trunk; exit 1 on errors | Open · P2: after row 49 (P1); first builder stopped before any change | |
 | 47 | QMD's hybrid mode against the 47 blind questions ([Search §8](DESIGN-search-daemon.md#8-alternatives)) | api:0 | QMD hybrid's hit@1, hit@3 and median on the 47 questions stand beside ours in §8, with the choice | Dropped: my proposal; a tool needs his yes per item (PRIORITIES 2026-08-04), and he chose our own improvements first (20 Oct 07:11Z) | 2026-10-20 |
