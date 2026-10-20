@@ -2944,3 +2944,28 @@ feature("the quota floor holds new automatic work on an account near its weekly 
     }],
   });
 });
+
+// lsrc:0, 2026-10-20 16:20Z: after the 16:10Z quota recovery, session claw delivered claw:0's seven paused jobs and
+// then claw:1's ten before claw:2's recovery continuation got its first attempt, 11 minutes after the restart. Panes
+// share one session lane (the tmux window), so one pane's backlog held every other pane in the session.
+feature("one pane's backlog never holds the rest of its session", () => {
+  component("each pane with work gets its next delivery before any pane gets another", {
+    given: ["claw:1 with three paused jobs and claw:2 with one queued after them", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      for (const [pane, text, orderKey] of [[1, "claw:1 first", "001"], [1, "claw:1 second", "002"], [1, "claw:1 third", "003"],
+        [2, "claw:2 continuation", "004"]]) queue.enqueue({ agentName: "claw", pane, text, source: "cli", orderKey });
+      const agent = acceptingAgent();
+      return { rootDir, queue, agent, broker: createDeliveryBroker({ agent, queue, notify: async () => {} }) };
+    }],
+    when: ["the broker polls until the queue is empty", async ({ broker, queue }) => {
+      for (let poll = 0; poll < 6 && queue.targets().some(({ agentName, pane }) =>
+        queue.list(agentName, pane).some((job) => job.status !== "acknowledged")); poll += 1) await broker.kick();
+    }],
+    then: ["claw:2's continuation lands second, not after claw:1's whole backlog", (_, ctx) => {
+      try {
+        expect(ctx.agent.sends.map((send) => send.text)).toEqual(["claw:1 first", "claw:2 continuation", "claw:1 second", "claw:1 third"]);
+      } finally { rmSync(ctx.rootDir, { recursive: true, force: true }); }
+    }],
+  });
+});

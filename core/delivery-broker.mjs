@@ -29,6 +29,7 @@ import { submittedTransportHint, submittedTuiInspectionDue } from "./submitted-t
 import { needsZoomFallback, terminalizeSlashRejection } from "./slash-ingest-guard.mjs";
 import { createDeliveryMemoryContext, deliveryMemoryReceiptText } from "./delivery-memory-context.mjs";
 import { withDeliveryWriter } from "./delivery-writer.mjs";
+import { createSessionLanes } from "./delivery-session-lane.mjs";
 const ACTIVE_RETRY_MS = 1_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
 // Warn well before a legitimate long turn reaches the 60-minute verdict.
@@ -90,26 +91,9 @@ export function createDeliveryBroker({
   // Exact-target wake still requires release identity and memory admission.
   const wakeGate = typeof wakeAdmission === "function" ? wakeAdmission
     : (bridgeDir ? createWakeAdmissionGate({ runtimeRoot: bridgeDir, reserveMiB: 512 }) : null);
-  const lanes = new Map();
+  const { runExclusive, peerWaiting: sessionPeerWaiting, settle: settleLanes } = createSessionLanes({ queue, now });
   let timer = null, started = false, stopped = false;
   let startupBarrier = Promise.resolve();
-  // Panes share one tmux window. A tiled delivery that cannot render its
-  // composer may temporarily zoom the target as a fallback; therefore the
-  // in-process critical section remains session-wide even though FIFO
-  // ordering is per pane.
-  const laneKey = (agentName) => String(agentName);
-
-  function runExclusive(agentName, pane, work) {
-    const key = laneKey(agentName);
-    const previous = lanes.get(key) || Promise.resolve();
-    const next = previous.catch(() => {}).then(work);
-    let tracked;
-    tracked = next.finally(() => {
-      if (lanes.get(key) === tracked) lanes.delete(key);
-    });
-    lanes.set(key, tracked);
-    return tracked;
-  }
 
   async function acknowledge(job, via = "echo") {
     const current = queue.read(job.agentName, job.pane, job.id) || job;
@@ -613,7 +597,9 @@ export function createDeliveryBroker({
         await answerBacklogBehindProbe(agentName, pane, head);
         if (Number(head.nextAttemptAt || 0) > now()) return;
         const outcome = await processJob(head, context.lease);
-        if (TERMINAL_DELIVERY_STATES.has(outcome.status)) continue;
+        // The lane is the session's: after a finished job, another pane's waiting head goes first, so one pane's
+        // backlog never holds the session (claw, 2026-10-20 16:1xZ: claw:2 waited 11 minutes behind claw:0 and claw:1).
+        if (TERMINAL_DELIVERY_STATES.has(outcome.status) && !sessionPeerWaiting(agentName, pane)) continue;
         return;
       }
     });
@@ -678,7 +664,7 @@ export function createDeliveryBroker({
     if (timer) clearInterval(timer);
     timer = null;
     await startupBarrier;
-    await Promise.allSettled([...lanes.values()]);
+    await settleLanes();
   }
   return { queue, enqueue, enqueueAndWait, start, stop, kick, kickTarget, runExclusive };
 }

@@ -7,7 +7,7 @@ fileSize:
     core/codex-tui.mjs: 546
     core/context.mjs: 618
     core/contract-lint.mjs: 640
-    core/delivery-broker.mjs: 684
+    core/delivery-broker.mjs: 669
     core/delivery-queue.mjs: 536
     core/jsonl-reader.mjs: 918
     core/native-runtime-client.mjs: 544
