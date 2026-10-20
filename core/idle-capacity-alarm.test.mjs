@@ -174,17 +174,23 @@ feature("the idle-capacity alarm and the state of a pane now", () => {
         history: [recoveryJob("2026-10-20T10:05:00Z")] };
       return { observation, fx: evening(observation, CLAUDE_S, "2026-10-20T11:15:00Z") };
     }],
-    when: ["the alarm checks, then again after the queue has forgotten the prompt", async ({ observation, fx }) => {
+    when: ["the alarm checks, the queue forgets the prompt, the pane works for a while and stops again with the same stale receipt", async ({ observation, fx }) => {
       await fx.alarm.tick();
       const first = [...fx.notices];
       observation.history = [];
       fx.clock += 5 * 60_000;
       await fx.alarm.tick();
-      return { first, second: fx.notices };
+      observation.paneStatus = "working";
+      fx.clock += 5 * 60_000;
+      await fx.alarm.tick();
+      observation.paneStatus = "idle";
+      fx.clock += 5 * 60_000;
+      await fx.alarm.tick();
+      return { first, last: fx.notices };
     }],
-    then: ["it never reports the episode, even after the evidence of the prompt is gone", ({ first, second }) => {
+    then: ["it never reports the episode, even after the evidence of the prompt is gone and the pane has worked in between", ({ first, last }) => {
       expect(first).toEqual([]);
-      expect(second).toEqual([]);
+      expect(last).toEqual([]);
     }],
   });
 
