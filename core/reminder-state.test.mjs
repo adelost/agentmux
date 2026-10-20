@@ -363,6 +363,14 @@ feature("formatReminderMessage --section override (1.25.53 behavior)", () => {
       expect(r).not.toMatch(/Re-read the "Staffing and review economics"/);
     }],
   });
+  unit("the outcome reminder asks for terse text that keeps every fact", {
+    given: ["the First line is the outcome section", () => ({ n: 40, count: 0 })],
+    when: ["formatting its reminder", ({ n, count }) =>
+      formatReminderMessage(n, count, "claude", "", "First line is the outcome")],
+    then: ["it says to drop small words and filler and keep every fact, number, negation and condition", (r) => {
+      expect(r).toMatch(/terse: drop small words and filler; keep every fact, number, negation and condition\./);
+    }],
+  });
 
   unit("the pinned message equals the rotation message at that section's index", {
     given: ["First line is the outcome sits at rotation index 4", () => ({})],
