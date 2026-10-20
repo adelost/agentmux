@@ -454,6 +454,36 @@ start and end of each run.
     `cli/search.mjs` (one help line) and three lifecycle tests, 40 min.
   - Total *estimated* 5.2h for Sonnet builders plus 30 min of api:0's review. The eval runs dominate the wall time.
 
+### Results for row 49, 20 Oct
+
+*Measured*, same machine and evidence folder (`*-before49-*`, `*-after49-*`). Before is the installed 1.25.277,
+11:11 to 11:14Z; after is 1.25.279 (b41ec5f6) after the reindex, 12:01 to 12:04Z.
+
+| Run | Release | Load | hit@1 | hit@3 | MRR | Median | p95 |
+|---|---|---|---|---|---|---|---|
+| 47 questions, warm | 1.25.277 | 7 to 10 | 87 % | 94 % | 0.91 | 1 843 ms | 5 488 ms |
+| 47 questions, warm | 1.25.279 | 10 to 8 | 87 % | 94 % | 0.91 | 1 895 ms | 5 168 ms |
+| 47 questions, `--lexical` | 1.25.277 | 10 to 9 | 62 % | 68 % | 0.65 | 673 ms | 1 136 ms |
+| 47 questions, `--lexical` | 1.25.279 | 8 to 11 | 62 % | 68 % | 0.65 | 664 ms | 880 ms |
+| v14 to v16, warm | 1.25.277 | 9 | 33 % | 33 % | 0.36 | 1 860 ms | 3 463 ms |
+| v14 to v16, warm | 1.25.279 | 11 to 10 | 0 % | 67 % | 0.28 | 2 292 ms | 3 341 ms |
+| v14 to v16, `--lexical` | 1.25.277 | 9 | 33 % | 33 % | 0.33 | 824 ms | 861 ms |
+| v14 to v16, `--lexical` | 1.25.279 | 10 | 33 % | 33 % | 0.33 | 752 ms | 4 325 ms |
+
+- The 47: the same hits; u06 moves from rank 6 to 7 warm and u13 from 8 to 10 lexical, both outside the top 3.
+- Verbatim, warm: v15 rises from rank 11 to 3; v16 falls from 1 to 2 under his joined run to api:0 at 07:11 to
+  07:12Z, which names him but not the expected words; v14 still misses.
+- lsrc:0's example query, what he said about Caveman and shorter answers: his two messages on it rank 5 and 6,
+  where none of his units was in the top 9 before. Ranks 1 to 4 are still agents' rows that quote the query itself.
+- Units: 8 315 singles under 1.25.277's rules (the builder's count), 7 292 now, every one headed with his name,
+  plus 1 751 joined runs. The reindex embedded 9 093 changed units in 78 s on the GPU.
+- Dream's answer share, both trees at 11:53Z: 24 h 364 of 403 (90.3 %) before, 310 of 346 (89.6 %) after; 7 days
+  2 491 of 2 677 (93.1 %) before, 2 101 of 2 258 (93.0 %) after. The asks that left are amux's own notices and
+  repeated texts, so the share barely moves.
+- 1.25.278 wrote every unit without his name: the CLI reads the generated `~/.config/agent/agents.yaml`, and the
+  generator carried only `agents`, `search` and `dream`. 1.25.279 carries `human` too (c1b5284d, a test red
+  before), and Dream's section parsing moved unchanged to `core/dream-config.mjs` to keep `sync.mjs` under 500 lines.
+
 ## 11. Rollout and rollback
 
 - Order: release, install, stop the daemon, one `amux search --reindex` on the GPU for the backfill, then the
@@ -522,7 +552,7 @@ start and end of each run.
 | 45 | Release with before and after on the same machine | api:0 | done: 7ecf4e59 |  | 0.5h | [Search §12](DESIGN-search-daemon.md#12-tests) | installed release; 47 questions and v14 to v16 warm and cold before and after, with load averages, in §10 |
 | 46 | Memory guard: the daemon starts only with room for its peak and closes under the floor | api:0 | done: 7ecf4e59 |  | 0.7h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | under 8 GB free the daemon closes within 30 s, and none starts under 12 GB; tests red before, green after |
 | 47 | QMD's hybrid mode against the 47 blind questions | api:0 | dropped: no yes from him for a tool |  | 1h | [Search §8](DESIGN-search-daemon.md#8-alternatives) | QMD hybrid's hit@1, hit@3 and median on the 47 questions stand beside ours in §8, with the choice |
-| 49 | His units name him, join a run of messages to one pane, and leave automation out | api:0 | working: Sonnet builds, api:0 reviews | P1 | 2h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | the 47 and v14 to v16 before and after in §10, and Dream's answer share before and after |
+| 49 | His units name him, join a run of messages to one pane, and leave automation out | api:0 | done: b41ec5f6 (1.25.279) | P1 | 2h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | the 47 and v14 to v16 before and after in §10, and Dream's answer share before and after |
 
 ## 14. Open questions
 
@@ -553,3 +583,5 @@ None for him. Calls made by api:0:
   and rows 43 to 46 done.
 - v7, 2026-10-20 09:35Z: outcome 4 and row 49 from the cause of 09:2xZ and lsrc:0's order: his name in the headers,
   joined units within 2 minutes, automation out through one `humanAsksOf` that Dream's answer share uses too.
+- v8, 2026-10-20 12:1xZ: row 49's results in §10 and row 49 done. 1.25.278 left his name out, because the generated
+  config never carried `human`; 1.25.279 fixes that. lsrc:0 told.
