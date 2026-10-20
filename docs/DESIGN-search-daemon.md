@@ -1,6 +1,6 @@
 # amux search: his messages as units, the conversation log in the daemon, 30 minutes warm while memory is free
 
-Version: 4 · 2026-10-20 08:40Z · owner of the design: api:0 · page: none yet
+Version: 5 · 2026-10-20 09:00Z · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -315,7 +315,7 @@ daemon, every 30 s while up (unref'd timer):
 | **B. Derived Markdown for his words, plus an in-memory word index in the daemon (chosen)** | under 50 ms | 3h | reuses every layer and the reindex; nothing new to rank | the derived files disagree with the log in a test |
 | C. His messages as a new unit type inside the semantic index, with no files | under 50 ms | 5h | needs new code in BM25, the overlay, the reranker text and `--show` | the Markdown form loses his words' exactness |
 | D. SQLite FTS over the whole log | about 10 ms | 4h | a native dependency, and it gives no semantic units of his | the window grows past 1 GB |
-| E. QMD (github.com/tobi/qmd) as the engine | *to be measured*, row 47 | 1h to compare | its keyword mode was tried on 20 Sep: 17/20 first and 20/20 in three on 20 keyword questions, 1/20 on whole questions; its hybrid mode was never tried | its hybrid mode beats ours on the 47 blind questions at a similar median |
+| E. QMD (github.com/tobi/qmd) as the engine | *to be measured*, row 47 | 1h to compare | its keyword mode was tried on 20 Sep: 17/20 first and 20/20 in three on 20 keyword questions, 1/20 on whole questions; its hybrid mode was never tried | he asks for the comparison; then its hybrid mode must beat ours on the 47 blind questions at a similar median |
 
 The approach that already worked was the 10 Oct pipeline at 1.18 s. B is that pipeline with one more root.
 
@@ -452,13 +452,13 @@ when he asks for less.
 
 ## 13. Tasks
 
-| # | Task | Owner | State | Estimate | Spec | Done when |
-|---|---|---|---|---|---|---|
-| 43 | His messages as search units, and the conversation log in the daemon without rescans | api:0 | working: Sonnet builds, api:0 reviews | 4.5h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | warm median about 1.6 s with no loss in hit@1 or hit@3 on the 47 blind questions |
-| 44 | Daemon warm for 30 minutes, with its RAM and VRAM measured | api:0 | working: Sonnet builds, api:0 reviews | 0.3h | [Search §11](DESIGN-search-daemon.md#11-rollout-and-rollback) | the daemon stays up 30 minutes after a question, and §10 holds its measured RSS and VRAM |
-| 45 | Release with before and after on the same machine | api:0 | open | 0.5h | [Search §12](DESIGN-search-daemon.md#12-tests) | installed release; 47 questions and v14 to v16 warm and cold before and after, with load averages, in §10 |
-| 46 | Memory guard: the daemon starts only with room for its peak and closes under the floor | api:0 | open: Sonnet builds after 43, api:0 reviews | 0.7h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | under 8 GB free the daemon closes within 30 s, and none starts under 12 GB; tests red before, green after |
-| 47 | QMD's hybrid mode against the 47 blind questions | api:0 | open: after 45 | 1h | [Search §8](DESIGN-search-daemon.md#8-alternatives) | QMD hybrid's hit@1, hit@3 and median on the 47 questions stand beside ours in §8, with the choice |
+| # | Task | Owner | State | Prio | Estimate | Spec | Done when |
+|---|---|---|---|---|---|---|---|
+| 43 | His messages as search units, and the conversation log in the daemon without rescans | api:0 | working: Sonnet builds, api:0 reviews | P1 | 4.5h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | warm median about 1.6 s with no loss in hit@1 or hit@3 on the 47 blind questions |
+| 44 | Daemon warm for 30 minutes, with its RAM and VRAM measured | api:0 | working: Sonnet builds, api:0 reviews | P1 | 0.3h | [Search §11](DESIGN-search-daemon.md#11-rollout-and-rollback) | the daemon stays up 30 minutes after a question, and §10 holds its measured RSS and VRAM |
+| 45 | Release with before and after on the same machine | api:0 | open | P1 | 0.5h | [Search §12](DESIGN-search-daemon.md#12-tests) | installed release; 47 questions and v14 to v16 warm and cold before and after, with load averages, in §10 |
+| 46 | Memory guard: the daemon starts only with room for its peak and closes under the floor | api:0 | open: Sonnet builds after 43, api:0 reviews | P1 | 0.7h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | under 8 GB free the daemon closes within 30 s, and none starts under 12 GB; tests red before, green after |
+| 47 | QMD's hybrid mode against the 47 blind questions | api:0 | dropped: no yes from him for a tool |  | 1h | [Search §8](DESIGN-search-daemon.md#8-alternatives) | QMD hybrid's hit@1, hit@3 and median on the 47 questions stand beside ours in §8, with the choice |
 
 ## 14. Open questions
 
@@ -469,7 +469,8 @@ None for him. Calls made by api:0:
 - A cold question leaves out the agents' conversation rows instead of scanning 238 MB.
 - 30 minutes warm, with a memory guard at 8 GB free and starts at 13 GB. He left the choice to api:0 at 07:26Z, and
   the table in §10 decided it.
-- No change of engine now. QMD's hybrid mode is measured on the same 47 questions after the release (row 47).
+- No change of engine. Row 47, my proposal to measure QMD's hybrid mode, is dropped: a tool needs his yes per item
+  (PRIORITIES 2026-08-04), and he chose our own improvements first.
 
 ## 15. Changes
 
@@ -483,3 +484,4 @@ None for him. Calls made by api:0:
   0.5 GB); the lease is checked before memory; the daemon's stderr goes to `~/.agentmux/search-embedder.log`, since
   `stdio: "ignore"` lost every line; the cold warning no longer says the daemon is starting, which a refused start
   made false; the guard closes without waiting for background loading. The fix round gets its own brief.
+- v5, 2026-10-20 09:00Z: row 47 dropped. It was my proposal, and his 2026-08-04 rule asks for his yes per tool.

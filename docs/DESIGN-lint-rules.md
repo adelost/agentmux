@@ -338,9 +338,9 @@ ai-gateway, skydive-manifest, haunt-lab, chat-helper, yt-subtl, cad, agent-sessi
 
 ## 13. Tasks
 
-| # | Task | Owner | State | Estimate | Spec | Done when |
-|---|---|---|---|---|---|---|
-| 48 | `amux lint --only rules`: the audit's ten checks over the repos' rule files | api:0 | open: after row 45; Sonnet builds, api:0 reviews | 5h | [Rules lint §6](DESIGN-lint-rules.md#6-pseudocode) | installed; one run over the 18 repos in §10 with every error checked against trunk; exit 1 on errors |
+| # | Task | Owner | State | Prio | Estimate | Spec | Done when |
+|---|---|---|---|---|---|---|---|
+| 48 | `amux lint --only rules`: the audit's ten checks over the repos' rule files | api:0 | open: after row 45; Sonnet builds, api:0 reviews | P2 | 5h | [Rules lint §6](DESIGN-lint-rules.md#6-pseudocode) | installed; one run over the 18 repos in §10 with every error checked against trunk; exit 1 on errors |
 
 ## 14. Open questions
 
