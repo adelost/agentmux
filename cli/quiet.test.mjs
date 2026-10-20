@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdQuiet, sendThroughAmux } from "./quiet.mjs";
+import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { createQuietStore } from "../core/quiet-episodes.mjs";
 import {
   ACTIVE_PANES, CLAW_156, LINES, ROSTER, askRow, ms, postRow, replyEndingWith, writeLedger,
@@ -154,6 +155,29 @@ feature("amux quiet --act: the one obvious action", () => {
       expect(outcomes.map(({ outcome }) => outcome)).toEqual(["sent", "unknown", "failed", "failed"]);
       expect(outcomes[2].detail).toBe("human-quote");
       expect(asked.every(([, agent, pane, , options]) => agent === "lsrc" && pane === 0 && options.idempotencyKey === "quiet:claw:0:abc")).toBe(true);
+    }],
+  });
+
+  component("sends through amux's own delivery queue, one job per key", {
+    given: ["an empty delivery queue in its own folder, and a message with its key", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-quiet-queue-"));
+      const queue = createDeliveryQueue({ rootDir: join(dir, "queue") });
+      return { dir, queue, ctx: { deliveryQueue: queue, deliveryWaitMs: 0 },
+        message: { agent: "quiettest", pane: 0, text: "[quiet] claw:0 waits for a decision you can make (09:19Z): \"Väntar på dig.\" Reply to claw:0.", key: "quiet:claw:0:abc1234567" } };
+    }],
+    when: ["the same message is sent twice, and another key once", async ({ ctx, message }) => [
+      await sendThroughAmux(ctx, message), await sendThroughAmux(ctx, message),
+      await sendThroughAmux(ctx, { ...message, key: `${message.key}:reminder`, text: "[quiet] reminder" }),
+    ]],
+    then: ["every send is queued and sent, and the queue holds one job for the key and one for the other key", (outcomes, { queue, dir, message }) => {
+      try {
+        expect(outcomes.map(({ outcome }) => outcome)).toEqual(["sent", "sent", "sent"]);
+        const jobs = queue.list("quiettest", 0);
+        expect(jobs.map(({ idempotencyKey, text }) => ({ idempotencyKey, text })).sort((a, b) => a.text.length - b.text.length)).toEqual([
+          { idempotencyKey: `${message.key}:reminder`, text: "[quiet] reminder" },
+          { idempotencyKey: message.key, text: message.text },
+        ]);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
     }],
   });
 

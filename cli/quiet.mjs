@@ -55,7 +55,7 @@ function readRoster(env) {
  */
 export async function sendThroughAmux(ctx, { agent, pane, text, key }, deliverTo = sendToPane) {
   try {
-    const result = await deliverTo(ctx, agent, pane, text, { idempotencyKey: key, waitMs: SEND_WAIT_MS });
+    const result = await deliverTo(ctx, agent, pane, text, { idempotencyKey: key, waitMs: ctx.deliveryWaitMs ?? SEND_WAIT_MS });
     if (result?.unverified) return { outcome: "unknown" };
     return result?.delivered ? { outcome: "sent" } : { outcome: "failed", detail: result?.reason ?? "blocked" };
   } catch (error) {
