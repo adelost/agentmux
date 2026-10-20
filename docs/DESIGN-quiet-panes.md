@@ -1,6 +1,6 @@
 # amux quiet: why a pane went quiet, and the one obvious action
 
-Version: 1 · 2026-10-20 10:05Z · owner of the design: api:0 · page: none yet
+Version: 2 · 2026-10-20 11:30Z · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -13,6 +13,10 @@ ended three turns (09:19, 09:26 and 09:30Z) with "Väntar på dig", a yes or no 
 08:34Z mandate the delegate decides that, but nobody saw it until he asked. `amux asks --open` shows 103 needs-you
 across 7 projects today, mostly noise; lsrc:0 counted about 70 in its view.
 
+lsrc:0's input at 11:2xZ: at 11:15Z idle-capacity notices said claw:1, lsrc:1 and lsrc:2 could not work for 21 to
+52 minutes while `amux ps` showed all three working (claw:1 thinking for 2m51s). After the 11:10Z window reset the
+notices fired on stale park and limit state.
+
 The outcome:
 
 1. When a pane ends a turn and stays quiet, amux classifies why, once per episode, and acts only when it is obvious:
@@ -24,6 +28,8 @@ The outcome:
    - **work left and no named blocker**: one nudge to its lead;
    - **done, an empty queue or no clear reason**: it sleeps.
 2. `needs-you` in `amux asks` and `amux done` means his hands only, so 103 shrinks to the real few.
+3. No notice, from quiet or from the idle-capacity alarm, about a pane that is working or thinking; an idle-capacity
+   episode closes when its recovery prompt is acknowledged.
 
 Principles, in the order they decide:
 
@@ -67,6 +73,9 @@ n/a: a command-line tool and messages between panes; no screens. New strings:
   Its lead (claw:0 by ROSTER) gets one nudge, but only when claw:0 has had a ledger row in the last 2 hours. Stage v1.
   Sequence: §5 seq-quiet.
 - **UC-5 Done.** "DONE: … OPEN: none" or an empty LEFT: it sleeps. Stage v1. No sequence: no action.
+- **UC-7 Stale quota state.** At 11:15Z, five minutes after a window reset, claw:1 is thinking but its park record
+  still says parked. The idle-capacity alarm reads the live status, sees it working and sends nothing; once the
+  recovery prompt is acknowledged, that episode is closed for good. Stage v1. No sequence: one check inside the alarm.
 - **UC-6 Replay.** `amux quiet --replay --since 2026-10-20T06:00Z --until 2026-10-20T10:00Z` prints every episode's
   class and the action it would take, sends nothing, and prints needs-you before and after. Stage v1. No sequence:
   one read-only process.
@@ -110,6 +119,10 @@ flowchart LR
     guarded by `core/quiet-episodes.test.mjs`, "sends one forward for three replies with the same line".
   - **I-2** No send to a dormant pane, and no resend after an unknown outcome. Enforced in `cli/quiet.mjs`, guarded by
     `cli/quiet.test.mjs`, "never nudges a dormant lead" and "marks an unknown outcome as sent".
+  - **I-4** No notice about a pane whose live status is working or thinking, and none after its recovery prompt is
+    acknowledged. Enforced in `cli/quiet.mjs` and `core/idle-capacity-alarm.mjs` through `isLiveStatus`
+    (`core/pane-status.mjs`), guarded by `core/idle-capacity-alarm.test.mjs`, "sends no idle notice about a working
+    pane" and "closes the episode when the recovery prompt is acknowledged".
   - **I-3** Only his hands make needs-you. Enforced in `core/ask-history.mjs` through `classifyQuiet`, guarded by
     `core/ask-history.test.mjs`, "needs-you only for his hands".
 
@@ -185,6 +198,13 @@ act(episode, seen, send, now):                        # cli/quiet.mjs
   # tests: cli/quiet.test.mjs "forwards a decision once and reminds once", "never nudges a dormant lead",
   #        "marks an unknown outcome as sent", "lists his hands without a message", "replay sends nothing"
 
+idlePaneEvidence(..., paneStatus, recovery):          # idle-capacity-alarm.mjs
+  isLiveStatus(paneStatus) -> null                    # working or thinking: no episode, no notice
+  recovery acknowledged -> the episode is closed and never notified again
+  # tests: idle-capacity-alarm.test.mjs "sends no idle notice about a working pane",
+  #        "closes the episode when the recovery prompt is acknowledged"
+act(...) also returns before any send when isLiveStatus(the pane's status) is true.
+
 classifyAskTurn(turn):                                # ask-history.mjs
   needs-you only when classifyQuiet(reply) is hands; decision -> "delegate"; the rest as today
   # tests: ask-history.test.mjs "needs-you only for his hands"
@@ -231,6 +251,11 @@ classifyAskTurn(turn):                                # ask-history.mjs
   - Mitigation: idempotency keys; an unknown outcome counts as sent.
   - Detection: "marks an unknown outcome as sent".
   - Fallback: none needed. Owner api:0.
+- **R-6 A stale park or limit record makes notices about working panes.** Happened at 11:15Z (claw:1, lsrc:1,
+  lsrc:2).
+  - Mitigation: I-4, the live status before every notice; an acknowledged recovery closes the episode.
+  - Detection: "sends no idle notice about a working pane".
+  - Fallback: none needed beyond the switch. Owner api:0.
 - **R-5 needs-you hides something he must see.** Possible.
   - Mitigation: decisions show as `↪ delegate`, not hidden; his hands stay needs-you.
   - Detection: "needs-you only for his hands"; the replay lists every former needs-you with its new class.
@@ -245,8 +270,9 @@ classifyAskTurn(turn):                                # ask-history.mjs
   - New `cli/quiet.mjs` (90 lines, `--act`, `--replay`, `--hands`) and its test, 75 min.
   - Changed `core/ask-history.mjs` (needs-you, 10 lines), `cli/commands.mjs` (the command and help, 10 lines),
     `core/ask-origin.mjs` (`[quiet]` among amux's own tags, 2 lines), 30 min.
+  - Changed `core/idle-capacity-alarm.mjs` (the live status and the closed episode, 15 lines) and its test, 30 min.
   - The replay and its review, 40 min.
-  - Total *estimated* 5h for a Sonnet builder plus 40 min of api:0's review.
+  - Total *estimated* 5.5h for a Sonnet builder plus 40 min of api:0's review.
 
 ## 11. Rollout and rollback
 
@@ -267,15 +293,17 @@ classifyAskTurn(turn):                                # ask-history.mjs
 | `core/ask-history.mjs` | `core/ask-history.test.mjs` |
 | `cli/commands.mjs` | `cli/quiet.test.mjs` |
 | `core/ask-origin.mjs` | `core/quiet-classify.test.mjs` |
+| `core/idle-capacity-alarm.mjs` | `core/idle-capacity-alarm.test.mjs` |
 
 | Test | Guards | Level | Write min | Run s |
 |---|---|---|---|---|
-| `core/quiet-classify.test.mjs` | UC-1, UC-2, UC-4, UC-5, R-1, R-3 | unit | 20 | 1 |
-| `core/quiet-episodes.test.mjs` | I-1, UC-1, R-2 | unit | 20 | 1 |
+| `core/quiet-classify.test.mjs` | UC-1, UC-2, UC-4, UC-5, R-1, R-3 | unit | 18 | 1 |
+| `core/quiet-episodes.test.mjs` | I-1, UC-1, R-2 | unit | 18 | 1 |
 | `cli/quiet.test.mjs` | I-2, UC-1, UC-4, UC-6, R-4 | component | 25 | 3 |
 | `core/ask-history.test.mjs` | I-3, R-5 | unit | 10 | 1 |
+| `core/idle-capacity-alarm.test.mjs` | I-4, UC-7, R-6 | unit | 8 | 1 |
 
-- Budget: write 75 min of the 300 min of build in chapter 13 (25 %); targeted run 6 s.
+- Budget: write 79 min of the 330 min of build in chapter 13 (24 %); targeted run 7 s.
 - Full proof: none: no money, sign-in, deletion or user data; sends are messages between panes.
 - Touched tests: `core/ask-history.test.mjs` is updated where it expected needs-you for a question that is not his
   hands; the requirement is lsrc:0's order that needs-you shrink to the real few.
@@ -297,7 +325,7 @@ classifyAskTurn(turn):                                # ask-history.mjs
 
 | # | Task | Owner | State | Prio | Estimate | Spec | Done when |
 |---|---|---|---|---|---|---|---|
-| 50 | `amux quiet`: classify why a pane went quiet and take only the obvious action | api:0 | open: after row 49; Sonnet builds, api:0 reviews | P1 | 5h | [Quiet §6](DESIGN-quiet-panes.md#6-pseudocode) | the replay forwards claw:0's 156 line once and needs-you in 06:00–10:00Z falls to the real few, counts in §10 |
+| 50 | `amux quiet`: classify why a pane went quiet and take only the obvious action | api:0 | open: after row 49; Sonnet builds, api:0 reviews | P1 | 5.5h | [Quiet §6](DESIGN-quiet-panes.md#6-pseudocode) | the replay forwards claw:0's 156 line once and needs-you in 06:00–10:00Z falls to the real few, counts in §10 |
 
 ## 14. Open questions
 
@@ -311,3 +339,4 @@ None for him. Calls made by api:0:
 ## 15. Changes
 
 - v1, 2026-10-20 10:05Z: first version, from his 10:1xZ request and lsrc:0's order.
+- v2, 2026-10-20 11:30Z: outcome 3, UC-7, I-4 and R-6 from lsrc:0's input on stale idle-capacity notices at 11:15Z.
