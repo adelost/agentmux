@@ -183,7 +183,7 @@ export async function reindex(roots, { log = () => {}, device = "cpu",
   }
   // His messages are a copy of the conversation log; bring the day files up to date before the files are listed.
   for (const root of semRoots.filter((candidate) => candidate.kind === "human-words")) {
-    try { syncHuman({ dir: root.path }); } catch (error) { log(`⚠ his messages could not be brought up to date: ${error.message}`); }
+    try { syncHuman({ dir: root.path, name: root.humanName }); } catch (error) { log(`⚠ his messages could not be brought up to date: ${error.message}`); }
   }
   const startedAt = Date.now();
   const prev = loadIndex(dir);

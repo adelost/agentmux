@@ -5,7 +5,7 @@
 // or panes without posted work.
 
 import { DREAM_SETTLE_MS } from "./dream-turn-selection.mjs";
-import { inferAskOrigin, isHumanAsk } from "./ask-origin.mjs";
+import { humanAsksOf, inferAskOrigin } from "./ask-origin.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 /** WHAT: Names the post kinds that carry a pane's own output. WHY: Mirrors and notices repeat an ask or report status; they are not the answer. */
@@ -79,10 +79,12 @@ export function conversationForPane(log, agent, pane, windowStartMs) {
 }
 
 /**
+ * The asks are counted through humanAsksOf: amux's own notices and a prompt typed three or more times are not human asks.
  * WHAT: Returns how many settled human-facing asks got an answer posted on their pane.
  * WHY: Keeps unanswered requests visible as health without treating that share as cutover authority.
  */
 export function answeredShare(log, { sinceMs = log.coverageStartMs, nowMs = Date.now() } = {}) {
+  const humanAsks = new Set(humanAsksOf(log.asks));
   const byPane = new Map();
   for (const ask of log.asks) {
     if (!byPane.has(paneKey(ask))) byPane.set(paneKey(ask), []);
@@ -98,7 +100,7 @@ export function answeredShare(log, { sinceMs = log.coverageStartMs, nowMs = Date
     for (const turn of conversationPaneTurns(asks, posts)) for (const id of turn.logIds) {
       const ask = byId.get(id);
       const atMs = tsMs(ask);
-      if (!isHumanAsk(ask) || atMs < sinceMs || nowMs - atMs < DREAM_SETTLE_MS) continue;
+      if (!humanAsks.has(ask) || atMs < sinceMs || nowMs - atMs < DREAM_SETTLE_MS) continue;
       asked++;
       if (turn.items.length) answered++;
       else unanswered[key] = (unanswered[key] || 0) + 1;

@@ -8,6 +8,8 @@ import {
   loadSearchRoots,
   withEventLedgerRoot,
   withHumanWordsRoot,
+  humanNameOf,
+  humanWordsDir,
   searchEventLedger,
   lexicalSearch,
   formatHits,
@@ -119,9 +121,9 @@ const CONVERSATION_MAX = 12;
  * WHAT: Returns the conversation log's hits for one question: the warm daemon's, else a scan when the reader named the log, else none and a warning.
  * WHY: Keeps a question from scanning 238 MB of log. A cold answer says what it left out, and the CLI brings his day files up to date itself.
  */
-async function conversationStep(content, flags, { semantic, warn }) {
+async function conversationStep(content, flags, { semantic, warn, humanName }) {
   if (flags.source && !"conversation".includes(flags.source)) return { hits: [], answered: false, cold: false };
-  const warm = await semantic.conversation?.(content, { max: CONVERSATION_MAX });
+  const warm = await semantic.conversation?.(content, { max: CONVERSATION_MAX, humanName });
   if (warm) {
     if (warm.warning) warn(`⚠ ${warm.warning}`);
     return { hits: warm, answered: true, cold: false };
@@ -144,12 +146,14 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   const lap = (stage) => { const now = performance.now(); timing[stage] = (timing[stage] || 0) + now - clock; clock = now; };
   const { query: content, dates } = temporalIntent(query, flags.now ? new Date(flags.now) : new Date());
   const ledgerRoot = roots.find((root) => root.kind === "event-ledger");
-  const conversation = await conversationStep(content, flags, { semantic, warn });
+  // His name comes from the root whatever --source says, so a question about the log never writes the day files without it.
+  const humanName = allRoots.find((root) => root.kind === "human-words")?.humanName;
+  const conversation = await conversationStep(content, flags, { semantic, warn, humanName });
   Object.assign(timing, conversation.hits.timing || {});
   // The daemon brings his day files up to date when it answers; otherwise this process does, before they are read.
   const humanRoot = roots.find((root) => root.kind === "human-words");
   if (humanRoot && !conversation.answered) {
-    try { syncHuman({ dir: humanRoot.path }); } catch (error) { warn(`⚠ his messages could not be brought up to date: ${error.message}`); }
+    try { syncHuman({ dir: humanRoot.path, name: humanRoot.humanName }); } catch (error) { warn(`⚠ his messages could not be brought up to date: ${error.message}`); }
   }
   const ledgerHits = [...(ledgerRoot ? searchEventLedger(content, ledgerRoot.path) : []), ...conversation.hits];
   lap("ledger");
@@ -405,7 +409,7 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
 
   const config = loadConfig(ctx.configPath);
   const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE || defaultWorkspace(process.env.HOME);
-  const roots = withHumanWordsRoot(withEventLedgerRoot(loadSearchRoots(config), eventsPath()));
+  const roots = withHumanWordsRoot(withEventLedgerRoot(loadSearchRoots(config), eventsPath()), humanWordsDir(), humanNameOf(config));
 
   if (flags.reindex) return reindexOnBestDevice(roots);
 

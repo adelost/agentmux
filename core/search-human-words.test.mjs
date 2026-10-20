@@ -7,7 +7,7 @@ import { acquireFileLease } from "./file-lease.mjs";
 import { syncHumanWords } from "./search-human-words.mjs";
 import { markdownUnits } from "./search-units.mjs";
 import { BETWEEN, BURST, createHumanDir, createLog, createThreeFileLog, HIS_NAME, LONG_MESSAGE, LONG_PROMPT, LOOP_PROMPT, MESSAGES, NOTICES,
-  NOW_MS, SHORT_PROMPT, typedTimes } from "../test/fixtures/conversation-log.mjs";
+  NOW_MS, SHORT_PROMPT, typedTimes, VOICE_PREFIX } from "../test/fixtures/conversation-log.mjs";
 
 const sync = (log, human, options = {}) => syncHumanWords({ dir: human.dir, ledgerPath: log.path, nowMs: NOW_MS, ...options });
 const dayFiles = (dir) => readdirSync(dir).filter((name) => /^\d{4}-\d{2}-\d{2}\.md$/u.test(name)).sort();
@@ -442,7 +442,7 @@ feature("his messages as day files", () => {
   });
 
   component("keeps a prompt repeated three times out and removes its copies", {
-    given: ["his typed message, a 63-character loop prompt typed twice so far, a 39-character and a 40-character prompt typed three times each, and a message of his sent twice through Discord with a pane-hook copy of each", () => {
+    given: ["his typed message, a 63-character loop prompt typed twice so far, a 39-character and a 40-character prompt typed three times each, a 13-character answer spoken three times, and a message of his sent twice through Discord with a pane-hook copy of each", () => {
       const log = createLog();
       log.ask(MESSAGES.typed);
       const loop = typedTimes(LOOP_PROMPT, 4, { idPrefix: "loop" });
@@ -450,6 +450,7 @@ feature("his messages as day files", () => {
         ...loop.slice(0, 2),
         ...typedTimes(SHORT_PROMPT, 3, { idPrefix: "short", firstTs: "2026-10-13T09:00:00.000Z", pane: 4 }),
         ...typedTimes(LONG_PROMPT, 3, { idPrefix: "long", firstTs: "2026-10-14T09:00:00.000Z", pane: 5 }),
+        ...typedTimes(`${VOICE_PREFIX}ja kör på det`, 3, { idPrefix: "yes", firstTs: "2026-10-15T09:00:00.000Z", pane: 6 }),
         MESSAGES.delivery, MESSAGES.hookCopy,
         { ...MESSAGES.delivery, id: "delivery:again", ts: "2026-10-06T05:00:00.000Z" },
         { ...MESSAGES.hookCopy, id: "hook:again", ts: "2026-10-06T05:00:03.000Z" },
@@ -458,7 +459,7 @@ feature("his messages as day files", () => {
     }],
     when: ["syncing, then after the third copy of the loop prompt, then after a fourth, and once more in an empty folder that sees the whole log at once", ({ log, human, loop }) => {
       const count = () => ({ loop: bulletsOf(human.dir, LOOP_PROMPT).length, short: bulletsOf(human.dir, SHORT_PROMPT).length,
-        long: bulletsOf(human.dir, LONG_PROMPT).length, twice: bullets(human.dir).filter((line) => line.includes("Okej, ja men vi kör Sonnet")).length });
+        long: bulletsOf(human.dir, LONG_PROMPT).length, spoken: bulletsOf(human.dir, "ja kör på det").length, twice: bullets(human.dir).filter((line) => line.includes("Okej, ja men vi kör Sonnet")).length });
       sync(log, human);
       const afterTwo = count();
       log.ask(loop[2]);
@@ -473,11 +474,11 @@ feature("his messages as day files", () => {
       fresh.remove();
       return { afterTwo, afterThree, afterFour, sameAsFresh };
     }],
-    then: ["two copies stay, the third removes both from their day file, a fourth stays out, a prompt under 40 characters or sent twice is kept, and a folder built from the whole log at once is the same", (result, { log, human }) => {
+    then: ["two copies stay, the third removes both from their day file, a fourth stays out, a prompt under 40 characters (the bridge's voice tag does not count) or sent twice is kept, and a folder built from the whole log at once is the same", (result, { log, human }) => {
       try {
-        expect(result.afterTwo).toEqual({ loop: 2, short: 3, long: 0, twice: 2 });
-        expect(result.afterThree).toEqual({ loop: 0, short: 3, long: 0, twice: 2, dayFile: false });
-        expect(result.afterFour).toEqual({ loop: 0, short: 3, long: 0, twice: 2 });
+        expect(result.afterTwo).toEqual({ loop: 2, short: 3, long: 0, spoken: 3, twice: 2 });
+        expect(result.afterThree).toEqual({ loop: 0, short: 3, long: 0, spoken: 3, twice: 2, dayFile: false });
+        expect(result.afterFour).toEqual({ loop: 0, short: 3, long: 0, spoken: 3, twice: 2 });
         expect(result.sameAsFresh).toBe(true);
       } finally { human.remove(); log.remove(); }
     }],

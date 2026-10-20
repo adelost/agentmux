@@ -118,17 +118,29 @@ export const humanWordsDir = () => process.env.AMUX_SEARCH_HUMAN_DIR || join(pro
 /** WHAT: Checks whether his messages are searched. WHY: Lets one switch, AMUX_SEARCH_HUMAN=0, stop both the root and the sync that fills it. */
 export const humanWordsEnabled = () => process.env.AMUX_SEARCH_HUMAN !== "0";
 
+/** WHAT: Normalizes a name to one line of at most 40 characters. WHY: Keeps a name with a newline or asterisks from breaking the Markdown unit that carries it. */
+export function cleanHumanName(value) {
+  return typeof value === "string" ? value.replace(/[*\r\n]+/gu, " ").replace(/\s+/gu, " ").trim().slice(0, 40) : "";
+}
+
+/** WHAT: Reads the name his headers carry from `human.name` in the config. WHY: Keeps the CLI, the daemon and the reindex from each reading the name their own way. */
+export const humanNameOf = (config) => cleanHumanName(config?.human?.name);
+
 /**
  * His messages are copied from the conversation log into one Markdown file per day, so every layer that serves notes
- * serves his exact words too. Like the event ledger, the folder is infrastructure, not personal configuration.
+ * serves his exact words too. Like the event ledger, the folder is infrastructure, not personal configuration. The
+ * root carries his name as `humanName` (from humanNameOf), so the CLI, the daemon and the reindex all write the same
+ * headers.
  * WHAT: Returns normalized roots containing the folder of his day files.
  * WHY: Prevents older personal configs from leaving his messages out of search and of the nightly reindex.
  */
-export function withHumanWordsRoot(roots, dir = humanWordsDir()) {
+export function withHumanWordsRoot(roots, dir = humanWordsDir(), name) {
   if (!humanWordsEnabled()) return roots;
   const path = expandTilde(dir);
+  // "" says he has no name; leaving it out says the caller does not know, and the day files keep the name they have.
+  const named = name === undefined ? {} : { humanName: name };
   if (roots.some((root) => root.path === path)) {
-    return roots.map((root) => root.path === path ? { ...root, kind: "human-words", semantic: true } : root);
+    return roots.map((root) => root.path === path ? { ...root, kind: "human-words", semantic: true, ...named } : root);
   }
   return [...roots, {
     name: "human",
@@ -139,6 +151,7 @@ export function withHumanWordsRoot(roots, dir = humanWordsDir()) {
     weight: 3,
     semantic: true,
     kind: "human-words",
+    ...named,
   }];
 }
 

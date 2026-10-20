@@ -186,9 +186,9 @@ export async function daemonPassages(query, roots, { max = 30, workspace, dates 
  * WHAT: Returns the conversation log's hits from the warm daemon, or null if it cannot answer.
  * WHY: Keeps a question from scanning 238 MB of log; the daemon reads new rows first.
  */
-export async function daemonConversation(query, { max = 12, dir = indexDir(), model = semanticModel().name } = {}) {
+export async function daemonConversation(query, { max = 12, humanName, dir = indexDir(), model = semanticModel().name } = {}) {
   try {
-    const result = await request(embedderSocketPath(dir, model), { op: "conversation", query, max }, 30_000);
+    const result = await request(embedderSocketPath(dir, model), { op: "conversation", query, max, humanName }, 30_000);
     if (!Array.isArray(result.hits) || result.unavailable) return null;
     result.hits.timing = result.timing;
     result.hits.warning = result.warning;
@@ -280,7 +280,7 @@ async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking
   // His day files are brought up to date when the daemon has not synced yet or a message of his has arrived since, so
   // the passage step of the same question reads them current. A failed sync is tried again by the next question.
   let syncDue = true;
-  const answerConversation = async (query, max) => {
+  const answerConversation = async (query, max, humanName) => {
     const timing = {};
     let started = performance.now();
     let humanAsks;
@@ -292,7 +292,7 @@ async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking
     started = performance.now();
     let warning;
     if (syncDue || humanAsks) {
-      try { syncHuman(); syncDue = false; } catch (error) {
+      try { syncHuman({ name: humanName }); syncDue = false; } catch (error) {
         warning = `his messages could not be copied to ${humanWordsDir()}: ${error.message}`;
       }
     }
@@ -313,7 +313,7 @@ async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking
     socket.on("end", async () => {
       let active = false;
       try {
-        const { query, k = 30, ping, op, roots, max, workspace, dates = [], texts, perFile } = JSON.parse(data);
+        const { query, k = 30, ping, op, roots, max, workspace, dates = [], texts, perFile, humanName } = JSON.parse(data);
         if (ping) { socket.end("{}"); return; }
         idle.begin(); active = true;
         if (op === "rerank") {
@@ -324,7 +324,7 @@ async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking
           return;
         }
         if (op === "conversation") {
-          socket.end(JSON.stringify(await answerConversation(String(query), Number(max) || 12)));
+          socket.end(JSON.stringify(await answerConversation(String(query), Number(max) || 12, typeof humanName === "string" ? humanName : undefined)));
           return;
         }
         if (op === "passages") {

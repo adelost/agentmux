@@ -94,7 +94,7 @@ feature("his messages as a search root", () => {
 });
 
 feature("his name on the root of his messages", () => {
-  unit("human.name of the config travels on his root to every caller, and is left off when unset", {
+  unit("human.name of the config travels on his root to every caller, as the empty name when unset", {
     given: ["a config with a name, a config without one, and one whose name would break a header", () => ({
       named: { human: { name: "Mattias" } },
       bare: { search: { roots: [] } },
@@ -111,7 +111,7 @@ feature("his name on the root of his messages", () => {
     then: ["the name is one clean line or empty, the root carries it as humanName, and a root that was configured by hand carries it too", ({ names, withName, withoutName, existing }) => {
       expect(names).toEqual(["Mattias", "", "Mat tias", ""]);
       expect(withName.humanName).toBe("Mattias");
-      expect("humanName" in withoutName).toBe(false);
+      expect(withoutName.humanName).toBe("");
       expect(existing).toMatchObject({ kind: "human-words", semantic: true, humanName: "Mattias" });
     }],
   });
