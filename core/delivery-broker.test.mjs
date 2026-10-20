@@ -2960,6 +2960,18 @@ feature("the quota floor holds new automatic work on an account near its weekly 
     windows: [{ kind: "session", usedPercent: 100, resetsAt: "2026-10-19T22:15:37.000Z" },
       { kind: "week", usedPercent: 48, resetsAt: "2026-10-27T14:21:43.000Z" }] }) });
 
+  component("a wind-down nudge still waits at a spent Codex window", {
+    given: ["an already queued nudge whose Codex account has since spent its session", () => floorWorld({ floor: codexSpent(),
+      job: { text: "[AMUX QUOTA WIND-DOWN · 3 %] End at a clean boundary.", source: "quota-wind-down" } })],
+    when: ["the ordinary broker serves the nudge", w => w.broker.kickTarget("claw", 1)],
+    then: ["the credit hold wins over the wind-down reserve exemption", (_result, w) => {
+      try {
+        expect(w.agent.sends).toEqual([]);
+        expect(w.current()).toMatchObject({ status: "pending", costHold: true });
+      } finally { w.cleanup(); }
+    }],
+  });
+
   component("a prompt to a Codex pane whose 5 h window is spent waits for the reset, though the account has credits", {
     given: ["claw:0 sends claw:1 a brief while Codex A's 5 h window reads 100 %", () => floorWorld({ floor: codexSpent() })],
     when: ["the broker serves claw:1", (w) => w.broker.kickTarget("claw", 1)],

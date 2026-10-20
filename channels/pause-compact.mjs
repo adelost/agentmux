@@ -150,7 +150,12 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     if (!stage) return false;
     const episodeKey = `${paneKey}|${stage.window}|${stage.resetAt}`;
     if (windDownEpisodes.get(paneKey)?.key !== episodeKey) {
-      windDownEpisodes.set(paneKey, { key: episodeKey, beganAt: stage.noticeAt });
+      const lastMoveAt = windDownEpisodes.get(paneKey)?.lastMoveAt;
+      windDownEpisodes.set(paneKey, { key: episodeKey, beganAt: stage.noticeAt, lastMoveAt });
+      if (Number.isFinite(lastMoveAt) && now() - lastMoveAt < 30 * 60_000) {
+        report(paneKey, episodeKey, { ...base, cell: "quota-wind-down", outcome: "wind-down-soon-after-move",
+          detail: `${Math.round((now() - lastMoveAt) / 60_000)} min since the previous wind-down move` });
+      }
     }
     const episode = windDownEpisodes.get(paneKey), working = isLiveStatus(status);
     const line = { ...base, mode: windDownMode, cell: "quota-wind-down", detail: `${stage.window} window, ${stage.leftPercent.toFixed(1)} % left` };
@@ -193,7 +198,10 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const result = await moveAfterWindDown({ agentName: name, pane, engine, target, from: facts.account,
       episode: episodeKey, beganAt: episode.beganAt, identity });
     episode.moved = Boolean(result?.moved);
-    if (episode.moved) report(paneKey, episodeKey, { ...line, outcome: "wind-down-moved", detail: `${facts.account.name} -> ${target.name}` });
+    if (episode.moved) {
+      episode.lastMoveAt = now();
+      report(paneKey, episodeKey, { ...line, outcome: "wind-down-moved", detail: `${facts.account.name} -> ${target.name}` });
+    }
     return episode.moved;
   }
 
@@ -202,6 +210,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const name = agentConfig.name;
     const paneKey = `${name}:${pane}`;
     const base = { at: new Date(now()).toISOString(), pane: paneKey, mode, tokens: contextTokens, cell: "self-request" };
+    if (engine === "codex" && parkFor && (mode !== "off" || windDownMode !== "off") && await creditHeld(paneKey, base)) return false;
     if (await windDownStep({ name, pane, paneKey, engine, paneDir, tokens: contextTokens, lastActivityMs, status, base })) return true;
     const readRequest = () => selfRequests?.read(name, pane, {
       onExpired: (expired) => report(paneKey, expired.requestedAt, { ...base, outcome: "dropped", detail: "self-request expired unrun after 2 h" }),
@@ -241,8 +250,6 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       }
       return false;
     }
-    if (engine === "codex" && parkFor && await creditHeld(paneKey, base)) return false;
-
     const identity = identityFor(engine, paneDir);
     if (!identity?.path) return false;
     const decision = pauseCompactDecision({ ...facts,

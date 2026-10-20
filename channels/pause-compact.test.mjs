@@ -10,14 +10,14 @@ import { createDeliveryBroker } from "../core/delivery-broker.mjs";
 const NOW = Date.parse("2026-10-11T03:36:00Z");
 const lsrc = { name: "lsrc", orchestrator: 3, leaders: [0] };
 
-function windDownFixture({ mode = "on", short = false } = {}) {
+function windDownFixture({ mode = "on", short = false, engine = "claude" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-wind-down-poll-"));
   let now = Date.parse("2026-10-20T10:07:10Z"), status = "working", idleFor = 61_000;
   const requests = createSelfCompactStore({ dir: join(root, "requests"), now: () => now });
   const queue = createDeliveryQueue({ rootDir: join(root, "queue"), now: () => now });
   const broker = createDeliveryBroker({ agent: {}, queue, now: () => now, log: () => {} });
   const lines = [], runs = [];
-  const facts = { account: { name: "Claude S", key: "claude:1" }, observedAt: Date.parse("2026-10-20T10:03:32Z"),
+  const facts = { account: { name: "Claude S", key: "claude:1", provider: engine }, observedAt: Date.parse("2026-10-20T10:03:32Z"),
     windows: [{ kind: "session", usedPercent: 94, resetsAt: "2026-10-20T11:10:00Z" }], accounts: [] };
   if (short) {
     now = Date.parse("2026-10-20T15:17:00Z");
@@ -28,17 +28,69 @@ function windDownFixture({ mode = "on", short = false } = {}) {
     contextMaintenance: { run: async () => { runs.push("compact"); return { ok: true, compacted: true }; } },
     record: line => lines.push(line), deliveryBroker: broker, selfRequests: requests, parkFor: async () => facts,
     limitReceiptFor: () => null, identityFor: () => ({ path: join(root, "session.jsonl"), sessionId: "s1" }),
-    journalCompactFor: () => null, backgroundFor: { claude: () => null } };
+    journalCompactFor: () => null, backgroundFor: { claude: () => null, codex: () => null } };
   let pause = createPauseCompact(options);
   return { queue, requests, lines, runs, facts, options,
     advance: ms => { now += ms; }, idle: (quietMs = 61_000) => { status = "idle"; idleFor = quietMs; },
     restart: () => { pause = createPauseCompact(options); },
-    poll: () => pause.consider({ agentConfig: lsrc, pane: 2, engine: "claude", paneDir: root,
+    poll: () => pause.consider({ agentConfig: lsrc, pane: 2, engine, paneDir: root,
       contextTokens: 150_000, lastActivityMs: now - (status === "idle" ? idleFor : 0), status, inCopyMode: false }),
     cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
+function readyToMove(ctx) {
+  const moves = [];
+  ctx.facts.accounts = [{ ok: true, provider: "claude", name: "Claude A", profile: { key: "claude:2", id: "2" },
+    observation: { observedAt: "2026-10-20T10:07:09Z" }, limits: [
+      { kind: "weekly_all", usedPercent: 40, resetsAt: "2026-10-23T11:10:00Z" },
+      { kind: "session", usedPercent: 10, resetsAt: "2026-10-20T11:10:00Z" }] }];
+  ctx.options.compactReceiptFor = () => ({ status: "VERIFIED", sessionId: "s1", finishedAt: Date.parse("2026-10-20T10:07:00Z") });
+  ctx.options.moveAfterWindDown = async input => { moves.push(input); return { moved: true }; };
+  ctx.restart(); ctx.idle();
+  return moves;
+}
+
 feature("quota wind-down in the pause poll (component)", () => {
+  component("dry mode logs a verified would-move without switching", {
+    given: ["an idle verified session with fresh target room in dry mode", () => {
+      const ctx = windDownFixture({ mode: "dry" }); return { ...ctx, moves: readyToMove(ctx) };
+    }],
+    when: ["polling twice", async ctx => { await ctx.poll(); await ctx.poll(); }],
+    then: ["one dry move and no side effects", (_result, ctx) => {
+      try {
+        expect(ctx.lines.map(line => line.outcome)).toEqual(["would-move"]);
+        expect(ctx.moves).toEqual([]); expect(ctx.requests.list()).toEqual([]); expect(ctx.queue.list("lsrc", 2)).toEqual([]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a second wind-down episode within 30 minutes of a move is logged", {
+    given: ["a moved pane that soon reaches another stopping window", async () => {
+      const ctx = windDownFixture(); readyToMove(ctx); await ctx.poll();
+      ctx.advance(60_000); ctx.facts.observedAt = Date.parse("2026-10-20T10:08:10Z");
+      ctx.facts.windows = [{ kind: "session", usedPercent: 96, resetsAt: "2026-10-20T11:11:00Z" }];
+      return ctx;
+    }],
+    when: ["polling the new episode twice", async ctx => { await ctx.poll(); await ctx.poll(); }],
+    then: ["the rapid second stop is reported once", (_result, ctx) => {
+      try { expect(ctx.lines.filter(line => line.outcome === "wind-down-soon-after-move")).toHaveLength(1); }
+      finally { ctx.cleanup(); }
+    }],
+  });
+  component("a spent Codex window files no wind-down work", {
+    given: ["a Codex pane still working after its session is spent", () => {
+      const ctx = windDownFixture({ engine: "codex" });
+      ctx.facts.windows[0].usedPercent = 100;
+      return ctx;
+    }],
+    when: ["the wind-down poll runs", ctx => ctx.poll()],
+    then: ["no notice, request or compact can spend paid credits", (_result, ctx) => {
+      try {
+        expect(ctx.queue.list("lsrc", 2)).toEqual([]);
+        expect(ctx.requests.list()).toEqual([]);
+        expect(ctx.runs).toEqual([]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
   component("a wind-down compact starts at the turn end without an extra settling minute", {
     given: ["a pane whose turn just ended", () => { const ctx = windDownFixture(); ctx.idle(0); return ctx; }],
     when: ["polling at that boundary", ctx => ctx.poll()],

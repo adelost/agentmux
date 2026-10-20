@@ -49,6 +49,34 @@ describe("Codex quota wind-down (component)", () => {
       expect(fx.calls.some(call => call.step === "restart")).toBe(false); expect(fx.jobs).toEqual([]);
     } finally { fx.clean(); }
   });
+  it("leaves an already pending operator request intact", async () => {
+    const fx = await windDown();
+    fx.ctx.agent.isBusy = async () => true;
+    try {
+      await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      const previous = codexAccountRequest(fx.ctx.state, "claw", 0);
+      fx.calls.length = 0;
+      fx.ctx.agent.isBusy = async () => false;
+      const result = await runRequestedCodexSwitch(fx.ctx, "claw", 0, fx.options);
+      expect(result).toMatchObject({ moved: false, reason: "account-switch-already-pending" });
+      expect(codexAccountRequest(fx.ctx.state, "claw", 0)).toEqual(previous);
+      expect(fx.calls).toEqual([]); expect(fx.jobs).toEqual([]);
+    } finally { fx.clean(); }
+  });
+  it("a queued wind-down switch never probes a spent source", async () => {
+    const fx = await windDown(), quota = fx.options.quota;
+    fx.options.quota = async profile => {
+      const reading = await quota(profile);
+      if (profile.id === "1") reading.limits[0].windows[1].usedPercent = 100;
+      return reading;
+    };
+    fx.options.status = async () => { fx.calls.push({ step: "paid-source-turn" }); return { ok: false }; };
+    try {
+      const result = await runRequestedCodexSwitch(fx.ctx, "claw", 0, fx.options);
+      expect(result).toMatchObject({ moved: false, reason: "wind-down-source-credit-hold" });
+      expect(fx.calls).toEqual([]); expect(fx.jobs).toEqual([]);
+    } finally { fx.clean(); }
+  });
 });
 
 function fixture({ busy = false, dormant = false, wrongModel = false } = {}) {

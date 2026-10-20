@@ -49,14 +49,15 @@ export async function wakeDeliveryTarget({
   const holdOf = (facts) => quotaFloorHold({ windows: facts?.windows, floorPercent: quotaFloor.percent, now: now(),
     provider: facts?.account?.provider, creditsAllowed: quotaFloor.creditsAllowed === true });
   const floorReason = async () => {
-    if (!quotaFloor || isOwnerChannelJob(job) || job.source === QUOTA_WIND_DOWN_ORIGIN) return null;
+    if (!quotaFloor || isOwnerChannelJob(job)) return null;
     const paneKey = `${job.agentName}:${job.pane}`;
     const cached = await quotaFloor.windowsFor(paneKey).catch(() => null);
     if (!holdOf(cached)) return null;
     // A pane quota recovery just moved may still be listed on its old account; re-read where it runs now.
     const fresh = await quotaFloor.windowsFor(paneKey, { fresh: true }).catch(() => null);
     const hold = holdOf(fresh);
-    if (!hold) return null;
+    // A clean-stop nudge may use the weekly reserve, never paid Codex credits.
+    if (!hold || (job.source === QUOTA_WIND_DOWN_ORIGIN && !hold.credits)) return null;
     const name = fresh.account?.name || "its account";
     return hold.credits
       ? `quota-floor: ${name} has spent its ${hold.window === "session" ? "5h" : hold.window} window until ${hold.resetsAt};`

@@ -23,6 +23,7 @@ import { isCompactedCodexSession } from "../core/codex-compacted-session.mjs";
 import { codexWeeklyLimitReached } from "../core/codex-limit-recovery.mjs";
 import { windDownCompactReceipt } from "../core/quota-wind-down-move.mjs";
 import { moveTarget, quotaObservedAt, windDownContinuation } from "../core/quota-wind-down.mjs";
+import { accountWindows, codexCreditHold, codexCreditsAllowed } from "../core/quota-park.mjs";
 
 /** WHAT: Defines explicit pane-local account request keys. WHY: Keeps operator intent separate from provider quota evidence and unrelated state writers. */
 export const CODEX_ACCOUNT_REQUESTS = "codex_account_requests_v1";
@@ -141,6 +142,8 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
       setCodexProfile(ctx.state, name, pane, target.id);
       return finish(ctx, key, request, { kind: "same" });
     }
+    if (request.windDown && codexCreditHold({ windows: accountWindows(await deps.quota(current)), provider: "codex",
+      creditsAllowed: codexCreditsAllowed(), now: deps.now() })) return pending("wind-down-source-credit-hold");
     deps.prepare(target, profiles[0]);
     const quota = await deps.quota(target);
     if (request.windDown && (quotaObservedAt(quota) > deps.now() || !moveTarget({ engine: "codex", accounts: [quota], from: request.windDown.from,
