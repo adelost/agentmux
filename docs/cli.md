@@ -128,8 +128,11 @@ after an idle exit do not pay for that work (8-9 s before, about 1.5 s after).
 
 The models and index stay loaded in a per-user background process
 (`bin/search-embedder.mjs`, Unix socket under `~/.agentmux/`) that starts on
-the first question and exits after 30 idle minutes
-(`AMUX_EMBEDDER_IDLE_MIN`). Until it is warm, that one question is answered
+the first question and stays loaded for 30 minutes after the last question
+(`AMUX_EMBEDDER_IDLE_MIN`), while at least 8 GB RAM is free
+(`AMUX_EMBEDDER_MIN_FREE_GB`). Its stderr, such as why it closed for memory,
+goes to `~/.agentmux/search-embedder.log`.
+Until it is warm, that one question is answered
 lexically and the output says so; a reranker that is still loading or failed
 is reported the same way. While running, it re-embeds notes edited since the
 nightly index in the background (at most 4 000 new units per 30 s scan),
