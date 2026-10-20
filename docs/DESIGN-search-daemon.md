@@ -1,6 +1,6 @@
 # amux search: his messages as units, the conversation log in the daemon, 30 minutes warm while memory is free
 
-Version: 5 · 2026-10-20 09:00Z · owner of the design: api:0 · page: none yet
+Version: 6 · 2026-10-20 09:10Z · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -369,19 +369,49 @@ when he asks for less.
 - The daemon's V8 heap without the models, *measured* 07:5xZ on 617bd0d9 (`heap-check.mjs` in the evidence folder):
   passage cache 432 MB; base index 14 MB, plus 242 MB of vectors outside the heap; conversation window 271 MB
   (320 360 rows, 10.5 M postings). 717 MB of the 1 536 MB cap, so the cap stays. RSS rises 530 MB with the window.
-- Warm time against the real pattern (§7, 229 searches in 48 h), with RAM at 3 GB while warm. *Measured* pattern,
-  *estimated* average:
+- Warm time against the real pattern (§7, 229 searches in 48 h), with RAM at 4.2 GB while warm, as measured after v1
+  (the v2 table used 3 GB). *Measured* pattern, *estimated* average:
 
 | Timer | Cold searches | Warm of 48 h | RAM on average |
 |---|---|---|---|
-| 2 min (until v1) | 163 (71 %) | 6.3 h | 0.4 GB |
-| 10 min | 72 (31 %) | 21.4 h | 1.3 GB |
-| 15 min | 50 (22 %) | 26.3 h | 1.6 GB |
-| 30 min (chosen) | 24 (10 %) | 34.4 h | 2.2 GB |
-| 60 min | 8 (3 %) | 41.7 h | 2.6 GB |
+| 2 min (until v1) | 163 (71 %) | 6.3 h | 0.6 GB |
+| 10 min | 72 (31 %) | 21.4 h | 1.9 GB |
+| 15 min | 50 (22 %) | 26.3 h | 2.3 GB |
+| 30 min (chosen) | 24 (10 %) | 34.4 h | 3.0 GB |
+| 60 min | 8 (3 %) | 41.7 h | 3.6 GB |
 
 - Starts fall from 163 to 24 per 48 h, and with them the CPU each start spends embedding the day's changed notes
   again. *Estimated* from the code (§7).
+
+### Results, 20 Oct, same machine
+
+*Measured*; reports, samples and scripts in `~/.agentmux/artifacts/search-daemon-2026-10-20/`. Before is b7323525,
+the search code of 1.25.275; after is 1.25.277 (7ecf4e59) after the reindex. Load is the 1-minute average at the
+start and end of each run.
+
+| Run | Release | Load | hit@1 | hit@3 | MRR | Median | p95 |
+|---|---|---|---|---|---|---|---|
+| 47 questions, warm | before | 4 to 17 | 87 % | 94 % | 0.91 | 6 983 ms | 18 414 ms |
+| 47 questions, warm | after | 6 to 9 | 87 % | 94 % | 0.91 | 1 652 ms | 3 024 ms |
+| 47 questions, `--lexical` | before | 17 to 25 | 60 % | 70 % | 0.64 | 6 211 ms | 9 970 ms |
+| 47 questions, `--lexical`, daemon warm | after | 8 | 62 % | 68 % | 0.65 | 623 ms | 934 ms |
+| 47 questions, cold, no daemon | after | 8 | 62 % | 68 % | 0.65 | 5 665 ms | 9 338 ms |
+| v14 to v16, warm | before | 25 | 33 % | 33 % | 0.33 | 7 198 ms | 9 995 ms |
+| v14 to v16, warm | after | 8 to 10 | 33 % | 33 % | 0.36 | 2 597 ms | 8 513 ms |
+| v14 to v16, `--lexical` | before | 25 to 23 | 33 % | 33 % | 0.33 | 5 921 ms | 9 892 ms |
+| v14 to v16, `--lexical` | after | 10 | 33 % | 33 % | 0.33 | 790 ms | 907 ms |
+| v14 to v16, cold | after | 9 | 33 % | 33 % | 0.33 | 6 037 ms | 9 768 ms |
+
+- Warm: the same three misses (u06 from rank 4 to 5, u15, u45); the median is 4.2 times and p95 6 times faster.
+- Lexical: one more question at rank 1, and u36 falls from rank 3 to 4, because his 29 Sep message about that person
+  now ranks first. A weight of 2 for his root changed nothing (the same 62 % and 68 %). Kept by api:0: the warm path,
+  which most searches take, loses nothing. Reopen when another lexical question falls.
+- Verbatim: v15 moves from no hit to rank 12; v14 and v16 still miss. His words are units, but these three are not
+  found by them yet. Not chased in this release.
+- Cold: the agents' rows are left out, with the same hits as lexical here. Its 5.7 s is the CLI building the
+  passage cache without a daemon, as before this release.
+- The daemon with the window, warm: RSS 4.14 to 4.34 GB (peak 4.34 GB) and 2.3 to 2.5 GB VRAM; the 5 GB start
+  headroom covers the peak. The reindex with the backfill took 97 s on the GPU for 9 957 new units.
 - Time, from the file list:
   - New `core/ledger-tail.mjs` (70 lines) and its test, 45 min.
   - New `core/search-human-words.mjs` (110 lines) and its test, 75 min.
@@ -444,20 +474,23 @@ when he asks for less.
   older than 30 days.
 - Browsers and devices: n/a. Live categories touched: performance that must be measured.
 - Small first:
-  - [ ] Pieces: n/a: until the build; each test runs on the synthetic three-file log in seconds.
-  - [ ] Edge cases: n/a: until the build; the fixtures above carry the real log's rotation, merges and prefixes.
-  - [ ] Seams: n/a: until the build; the daemon socket and the real log are run by the rehearsal step.
-  - [ ] Whole path: n/a: until the build; the installed CLI against the daemon on a copy of the log, cap 600 s.
-  - [ ] Big input last: n/a: until the build; the real log and the 47 questions, once, last.
+  - [x] Pieces: the synthetic three-file log (`test/fixtures/conversation-log.mjs`); 137 tests in 1.9 s on the release
+    source.
+  - [x] Edge cases: rotation by inode, a partial line, a rewritten file, a delivery and its pane-hook copy, the voice
+    prefix, a 2 000-character message and a row past 30 days, in the tail, day-file and window tests.
+  - [x] Seams: op conversation through the daemon socket in four daemon tests; the real log through the build's
+    read-only run (320 k rows) and the heap check.
+  - [x] Whole path: the installed 1.25.277 against its daemon on the real log, 08:43Z: 9.5 s cold, 0.6 s warm.
+  - [x] Big input last: the 47 questions and v14 to v16 on the real 30-day log after the reindex, 08:44 to 08:51Z.
 
 ## 13. Tasks
 
 | # | Task | Owner | State | Prio | Estimate | Spec | Done when |
 |---|---|---|---|---|---|---|---|
-| 43 | His messages as search units, and the conversation log in the daemon without rescans | api:0 | working: Sonnet builds, api:0 reviews | P1 | 4.5h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | warm median about 1.6 s with no loss in hit@1 or hit@3 on the 47 blind questions |
-| 44 | Daemon warm for 30 minutes, with its RAM and VRAM measured | api:0 | working: Sonnet builds, api:0 reviews | P1 | 0.3h | [Search §11](DESIGN-search-daemon.md#11-rollout-and-rollback) | the daemon stays up 30 minutes after a question, and §10 holds its measured RSS and VRAM |
-| 45 | Release with before and after on the same machine | api:0 | open | P1 | 0.5h | [Search §12](DESIGN-search-daemon.md#12-tests) | installed release; 47 questions and v14 to v16 warm and cold before and after, with load averages, in §10 |
-| 46 | Memory guard: the daemon starts only with room for its peak and closes under the floor | api:0 | open: Sonnet builds after 43, api:0 reviews | P1 | 0.7h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | under 8 GB free the daemon closes within 30 s, and none starts under 12 GB; tests red before, green after |
+| 43 | His messages as search units, and the conversation log in the daemon without rescans | api:0 | done: 7ecf4e59 |  | 4.5h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | warm median about 1.6 s with no loss in hit@1 or hit@3 on the 47 blind questions |
+| 44 | Daemon warm for 30 minutes, with its RAM and VRAM measured | api:0 | done: 7ecf4e59 |  | 0.3h | [Search §11](DESIGN-search-daemon.md#11-rollout-and-rollback) | the daemon stays up 30 minutes after a question, and §10 holds its measured RSS and VRAM |
+| 45 | Release with before and after on the same machine | api:0 | done: 7ecf4e59 |  | 0.5h | [Search §12](DESIGN-search-daemon.md#12-tests) | installed release; 47 questions and v14 to v16 warm and cold before and after, with load averages, in §10 |
+| 46 | Memory guard: the daemon starts only with room for its peak and closes under the floor | api:0 | done: 7ecf4e59 |  | 0.7h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | under 8 GB free the daemon closes within 30 s, and none starts under 12 GB; tests red before, green after |
 | 47 | QMD's hybrid mode against the 47 blind questions | api:0 | dropped: no yes from him for a tool |  | 1h | [Search §8](DESIGN-search-daemon.md#8-alternatives) | QMD hybrid's hit@1, hit@3 and median on the 47 questions stand beside ours in §8, with the choice |
 
 ## 14. Open questions
@@ -485,3 +518,5 @@ None for him. Calls made by api:0:
   `stdio: "ignore"` lost every line; the cold warning no longer says the daemon is starting, which a refused start
   made false; the guard closes without waiting for background loading. The fix round gets its own brief.
 - v5, 2026-10-20 09:00Z: row 47 dropped. It was my proposal, and his 2026-08-04 rule asks for his yes per tool.
+- v6, 2026-10-20 09:10Z: the results of 1.25.277 in §10, the timer table at the measured 4.2 GB, the Small first boxes
+  and rows 43 to 46 done.
