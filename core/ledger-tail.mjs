@@ -39,6 +39,24 @@ function readWholeLines(read, file, start, remaining, budget) {
   }
 }
 
+// The whole lines of one file from `start`, as rows with their places. Null when the file is no longer at its path: a
+// rotation renamed it after it was listed, and the next call finds it by inode under its new name.
+function readNewRows(read, span, key, start, remaining, budget) {
+  let slice;
+  try { slice = readWholeLines(read, span.file, start, remaining, budget); } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+  const rows = [];
+  for (let at = 0; at < slice.end;) {
+    const stop = slice.bytes.indexOf(NEWLINE, at);
+    const row = parsedRow(slice.bytes.toString("utf8", at, stop));
+    if (row) rows.push({ row, path: span.file, file: key, offset: start + at, length: stop - at });
+    at = stop + 1;
+  }
+  return { rows, end: slice.end, bytes: slice.bytes.length };
+}
+
 function parsedRow(line) {
   try {
     const row = JSON.parse(line);
@@ -78,16 +96,15 @@ export function tailLedger(state = {}, { path = defaultAskLedgerPath(), sinceMs 
     }
     let end = 0;
     if (remaining > 0) {
-      const slice = readWholeLines(read, span.file, start, remaining, budget);
-      end = slice.end;
-      budget -= slice.bytes.length;
-      if (start + slice.bytes.length < info.size) done = false;
-      for (let at = 0; at < end;) {
-        const stop = slice.bytes.indexOf(NEWLINE, at);
-        const row = parsedRow(slice.bytes.toString("utf8", at, stop));
-        if (row) rows.push({ row, path: span.file, file: key, offset: start + at, length: stop - at });
-        at = stop + 1;
+      const added = readNewRows(read, span, key, start, remaining, budget);
+      if (!added) {
+        if (known) next[key] = { ...known, path: span.file };
+        continue;
       }
+      for (const item of added.rows) rows.push(item);
+      end = added.end;
+      budget -= added.bytes;
+      if (start + added.bytes < info.size) done = false;
     }
     next[key] = { path: span.file, size: info.size, offset: start + end };
   }

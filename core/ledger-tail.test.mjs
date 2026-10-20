@@ -164,6 +164,33 @@ feature("the tail of the conversation log", () => {
     }],
   });
 
+  component("leaves a file that was renamed after it was listed for the next call", {
+    given: ["a tail that has read one row, then a second row, and a reader that finds the file gone once", () => {
+      const log = createLog();
+      log.ask(message(1));
+      const { options } = recorded(log);
+      const first = tailLedger({}, options);
+      log.ask(message(2));
+      let gone = true;
+      const vanishing = { ...options, read: (file, offset, length) => {
+        if (gone) { gone = false; throw Object.assign(new Error("ENOENT: renamed after it was listed"), { code: "ENOENT" }); }
+        return readRange(file, offset, length);
+      } };
+      return { log, options: vanishing, first };
+    }],
+    when: ["tailing twice more", ({ options, first }) => {
+      const missed = tailLedger(first.state, options);
+      return { missed, found: tailLedger(missed.state, options) };
+    }],
+    then: ["the first call returns nothing and keeps its place, the second reads the row once", ({ missed, found }, { log, first }) => {
+      try {
+        expect(missed.rows).toEqual([]);
+        expect(missed.state).toEqual(first.state);
+        expect(ids(found)).toEqual(["ask:2"]);
+      } finally { log.remove(); }
+    }],
+  });
+
   unit("a file that vanished between listing and reading is left out", {
     given: ["a listing with one file that cannot be read", () => ({
       files: () => [{ file: "/gone/ask.jsonl", firstMs: -Infinity, lastMs: Infinity }],
