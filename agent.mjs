@@ -280,8 +280,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   // --- Pane setup ---
 
-  // Detached windows need room for every split and composer; attached clients
-  // retain control of their own terminal geometry.
+  // Every window, attached or not, stays manual 340x100 so each split and composer has room;
+  // an attached client views that window and never resizes the fleet's panes.
   const ensureSplitRoom = (name) => ensureHeadlessWindow(t, name);
   const settleWindowSize = async (name, layout) => {
     if (await settleTmuxWindowSize(t, name)) await t.selectLayout(name, layout).catch(() => {});

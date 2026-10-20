@@ -90,10 +90,6 @@ export function createTmuxAdapter({ socket, exec }) {
       await raw(`set-window-option -t ${q(name)} window-size manual`);
     },
 
-    async setWindowSizeLatest(name) {
-      await raw(`set-window-option -t ${q(name)} window-size latest`);
-    },
-
     async sessionAttachedCount(name) {
       const value = Number(await display(name, "#{session_attached}"));
       return Number.isSafeInteger(value) && value >= 0 ? value : 0;
