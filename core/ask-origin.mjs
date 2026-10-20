@@ -60,6 +60,7 @@ export const AMUX_PANE_TAGS = Object.freeze([
   ["[SRC-0114]", "core/suggestions-watchdog-outbox.mjs"],
   ["[drift-guard]", "core/reminder-state.mjs"],
   ["[idle-capacity]", "core/idle-capacity-alarm.mjs"],
+  ["[quiet]", "core/quiet-plan.mjs"],
   ["[model-watch]", "core/model-watch.mjs"],
   ["[pause-compact]", "core/pause-compact.mjs"],
   ["[krasch-recovery]", "core/revive.mjs"],
