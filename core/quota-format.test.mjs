@@ -185,3 +185,17 @@ feature("stop notice for a pane that hit its plan limit", () => {
     }],
   });
 });
+
+// lsrc:0 2026-10-20: a credit drain shows only when the balance stands beside the windows it outlasts.
+feature("a Codex account's paid credits in the detail lines", () => {
+  unit("the balance closes the account line in whole credits", {
+    when: ["rendering Codex A with its 5 h window spent and 57 074.79 credits", () => formatQuotaSnapshot({
+      accounts: [{ ok: true, provider: "codex", profile: { id: "1", key: "codex:1" }, name: "Codex A",
+        account: { email: "adelost@example.com", plan: "plus" }, credits: { unlimited: false, balance: 57074.790715 },
+        limits: [{ limitId: "codex", windows: [
+          { usedPercent: 100, windowMinutes: 300, resetsAt: "2026-10-20T22:15:37.000Z" },
+          { usedPercent: 48, windowMinutes: 10_080, resetsAt: "2026-10-27T14:21:43.000Z" }] }] }],
+    }).split("\n")],
+    then: ["after the 5 h and the week", (lines) => expect(lines[1]).toMatch(/ 5h 100%.* · week 48% \(reset [^)]+\) · credits 57 075$/u)],
+  });
+});

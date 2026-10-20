@@ -266,3 +266,39 @@ feature("a pane whose account is about to stop it", () => {
     }],
   });
 });
+
+// lsrc:0 2026-10-20 ~18:0xZ: two Codex panes compacted on paid credits after Codex A's 5 h window filled at about 17:35Z.
+feature("a Codex pane whose account has spent a window", () => {
+  const spent = ({ creditsAllowed = false } = {}) => {
+    const runs = [], lines = [];
+    const pause = createPauseCompact({ modes: { claude: "on", codex: "on" }, now: () => NOW, state: { get: () => ({}) },
+      contextMaintenance: { run: async (name, pane, options) => { runs.push({ pane: `${name}:${pane}`, ...options }); return { ok: true, compacted: true }; } },
+      record: line => lines.push(line), identityFor: () => ({ path: "/projects/lsrc-4/s1.jsonl", sessionId: "s1" }),
+      backgroundFor: { claude: () => null, codex: () => null }, journalCompactFor: () => null, creditsAllowed,
+      parkFor: async () => ({ account: { name: "Codex A", key: "codex:1", provider: "codex" },
+        windows: [{ kind: "session", usedPercent: 100, resetsAt: new Date(NOW + 4 * 3_600_000).toISOString() },
+          { kind: "week", usedPercent: 48, resetsAt: new Date(NOW + 6 * 86_400_000).toISOString() }] }) });
+    const poll = () => pause.consider({ agentConfig: lsrc, pane: 4, engine: "codex", paneDir: "/lsrc/.agents/4", status: "idle",
+      inCopyMode: false, contextTokens: 200_000, lastActivityMs: NOW - 26 * 60_000 });
+    return { runs, lines, poll };
+  };
+
+  component("is not compacted on paid credits; it waits for the reset", {
+    given: ["quiet Codex lsrc:4 at 200k while Codex A's 5 h window reads 100 %", () => spent()],
+    when: ["polling 26 minutes after its turn", ctx => ctx.poll()],
+    then: ["nothing runs and the hold is logged", (sent, ctx) => {
+      expect(sent).toBe(false);
+      expect(ctx.runs).toEqual([]);
+      expect(ctx.lines).toEqual([expect.objectContaining({ outcome: "held", cell: "credit-hold" })]);
+    }],
+  });
+
+  component("is compacted as before when credits are allowed", {
+    given: ["the same pane with AMUX_CODEX_CREDITS=allow", () => spent({ creditsAllowed: true })],
+    when: ["polling 26 minutes after its turn", ctx => ctx.poll()],
+    then: ["one compact against the 150k Codex floor", (sent, ctx) => {
+      expect(sent).toBe(true);
+      expect(ctx.runs).toEqual([expect.objectContaining({ pane: "lsrc:4", pauseTokens: 150_000, dry: false })]);
+    }],
+  });
+});

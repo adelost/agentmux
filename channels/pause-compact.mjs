@@ -13,13 +13,14 @@ import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, oversizeN
   pauseCompactLimit, sessionBackgroundActivity } from "../core/pause-compact.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice } from "../core/self-compact.mjs";
-import { QUOTA_FLOOR_DEFAULT_PERCENT, QUOTA_PARK_ORIGIN, QUOTA_PARK_POLICY, quotaParkContinuation, quotaParkDecision } from "../core/quota-park.mjs";
+import { QUOTA_FLOOR_DEFAULT_PERCENT, QUOTA_PARK_ORIGIN, QUOTA_PARK_POLICY, codexCreditHold, quotaParkContinuation,
+  quotaParkDecision } from "../core/quota-park.mjs";
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
 import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 import { isLiveStatus } from "../core/pane-status.mjs";
 export { createQuotaParkFacts } from "./quota-park.mjs";
 export { createQuotaParkStore } from "../core/quota-park-store.mjs";
-export { quotaFloorPercent } from "../core/quota-park.mjs";
+export { codexCreditsAllowed, quotaFloorPercent } from "../core/quota-park.mjs";
 
 const BACKGROUND_BY_ENGINE = Object.freeze({ claude: sessionBackgroundActivity, codex: codexBackgroundActivity });
 
@@ -35,7 +36,8 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
   identityFor = latestPaneSessionIdentity, backgroundFor = BACKGROUND_BY_ENGINE, journalCompactFor = latestJournalCompactMs,
   selfRequests = null, notify = async () => {}, cacheLifeMs = readContextCostPolicy().coldMs, deliveryBroker = null,
-  parkFor = null, parkStore = null, floorPercent = QUOTA_FLOOR_DEFAULT_PERCENT, limitReceiptFor = (engine, paneDir) => (engine === "claude" ? activeClaudeLimitReceipt(paneDir) : null),
+  parkFor = null, parkStore = null, floorPercent = QUOTA_FLOOR_DEFAULT_PERCENT, creditsAllowed = false,
+  limitReceiptFor = (engine, paneDir) => (engine === "claude" ? activeClaudeLimitReceipt(paneDir) : null),
   cursorFor = path => captureJsonlAppendCursor("self-compact-request-v1", [path]) }) {
   const lastLogged = new Map();
   // The episode each working pane was asked about, so it hears once until it compacts.
@@ -126,6 +128,17 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     return result.ok;
   }
 
+  // lsrc:0 2026-10-20: two Codex panes compacted on paid credits after Codex A's 5 h window was spent at about 17:35Z.
+  // Codex works on past a spent window on credits, so its compact waits for the reset like any automatic turn.
+  async function creditHeld(paneKey, base) {
+    const facts = await parkFor(paneKey);
+    const hold = codexCreditHold({ windows: facts?.windows, provider: facts?.account?.provider, creditsAllowed, now: now() });
+    if (!hold) return false;
+    report(paneKey, hold.resetsAt, { ...base, cell: "credit-hold", outcome: "held",
+      detail: `${facts.account?.name || "its account"} has spent its ${hold.window} window until ${hold.resetsAt}` });
+    return true;
+  }
+
   async function consider({ agentConfig, pane, engine, paneDir, status, inCopyMode, contextTokens, lastActivityMs }) {
     const mode = modes[engine] || "off";
     if (mode === "off") return false;
@@ -165,6 +178,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       }
       return false;
     }
+    if (engine === "codex" && parkFor && await creditHeld(paneKey, base)) return false;
 
     const identity = identityFor(engine, paneDir);
     if (!identity?.path) return false;

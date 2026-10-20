@@ -6,7 +6,7 @@
 // paneler som kör på den", "här ser man ju inte om man har resets kvar. Man ser inte när subscriptionen tar slut heller".
 import { accountName, loginOfEmail } from "../core/account-names.mjs";
 import { weeklyForecast } from "../core/quota-forecast.mjs";
-import { clockOf, nearestMinute } from "../core/quota-format.mjs";
+import { clockOf, creditsText, nearestMinute } from "../core/quota-format.mjs";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -86,6 +86,8 @@ function linesOf(fact, width, now) {
   const left = Math.max(0, Math.min(100, Math.round(100 - fact.week.usedPercent)));
   return [`${head}  ${`${left}%`.padStart(4)}  ${dayAndClock(fact.week.resetsAt)}`,
     ...(fact.blockedBy5h ? [`    5h 0% until ${untilClock(fact.blockedBy5h.resetsAt, now)}`] : []),
+    // lsrc:0 2026-10-20: past a spent window Codex draws these paid credits, so the balance stands beside the windows.
+    ...(fact.account.credits ? [`    ${creditsText(fact.account.credits)}`] : []),
     ...subscriptionLines(fact.account.subscription)];
 }
 

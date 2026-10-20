@@ -43,17 +43,24 @@ export async function wakeDeliveryTarget({
 
   // lsrc:0 2026-10-19: at the floor an account's last few percent are for clean stops, compacts and handovers, so
   // automatic work waits; a person's own message still goes through (context-maintenance.mjs, 2026-09-26).
-  // An unreadable quota never holds work; the facts reader logs its own read failures.
+  // An unreadable quota never holds work; the facts reader logs its own read failures. A Codex account past a spent
+  // window works on paid credits, so it holds until the reset unless credits are allowed (lsrc:0 2026-10-20).
+  const holdOf = (facts) => quotaFloorHold({ windows: facts?.windows, floorPercent: quotaFloor.percent, now: now(),
+    provider: facts?.account?.provider, creditsAllowed: quotaFloor.creditsAllowed === true });
   const floorReason = async () => {
     if (!quotaFloor || isOwnerChannelJob(job)) return null;
     const paneKey = `${job.agentName}:${job.pane}`;
     const cached = await quotaFloor.windowsFor(paneKey).catch(() => null);
-    if (!quotaFloorHold({ windows: cached?.windows, floorPercent: quotaFloor.percent, now: now() })) return null;
+    if (!holdOf(cached)) return null;
     // A pane quota recovery just moved may still be listed on its old account; re-read where it runs now.
     const fresh = await quotaFloor.windowsFor(paneKey, { fresh: true }).catch(() => null);
-    const hold = quotaFloorHold({ windows: fresh?.windows, floorPercent: quotaFloor.percent, now: now() });
-    return hold ? `quota-floor: ${fresh.account?.name || "its account"} has ${hold.leftPercent} % of its week left`
-      + ` (floor ${quotaFloor.percent} %) until ${hold.resetsAt}` : null;
+    const hold = holdOf(fresh);
+    if (!hold) return null;
+    const name = fresh.account?.name || "its account";
+    return hold.credits
+      ? `quota-floor: ${name} has spent its ${hold.window === "session" ? "5h" : hold.window} window until ${hold.resetsAt};`
+        + " a turn now draws paid credits"
+      : `quota-floor: ${name} has ${hold.leftPercent} % of its week left (floor ${quotaFloor.percent} %) until ${hold.resetsAt}`;
   };
 
   const costGate = async () => {

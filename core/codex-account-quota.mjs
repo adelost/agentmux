@@ -27,6 +27,13 @@ const windowsFor = (snapshot) => ["primary", "secondary"].flatMap((id) => {
   }];
 });
 
+// lsrc:0 2026-10-20: past a spent window Codex draws the paid credit balance, about 1 200 an hour unseen that day.
+const creditsFor = (snapshot) => {
+  const credits = snapshot?.credits, balance = Number(credits?.balance);
+  if (credits?.unlimited) return { unlimited: true, balance: Number.isFinite(balance) ? balance : null };
+  return credits?.hasCredits && Number.isFinite(balance) ? { unlimited: false, balance } : null;
+};
+
 /** WHAT: Normalizes Codex account limits. WHY: Keeps app-server wire fields out of shared consumers. */
 export function normalizeCodexAppServerQuota(profile, accountResult, rateLimitResult, observedAt) {
   const account = accountResult?.account;
@@ -55,6 +62,7 @@ export function normalizeCodexAppServerQuota(profile, accountResult, rateLimitRe
       error: "no_rate_limits" };
   }
   const headlineLimit = limits.find((row) => row.limitId === "codex") ?? limits[0];
+  const credits = creditsFor(snapshots.find((row) => row?.limitId === headlineLimit.limitId));
   const headline = headlineLimit.windows.find((row) => row.windowMinutes === 10_080)
     ?? headlineLimit.windows[0];
   return {
@@ -70,6 +78,7 @@ export function normalizeCodexAppServerQuota(profile, accountResult, rateLimitRe
       resetsAt: headline.resetsAt,
     }),
     limits,
+    ...(credits ? { credits } : {}),
   };
 }
 

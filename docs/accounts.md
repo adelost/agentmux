@@ -59,6 +59,14 @@ the floor left, after the reset or a free reset, and parked panes then get the
 same-session recovery prompt. A pane that quota recovery moved to an account
 with room is judged by the account it runs on now.
 
+A Codex account past a spent 5h or week window keeps working on its paid
+credit balance, and Codex refuses nothing while credits last. amux holds new
+automatic deliveries and idle compacts on it until that window resets, whatever
+the floor setting, unless `AMUX_CODEX_CREDITS=allow` is set for the bridge
+(lsrc:0, 2026-10-20: about 1 200 credits an hour at 375.96 SEK per 1 000). The
+owner's own message still goes through. `amux quota` shows the balance beside
+the windows.
+
 ## Idle capacity
 
 With `AMUX_IDLE_CAPACITY_TARGET=agent:pane` in the bridge environment, the

@@ -112,10 +112,36 @@ export function quotaParkDecision({ engine, windows = [], graceNote = false, gra
 }
 
 /**
- * WHAT: Returns the live week window at or under the floor, with what is left, or null.
- * WHY: Keeps new automatic work from starting on an account its week is about to stop.
+ * WHAT: Reads AMUX_CODEX_CREDITS: hold (default) keeps Codex work off paid credits; allow lets it draw them.
+ * WHY: Keeps credits unused until he allows them; a bad value is reported and holds.
  */
-export function quotaFloorHold({ windows = [], floorPercent = QUOTA_FLOOR_DEFAULT_PERCENT, now }) {
+export function codexCreditsAllowed(env = process.env, warn = console.warn) {
+  const raw = String(env.AMUX_CODEX_CREDITS ?? "").trim();
+  if (raw === "allow") return true;
+  if (raw !== "" && raw !== "hold") warn(`AMUX_CODEX_CREDITS=${raw} is not hold or allow; holding`);
+  return false;
+}
+
+// lsrc:0 2026-10-20 ~18:0xZ: Codex A's 5 h window read 100 % from about 17:35Z and its panes worked on, drawing paid
+// credits (375.96 SEK per 1 000, about 1 200 an hour). Codex refuses nothing while credits last, so no stop showed.
+/**
+ * WHAT: Returns a Codex account's spent window with the latest reset, unless credits are allowed, or null.
+ * WHY: Keeps automatic turns off paid credits until every spent window has reset.
+ */
+export function codexCreditHold({ windows = [], provider = null, creditsAllowed = false, now }) {
+  if (provider !== "codex" || creditsAllowed) return null;
+  const spent = windows.filter((window) => window.usedPercent >= 100 && Date.parse(window.resetsAt) > now)
+    .sort((left, right) => Date.parse(right.resetsAt) - Date.parse(left.resetsAt))[0];
+  return spent ? { leftPercent: 0, resetsAt: spent.resetsAt, window: spent.kind, credits: true } : null;
+}
+
+/**
+ * WHAT: Returns what holds automatic work: a spent Codex window, or the week at the floor.
+ * WHY: Keeps new automatic work off an account about to stop, or off paid credits.
+ */
+export function quotaFloorHold({ windows = [], floorPercent = QUOTA_FLOOR_DEFAULT_PERCENT, now, provider = null, creditsAllowed = false }) {
+  const credits = codexCreditHold({ windows, provider, creditsAllowed, now });
+  if (credits) return credits;
   if (!(floorPercent > 0)) return null;
   const week = windows.find((window) => window.kind === "week" && Number.isFinite(window.usedPercent)
     && Date.parse(window.resetsAt) > now);

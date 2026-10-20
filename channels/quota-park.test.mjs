@@ -22,10 +22,13 @@ feature("which account a pane's quota facts come from", () => {
       return { root, facts };
     }],
     when: ["reading claw:1 cached, then fresh", async ({ facts }) => [await facts("claw:1"), await facts("claw:1", { fresh: true })]],
-    then: ["Claude S from the snapshot, Claude A from the live home", ([cached, fresh], { root }) => {
+    // The provider tells the floor a Codex account, which works on past a spent window on paid credits (lsrc:0 2026-10-20).
+    then: ["Claude S from the snapshot, Claude A from the live home, each with its provider", ([cached, fresh], { root }) => {
       try {
-        expect(cached).toEqual({ account: { name: "Claude S", key: "claude:1" }, windows: [expect.objectContaining({ kind: "week", usedPercent: 97 })] });
-        expect(fresh).toEqual({ account: { name: "Claude A", key: "claude:2" }, windows: [expect.objectContaining({ kind: "week", usedPercent: 40 })] });
+        expect(cached).toEqual({ account: { name: "Claude S", key: "claude:1", provider: "claude" },
+          windows: [expect.objectContaining({ kind: "week", usedPercent: 97 })] });
+        expect(fresh).toEqual({ account: { name: "Claude A", key: "claude:2", provider: "claude" },
+          windows: [expect.objectContaining({ kind: "week", usedPercent: 40 })] });
       } finally { rmSync(root, { recursive: true, force: true }); }
     }],
   });

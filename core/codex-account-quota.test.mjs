@@ -72,3 +72,15 @@ feature("official Codex account quota", () => {
     }],
   });
 });
+
+// lsrc:0 2026-10-20: Codex A drew about 1 200 paid credits an hour unseen once its 5 h window was spent.
+feature("the paid credit balance of a Codex account", () => {
+  unit("is carried when the account has credits, and left out when it has none", {
+    when: ["mapping Codex A's and Codex W's readings of 2026-10-20", () => [
+      { hasCredits: true, unlimited: false, balance: "57074.7907150000" },
+      { hasCredits: false, unlimited: false, balance: "0" },
+    ].map((credits) => normalizeCodexAppServerQuota(PROFILE, ACCOUNT, {
+      rateLimitsByLimitId: { codex: { ...LIMITS.rateLimitsByLimitId.codex, credits } } }, "2026-10-20T18:00:00.000Z").credits)],
+    then: ["57 074.79 credits, then none", (credits) => expect(credits).toEqual([{ unlimited: false, balance: 57074.790715 }, undefined])],
+  });
+});

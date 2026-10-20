@@ -29,7 +29,7 @@ import { startBot } from "./bot.mjs";
 import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
-import { createPauseCompact, createQuotaParkFacts, createQuotaParkStore, quotaFloorPercent } from "./channels/pause-compact.mjs";
+import { codexCreditsAllowed, createPauseCompact, createQuotaParkFacts, createQuotaParkStore, quotaFloorPercent } from "./channels/pause-compact.mjs";
 import { readPauseCompactModes } from "./core/pause-compact.mjs";
 import { createLeaderReview, leaderFromConfig } from "./core/leader-review.mjs";
 import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
@@ -244,7 +244,7 @@ if (repairedSleeps.length) {
 }
 
 // `amux compact --self` requests, run at the end of the pane's turn or before its next delivery.
-const selfCompactRequests = createSelfCompactStore(), quotaFacts = createQuotaParkFacts(), quotaFloor = { windowsFor: quotaFacts, percent: quotaFloorPercent() };
+const selfCompactRequests = createSelfCompactStore(), quotaFacts = createQuotaParkFacts(), quotaFloor = { windowsFor: quotaFacts, percent: quotaFloorPercent(), creditsAllowed: codexCreditsAllowed() };
 const contextMaintenance = createBridgeWorkAdmission({
   agent, state: appState, queue: deliveryQueue, configPath: AGENTS_YAML, discord, selfRequests: selfCompactRequests,
   log: message => console.log(`context-cost | ${message}`),
@@ -341,7 +341,7 @@ const autoCompact = createAutoCompact({
   tmux: (cmd) => tmuxExec(`tmux -S '${TMUX_SOCKET}' ${cmd}`),
   config: autoCompactConfig,
   contextMaintenance,
-  pauseCompact: createPauseCompact({ contextMaintenance, deliveryBroker, parkFor: quotaFacts, parkStore: createQuotaParkStore(), floorPercent: quotaFloor.percent, state: appState, modes: readPauseCompactModes(),
+  pauseCompact: createPauseCompact({ contextMaintenance, deliveryBroker, parkFor: quotaFacts, parkStore: createQuotaParkStore(), floorPercent: quotaFloor.percent, creditsAllowed: quotaFloor.creditsAllowed, state: appState, modes: readPauseCompactModes(),
     log: message => console.log(`pause-compact | ${message}`), selfRequests: selfCompactRequests, notify: contextMaintenance.notify }),
 });
 autoCompact.start();

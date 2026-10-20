@@ -147,3 +147,20 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
     }],
   });
 });
+
+// lsrc:0 2026-10-20: Codex A drew paid credits unseen once its 5 h window was spent at about 17:35Z.
+feature("a Codex account's paid credits in the quota box", () => {
+  unit("the balance stands under the 5 h line, within a phone's width", {
+    when: ["Codex A at 48 % of its week, its 5 h window spent, 57 074.79 credits left", () => render([
+      { ok: true, provider: "codex", profile: { id: "1" }, account: { email: "adelost@example.test" }, inUse: panes("lsrc", 3),
+        credits: { unlimited: false, balance: 57074.790715 }, limits: [{ limitId: "codex", windows: [
+          { windowMinutes: 300, usedPercent: 100, resetsAt: "2026-10-17T14:40:00Z" },
+          { windowMinutes: 10080, usedPercent: 48, resetsAt: "2026-10-24T11:35:12Z" }] }] }])],
+    then: ["5 h line, then the balance", lines => {
+      const fiveHour = lines.indexOf("    5h 0% until 16:40");
+      expect(fiveHour).toBeGreaterThan(0);
+      expect(lines[fiveHour + 1]).toBe("    credits 57 075");
+      expect(lines.filter(line => [...line].length > 32)).toEqual([]);
+    }],
+  });
+});

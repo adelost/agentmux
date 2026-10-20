@@ -34,7 +34,8 @@ export function createQuotaParkFacts({
     if (freshPanes && current) current = withPanesInUse(current, await readPanes(), profiles());
     const account = current?.accounts?.find((candidate) => candidate.ok && candidate.inUse?.includes(paneKey));
     return account
-      ? { account: { name: account.name || account.profile?.key || null, key: account.profile?.key || null }, windows: accountWindows(account) }
+      ? { account: { name: account.name || account.profile?.key || null, key: account.profile?.key || null, provider: account.provider || null },
+        windows: accountWindows(account) }
       : null;
   };
 }

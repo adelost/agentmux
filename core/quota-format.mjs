@@ -90,6 +90,10 @@ const claudeLine = (claude) => {
 const codexWindowLabel = (window) =>
   window.windowMinutes === 10_080 ? "week" : `${Math.round(window.windowMinutes / 60)}h`;
 
+/** WHAT: Formats a Codex account's paid credit balance in whole credits. WHY: Keeps a credit drain visible beside its windows. */
+export const creditsText = ({ unlimited, balance }) => (unlimited ? "credits unlimited"
+  : `credits ${String(Math.round(balance)).replace(/\B(?=(\d{3})+(?!\d))/gu, " ")}`);
+
 const codexLine = (codex) => {
   if (!codex?.ok) return `Codex   unavailable (${codex?.error ?? "unknown error"})`;
   const cells = codex.limits.flatMap((limit) => limit.windows.map((window) => {
@@ -97,7 +101,7 @@ const codexLine = (codex) => {
     const label = [limit.limitName, codexWindowLabel(window)].filter(Boolean).join(" ");
     return `${percentCell(label, window.usedPercent)}${reset ? ` (${reset})` : ""}`;
   }));
-  return `Codex   ${cells.join(" · ")}`;
+  return `Codex   ${[...cells, ...(codex.credits ? [creditsText(codex.credits)] : [])].join(" · ")}`;
 };
 
 const kimiLine = (kimi) => {

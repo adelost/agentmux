@@ -2880,7 +2880,7 @@ feature("a cancelled delivery never leaves its own text in a composer", () => {
 // so its panes ran it to the limit with nothing left to stop cleanly, compact and hand over.
 feature("the quota floor holds new automatic work on an account near its weekly limit", () => {
   const RESETS = "2026-10-20T04:00:00.000Z";
-  function floorWorld({ weekUsed = 97, freshWeekUsed = weekUsed, job = {} } = {}) {
+  function floorWorld({ weekUsed = 97, freshWeekUsed = weekUsed, job = {}, floor = null } = {}) {
     const rootDir = tempRoot();
     let clock = Date.parse("2026-10-19T19:55:00Z");
     const queue = createDeliveryQueue({ rootDir, now: () => clock });
@@ -2888,7 +2888,7 @@ feature("the quota floor holds new automatic work on an account near its weekly 
     agent.paneProcessState = async () => ({ running: true, shell: false, dead: false, command: "claude" });
     const reading = { used: weekUsed, freshUsed: freshWeekUsed };
     // The bridge's reader: the cached snapshot, or with `fresh` the account the pane runs on now.
-    const quotaFloor = { percent: 3, windowsFor: async (_paneKey, { fresh = false } = {}) => ({
+    const quotaFloor = floor || { percent: 3, windowsFor: async (_paneKey, { fresh = false } = {}) => ({
       account: { name: fresh && reading.freshUsed !== reading.used ? "Claude A" : "Claude S" },
       windows: [{ kind: "week", usedPercent: fresh ? reading.freshUsed : reading.used, resetsAt: RESETS }] }) };
     const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {}, quotaFloor });
@@ -2940,6 +2940,33 @@ feature("the quota floor holds new automatic work on an account near its weekly 
       () => floorWorld({ weekUsed: 97, freshWeekUsed: 40 })],
     when: ["the broker serves claw:1", (w) => w.broker.kickTarget("claw", 1)],
     then: ["the brief is typed", (_, w) => {
+      try { expect(w.agent.sends.map((send) => send.text)).toEqual(["[from claw:0] Build the Kit view."]); } finally { w.cleanup(); }
+    }],
+  });
+
+  // lsrc:0 2026-10-20 ~18:0xZ: Codex A's 5 h window read 100 % from about 17:35Z and its panes worked on paid credits.
+  const codexSpent = (creditsAllowed = false) => ({ percent: 3, creditsAllowed, windowsFor: async () => ({
+    account: { name: "Codex A", key: "codex:1", provider: "codex" },
+    windows: [{ kind: "session", usedPercent: 100, resetsAt: "2026-10-19T22:15:37.000Z" },
+      { kind: "week", usedPercent: 48, resetsAt: "2026-10-27T14:21:43.000Z" }] }) });
+
+  component("a prompt to a Codex pane whose 5 h window is spent waits for the reset, though the account has credits", {
+    given: ["claw:0 sends claw:1 a brief while Codex A's 5 h window reads 100 %", () => floorWorld({ floor: codexSpent() })],
+    when: ["the broker serves claw:1", (w) => w.broker.kickTarget("claw", 1)],
+    then: ["nothing is typed and the brief waits with the spent window as its reason", (_, w) => {
+      try {
+        expect(w.agent.sends).toEqual([]);
+        expect(w.current()).toMatchObject({ status: "pending", costHold: true });
+        expect(w.current().lastReason).toBe("wake-refused:quota-floor: Codex A has spent its 5h window until 2026-10-19T22:15:37.000Z;"
+          + " a turn now draws paid credits");
+      } finally { w.cleanup(); }
+    }],
+  });
+
+  component("with credits allowed the brief to that pane is typed", {
+    given: ["the same reading with AMUX_CODEX_CREDITS=allow", () => floorWorld({ floor: codexSpent(true) })],
+    when: ["the broker serves claw:1", (w) => w.broker.kickTarget("claw", 1)],
+    then: ["it is typed", (_, w) => {
       try { expect(w.agent.sends.map((send) => send.text)).toEqual(["[from claw:0] Build the Kit view."]); } finally { w.cleanup(); }
     }],
   });

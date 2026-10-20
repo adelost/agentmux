@@ -1,5 +1,6 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { accountWindows, parkResumeDecision, quotaFloorHold, quotaFloorPercent, quotaParkContinuation, quotaParkDecision } from "./quota-park.mjs";
+import { accountWindows, codexCreditsAllowed, parkResumeDecision, quotaFloorHold, quotaFloorPercent, quotaParkContinuation,
+  quotaParkDecision } from "./quota-park.mjs";
 
 const NOW = Date.parse("2026-10-19T09:30:00Z");
 const week = (usedPercent, resetsAt = "2026-10-25T18:08:00Z") => ({ kind: "week", usedPercent, resetsAt });
@@ -159,6 +160,36 @@ feature("the quota floor", () => {
     then: ["3, 2, 0, then the default twice with a warning each", ({ values, warnings }) => {
       expect(values).toEqual([3, 2, 0, 3, 3]);
       expect(warnings).toHaveLength(2);
+    }],
+  });
+  // lsrc:0 2026-10-20 ~18:0xZ: Codex A's 5 h window read 100 % from about 17:35Z and its panes worked on, drawing paid
+  // credits (375.96 SEK per 1 000); Codex refuses nothing while credits last, so amux saw no stop.
+  unit("a spent Codex window holds work until it resets, credits or not, unless credits are allowed", {
+    when: ["Codex A's 5 h window spent, read as Codex, with the floor off, as Claude, with credits allowed, and after its reset",
+      () => {
+        const windows = [{ kind: "session", usedPercent: 100, resetsAt: "2026-10-19T12:00:00Z" }, week(48)];
+        return [
+          quotaFloorHold({ windows, provider: "codex", now: NOW }),
+          quotaFloorHold({ windows, provider: "codex", floorPercent: 0, now: NOW }),
+          quotaFloorHold({ windows, provider: "claude", now: NOW }),
+          quotaFloorHold({ windows, provider: "codex", creditsAllowed: true, now: NOW }),
+          quotaFloorHold({ windows, provider: "codex", now: Date.parse("2026-10-19T12:01:00Z") }),
+        ];
+      }],
+    then: ["held twice until the 5 h reset, open for the rest", holds => expect(holds).toEqual([
+      { leftPercent: 0, resetsAt: "2026-10-19T12:00:00Z", window: "session", credits: true },
+      { leftPercent: 0, resetsAt: "2026-10-19T12:00:00Z", window: "session", credits: true },
+      null, null, null])],
+  });
+  unit("credits stay held unless the setting says allow; a bad value is reported and holds", {
+    when: ["four environments", () => {
+      const warnings = [];
+      const read = (value) => codexCreditsAllowed(value === undefined ? {} : { AMUX_CODEX_CREDITS: value }, (line) => warnings.push(line));
+      return { values: [read(undefined), read("hold"), read("allow"), read("yes")], warnings };
+    }],
+    then: ["held, held, allowed, held with a warning", ({ values, warnings }) => {
+      expect(values).toEqual([false, false, true, false]);
+      expect(warnings).toHaveLength(1);
     }],
   });
 });

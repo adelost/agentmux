@@ -37,6 +37,8 @@ Quota warning: answers the human in the channel he writes in, from AMUX_QUOTA_WA
 Warnings never switch accounts; explicit operator requests use the guarded path above.
 Quota floor: at AMUX_QUOTA_FLOOR_PERCENT left on the week (default 3, 0 is off) automatic work waits and parked panes compact;
 the owner's own message still goes through, and a reading with room lifts it and resumes parked panes.
+Codex credits: a Codex account past a spent 5h or week window would draw paid credits, so automatic work and idle compacts wait
+for its reset unless AMUX_CODEX_CREDITS=allow; amux quota shows the balance.
 Codex automatic switch: only after a reached weekly limit, spare account quota and exact-session continuity.
 Disable with AMUX_CODEX_LIMIT_RECOVERY_ENABLED=false. Predictions never switch accounts.
 Claude automatic switch: only after an actual limit banner and a later reading that shows the pane's own week spent,
