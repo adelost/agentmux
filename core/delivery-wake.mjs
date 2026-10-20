@@ -5,6 +5,7 @@ import { paneNeedsWake } from "./wake-admission.mjs";
 import { isOwnerChannelJob } from "./ask-origin.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { quotaFloorHold } from "./quota-park.mjs";
+import { QUOTA_WIND_DOWN_ORIGIN } from "./quota-wind-down.mjs";
 
 const pendingState = (drafted, ownsPaneDraft) =>
   drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending");
@@ -48,7 +49,7 @@ export async function wakeDeliveryTarget({
   const holdOf = (facts) => quotaFloorHold({ windows: facts?.windows, floorPercent: quotaFloor.percent, now: now(),
     provider: facts?.account?.provider, creditsAllowed: quotaFloor.creditsAllowed === true });
   const floorReason = async () => {
-    if (!quotaFloor || isOwnerChannelJob(job)) return null;
+    if (!quotaFloor || isOwnerChannelJob(job) || job.source === QUOTA_WIND_DOWN_ORIGIN) return null;
     const paneKey = `${job.agentName}:${job.pane}`;
     const cached = await quotaFloor.windowsFor(paneKey).catch(() => null);
     if (!holdOf(cached)) return null;

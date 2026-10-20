@@ -811,6 +811,22 @@ feature("a pane idle past its cache's life is compacted before a delivery", () =
 });
 
 feature("a self-request before the next delivery", () => {
+  component("the wind-down warning lands before its own turn-end compact", {
+    given: ["a warm 120k pane, wind-down self-request and its warning about to land", () => {
+      const ctx = fixture();
+      ctx.agent.getContext = async () => ({ tokens: 120_000 });
+      ctx.activityFor = () => ctx.now() - 5_000;
+      const requests = createSelfCompactStore({ dir: join(ctx.identityFor().path, "..", "requests"), now: ctx.now });
+      requests.request({ agent: "claw", pane: 2, tokens: 120_000, origin: "quota-wind-down" });
+      return { ...ctx, requests };
+    }],
+    when: ["admitting that warning", ctx => createContextMaintenance({ ...ctx, selfRequests: ctx.requests })
+      .beforeWork({ agentName: "claw", pane: 2, id: "warning", source: "quota-wind-down" })],
+    then: ["the warning cannot consume its own pending compact and invalidate its receipt", (result, ctx) => {
+      try { expect(result.ok).toBe(true); expect(ctx.calls).toEqual([]); expect(ctx.requests.read("claw", 2)?.origin).toBe("quota-wind-down"); }
+      finally { ctx.cleanup(); }
+    }],
+  });
   component("a pane that asked is compacted with its focus before a waiting prompt lands", {
     given: ["claw:2 at 120k, its turn ended 5 s ago, a self-request and a delivery waiting", () => {
       const ctx = fixture();

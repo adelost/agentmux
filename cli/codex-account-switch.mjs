@@ -21,6 +21,8 @@ import { acquireFileLease } from "../core/file-lease.mjs";
 import { accountSwitchStatus, registerAccountSwitchBatch } from "./codex-account-status.mjs";
 import { isCompactedCodexSession } from "../core/codex-compacted-session.mjs";
 import { codexWeeklyLimitReached } from "../core/codex-limit-recovery.mjs";
+import { windDownCompactReceipt } from "../core/quota-wind-down-move.mjs";
+import { moveTarget, quotaObservedAt, windDownContinuation } from "../core/quota-wind-down.mjs";
 
 /** WHAT: Defines explicit pane-local account request keys. WHY: Keeps operator intent separate from provider quota evidence and unrelated state writers. */
 export const CODEX_ACCOUNT_REQUESTS = "codex_account_requests_v1";
@@ -65,7 +67,31 @@ function finish(ctx, key, request, result) {
   const job = text ? ctx.deliveryQueue.enqueue({ agentName: request.name, pane: request.pane, text,
     source: "codex-account-switch", idempotencyKey: `account-switch:${request.id}` }) : null;
   save(ctx, key, { ...request, phase: "complete", reason: null, result, deliveryText: text, ...(job ? { jobId: job.id } : {}) });
-  return { key, ...result, native: result.status, status: result.dormant ? "selected-for-next-start" : result.kind };
+  return { key, ...result, ...(request.windDown ? { moved: result.kind === "switched" } : {}),
+    native: result.status, status: result.dormant ? "selected-for-next-start" : result.kind };
+}
+
+function windDownProof(ctx, name, pane, request, identity, now) {
+  if (process.env.AMUX_QUOTA_WIND_DOWN_MOVE === "false" || ["off", "dry"].includes(process.env.AMUX_QUOTA_WIND_DOWN)
+      || !(Number(request.episode?.split("|").at(-1)) > now) || identity?.sessionId !== request.sessionId) return null;
+  return windDownCompactReceipt({ state: ctx.state, agentName: name, pane, identity, beganAt: request.beganAt, now });
+}
+
+function requestWindDown(ctx, name, pane, options, deps, cfg) {
+  const key = keyOf(name, pane), previous = requestOf(ctx, key), intent = options.windDown;
+  if (!intent || !cfg || cfg.backend === "native" || engine(cfg.panes?.[pane] || {}) !== "codex") return { moved: false, reason: "wind-down-target-unsupported" };
+  const same = previous?.windDown?.episode === intent.episode;
+  if (same && previous.phase === "complete") return { moved: true, replayed: true };
+  if (previous && ["pending", "switched"].includes(previous.phase)) {
+    return same ? null : { moved: false, reason: "account-switch-already-pending" };
+  }
+  const identity = deps.identity(join(cfg.dir, ".agents", String(pane)));
+  if (!windDownProof(ctx, name, pane, intent, identity, deps.now())) return { moved: false, reason: "wind-down-compact-unverified" };
+  const target = typeof options.to === "string" ? options.to : options.to.profileId;
+  save(ctx, key, { id: `quota-wind-down:${intent.episode}`, name, pane, dir: cfg.dir, target,
+    phase: "pending", requestedAt: new Date(deps.now()).toISOString(), windDown: intent,
+    deliveryText: windDownContinuation({ from: intent.from.name, to: options.to.name || `codex:${target}` }) }, true);
+  return null;
 }
 
 /** WHAT: Reads one explicit pending selection. WHY: Keeps ordinary watcher ticks free of account work unless the operator requested it. */
@@ -74,9 +100,15 @@ export const codexAccountRequest = (state, name, pane) => state.get(`${CODEX_ACC
 /** WHAT: Reads and dispatches an explicit Codex account request at a verified safe boundary. WHY: Keeps busy turns, drafts, session history and selected models outside account-rotation side effects. */
 export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
   const key = keyOf(name, pane);
+  const existing = requestOf(ctx, key);
+  if (!options.to && (!existing || !["pending", "switched"].includes(existing.phase) || running.has(key))) return null;
+  const deps = { now: Date.now, ...defaults, ...options }, cfg = (options.agents || listAgents(ctx.configPath)).find(entry => entry.name === name);
+  if (options.to) {
+    const result = requestWindDown(ctx, name, pane, options, deps, cfg);
+    if (result) return result;
+  }
   let request = requestOf(ctx, key);
   if (!request || !["pending", "switched"].includes(request.phase) || running.has(key)) return null;
-  const deps = { ...defaults, ...options }, cfg = (options.agents || listAgents(ctx.configPath)).find(entry => entry.name === name);
   // This operation lease spans compact and restart; the compact still owns its separate session lease.
   const operation = acquireFileLease(join(ctx.deliveryQueue.rootDir || defaultDeliveryQueueDir(),
     `.codex-account-${encodeURIComponent(key)}.lock`));
@@ -85,7 +117,7 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
   let lease = null;
   const pending = reason => {
     save(ctx, key, { ...request, reason, updatedAt: new Date().toISOString() });
-    return { key, status: "pending", reason };
+    return { key, status: "pending", ...(request.windDown ? { moved: false } : {}), reason };
   };
   try {
     request = requestOf(ctx, key);
@@ -97,18 +129,22 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
     if (!target || !deps.authenticated(target)) throw new Error("target account needs login");
     let observed = await observe(ctx, name, pane, deps);
     if (observed.blocked) return pending(observed.blocked);
+    const dir = join(cfg.dir, ".agents", String(pane));
+    const windDownReceipt = request.windDown && windDownProof(ctx, name, pane, request.windDown, deps.identity(dir), deps.now());
+    if (request.windDown && (observed.dormant || !windDownReceipt)) return pending("wind-down-compact-unverified");
     if (request.phase === "switched") {
       if (observed.dormant || observed.current.id !== target.id) throw new Error("account changed before continuation recovery");
       return finish(ctx, key, request, request.result);
     }
     const current = observed.current || selectedCodexProfile(ctx.state, name, pane, profiles);
-    const dir = join(cfg.dir, ".agents", String(pane));
     if (!observed.dormant && current.id === target.id) {
       setCodexProfile(ctx.state, name, pane, target.id);
       return finish(ctx, key, request, { kind: "same" });
     }
     deps.prepare(target, profiles[0]);
     const quota = await deps.quota(target);
+    if (request.windDown && (quotaObservedAt(quota) > deps.now() || !moveTarget({ engine: "codex", accounts: [quota], from: request.windDown.from,
+      readAfter: Math.max(windDownReceipt.finishedAt ?? windDownReceipt.at, deps.now() - 10 * 60_000) }))) return pending("wind-down-target-no-fresh-room");
     const windows = quota.limits?.find(limit => limit.limitId === "codex")?.windows || [];
     if (!quota.ok || !windows.some(window => window.windowMinutes === 10080)
         || windows.some(window => window.usedPercent >= 100)) throw new Error("target has no verified quota room");
@@ -156,6 +192,7 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
     const identityOptions = { sessionDirs: [join(current.home, "sessions")], sessionId: native.status.session };
     const before = deps.identity(dir, identityOptions);
     if (!before || before.sessionId !== native.status.session) throw new Error("source session identity unavailable");
+    if (request.windDown && !windDownProof(ctx, name, pane, request.windDown, before, deps.now())) return pending("wind-down-compact-unverified");
     const prior = contextMaintenanceAttempt(ctx.state, name, pane, before);
     if (prior?.status === "ATTEMPTING") return pending("compact-already-in-flight");
     const exhausted = codexWeeklyLimitReached(await deps.quota(current));
@@ -179,7 +216,9 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
     if (!exhausted && !isCompactedCodexSession(after) && contextMaintenanceAttempt(ctx.state, name, pane, after)?.status !== "VERIFIED") {
       return pending("new-work-or-compact-unverified");
     }
+    if (request.windDown && !windDownProof(ctx, name, pane, request.windDown, after, deps.now())) return pending("wind-down-compact-unverified");
     const proof = deps.transfer(dir, current, target, { sessionId: before.sessionId });
+    if (request.windDown && !proof.ok) return pending("wind-down-exact-session-unavailable");
     const handover = proof.ok ? null : deps.handover({ name, pane, dir, current, target,
       refusal: { id: request.id }, cause: "operator-switch" });
     const result = await deps.switchAccount({ agent: ctx.agent, state: ctx.state, name, pane, current, target,

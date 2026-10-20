@@ -9,6 +9,99 @@ import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 import { quotaParkContinuation } from "./quota-park.mjs";
 
+function windDownFixture({ verified = true, busy = false, draft = false, sessionUsed = 10 } = {}) {
+  const data = {}, state = { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
+  const identity = { sessionId: receipt.sessionId }, profiles = [{ id: "1", key: "claude:1" }, { id: "2", key: "claude:2" }];
+  const targetQuota = { ok: true, provider: "claude", name: "Claude A", profile: profiles[1],
+    observation: { observedAt: new Date(25_000).toISOString() }, limits: [
+      { kind: "weekly_all", usedPercent: 40, resetsAt: new Date(1e9).toISOString() },
+      { kind: "session", usedPercent: sessionUsed, resetsAt: new Date(1e7).toISOString() }] };
+  const agent = { paneProcessState: async () => ({ running: true, command: "claude" }), isBusy: async () => busy,
+    promptTransportState: async () => ({ state: draft ? "drafted" : "empty-idle" }) };
+  const ctx = fixture({ coordinatorOptions: { windDown: { state, agent, identityFor: () => identity, profiles: () => profiles,
+    readTargetQuota: async () => targetQuota } } });
+  identity.path = join(ctx.cwd, "wind-down.jsonl");
+  writeFileSync(identity.path, "{}\n");
+  const compact = { status: verified ? "VERIFIED" : "FAILED", sessionId: identity.sessionId, at: 15_000, finishedAt: 20_000,
+    cursor: captureJsonlAppendCursor("context-maintenance-v1", [identity.path]) };
+  state.set("context_maintenance_by_pane_v1", { "lsrc:0": compact });
+  let selected = profiles[0];
+  ctx.lifecycle.profileFor = () => selected;
+  ctx.lifecycle.selectProfile = (_name, _pane, profile) => { selected = profile; };
+  ctx.lifecycle.restartAfterWindDown = async (...args) => {
+    ctx.restarts.push(args);
+    return { ok: true, sessionId: identity.sessionId };
+  };
+  ctx.setActiveReceipt(null);
+  return { ...ctx, state, compact, identity, targetQuota, selected: () => selected,
+    input: { agentName: "lsrc", pane: 0, target: { name: "Claude A", profileId: "2", profileKeys: ["claude:2"] },
+      from: { name: "Claude S", key: "claude:1" }, episode: "lsrc:0|session|10000000", beganAt: 10_000 } };
+}
+
+feature("verified quota wind-down moves (component)", () => {
+  for (const unsafe of ["other-session", "before-episode", "new-work", "live-delivery", "stale-target", "session-lease"]) {
+    component(`I-2 refuses ${unsafe}`, {
+      given: ["one missing move invariant", () => {
+        const ctx = windDownFixture();
+        if (unsafe === "other-session") ctx.compact.sessionId = "other-session";
+        if (unsafe === "before-episode") { ctx.compact.at = 1000; ctx.compact.finishedAt = 2000; }
+        if (unsafe === "new-work") appendFileSync(ctx.identity.path, JSON.stringify({ type: "user", message: { content: "new task" } }) + "\n");
+        if (unsafe === "stale-target") ctx.targetQuota.observation.observedAt = new Date(19_000).toISOString();
+        if (unsafe === "live-delivery") {
+          const job = ctx.queue.enqueue({ agentName: "lsrc", pane: 0, text: "synthetic in-flight delivery" });
+          ctx.queue.update(job, { status: "submitted", submittedAt: 29_000 });
+        }
+        if (unsafe === "session-lease") ctx.heldLease = ctx.queue.acquireSessionLease("lsrc", 0);
+        return ctx;
+      }],
+      when: ["trying the move", ctx => ctx.coordinator.moveAfterWindDown(ctx.input)],
+      then: ["no account selection or process restart", (result, ctx) => {
+        try { expect(result.moved).toBe(false); expect(ctx.selected().key).toBe("claude:1"); expect(ctx.restarts).toEqual([]); }
+        finally { ctx.heldLease?.release(); ctx.cleanup(); }
+      }],
+    });
+  }
+  component("moves an idle, compacted pane to the account with room", {
+    given: ["UC-4, verified compact in this episode and fresh room in both windows", () => windDownFixture()],
+    when: ["moving twice across the same boundary", async ctx => [await ctx.coordinator.moveAfterWindDown(ctx.input), await ctx.coordinator.moveAfterWindDown(ctx.input)]],
+    then: ["one exact restart, one MOVED continuation and target selected", ([first, again], ctx) => {
+      try {
+        expect(first.moved).toBe(true); expect(again.moved).toBe(true);
+        expect(ctx.selected().key).toBe("claude:2"); expect(ctx.restarts).toHaveLength(1);
+        expect(ctx.restarts[0][2].sessionId).toBe(receipt.sessionId);
+        const jobs = ctx.queue.list("lsrc", 0);
+        expect(jobs).toHaveLength(1); expect(jobs[0].text).toContain("[AMUX QUOTA WIND-DOWN · MOVED]");
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  for (const unsafe of ["busy", "draft"]) {
+    component(`no move while ${unsafe}`, {
+      given: ["R-7, verified compact but unsafe input", () => windDownFixture({ [unsafe]: true })],
+      when: ["trying the move", ctx => ctx.coordinator.moveAfterWindDown(ctx.input)],
+      then: ["no selection, restart or continuation", (result, ctx) => {
+        try { expect(result.moved).toBe(false); expect(ctx.selected().key).toBe("claude:1"); expect(ctx.restarts).toEqual([]); expect(ctx.queue.list("lsrc", 0)).toEqual([]); }
+        finally { ctx.cleanup(); }
+      }],
+    });
+  }
+  component("no move without a verified compact", {
+    given: ["I-2, a failed compact", () => windDownFixture({ verified: false })],
+    when: ["trying the move", ctx => ctx.coordinator.moveAfterWindDown(ctx.input)],
+    then: ["the pane stays put", (result, ctx) => {
+      try { expect(result).toMatchObject({ moved: false, reason: "wind-down-compact-unverified" }); expect(ctx.restarts).toEqual([]); }
+      finally { ctx.cleanup(); }
+    }],
+  });
+  component("a target that lost session room is rechecked before selection", {
+    given: ["a target now at 90 % session use", () => windDownFixture({ sessionUsed: 90 })],
+    when: ["trying the move", ctx => ctx.coordinator.moveAfterWindDown(ctx.input)],
+    then: ["no move", (result, ctx) => {
+      try { expect(result.moved).toBe(false); expect(ctx.selected().key).toBe("claude:1"); expect(ctx.restarts).toEqual([]); }
+      finally { ctx.cleanup(); }
+    }],
+  });
+});
+
 const receipt = {
   sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   limitEventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",

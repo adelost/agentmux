@@ -7,6 +7,27 @@ import { createClaudeQuotaLifecycle } from "./claude-quota-lifecycle.mjs";
 import { assertClaudeQuotaAvailable } from "./claude-quota-target.mjs";
 import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
 
+feature("wind-down exact-session restart (component)", () => {
+  for (const allowed of [true, false]) {
+    component(`wind-down ${allowed ? "restarts the compacted session without a limit banner" : "refuses changed evidence before respawning"}`, {
+      given: ["a compacted owned session, no active usage refusal", () => {
+        const ctx = fixture();
+        writeFileSync(ctx.sessionPath, JSON.stringify({ type: "system", subtype: "compact_boundary", timestamp: "2026-10-20T10:10:00Z" }) + "\n");
+        return ctx;
+      }],
+      when: ["using the coordinator's verified admission", ctx => ctx.lifecycle.restartAfterWindDown("claw", 0,
+        { sessionId: ctx.sessionId, guard: async () => allowed }, "claude:1")],
+      then: ["only permitted evidence crosses the process boundary", (result, ctx) => {
+        try {
+          expect(result.ok).toBe(allowed);
+          expect(ctx.commands.some(command => command.includes("respawn-pane"))).toBe(allowed);
+          if (allowed) expect(ctx.commands.some(command => new RegExp(`--resume\\s+['"]?${ctx.sessionId}(?=['"\\s]|$)`, "u").test(command))).toBe(true);
+        } finally { ctx.cleanup(); }
+      }],
+    });
+  }
+});
+
 function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch = false,
   selected = null, configuredCmd = "claude", observed = null, selectedProfile = "1", liveSessionId = null,
   sessionExists = true, afterLimitMenu = "❯  " } = {}) {

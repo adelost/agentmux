@@ -151,16 +151,15 @@ from its own branching or state; a small split goes in the same change.
    then the sender keeps it.
 
    Opus designs; Codex implements (Mattias, 2026-10-17): Opus owns
-   architecture, gameplay, UX, reviews and merges; free Codex panes build a
-   finished design from a brief, never Claude subagents.
+   architecture, gameplay, UX, reviews and merges; free Codex builds finished
+   designs from briefs, never Claude subagents.
    Codex models (Mattias, 2026-09-20, 2026-10-11): default \`gpt-6.1-sol\`,
    never Astra; Claude and Kimi keep theirs; a pane's choice survives restart.
-   Change models only with Discord \`/model sol\` or \`amux model PROJECT -p N
-   sol\` (a raw \`/model\` is refused); dormant panes switch at their next work
+   Change models only via Discord \`/model sol\` or \`amux model PROJECT -p N
+   sol\` (raw \`/model\` refused); dormant panes switch at their next work
    prompt, never by a fleet wake-up. Read model and tokens from the exact
-   pane; quota is paid capacity. Account recovery moves a pane only at a
-   reached weekly limit, to verified room, in its exact session; forecasts
-   never switch.
+   pane; quota is paid capacity. Account moves require a reached weekly limit or a verified wind-down compact,
+   verified room and the exact session. Forecasts alone never switch.
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, in a modal, or between tool calls.
    A blocked task does not reserve its pane indefinitely:

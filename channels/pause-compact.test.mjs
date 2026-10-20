@@ -4,9 +4,107 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPauseCompact, createQuotaParkStore } from "./pause-compact.mjs";
 import { createSelfCompactStore } from "../core/self-compact.mjs";
+import { createDeliveryQueue } from "../core/delivery-queue.mjs";
+import { createDeliveryBroker } from "../core/delivery-broker.mjs";
 
 const NOW = Date.parse("2026-10-11T03:36:00Z");
 const lsrc = { name: "lsrc", orchestrator: 3, leaders: [0] };
+
+function windDownFixture({ mode = "on", short = false } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "amux-wind-down-poll-"));
+  let now = Date.parse("2026-10-20T10:07:10Z"), status = "working", idleFor = 61_000;
+  const requests = createSelfCompactStore({ dir: join(root, "requests"), now: () => now });
+  const queue = createDeliveryQueue({ rootDir: join(root, "queue"), now: () => now });
+  const broker = createDeliveryBroker({ agent: {}, queue, now: () => now, log: () => {} });
+  const lines = [], runs = [];
+  const facts = { account: { name: "Claude S", key: "claude:1" }, observedAt: Date.parse("2026-10-20T10:03:32Z"),
+    windows: [{ kind: "session", usedPercent: 94, resetsAt: "2026-10-20T11:10:00Z" }], accounts: [] };
+  if (short) {
+    now = Date.parse("2026-10-20T15:17:00Z");
+    facts.observedAt = now;
+    facts.windows = [{ kind: "session", usedPercent: 95.1, resetsAt: "2026-10-20T16:10:00Z" }];
+  }
+  const options = { modes: { claude: "off" }, windDownMode: mode, now: () => now, state: { get: () => ({}) },
+    contextMaintenance: { run: async () => { runs.push("compact"); return { ok: true, compacted: true }; } },
+    record: line => lines.push(line), deliveryBroker: broker, selfRequests: requests, parkFor: async () => facts,
+    limitReceiptFor: () => null, identityFor: () => ({ path: join(root, "session.jsonl"), sessionId: "s1" }),
+    journalCompactFor: () => null, backgroundFor: { claude: () => null } };
+  let pause = createPauseCompact(options);
+  return { queue, requests, lines, runs, facts, options,
+    advance: ms => { now += ms; }, idle: (quietMs = 61_000) => { status = "idle"; idleFor = quietMs; },
+    restart: () => { pause = createPauseCompact(options); },
+    poll: () => pause.consider({ agentConfig: lsrc, pane: 2, engine: "claude", paneDir: root,
+      contextTokens: 150_000, lastActivityMs: now - (status === "idle" ? idleFor : 0), status, inCopyMode: false }),
+    cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+feature("quota wind-down in the pause poll (component)", () => {
+  component("a wind-down compact starts at the turn end without an extra settling minute", {
+    given: ["a pane whose turn just ended", () => { const ctx = windDownFixture(); ctx.idle(0); return ctx; }],
+    when: ["polling at that boundary", ctx => ctx.poll()],
+    then: ["the compact starts now", (_result, ctx) => {
+      try { expect(ctx.runs).toEqual(["compact"]); } finally { ctx.cleanup(); }
+    }],
+  });
+  component("one notice and one nudge per episode, also across a restart", {
+    given: ["a working pane at 5 % and its real durable broker", () => windDownFixture()],
+    when: ["polling repeatedly and restarting before and after 3 %", async ctx => {
+      await ctx.poll(); await ctx.poll(); ctx.restart(); await ctx.poll();
+      ctx.advance(300_000); await ctx.poll(); ctx.restart(); await ctx.poll();
+      return ctx.queue.list("lsrc", 2);
+    }],
+    then: ["two ordinary FIFO notices, each with its own durable key", (jobs, ctx) => {
+      try {
+        expect(jobs.map(job => job.text.split("]")[0])).toEqual(["[AMUX QUOTA WIND-DOWN · 5 %", "[AMUX QUOTA WIND-DOWN · 3 %"]);
+        expect(jobs.map(job => job.idempotencyKey)).toEqual([expect.stringMatching(/^quota-wind-down:5:lsrc:2:/u), expect.stringMatching(/^quota-wind-down:3:lsrc:2:/u)]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a working pane requests a compact that runs only after its turn ends", {
+    given: ["UC-1 with pause-size compaction off", () => windDownFixture()],
+    when: ["polling while working, then at a clean turn end", async ctx => {
+      await ctx.poll();
+      expect(ctx.requests.read("lsrc", 2)?.origin).toBe("quota-wind-down");
+      expect(ctx.runs).toEqual([]);
+      ctx.idle(); await ctx.poll();
+      return ctx.runs;
+    }],
+    then: ["one compact through context maintenance", (runs, ctx) => {
+      try { expect(runs).toEqual(["compact"]); } finally { ctx.cleanup(); }
+    }],
+  });
+  component("an idle pane compacts without starting a notice turn", {
+    given: ["UC-2 idle at 5 %", () => { const ctx = windDownFixture(); ctx.idle(); return ctx; }],
+    when: ["polling", ctx => ctx.poll()],
+    then: ["a compact and no notice", (_result, ctx) => {
+      try { expect(ctx.runs).toEqual(["compact"]); expect(ctx.queue.list("lsrc", 2)).toEqual([]); } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a short stop notices but files no compact request", {
+    given: ["UC-5 with no spare room", () => windDownFixture({ short: true })],
+    when: ["polling", ctx => ctx.poll()],
+    then: ["notice only", (_result, ctx) => {
+      try { expect(ctx.queue.list("lsrc", 2)).toHaveLength(1); expect(ctx.requests.list()).toEqual([]); expect(ctx.runs).toEqual([]); } finally { ctx.cleanup(); }
+    }],
+  });
+  component("dry mode logs would-notice and would-nudge without writes", {
+    given: ["dry wind-down", () => windDownFixture({ mode: "dry" })],
+    when: ["polling at 5 and 3 %", async ctx => { await ctx.poll(); ctx.advance(300_000); await ctx.poll(); }],
+    then: ["only dry outcomes", (_result, ctx) => {
+      try {
+        expect(ctx.lines.map(line => line.outcome)).toEqual(["would-notice", "would-nudge"]);
+        expect(ctx.queue.list("lsrc", 2)).toEqual([]); expect(ctx.requests.list()).toEqual([]); expect(ctx.runs).toEqual([]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("off mode leaves the pane alone", {
+    given: ["wind-down off", () => windDownFixture({ mode: "off" })],
+    when: ["polling", ctx => ctx.poll()],
+    then: ["no action", (_result, ctx) => {
+      try { expect(ctx.queue.list("lsrc", 2)).toEqual([]); expect(ctx.requests.list()).toEqual([]); expect(ctx.lines).toEqual([]); } finally { ctx.cleanup(); }
+    }],
+  });
+});
 
 function controller(mode, { compacted = true, codexMode = "dry" } = {}) {
   let now = NOW;

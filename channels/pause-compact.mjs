@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { CONTEXT_COST_POLICY, PAUSE_COMPACT_POLICY, readContextCostPolicy } from "../policies/context-cost.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
-import { lastContextCompactAt } from "../core/context-maintenance.mjs";
+import { contextMaintenanceAttempt, lastContextCompactAt } from "../core/context-maintenance.mjs";
 import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, oversizeNotice, oversizeWhileWorking, pauseCompactDecision,
   pauseCompactLimit, sessionBackgroundActivity } from "../core/pause-compact.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
@@ -18,6 +18,7 @@ import { QUOTA_FLOOR_DEFAULT_PERCENT, QUOTA_PARK_ORIGIN, QUOTA_PARK_POLICY, code
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
 import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 import { isLiveStatus } from "../core/pane-status.mjs";
+import { compactPays, moveTarget, QUOTA_WIND_DOWN_ORIGIN, windDownNotice, windDownStage } from "../core/quota-wind-down.mjs";
 export { createQuotaParkFacts } from "./quota-park.mjs";
 export { createQuotaParkStore } from "../core/quota-park-store.mjs";
 export { codexCreditsAllowed, quotaFloorPercent } from "../core/quota-park.mjs";
@@ -38,12 +39,16 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   selfRequests = null, notify = async () => {}, cacheLifeMs = readContextCostPolicy().coldMs, deliveryBroker = null,
   parkFor = null, parkStore = null, floorPercent = QUOTA_FLOOR_DEFAULT_PERCENT, creditsAllowed = false,
   limitReceiptFor = (engine, paneDir) => (engine === "claude" ? activeClaudeLimitReceipt(paneDir) : null),
+  windDownMode = process.env.AMUX_QUOTA_WIND_DOWN || "on", windDownMove = process.env.AMUX_QUOTA_WIND_DOWN_MOVE !== "false",
+  moveAfterWindDown = null, compactReceiptFor = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity, now()),
   cursorFor = path => captureJsonlAppendCursor("self-compact-request-v1", [path]) }) {
+  if (!["off", "dry", "on"].includes(windDownMode)) throw new Error("AMUX_QUOTA_WIND_DOWN must be off, dry or on");
   const lastLogged = new Map();
   // The episode each working pane was asked about, so it hears once until it compacts.
   const asked = new Map();
   // The stop each pane was parked for, so it is parked once per stop.
   const parked = new Map();
+  const windDownEpisodes = new Map();
   // A dry run compacts nothing, so it remembers its own would-be compacts to show the spacing rule.
   const dryCompacts = new Map();
 
@@ -139,21 +144,79 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     return true;
   }
 
+  async function windDownStep({ name, pane, paneKey, engine, paneDir, tokens, lastActivityMs, status, base }) {
+    if (windDownMode === "off" || !parkFor || !["claude", "codex"].includes(engine)) return false;
+    const facts = await parkFor(paneKey), stage = windDownStage({ ...facts, now: now() });
+    if (!stage) return false;
+    const episodeKey = `${paneKey}|${stage.window}|${stage.resetAt}`;
+    if (windDownEpisodes.get(paneKey)?.key !== episodeKey) {
+      windDownEpisodes.set(paneKey, { key: episodeKey, beganAt: stage.noticeAt });
+    }
+    const episode = windDownEpisodes.get(paneKey), working = isLiveStatus(status);
+    const line = { ...base, mode: windDownMode, cell: "quota-wind-down", detail: `${stage.window} window, ${stage.leftPercent.toFixed(1)} % left` };
+    const send = (percent, flag, action) => {
+      if (!working || episode[flag]) return;
+      const idempotencyKey = `quota-wind-down:${percent}:${paneKey}:${episodeKey}`;
+      const existing = deliveryBroker?.queue?.list(name, pane).some(job => job.idempotencyKey === idempotencyKey);
+      if (!existing) {
+        if (windDownMode === "on" && !deliveryBroker) return;
+        if (windDownMode === "on") deliveryBroker.enqueue({ agentName: name, pane, source: QUOTA_WIND_DOWN_ORIGIN,
+          text: windDownNotice({ ...stage, account: facts.account.name }), idempotencyKey });
+        report(paneKey, episodeKey, { ...line, outcome: windDownMode === "dry" ? `would-${action}` : `wind-down-${action}` });
+      }
+      episode[flag] = true;
+    };
+    if (stage.stage === "notice") send(5, "noticed", "notice");
+    if (stage.stage === "nudge") send(3, "nudged", "nudge");
+    const identity = identityFor(engine, paneDir);
+    const receipt = identity && compactReceiptFor(name, pane, identity);
+    const verified = receipt?.status === "VERIFIED" && receipt.sessionId === identity.sessionId
+      && (receipt.finishedAt ?? receipt.at) >= episode.beganAt;
+    const readAfter = Math.max(verified ? receipt.finishedAt ?? receipt.at : -Infinity, now() - 10 * 60_000);
+    const target = windDownMove ? moveTarget({ engine, accounts: facts.accounts, from: facts.account, readAfter }) : null;
+    if (!verified && !episode.requested && selfRequests && windDownMode === "on" && !selfRequests.read(name, pane)
+        && compactPays({ ...stage, engine, working, lastActivityAt: lastActivityMs, target })) {
+      const limit = limitReceiptFor(engine, paneDir);
+      if (!limit || limit.stop === "grace-note") {
+        const result = selfRequests.request({ agent: name, pane, tokens, origin: QUOTA_WIND_DOWN_ORIGIN,
+          lastCompactAt: lastCompactAt(name, pane, paneKey, identity?.path) });
+        episode.requested = result.ok;
+        report(paneKey, episodeKey, { ...line, outcome: result.ok ? "wind-down-requested" : "wind-down-held", detail: result.detail || line.detail });
+      }
+    }
+    if (!verified || !target || working || status !== "idle" || episode.moved) return false;
+    if (windDownMode === "dry") {
+      report(paneKey, episodeKey, { ...line, outcome: "would-move", detail: `${facts.account.name} -> ${target.name}` });
+      return false;
+    }
+    if (!moveAfterWindDown) return false;
+    const result = await moveAfterWindDown({ agentName: name, pane, engine, target, from: facts.account,
+      episode: episodeKey, beganAt: episode.beganAt, identity });
+    episode.moved = Boolean(result?.moved);
+    if (episode.moved) report(paneKey, episodeKey, { ...line, outcome: "wind-down-moved", detail: `${facts.account.name} -> ${target.name}` });
+    return episode.moved;
+  }
+
   async function consider({ agentConfig, pane, engine, paneDir, status, inCopyMode, contextTokens, lastActivityMs }) {
-    const mode = modes[engine] || "off";
-    if (mode === "off") return false;
+    let mode = modes[engine] || "off";
     const name = agentConfig.name;
     const paneKey = `${name}:${pane}`;
     const base = { at: new Date(now()).toISOString(), pane: paneKey, mode, tokens: contextTokens, cell: "self-request" };
+    if (await windDownStep({ name, pane, paneKey, engine, paneDir, tokens: contextTokens, lastActivityMs, status, base })) return true;
     const readRequest = () => selfRequests?.read(name, pane, {
       onExpired: (expired) => report(paneKey, expired.requestedAt, { ...base, outcome: "dropped", detail: "self-request expired unrun after 2 h" }),
     }) ?? null;
     let request = readRequest();
+    if (request?.origin === QUOTA_WIND_DOWN_ORIGIN) mode = windDownMode;
+    if (mode === "off") return false;
+    base.mode = mode;
     const quietMs = Number.isFinite(lastActivityMs) ? now() - lastActivityMs : NaN;
     if (!request && parkFor && selfRequests && await park({ name, pane, paneKey, engine, paneDir, tokens: contextTokens, quietMs, status, base })) {
       request = readRequest();
     }
-    const parking = request?.origin === QUOTA_PARK_ORIGIN;
+    const parking = request?.origin === QUOTA_PARK_ORIGIN || request?.origin === QUOTA_WIND_DOWN_ORIGIN;
+    const windDownRequested = request?.origin === QUOTA_WIND_DOWN_ORIGIN;
+    const decisionPolicy = windDownRequested ? { ...policy, settleMs: 0 } : policy;
     if (request && contextMaintenance.selfRequestSuperseded?.(request)) {
       selfRequests.clear(name, pane);
       // New input outdates the park's handoff, not its compact: the next turn end parks the pane again for this stop.
@@ -168,7 +231,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     // A self-request resumes work at once, so its compact is due even on a cold cache.
     const facts = { engine, tokens: contextTokens, limit, ...codexIdle, status, inCopyMode, quietMs,
       cacheLifeMs: request ? null : cacheLifeMs, now: now() };
-    const first = pauseCompactDecision(facts, policy);
+    const first = pauseCompactDecision(facts, decisionPolicy);
     if (first.cell === "turn-running" && !request && oversizeWhileWorking(facts, policy)) {
       askToCompact({ name, pane, paneKey, engine, paneDir, tokens: contextTokens, limit, base });
     }
@@ -185,7 +248,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const decision = pauseCompactDecision({ ...facts,
       // A park compacts while a subagent or job still works: the stop turns the context cold before their results land.
       background: parking ? null : backgroundFor[engine]({ sessionPath: identity.path, sessionId: identity.sessionId, paneDir, now: facts.now, policy }),
-      lastCompactAt: lastCompactAt(name, pane, paneKey, identity.path) }, policy);
+      lastCompactAt: lastCompactAt(name, pane, paneKey, identity.path) }, decisionPolicy);
     const line = { at: new Date(facts.now).toISOString(), pane: paneKey, mode, tokens: contextTokens, limit: decision.budget ?? limit,
       leader: leaderPanes(agentConfig).has(pane), quietSec: Math.round(quietMs / 1000),
       cell: request && decision.action === "compact" ? "self-request" : decision.cell, detail: decision.detail };
@@ -201,6 +264,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
 
     // The same admission as a live compact: lease, fence, delivery in flight, session, busy screen, composer.
     const result = await contextMaintenance.run(name, pane, { pauseTokens: decision.budget, dry: mode === "dry",
+      ...(windDownRequested ? { pauseSettleMs: 0 } : {}),
       ...(request ? { focus: request.focus } : {}) });
     if (result.dry) {
       dryCompacts.set(paneKey, facts.now);

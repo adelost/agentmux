@@ -2,8 +2,54 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { switchCodexAccounts, codexAccountRequest } from "./codex-account-switch.mjs";
+import { switchCodexAccounts, codexAccountRequest, runRequestedCodexSwitch } from "./codex-account-switch.mjs";
 import { rememberContextCompact } from "../core/context-maintenance.mjs";
+
+describe("Codex quota wind-down (component)", () => {
+  async function windDown({ verified = true, divergent = false } = {}) {
+    const fx = fixture(), now = Date.now();
+    if (verified) await fx.options.compact();
+    fx.calls.length = 0;
+    const reset = new Date(now + 2 * 3_600_000).toISOString();
+    fx.options.quota = async profile => ({ ok: true, provider: "codex", name: "Codex A", profile,
+      account: { email: "second@example.com" }, observation: { observedAt: new Date(Date.now() + 1).toISOString() },
+      limits: [{ limitId: "codex", windows: [{ windowMinutes: 10080, usedPercent: 30, resetsAt: reset },
+        { windowMinutes: 300, usedPercent: 10, resetsAt: reset }] }] });
+    // A fixed clock keeps the reading after the compact and not in the future.
+    fx.options.now = () => now + 10_000;
+    fx.options.to = { name: "Codex A", profileId: "2", profileKeys: ["codex:2"] };
+    fx.options.windDown = { episode: `claw:0|session|${now + 3_600_000}`, beganAt: now - 60_000,
+      sessionId: "exact-session", from: { name: "Codex W", key: "codex:1" } };
+    if (divergent) fx.options.transfer = () => ({ ok: false, reason: "divergent-history" });
+    return fx;
+  }
+  it("moves the verified compacted exact session and queues the MOVED text", async () => {
+    const fx = await windDown();
+    try {
+      const result = await runRequestedCodexSwitch(fx.ctx, "claw", 0, fx.options);
+      expect(result?.moved).toBe(true);
+      expect(fx.calls.filter(call => call.step === "restart")[0]?.resumeSessionId).toBe("exact-session");
+      expect(fx.jobs).toHaveLength(1); expect(fx.jobs[0].text).toContain("[AMUX QUOTA WIND-DOWN · MOVED]");
+    } finally { fx.clean(); }
+  });
+  it("does not create a switch without a verified compact in this episode", async () => {
+    const fx = await windDown({ verified: false });
+    try {
+      const result = await runRequestedCodexSwitch(fx.ctx, "claw", 0, fx.options);
+      expect(result).toMatchObject({ moved: false, reason: "wind-down-compact-unverified" });
+      expect(fx.calls).toEqual([]); expect(fx.jobs).toEqual([]);
+    } finally { fx.clean(); }
+  });
+  it("does not replace a divergent exact session with a fresh handover", async () => {
+    const fx = await windDown({ divergent: true });
+    fx.options.handover = () => { throw new Error("wind-down must keep the exact session"); };
+    try {
+      const result = await runRequestedCodexSwitch(fx.ctx, "claw", 0, fx.options);
+      expect(result).toMatchObject({ moved: false, reason: "wind-down-exact-session-unavailable" });
+      expect(fx.calls.some(call => call.step === "restart")).toBe(false); expect(fx.jobs).toEqual([]);
+    } finally { fx.clean(); }
+  });
+});
 
 function fixture({ busy = false, dormant = false, wrongModel = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "codex-account-cli-")), journal = join(root, "session.jsonl");
@@ -42,6 +88,10 @@ function fixture({ busy = false, dormant = false, wrongModel = false } = {}) {
 }
 
 describe("Codex operator account switches", () => {
+  it("an ordinary tick with no request reads no agent config", async () => {
+    const fx = fixture();
+    try { expect(await runRequestedCodexSwitch(fx.ctx, "claw", 0)).toBeNull(); } finally { fx.clean(); }
+  });
   it("persists busy reason and supports idempotent JSON batch lookup after superseding", async () => {
     const fx = fixture({ busy: true }), output = [];
     try {

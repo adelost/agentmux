@@ -2879,6 +2879,16 @@ feature("a cancelled delivery never leaves its own text in a composer", () => {
 // lsrc:0 2026-10-19: amux had no quota floor. An account with 3 % of its week left still got new automatic work,
 // so its panes ran it to the limit with nothing left to stop cleanly, compact and hand over.
 feature("the quota floor holds new automatic work on an account near its weekly limit", () => {
+  component("the 3 % wind-down nudge uses the reserve for a clean stop", {
+    given: ["a wind-down nudge at the weekly floor", () => floorWorld({ job: {
+      text: "[AMUX QUOTA WIND-DOWN · 3 %] Claude S is about to stop. End your turn at the next clean boundary; amux compacts this session then.",
+      source: "quota-wind-down", idempotencyKey: "quota-wind-down:3:claw:1:fixture" } })],
+    when: ["the ordinary broker FIFO serves the nudge", w => w.broker.kickTarget("claw", 1)],
+    then: ["the nudge reaches the pane before the reserve is spent", (_result, w) => {
+      try { expect(w.current().status).toBe("acknowledged"); expect(w.agent.sends).toHaveLength(1); }
+      finally { w.cleanup(); }
+    }],
+  });
   const RESETS = "2026-10-20T04:00:00.000Z";
   function floorWorld({ weekUsed = 97, freshWeekUsed = weekUsed, job = {}, floor = null } = {}) {
     const rootDir = tempRoot();

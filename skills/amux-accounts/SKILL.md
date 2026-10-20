@@ -33,8 +33,8 @@ activates an account and says it should be used, that word covers every pane.
 
 When Mattias writes in a pane channel, amux answers there for each account
 panes run on at `AMUX_QUOTA_WARN_PERCENT` (default 80 % weekly used) or more:
-at most every 6 h below 90 %, every 3 h from 90 %. Warnings and forecasts
-never switch.
+at most every 6 h below 90 %, every 3 h from 90 %. Warnings and forecasts alone
+never switch; the verified wind-down compact below is the exception.
 Mattias authorized Codex automatic recovery on 2026-10-12: an actual usage
 refusal plus reached weekly quota and verified spare capacity may switch that
 one pane. Transfer its exact session, or save its task and replies before a
@@ -44,8 +44,15 @@ Mattias authorized Claude automatic recovery on 2026-10-19: an actual limit
 banner plus a reading after it that shows the pane's own week spent moves that
 one pane to the logged-in Claude account with the most weekly room below
 `AMUX_QUOTA_RESERVE_PERCENT`, in its exact session; its parked messages follow.
-A session window never moves a pane. `AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false`
-disables it. Other rotations still require his instruction.
+A session window moves a pane only after a verified wind-down compact. `AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false`
+disables banner recovery. Other rotations still require his instruction.
+Mattias authorized quota wind-down on 2026-10-20: the nearer week or session
+window warns at 5 % left and nudges once at 3 %. A move requires a VERIFIED
+compact of this session in this episode, an idle pane, an empty composer, no
+live delivery and another account with room in both windows read after the
+compact. The exact session continues there. `AMUX_QUOTA_WIND_DOWN=off|dry|on`
+(default on) controls wind-down; `AMUX_QUOTA_WIND_DOWN_MOVE=false` disables its
+moves while keeping notices and worthwhile compacts.
 At `AMUX_QUOTA_FLOOR_PERCENT` left on the week (default 3 %, 0 is off) amux
 starts no new automatic delivery to panes on that account and the quota park
 compacts them at their turn end; the owner's own message still goes through.
@@ -86,7 +93,7 @@ of its engine has room. It never wakes or moves anything itself.
   the existing journal watcher; dormant selections never wake an engine.
   `--continue-file PATH` is single-pane only and queues once after verification.
   Discord `/switch` remains available. Reached-weekly-limit recovery works in
-  both directions; it never switches on a forecast.
+  both directions; a forecast moves a pane only after the verified wind-down compact.
 
 ## 4. Logins
 

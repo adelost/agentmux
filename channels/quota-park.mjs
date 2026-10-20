@@ -4,6 +4,7 @@
 import { readLivePaneHomes, readQuotaSnapshotWithPanes, withPanesInUse } from "../core/quota-in-use.mjs";
 import { quotaAccountCatalog } from "../core/quota-profiles.mjs";
 import { accountWindows } from "../core/quota-park.mjs";
+import { quotaObservedAt } from "../core/quota-wind-down.mjs";
 
 const quotaProfiles = () => quotaAccountCatalog().filter((profile) => profile.provider !== "kimi");
 
@@ -34,8 +35,10 @@ export function createQuotaParkFacts({
     if (freshPanes && current) current = withPanesInUse(current, await readPanes(), profiles());
     const account = current?.accounts?.find((candidate) => candidate.ok && candidate.inUse?.includes(paneKey));
     return account
-      ? { account: { name: account.name || account.profile?.key || null, key: account.profile?.key || null, provider: account.provider || null },
-        windows: accountWindows(account) }
+      ? { account: { name: account.name || account.profile?.key || null, key: account.profile?.key || null,
+        provider: account.provider || null,
+        ...(account.account?.email ? { email: account.account.email } : {}) }, windows: accountWindows(account),
+      observedAt: quotaObservedAt(account), accounts: current.accounts }
       : null;
   };
 }

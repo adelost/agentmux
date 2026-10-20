@@ -16,7 +16,8 @@ export function windDownStage({ windows = [], now, observedAt }) {
     if (!Number.isFinite(stopAt)) return [];
     const elapsed = readAt - (resetAt - QUOTA_PARK_POLICY.windowMs[window.kind]);
     const leftPercent = Math.max(0, 100 - window.usedPercent - window.usedPercent / elapsed * (now - readAt));
-    return [{ window: window.kind, resetAt, stopAt, leftPercent }];
+    const noticeAt = readAt - elapsed + 95 * elapsed / window.usedPercent;
+    return [{ window: window.kind, resetAt, stopAt, leftPercent, noticeAt }];
   }).sort((left, right) => left.stopAt - right.stopAt);
   const nearest = live[0];
   if (!nearest || nearest.leftPercent > 5) return null;

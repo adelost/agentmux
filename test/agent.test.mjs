@@ -538,6 +538,7 @@ feature("generated agent policy", () => {
     then: ["design is Opus work and implementing it is Codex work", (content) => {
       expect(content).toMatch(/Opus designs; Codex implements/u);
       expect(content).toMatch(/never Claude\s+subagents/u);
+      expect(content).toMatch(/reached weekly limit or a verified wind-down compact/u);
     }],
   });
 

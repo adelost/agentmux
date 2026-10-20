@@ -7,6 +7,17 @@ import { createQuotaParkFacts } from "./quota-park.mjs";
 // lsrc:0 2026-10-19: a pane quota recovery moved to an account with room keeps working under the floor,
 // even while the five-minute snapshot still lists it on the account it left.
 feature("which account a pane's quota facts come from", () => {
+  unit("wind-down receives provider reading time and candidate accounts, never cache refresh time", {
+    given: ["a snapshot read now containing an older provider observation", () => ({ accounts: [{ ok: true, provider: "claude",
+      name: "Claude S", profile: { key: "claude:1" }, inUse: ["claw:1"], limits: [],
+      observation: { observedAt: "2026-10-20T10:03:32Z" } }] })],
+    when: ["reading the pane facts", async snapshot => ({ snapshot, facts: await createQuotaParkFacts({ read: async () => snapshot,
+      profiles: () => [], now: () => Date.parse("2026-10-20T10:07:10Z") })("claw:1") })],
+    then: ["the provider time survives with the shared candidate snapshot", ({ snapshot, facts }) => {
+      expect(facts.observedAt).toBe(Date.parse("2026-10-20T10:03:32Z"));
+      expect(facts.accounts).toEqual(snapshot.accounts);
+    }],
+  });
   unit("a fresh read follows the pane to the account it runs on now; the cached read keeps the snapshot", {
     given: ["claw:1 listed on Claude S at 97 %, now running from Claude A's home", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-quota-facts-"));
@@ -25,9 +36,9 @@ feature("which account a pane's quota facts come from", () => {
     // The provider tells the floor a Codex account, which works on past a spent window on paid credits (lsrc:0 2026-10-20).
     then: ["Claude S from the snapshot, Claude A from the live home, each with its provider", ([cached, fresh], { root }) => {
       try {
-        expect(cached).toEqual({ account: { name: "Claude S", key: "claude:1", provider: "claude" },
+        expect(cached).toMatchObject({ account: { name: "Claude S", key: "claude:1", provider: "claude" },
           windows: [expect.objectContaining({ kind: "week", usedPercent: 97 })] });
-        expect(fresh).toEqual({ account: { name: "Claude A", key: "claude:2", provider: "claude" },
+        expect(fresh).toMatchObject({ account: { name: "Claude A", key: "claude:2", provider: "claude" },
           windows: [expect.objectContaining({ kind: "week", usedPercent: 40 })] });
       } finally { rmSync(root, { recursive: true, force: true }); }
     }],

@@ -168,10 +168,10 @@ export function createClaudeQuotaLifecycle({
    * WHAT: Replaces one limited pane and resumes only its receipt-bound session.
    * WHY: Prevents stale observations from killing a manual recovery or starting fresh.
    */
-  async function restart(agentName, pane, expectedReceipt, expectedProfileKey = null) {
+  async function restart(agentName, pane, expectedReceipt, expectedProfileKey = null, windDownGuard = null) {
     const targetConfig = configuredClaudeTarget(agentName, pane, { configPath });
     if (!targetConfig) return { ok: false, reason: "not-a-tmux-claude-target" };
-    if (!expectedReceipt?.sessionId || !expectedReceipt?.limitEventId) {
+    if (!expectedReceipt?.sessionId || (!windDownGuard && !expectedReceipt?.limitEventId)) {
       return { ok: false, reason: "missing-exact-limit-receipt" };
     }
     const persisted = persistedSessionIdentity(
@@ -181,7 +181,8 @@ export function createClaudeQuotaLifecycle({
       { homeDir },
     );
     if (!persisted) return { ok: false, reason: "session-not-owned-by-pane" };
-    if (!sameReceipt(activeReceipt(agentName, pane), expectedReceipt)) {
+    const authorized = () => windDownGuard ? windDownGuard() : sameReceipt(activeReceipt(agentName, pane), expectedReceipt);
+    if (!await authorized()) {
       return { ok: false, reason: "limit-receipt-superseded" };
     }
 
@@ -215,7 +216,7 @@ export function createClaudeQuotaLifecycle({
       if (!await waitForComposer(target)) {
         return { ok: false, reason: "pending-exact-resume-composer-not-ready" };
       }
-      if (!sameReceipt(activeReceipt(agentName, pane), expectedReceipt)) {
+      if (!await authorized()) {
         return { ok: false, reason: "limit-receipt-superseded" };
       }
       try {
@@ -234,7 +235,7 @@ export function createClaudeQuotaLifecycle({
         limitEventId: expectedReceipt.limitEventId,
       };
     }
-    if (!sameReceipt(activeReceipt(agentName, pane), expectedReceipt)) {
+    if (!await authorized()) {
       return { ok: false, reason: "limit-receipt-superseded" };
     }
     if (profileFor(agentName, pane)?.key !== profile?.key) return { ok: false, reason: "quota-profile-changed" };
@@ -272,5 +273,10 @@ export function createClaudeQuotaLifecycle({
     };
   }
 
-  return { activeReceipt, profileFor, selectProfile, recoveredSession, restart };
+  // The coordinator holds the lease and rechecks the verified compact, idle turn and composer at every boundary.
+  const restartAfterWindDown = (name, pane, { sessionId, guard }, profileKey) => {
+    if (typeof guard !== "function") return Promise.resolve({ ok: false, reason: "wind-down-admission-missing" });
+    return restart(name, pane, { sessionId }, profileKey, guard);
+  };
+  return { activeReceipt, profileFor, selectProfile, recoveredSession, restart, restartAfterWindDown };
 }

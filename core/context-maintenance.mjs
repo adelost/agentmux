@@ -16,6 +16,7 @@ import { isCodexCompaction } from "./codex-compaction.mjs";
 import { isRecoveredClaudeCompactAttempt } from "./claude-quota-target.mjs";
 import { claudeRefusalResetAt } from "./claude-limit-evidence.mjs";
 import { QUOTA_PARK_ORIGIN } from "./quota-park.mjs";
+import { QUOTA_WIND_DOWN_ORIGIN } from "./quota-wind-down.mjs";
 import { withdrawDraft } from "./draft-withdrawal.mjs";
 
 const STATE_KEY = "context_maintenance_by_pane_v1";
@@ -267,7 +268,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   // no second paid attempt, until evidence, a verified compact or new work arrives.
   async function beforeWork(job, { lease = null } = {}) {
     const { agentName, pane, id } = job;
-    const self = await selfBeforeWork({ agentName, pane, id }, lease);
+    const self = job.source === QUOTA_WIND_DOWN_ORIGIN ? null : await selfBeforeWork({ agentName, pane, id }, lease);
     const result = self ?? await run(agentName, pane, { cold: true, leaseHeld: true, heldLease: lease, jobId: id });
     // The broker types the message next, which needs the session again.
     if (!await regainSessionLease(lease)) return { ok: false, reason: "delivery-lease-busy" };
@@ -289,7 +290,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const target = resolveTarget(agentName, pane);
     const identity = target && identityFor(target.engine, target.dir);
     // A park's compact is due before the stop, even while a subagent or job still works.
-    const background = identity && request.origin !== QUOTA_PARK_ORIGIN ? coldBeforeDelivery?.background({ engine: target.engine,
+    const background = identity && ![QUOTA_PARK_ORIGIN, QUOTA_WIND_DOWN_ORIGIN].includes(request.origin) ? coldBeforeDelivery?.background({ engine: target.engine,
       sessionPath: identity.path, sessionId: identity.sessionId, paneDir: target.dir, now: now() }) : null;
     if (background) { log(`${agentName}:${pane} self-compact held before delivery: ${background}`); return null; }
     const context = await (agent.getContext?.(agentName, pane) ?? agent.getContextPercent(agentName, pane));

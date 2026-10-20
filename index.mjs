@@ -30,6 +30,7 @@ import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
 import { codexCreditsAllowed, createPauseCompact, createQuotaParkFacts, createQuotaParkStore, quotaFloorPercent } from "./channels/pause-compact.mjs";
+import { createQuotaWindDownMover } from "./channels/quota-wind-down-move.mjs";
 import { readPauseCompactModes } from "./core/pause-compact.mjs";
 import { createLeaderReview, leaderFromConfig } from "./core/leader-review.mjs";
 import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
@@ -326,12 +327,7 @@ process.on("SIGUSR1", () => {
   );
 });
 
-// Voice PWA HTTP endpoint (optional). Mirror sends voice input to the
-// discord channel bound to the pane so channel watchers see what came
-// in via the phone — same source-of-truth principle as sendToPane.
-// Auto-compact: background poll that warns + fires /compact on idle
-// high-context panes. Defaults are tuned for "user left, agent idling" —
-// see core/auto-compact.mjs for rationale.
+// Idle context maintenance and quota wind-down share the per-pane poll.
 const autoCompactConfig = parseAutoCompactConfig();
 const autoCompact = createAutoCompact({
   agent,
@@ -342,6 +338,8 @@ const autoCompact = createAutoCompact({
   config: autoCompactConfig,
   contextMaintenance,
   pauseCompact: createPauseCompact({ contextMaintenance, deliveryBroker, parkFor: quotaFacts, parkStore: createQuotaParkStore(), floorPercent: quotaFloor.percent, creditsAllowed: quotaFloor.creditsAllowed, state: appState, modes: readPauseCompactModes(),
+    moveAfterWindDown: createQuotaWindDownMover({ agent, state: appState, queue: deliveryQueue, configPath: AGENTS_YAML,
+      tmuxSocket: TMUX_SOCKET, tmuxExec, accountFor: quotaFacts }),
     log: message => console.log(`pause-compact | ${message}`), selfRequests: selfCompactRequests, notify: contextMaintenance.notify }),
 });
 autoCompact.start();

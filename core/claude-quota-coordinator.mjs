@@ -16,6 +16,7 @@ import {
   quotaRecoveryJobKey,
 } from "./claude-quota-recovery.mjs";
 import { resumeParkedPanes } from "./quota-park-resume.mjs";
+import { createClaudeWindDownMove } from "./quota-wind-down-move.mjs";
 
 const PAUSED_UNTIL_RECOVERY = Number.MAX_SAFE_INTEGER;
 
@@ -74,6 +75,7 @@ export function createClaudeQuotaCoordinator({
   parkStore = null,
   identityFor = undefined,
   floorPercent = undefined,
+  windDown = null,
   switchAccounts = process.env.AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED !== "false",
   now = () => Date.now(),
   resetGraceMs = 15_000,
@@ -347,5 +349,6 @@ export function createClaudeQuotaCoordinator({
     return inFlight;
   }
 
-  return { tick, parkTarget, recoverTarget };
+  const moveAfterWindDown = createClaudeWindDownMove({ queue, lifecycle, configPath, now, windDown });
+  return { tick, parkTarget, recoverTarget, moveAfterWindDown };
 }
