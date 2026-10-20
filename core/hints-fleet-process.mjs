@@ -179,7 +179,7 @@ from its own branching or state; a small split goes in the same change.
    separately; changed requirements need new evidence.
    A row may carry a \`Source\` column: a pointer to his decision-log entry
    (file, date, and time to the precision the log proves, or a stable message
-   id), \`own\` plus the mandate it rests on, or \`inferred:\` before the pointer
+   id), \`own\`, after his pointer if any, or \`inferred:\` before the pointer
    when the row rests on your reading of his words.
 6. **Merge by fresh proof.** Just before merge, fetch and rebase on current
    trunk in the allowed checkout. On that exact source run the
