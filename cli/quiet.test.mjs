@@ -247,24 +247,40 @@ feature("amux quiet --act: the one obvious action", () => {
 });
 
 feature("amux quiet --replay: what the cron would have done", () => {
-  component("replay sends nothing, forwards claw:0's line once, and counts needs-you before and after", {
-    given: ["claw:0's three replies, a login at skyvw:0 and a bare question at lsrc:2, each after a message of his, and a send that must not be called", () => world({
-      rows: [
-        ...CLAW_156, ...ACTIVE_PANES,
-        askRow("skyvw:0", "09:40:00", "Hur går uppladdningen?", { source: "discord" }),
-        postRow("skyvw:0", "09:42:00", replyEndingWith(LINES.login)),
-        askRow("lsrc:2", "09:50:00", "Hur ser PR 7 ut?", { source: "discord" }),
-        postRow("lsrc:2", "09:51:00", LINES.question),
-      ],
-      now: "12:00:00",
-    })],
-    when: ["replaying 09:00 to 10:00", async (w) => {
-      await w.run(["--replay", "--since", "2026-10-20T09:00:00Z", "--until", "2026-10-20T10:00:00Z"], {
-        send: async () => { throw new Error("replay must not send"); },
-      });
-      return w;
+  // A login at skyvw:0 and a bare question at lsrc:2, each after a message of his, beside claw:0's three replies.
+  const replayWorld = () => world({
+    rows: [
+      ...CLAW_156, ...ACTIVE_PANES,
+      askRow("skyvw:0", "09:40:00", "Hur går uppladdningen?", { source: "discord" }),
+      postRow("skyvw:0", "09:42:00", replyEndingWith(LINES.login)),
+      askRow("lsrc:2", "09:50:00", "Hur ser PR 7 ut?", { source: "discord" }),
+      postRow("lsrc:2", "09:51:00", LINES.question),
+    ],
+    now: "12:00:00",
+  });
+  const replay = async (w) => {
+    await w.run(["--replay", "--since", "2026-10-20T09:00:00Z", "--until", "2026-10-20T10:00:00Z"], {
+      send: async () => { throw new Error("replay must not send"); },
+    });
+    return w;
+  };
+
+  component("replay sends nothing", {
+    given: ["a ledger with a decision, a login and a bare question, and a send that throws if it is called", replayWorld],
+    when: ["replaying 09:00 to 10:00", replay],
+    then: ["nothing was sent, and neither the seen file nor the hands list was written", (w) => {
+      try {
+        expect(w.sent).toEqual([]);
+        expect(w.store.seen()).toEqual({});
+        expect(w.store.hands()).toEqual({});
+      } finally { w.remove(); }
     }],
-    then: ["one forward for claw:0, one hands and one decision episode, needs-you 2 before and 1 after with the former ones by pane and time, and no state written", (w) => {
+  });
+
+  component("the replay forwards claw:0's line once and counts needs-you before and after", {
+    given: ["claw:0's three replies, a login at skyvw:0 and a bare question at lsrc:2", replayWorld],
+    when: ["replaying 09:00 to 10:00", replay],
+    then: ["one forward for claw:0, one hands and one decision episode, needs-you 2 before and 1 after, and the former ones by pane and time", (w) => {
       try {
         const text = w.text();
         expect(text.match(/forward to lsrc:0/gu)).toHaveLength(1);
@@ -274,9 +290,6 @@ feature("amux quiet --replay: what the cron would have done", () => {
         expect(text).toMatch(/^ {2}claw:0 09:15Z → delegate$/mu);
         expect(text).toMatch(/^ {2}lsrc:2 09:50Z → answered$/mu);
         expect(text).toMatch(/^needs-you now: skyvw:0 09:40Z$/mu);
-        expect(w.sent).toEqual([]);
-        expect(w.store.seen()).toEqual({});
-        expect(w.store.hands()).toEqual({});
       } finally { w.remove(); }
     }],
   });

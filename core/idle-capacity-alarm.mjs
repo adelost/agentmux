@@ -122,6 +122,7 @@ export function createIdleCapacityAlarm({
     const before = state.get(IDLE_CAPACITY_STATE_KEY, {}) || {};
     const sent = { ...before };
     const stuck = new Set();
+    const closed = new Set();
     const rooms = new Map();
     for (const pane of panes()) {
       // The dispatcher cannot read a notice about its own stop.
@@ -131,8 +132,8 @@ export function createIdleCapacityAlarm({
       if (!evidence) continue;
       // The recovery prompt reached the pane, so this stop is over: it is kept as reported, and never reported again.
       if (evidence.closed) {
-        stuck.add(pane.key);
-        sent[pane.key] = { episode: evidence.episode, at: sent[pane.key]?.at ?? now(), closed: true };
+        closed.add(pane.key);
+        sent[pane.key] = { episode: evidence.episode, at: sent[pane.key]?.episode === evidence.episode ? sent[pane.key].at : now(), closed: true };
         continue;
       }
       if (!(now() - evidence.since >= afterMs)) continue;
@@ -148,7 +149,7 @@ export function createIdleCapacityAlarm({
       log(`${pane.key} reported to ${target}: ${evidence.reason}`);
     }
     // A pane that works again is reported again when it next stops.
-    for (const key of Object.keys(sent)) if (!stuck.has(key)) delete sent[key];
+    for (const key of Object.keys(sent)) if (!stuck.has(key) && !closed.has(key)) delete sent[key];
     if (JSON.stringify(sent) !== JSON.stringify(before)) state.set(IDLE_CAPACITY_STATE_KEY, sent);
     return [...stuck];
   }

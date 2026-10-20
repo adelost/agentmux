@@ -33,7 +33,10 @@ Why a pane went quiet, and the one obvious action, from the conversation log. Ru
              outcome. AMUX_QUIET=0 prints what it would send and sends and marks nothing.
   --replay   Read the log between --since and --until (ISO), print each episode's class and the action it would take, and
              needs-you before and after. Sends and writes nothing.
-  --hands    Print the panes that wait for the operator's hands.`;
+  --hands    Print the panes that wait for the operator's hands.
+
+Environment: AMUX_QUIET=0 (nothing is sent), AMUX_QUIET_DELEGATE (default lsrc:0), AMUX_ROSTER_PATH (default
+~/.agentmux/ROSTER.md), AMUX_QUIET_SEEN_PATH and AMUX_QUIET_HANDS_PATH (default ~/.agentmux/quiet-seen.json and quiet-hands.json).`;
 
 const splitPane = (pane) => [pane.slice(0, pane.lastIndexOf(":")), Number(pane.slice(pane.lastIndexOf(":") + 1))];
 
@@ -86,7 +89,7 @@ async function deliver(d, plan, nowMs) {
     at: nowMs, state: outcome, target: plan.target, kind: plan.kind, since: plan.episode.sinceMs,
     ...(outcome === "failed" ? { attempts: plan.attempts } : {}),
   });
-  return `${planWords(plan)} (${plan.key}): ${outcome}${detail ? `, ${detail}` : ""}`;
+  return { outcome, line: `${planWords(plan)} (${plan.key}): ${outcome}${detail ? `, ${detail}` : ""}` };
 }
 
 async function actQuiet(d) {
@@ -115,8 +118,9 @@ async function actQuiet(d) {
     } else if (dry) {
       lines.push(`AMUX_QUIET=0: would send ${planWords(plan)}: ${plan.text}`);
     } else {
-      lines.push(await deliver(d, plan, nowMs));
-      done[plan.kind] += 1;
+      const { outcome, line } = await deliver(d, plan, nowMs);
+      lines.push(line);
+      if (outcome !== "failed") done[plan.kind] += 1;
     }
   }
   const previous = d.store.hands();
