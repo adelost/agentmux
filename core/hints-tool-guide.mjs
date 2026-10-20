@@ -2,15 +2,14 @@
 // crowding repository instructions out of an engine's startup context.
 export const TOOL_GUIDE_HINTS = `# agentmux
 
-\`amux --help\` documents every command (alias \`ax\`). Load only the skills the
-task needs.
+\`amux --help\` documents every command (alias \`ax\`); load only the skills needed.
 
 ## Orient, then act
 
 - \`amux done\`: your work and recovery entry; inspect an owner's work before
   intervening.
-- \`amux log PROJECT -p N -n 3\` (\`--grep\`, \`--since\`, \`--raw\`, \`--tmux -s 60\`).
-  **Never use raw \`tmux ... capture-pane\`.**
+- \`amux log PROJECT -p N -n 3\` (\`--grep\`, \`--since\`): conversation; \`--raw\`: engine journal;
+  \`--tmux -s 60\`: live TUI. **Never use raw \`tmux ... capture-pane\`.**
 - \`amux asks --open\`: candidate open requests; read the original instructions
   and later replies before reviving a waiter; unverified is not
   unfinished. \`amux ps\`: configured, historical and running model/context.
@@ -25,12 +24,12 @@ task needs.
 
 Write exact UTF-8 text with the file-editing tool, then \`amux PROJECT -p N
 --stdin < /absolute/path/message.txt\`; never build prompt text in bash
-(backticks, dollar signs and quotes expand). Sends mirror to Discord. Short
+(backticks, $ and quotes expand). Sends mirror to Discord. Short
 slash commands are raw engine commands: verify consumption. \`amux queue\`
 separates enqueue, submission and receipt; an unknown post-submit outcome is
 not permission to resend or delete fences.
 
-## Relevant health and maintenance
+## Health and maintenance
 
 - \`amux doctor\` classifies before any restart (installed CLI, running bridge
   and merges can differ); never start disabled services for green.
@@ -52,5 +51,6 @@ shorter text; no automatic voice surprises. Requested images: \`amux image
 /absolute/path.png\` or \`[image: /absolute/path.png]\`; a saved path alone is
 not delivery. Label synthetic inputs and incomplete captures. Read
 browser/repo QA instructions before choosing a browser or emulator.
-\`amux notifyuser\`: requested or urgent attention, not routine progress. Never claim ongoing monitoring without a running wait or monitor.
+\`amux notifyuser\`: requested or important timely attention, not routine
+progress. Never claim ongoing monitoring without a running wait or monitor.
 `;

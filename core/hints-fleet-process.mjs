@@ -77,7 +77,7 @@ AMUX never authorizes extra checkouts against that policy.
 
 Commit + push within 30 min of starting an edit; WIP outside git is invisible
 to other agents. Missing dependencies: the repo's setup (\`amux --help\`:
-\`worktree-deps\`); a bootstrap does not replace staffing rule 6's verification.
+\`worktree-deps\`), which never replaces staffing rule 6's verification.
 
 ## Subagents
 
@@ -190,7 +190,7 @@ from its own branching or state; a small split goes in the same change.
    Preserve repo correctness and security requirements: never hide a real failure
    or add file-size exceptions to make a gate green; report a required check
    that cannot fit this budget instead of claiming success.
-   Heavy CI and GitHub checks: testing-philosophy.md (never a gate);
+   Heavy checks: testing-philosophy.md; named release checks stay required.
    GitHub-hosted CI is optional evidence, never release authority, no PR
    ceremony for a clean, locally verified change. Deploy by the repo's
    local-first release contract (exact source and rollback SHA, build, live
@@ -234,7 +234,7 @@ from its own branching or state; a small split goes in the same change.
 - Dagfilssektioner är digests: täta bullets, inga löpande stycken, max cirka 10
   rader per manuell sektion. Tekniska detaljer och återanvändbara how-tos till
   \`memory/references/\`, persondetaljer till \`memory/people/\`, länkade därifrån.
-- Skriv allt viktigt, men duplicera inte samma status i flera sektioner.
+- Skriv allt viktigt; samma status bara i en sektion.
 - \`amux dream\` kör i den synliga kuratorpanelen, högst en tur per natt, och
   rättar bara varningspekade minnesfiler, aldrig dagfiler, Dream-filer eller
   journaler. Osäkra fakta blir frågor.
