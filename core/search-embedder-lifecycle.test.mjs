@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEmbedderIdle, embedderIdleMs, legacyEmbedderPid } from "./search-embedder-lifecycle.mjs";
 
-const model = vi.hoisted(() => ({ version: "before-release", load: vi.fn(), score: vi.fn(), exit: vi.fn() }));
+const model = vi.hoisted(() => ({ version: "before-release", load: vi.fn(), score: vi.fn(), exit: vi.fn(), spawn: vi.fn() }));
+// A start that gets past its checks must not launch a real daemon from a test.
+vi.mock("node:child_process", async original => ({ ...await original(), spawn: model.spawn }));
 vi.mock("node:module", async original => {
   const actual = await original();
   return { ...actual, createRequire: url => new Proxy(actual.createRequire(url), {
@@ -25,6 +27,7 @@ beforeEach(() => {
   vi.stubEnv("HOME", home); vi.stubEnv("AMUX_SEARCH_GPU", "0"); vi.stubEnv("AMUX_SEARCH_WARM_ROOTS", "");
   model.load.mockReset().mockResolvedValue(async () => [[1]]);
   model.score.mockReset().mockResolvedValue([1]); model.exit.mockReset();
+  model.spawn.mockReset().mockReturnValue({ unref: () => {} });
 });
 afterEach(async () => { await delay(60); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
 
@@ -93,5 +96,84 @@ describe("one warm search model owner", () => {
     await delay(60);
     expect(await api.daemonAlive({ dir })).toBe(false);
     expect(model.exit).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The memory guard (design I-4): the daemon starts only with room for its peak, and leaves when the machine runs short.
+// Every test injects the meminfo reader and runs on fake timers: no daemon, model or socket.
+describe("the search daemon's memory guard", () => {
+  // Fake timers are dropped even when a test fails halfway, so the file's own afterEach can still wait.
+  afterEach(() => { vi.useRealTimers(); });
+  const embedder = () => import("./search-embedder.mjs");
+  const kb = gb => Math.round(gb * 1024 * 1024); // MemAvailable as /proc/meminfo reports it
+  const SECOND = 1000;
+
+  it("does not start without room for its peak", async () => {
+    const { startEmbedder } = await embedder();
+    // The default floor is 8 GB and the daemon peaks near 4 GB, so a start needs 12 GB free.
+    expect(startEmbedder({ dir, env: {}, readAvailableKb: () => kb(6.2) })).toEqual({
+      unavailable: "6.2 GB RAM free, the search daemon starts at 12 GB; lexical only this time",
+    });
+    expect(model.spawn).not.toHaveBeenCalled();
+    expect(startEmbedder({ dir, env: {}, readAvailableKb: () => kb(12) })).toBeUndefined();
+    expect(model.spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes when free memory falls under the floor", async () => {
+    const { watchMemoryFloor } = await embedder();
+    vi.useFakeTimers();
+    let freeGb = 20;
+    const close = vi.fn(), log = vi.fn();
+    // Background index work is running: the guard does not wait for it, only for a question in flight.
+    const idle = createEmbedderIdle({ idleMs: 30 * 60 * SECOND, busy: () => true, close });
+    idle.arm();
+    const stop = watchMemoryFloor({ closeWhenQuiet: idle.closeWhenQuiet, readAvailableKb: () => kb(freeGb), env: {}, log });
+    vi.advanceTimersByTime(5 * 30 * SECOND);
+    expect(close).not.toHaveBeenCalled();
+    freeGb = 7.4;
+    vi.advanceTimersByTime(30 * SECOND);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls).toEqual([["search-embedder: closing, 7.4 GB RAM free is under the 8 GB floor"]]);
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("waits for the question in flight before it closes for memory", async () => {
+    const { watchMemoryFloor } = await embedder();
+    vi.useFakeTimers();
+    const close = vi.fn(), log = vi.fn();
+    const idle = createEmbedderIdle({ idleMs: 30 * 60 * SECOND, close });
+    watchMemoryFloor({ closeWhenQuiet: idle.closeWhenQuiet, readAvailableKb: () => kb(7.4), env: {}, log });
+    idle.begin();
+    vi.advanceTimersByTime(3 * 30 * SECOND);
+    expect(close).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledTimes(1);
+    idle.finish();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("a floor of 0 turns the guard off", async () => {
+    const { startEmbedder, watchMemoryFloor } = await embedder();
+    const env = { AMUX_EMBEDDER_MIN_FREE_GB: "0" };
+    const scarce = () => kb(0.5);
+    expect(startEmbedder({ dir, env, readAvailableKb: scarce })).toBeUndefined();
+    expect(model.spawn).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers();
+    const closeWhenQuiet = vi.fn();
+    watchMemoryFloor({ closeWhenQuiet, readAvailableKb: scarce, env, log: vi.fn() });
+    vi.advanceTimersByTime(60 * 60 * SECOND);
+    expect(closeWhenQuiet).not.toHaveBeenCalled();
+  });
+
+  it("takes memory it cannot read as room, and says once that the guard is off", async () => {
+    const { memoryRoom, readMemAvailableKb, watchMemoryFloor } = await embedder();
+    const unreadable = () => readMemAvailableKb(join(home, "no-such-meminfo"));
+    expect(memoryRoom(12, { readAvailableKb: unreadable, env: {} }).room).toBe(true);
+    vi.useFakeTimers();
+    const closeWhenQuiet = vi.fn(), log = vi.fn();
+    watchMemoryFloor({ closeWhenQuiet, readAvailableKb: unreadable, env: {}, log });
+    vi.advanceTimersByTime(5 * 30 * SECOND);
+    expect(closeWhenQuiet).not.toHaveBeenCalled();
+    expect(log.mock.calls).toEqual([["search-embedder: memory guard off: no /proc/meminfo"]]);
   });
 });

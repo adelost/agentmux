@@ -52,9 +52,9 @@ and one- or two-word names stay lexical, and an exact hit opens the units that
 hold the phrase. Relative time ("i går", "i förmiddags", "last week") prefers
 that day's notes. The semantic layer runs in a small background process, the
 search daemon. It loads on the first question, follows notes edited since the
-nightly index and stays loaded for 30 minutes after the last question; until it
-is warm a question is answered lexically and says so. A passage expands with
-its section around it.
+nightly index and stays loaded for 30 minutes after the last question, while at
+least 8 GB RAM is free; until it is warm a question is answered lexically and
+says so. A passage expands with its section around it.
 Validated memory/topics pages provide compact orientation alongside original sources.
 --raw disables these layers. Topic/paragraph expansion rechecks source hashes; use
 amux memory topics --json to inspect states and decision cells. Topic text is

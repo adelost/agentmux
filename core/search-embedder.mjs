@@ -1,14 +1,15 @@
 // Warm semantic lookups for amux search. Loading the model and 100 MB of
 // vectors took 2–13 s per CLI call, so semantic search was opt-in and rarely
 // used. A small per-user daemon keeps both loaded behind a Unix socket and
-// exits after an idle period (30 minutes after the last question); the CLI
+// exits after an idle period (30 minutes after the last question), or sooner
+// when the machine runs short of free RAM (memoryRoom); the CLI
 // never waits for a cold start. When the daemon is not up yet, that one query
 // is answered lexically and says so. The daemon also holds the conversation
 // log's word index (core/conversation-window.mjs) and answers op conversation.
 
 import { createConnection, createServer } from "node:net";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +20,8 @@ import { exitAfterGpu, gpuEnv, gpuReady, reindexRunning } from "./search-gpu.mjs
 import { searchPassages } from "./search-passages.mjs";
 import { isTopicPath } from "./memory-topic-search.mjs";
 import { acquireFileLease } from "./file-lease.mjs";
-import { createEmbedderIdle, embedderIdleMs, embedderLeasePath, legacyEmbedderPid } from "./search-embedder-lifecycle.mjs";
+import { createEmbedderIdle, embedderIdleMs, embedderLeasePath, embedderMinFreeGb, legacyEmbedderPid } from "./search-embedder-lifecycle.mjs";
+import { parseMeminfo } from "./memory-guard.mjs";
 import { createConversationWindow } from "./conversation-window.mjs";
 import { syncHumanWords } from "./search-human-words.mjs";
 import { humanWordsDir } from "./search.mjs";
@@ -30,6 +32,49 @@ const PROTOCOL_VERSION = 2;
 
 const CONNECT_MS = 150;
 const DAEMON_HEAP_MB = 1536;
+// The daemon's measured peak is 3.81 GB (design §7), so a start needs the floor plus 4 GB: after the load it is still over the floor.
+const DAEMON_PEAK_GB = 4;
+const MEMORY_CHECK_MS = 30_000;
+const KB_PER_GB = 1024 * 1024;
+const gbText = (gb) => String(Math.round(gb * 10) / 10);
+
+/**
+ * WHAT: Reads MemAvailable of a meminfo file in kB, or null when it cannot be read.
+ * WHY: Gives the memory guard one number; a machine without /proc/meminfo runs without the guard instead of failing.
+ */
+export function readMemAvailableKb(path = "/proc/meminfo") {
+  try { return parseMeminfo(readFileSync(path, "utf8")).memAvailableKb; } catch { return null; }
+}
+
+/** WHAT: Checks whether needGb of RAM is free; floor 0 or no meminfo means room. WHY: Keeps the search daemon from starting, or staying, when the machine needs its memory. */
+export function memoryRoom(needGb, { readAvailableKb = readMemAvailableKb, env = process.env } = {}) {
+  // Returns { room, free } in GB; unreadable meminfo gives { room: true, unreadable: true } so the daemon can say the guard is off (design I-4).
+  if (embedderMinFreeGb(env) === 0) return { room: true };
+  const kb = readAvailableKb();
+  if (!Number.isFinite(kb)) return { room: true, unreadable: true };
+  const free = kb / KB_PER_GB;
+  return { room: free >= needGb, free };
+}
+
+/** WHAT: Checks free RAM every 30 s and asks the daemon to close under the floor. WHY: Keeps the daemon from holding RAM the machine needs after the floor is crossed. */
+export function watchMemoryFloor({ closeWhenQuiet, readAvailableKb, env = process.env, log = console.warn }) {
+  // Under the floor it logs why, once, and calls closeWhenQuiet; it returns the function that stops the check (design I-4, UC-6).
+  // The timer is unref'd so a forgotten one never holds the process; readAvailableKb and env are for tests.
+  const floor = embedderMinFreeGb(env);
+  if (floor === 0) return () => {};
+  let saidGuardOff = false, leaving = false;
+  const check = () => {
+    const memory = memoryRoom(floor, { readAvailableKb, env });
+    if (memory.unreadable && !saidGuardOff) { saidGuardOff = true; log("search-embedder: memory guard off: no /proc/meminfo"); }
+    if (memory.room || leaving) return;
+    leaving = true;
+    log(`search-embedder: closing, ${memory.free.toFixed(1)} GB RAM free is under the ${gbText(floor)} GB floor`);
+    closeWhenQuiet();
+  };
+  const timer = setInterval(check, MEMORY_CHECK_MS);
+  timer.unref();
+  return () => clearInterval(timer);
+}
 
 /**
  * WHAT: Names the socket for one index, model and wire protocol.
@@ -60,8 +105,12 @@ export async function daemonAlive({ dir = indexDir(), model = semanticModel().na
   return request(embedderSocketPath(dir, model), { ping: true }, CONNECT_MS).then(() => true, () => false);
 }
 
-/** WHAT: Schedules the daemon start in the background. WHY: Keeps the current query from waiting on a cold model load. */
-export function startEmbedder({ dir = indexDir(), model = semanticModel().name, roots = null } = {}) {
+/** WHAT: Schedules the daemon start in the background when free RAM covers its peak. WHY: Keeps the query from waiting on a cold load, and a start from starving the machine. */
+export function startEmbedder({ dir = indexDir(), model = semanticModel().name, roots = null, readAvailableKb, env = process.env } = {}) {
+  // Without the floor plus the daemon's peak free, the start is refused; readAvailableKb and env are for the memory check's tests.
+  const need = embedderMinFreeGb(env) + DAEMON_PEAK_GB;
+  const memory = memoryRoom(need, { readAvailableKb, env });
+  if (!memory.room) return { unavailable: `${memory.free.toFixed(1)} GB RAM free, the search daemon starts at ${gbText(need)} GB; lexical only this time` };
   const lease = acquireFileLease(embedderLeasePath());
   if (!lease) return { unavailable: "search model owner busy or starting; lexical only this time" };
   let legacyPid;
@@ -304,12 +353,14 @@ async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking
   });
   live.index();
   idle.arm();
+  const stopMemoryWatch = watchMemoryFloor({ closeWhenQuiet: idle.closeWhenQuiet });
   // Warm start: parse every note and scan for edited files while the
   // reranker loads, so the first real question after an idle exit does not
   // pay for it (it took 9.4 s instead of ~1.5 s).
   setImmediate(() => warmStart(process.env.AMUX_SEARCH_WARM_ROOTS, { segments, live }));
   server.on("close", () => {
     idle.cancel();
+    stopMemoryWatch();
     rmSync(socketPath, { force: true });
     lease.release();
     exit(0);
