@@ -2,11 +2,12 @@ import { component, expect, feature, unit } from "bdd-vitest";
 import { appendFileSync, chmodSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { vi } from "vitest";
-import { isHumanAsk } from "./ask-origin.mjs";
+import { AMUX_PANE_TAGS, isHumanAsk } from "./ask-origin.mjs";
 import { acquireFileLease } from "./file-lease.mjs";
 import { syncHumanWords } from "./search-human-words.mjs";
 import { markdownUnits } from "./search-units.mjs";
-import { createHumanDir, createLog, createThreeFileLog, LONG_MESSAGE, MESSAGES, NOW_MS } from "../test/fixtures/conversation-log.mjs";
+import { BETWEEN, BURST, createHumanDir, createLog, createThreeFileLog, HIS_NAME, LONG_MESSAGE, LONG_PROMPT, LOOP_PROMPT, MESSAGES, NOTICES,
+  NOW_MS, SHORT_PROMPT, typedTimes } from "../test/fixtures/conversation-log.mjs";
 
 const sync = (log, human, options = {}) => syncHumanWords({ dir: human.dir, ledgerPath: log.path, nowMs: NOW_MS, ...options });
 const dayFiles = (dir) => readdirSync(dir).filter((name) => /^\d{4}-\d{2}-\d{2}\.md$/u.test(name)).sort();
@@ -14,6 +15,10 @@ const read = (dir, name) => readFileSync(join(dir, name), "utf8");
 const snapshot = (dir) => Object.fromEntries(readdirSync(dir).filter((name) => name !== ".lease").sort().map((name) => [name, read(dir, name)]));
 const bullets = (dir) => dayFiles(dir).flatMap((name) => read(dir, name).split("\n").filter((line) => line.startsWith("- **")));
 const header = (day) => `# Human messages, ${day}\n\n`;
+const joinedHeader = (day) => `# Human messages joined, ${day}\n\n`;
+// The bullets of every day file whose words are exactly `text`.
+const bulletsOf = (dir, text) => bullets(dir).filter((line) => line.endsWith(`** ${text}`));
+const markdownFiles = (dir) => Object.fromEntries(Object.entries(snapshot(dir)).filter(([name]) => name.endsWith(".md")));
 
 feature("his messages as day files", () => {
   component("writes each message of his once, word for word", {
@@ -321,6 +326,212 @@ feature("his messages as day files", () => {
         expect(result).toEqual({ disabled: true });
         expect(entries).toEqual([]);
       } finally { vi.unstubAllEnvs(); human.remove(); log.remove(); }
+    }],
+  });
+
+  // v7: his name in the header, joined units, automation out (docs/DESIGN-search-daemon.md §4 I-2b and §6).
+  component("writes his name in each unit's header", {
+    given: ["the three-file log and two empty folders", () => ({ log: createThreeFileLog(), named: createHumanDir(), plain: createHumanDir() })],
+    when: ["syncing one folder with his name and the other with none", ({ log, named, plain }) => {
+      sync(log, named, { name: HIS_NAME });
+      sync(log, plain);
+      return { named: bullets(named.dir), plain: bullets(plain.dir) };
+    }],
+    then: ["every header reads time, name, 'to' and the pane, with the voice flag after the pane; with no name it is what it was", (result, { log, named, plain }) => {
+      try {
+        expect(result.named).toEqual([
+          "- **10:00:00Z Mattias to lsrc:0** Kom ihåg att autocompact-gränsen ska vara sjuttio procent",
+          "- **05:39:58Z Mattias to api:0** Okej, ja men vi kör Sonnet för genomförandet och Opus planerar",
+          "- **07:15:03Z Mattias to api:1 voice** Hej, vi behöver autocompact-gränsen dokumenterad",
+          `- **09:00:00Z Mattias to api:2** ${LONG_MESSAGE.split("\n")[0]}`,
+          "- **14:30:00Z Mattias to lsrc:1** Kör testerna för autocompact nu",
+          "- **08:00:00Z Mattias to api:0** Vad sa vi om Sonnet och Opus?",
+        ]);
+        expect(result.plain).toEqual(result.named.map((line) => line.replace(" Mattias to ", " ")));
+      } finally { named.remove(); plain.remove(); log.remove(); }
+    }],
+  });
+
+  component("joins his messages to one pane within 2 minutes and keeps the singles", {
+    given: ["a voice message that came in pieces: three to lsrc:0 within 2 minutes of each other, one 121 s after the last, and one to another pane in between", () => {
+      const log = createLog();
+      for (const message of [BURST.first, BURST.second, BURST.elsewhere, BURST.third, BURST.apart]) log.ask(message);
+      return { log, human: createHumanDir() };
+    }],
+    when: ["syncing with his name, and again after a message arrives between the third piece and the last", ({ log, human }) => {
+      sync(log, human, { name: HIS_NAME });
+      const first = { single: read(human.dir, "2026-10-20.md"), joined: read(human.dir, "2026-10-20.joined.md") };
+      log.ask(BETWEEN);
+      sync(log, human, { name: HIS_NAME });
+      const grown = { single: read(human.dir, "2026-10-20.md"), joined: read(human.dir, "2026-10-20.joined.md") };
+      return { first, grown, files: readdirSync(human.dir).sort(), units: markdownUnits(first.joined).map((unit) => unit.text) };
+    }],
+    then: ["one joined bullet holds the run with its texts on indented lines, every single bullet is still there, the joined file is one unit per run, and the run grows to five", (result, { log, human }) => {
+      try {
+        expect(result.first.single).toBe(`${header("2026-10-20")}`
+          + "- **07:07:54Z Mattias to lsrc:0** Första delen av tanken om gränsen\n"
+          + "- **07:08:14Z Mattias to lsrc:0** Andra delen\n  med en rad till\n"
+          + "- **07:08:30Z Mattias to api:1** Något helt annat till en annan panel\n"
+          + "- **07:10:14Z Mattias to lsrc:0** Sista delen, exakt två minuter senare\n"
+          + "- **07:12:15Z Mattias to lsrc:0** Ett eget meddelande efter mer än två minuter\n");
+        expect(result.first.joined).toBe(`${joinedHeader("2026-10-20")}`
+          + "- **07:07:54Z to 07:10:14Z Mattias to lsrc:0, 3 messages**\n"
+          + "  Första delen av tanken om gränsen\n  Andra delen\n    med en rad till\n  Sista delen, exakt två minuter senare\n");
+        expect(result.units).toHaveLength(1);
+        expect(result.grown.single.startsWith(result.first.single)).toBe(true);
+        expect(result.grown.single).toContain("- **07:11:00Z Mattias to lsrc:0** Och något mitt emellan\n");
+        expect(result.grown.joined).toBe(`${joinedHeader("2026-10-20")}`
+          + "- **07:07:54Z to 07:12:15Z Mattias to lsrc:0, 5 messages**\n"
+          + "  Första delen av tanken om gränsen\n  Andra delen\n    med en rad till\n  Sista delen, exakt två minuter senare\n"
+          + "  Och något mitt emellan\n  Ett eget meddelande efter mer än två minuter\n");
+        expect(result.files).toEqual([".lease", "2026-10-20.joined.md", "2026-10-20.md", "state.json"]);
+      } finally { human.remove(); log.remove(); }
+    }],
+  });
+
+  component("keeps amux's own notices out", {
+    given: ["his typed message among notices that amux typed into a pane, each with its tag in front, beside his own attachments, a voice message, and text that only mentions or resembles a tag", () => {
+      const log = createLog();
+      log.ask(MESSAGES.typed);
+      log.ask(MESSAGES.voice);
+      for (const notice of NOTICES) log.ask(notice);
+      const own = [
+        ["[image attached: /tmp/skiss.png] titta på den här skissen", "2026-10-17T08:00:00.000Z"],
+        ["[file attached: /tmp/rapport.pdf] läs den här innan mötet", "2026-10-17T09:00:00.000Z"],
+        ["Vad betyder [stall-watch] egentligen, och vem skickar det?", "2026-10-17T10:00:00.000Z"],
+        ["[stall-watchers] är inte samma sak som aviseringen", "2026-10-17T11:00:00.000Z"],
+        ["[keepers] är också bara text och ingen avisering", "2026-10-17T12:00:00.000Z"],
+      ];
+      own.forEach(([text, ts], index) => log.ask({ id: `own:${index}`, ts, agent: "lsrc", pane: 1, source: "pane-hook", text }));
+      return { log, human: createHumanDir() };
+    }],
+    when: ["syncing", ({ log, human }) => {
+      sync(log, human);
+      return { text: dayFiles(human.dir).map((name) => read(human.dir, name)).join("\n"), count: bullets(human.dir).length };
+    }],
+    then: ["not one notice is in a day file, and all seven messages of his are", ({ text, count }, { log, human }) => {
+      try {
+        for (const notice of NOTICES) {
+          expect(text).not.toContain(notice.text.split("\n")[0]);
+          expect(text).not.toContain(notice.text.split("\n").at(-1));
+        }
+        for (const kept of ["titta på den här skissen", "läs den här innan mötet", "Vad betyder [stall-watch] egentligen", "[stall-watchers] är inte samma sak", "[keepers] är också bara text",
+          "Kör testerna för autocompact nu", "Hej, vi behöver autocompact-gränsen dokumenterad"]) expect(text).toContain(kept);
+        expect(count).toBe(7);
+      } finally { human.remove(); log.remove(); }
+    }],
+  });
+
+  unit("lists every bracket tag amux types into a pane with the module that sends it, and refuses a prompt that starts with one", {
+    given: ["the list, and a pane-hook row that starts with each tag", () => ({
+      list: AMUX_PANE_TAGS,
+      rows: AMUX_PANE_TAGS.map(({ tag }) => ({ source: "pane-hook", verbatim: `${tag} och sedan något som ser ut som en vanlig mening` })),
+    })],
+    when: ["asking whether each row is his", ({ rows }) => rows.map(isHumanAsk)],
+    then: ["none is his, each tag names the file that sends it, and that file holds the tag", (answers, { list }) => {
+      expect(list.map(({ tag }) => tag)).toEqual(expect.arrayContaining(["[stall-watch]", "[pause-compact]", "[krasch-recovery]", "[idle-capacity]",
+        "[model-watch]", "[amux-link-turn", "[AMUX leveransstopp", "[drift-guard]"]));
+      expect(answers.every((answer) => answer === false)).toBe(true);
+      for (const { tag, sender } of list) {
+        expect(sender, tag).toBeTruthy();
+        // A sender outside this repository is named by its path under the home folder and is not read here.
+        if (sender.startsWith("~/")) continue;
+        expect(readFileSync(new URL(`../${sender}`, import.meta.url), "utf8"), `${sender} should hold ${tag}`).toContain(tag);
+      }
+    }],
+  });
+
+  component("keeps a prompt repeated three times out and removes its copies", {
+    given: ["his typed message, a 63-character loop prompt typed twice so far, a 39-character and a 40-character prompt typed three times each, and a message of his sent twice through Discord with a pane-hook copy of each", () => {
+      const log = createLog();
+      log.ask(MESSAGES.typed);
+      const loop = typedTimes(LOOP_PROMPT, 4, { idPrefix: "loop" });
+      for (const message of [
+        ...loop.slice(0, 2),
+        ...typedTimes(SHORT_PROMPT, 3, { idPrefix: "short", firstTs: "2026-10-13T09:00:00.000Z", pane: 4 }),
+        ...typedTimes(LONG_PROMPT, 3, { idPrefix: "long", firstTs: "2026-10-14T09:00:00.000Z", pane: 5 }),
+        MESSAGES.delivery, MESSAGES.hookCopy,
+        { ...MESSAGES.delivery, id: "delivery:again", ts: "2026-10-06T05:00:00.000Z" },
+        { ...MESSAGES.hookCopy, id: "hook:again", ts: "2026-10-06T05:00:03.000Z" },
+      ]) log.ask(message);
+      return { log, human: createHumanDir(), loop };
+    }],
+    when: ["syncing, then after the third copy of the loop prompt, then after a fourth, and once more in an empty folder that sees the whole log at once", ({ log, human, loop }) => {
+      const count = () => ({ loop: bulletsOf(human.dir, LOOP_PROMPT).length, short: bulletsOf(human.dir, SHORT_PROMPT).length,
+        long: bulletsOf(human.dir, LONG_PROMPT).length, twice: bullets(human.dir).filter((line) => line.includes("Okej, ja men vi kör Sonnet")).length });
+      sync(log, human);
+      const afterTwo = count();
+      log.ask(loop[2]);
+      sync(log, human);
+      const afterThree = { ...count(), dayFile: readdirSync(human.dir).includes("2026-10-12.md") };
+      log.ask(loop[3]);
+      sync(log, human);
+      const afterFour = count();
+      const fresh = createHumanDir();
+      sync(log, fresh);
+      const sameAsFresh = JSON.stringify(markdownFiles(human.dir)) === JSON.stringify(markdownFiles(fresh.dir));
+      fresh.remove();
+      return { afterTwo, afterThree, afterFour, sameAsFresh };
+    }],
+    then: ["two copies stay, the third removes both from their day file, a fourth stays out, a prompt under 40 characters or sent twice is kept, and a folder built from the whole log at once is the same", (result, { log, human }) => {
+      try {
+        expect(result.afterTwo).toEqual({ loop: 2, short: 3, long: 0, twice: 2 });
+        expect(result.afterThree).toEqual({ loop: 0, short: 3, long: 0, twice: 2, dayFile: false });
+        expect(result.afterFour).toEqual({ loop: 0, short: 3, long: 0, twice: 2 });
+        expect(result.sameAsFresh).toBe(true);
+      } finally { human.remove(); log.remove(); }
+    }],
+  });
+
+  component("rebuilds the day files when their format changes", {
+    given: ["a folder the previous release left: state of format 1 and a day file in the old header, with one bullet the log does not hold", () => {
+      const log = createThreeFileLog();
+      const human = createHumanDir();
+      writeFileSync(join(human.dir, "state.json"), JSON.stringify({ version: 1, tail: {}, keys: {} }));
+      writeFileSync(join(human.dir, "2026-10-05.md"), `${header("2026-10-05")}- **05:39:58Z api:0** Okej, ja men vi kör Sonnet för genomförandet och Opus planerar\n`
+        + "- **13:00:00Z api:0** Ett gammalt meddelande som loggen inte har\n");
+      return { log, human };
+    }],
+    when: ["syncing with his name, and again", ({ log, human }) => {
+      const first = sync(log, human, { name: HIS_NAME });
+      const afterFirst = snapshot(human.dir);
+      const second = sync(log, human, { name: HIS_NAME });
+      return { first, second, afterFirst, afterSecond: snapshot(human.dir) };
+    }],
+    then: ["the old day file is gone and the log's messages are written again in the new header, the state is of format 2, and the second sync changes no byte", ({ first, second, afterFirst, afterSecond }, { log, human }) => {
+      try {
+        expect(afterFirst["2026-10-05.md"]).toBe(`${header("2026-10-05")}- **05:39:58Z Mattias to api:0** Okej, ja men vi kör Sonnet för genomförandet och Opus planerar\n`);
+        expect(Object.keys(afterFirst).sort()).toEqual(["2026-09-24.md", "2026-10-05.md", "2026-10-06.md", "2026-10-07.md", "2026-10-19.md", "2026-10-20.md", "state.json"]);
+        expect(JSON.parse(afterFirst["state.json"])).toMatchObject({ version: 2, name: HIS_NAME });
+        expect(first).toMatchObject({ written: 6 });
+        expect(second).toMatchObject({ written: 0 });
+        expect(afterSecond).toEqual(afterFirst);
+      } finally { human.remove(); log.remove(); }
+    }],
+  });
+
+  component("rebuilds the day files when his name changes, and keeps them when no name is given", {
+    given: ["a folder synced under one name", () => {
+      const log = createThreeFileLog();
+      const human = createHumanDir();
+      sync(log, human, { name: HIS_NAME });
+      return { log, human };
+    }],
+    when: ["syncing with no name given, with another name, and with the empty name", ({ log, human }) => {
+      sync(log, human);
+      const unspecified = bullets(human.dir)[0];
+      sync(log, human, { name: "Matti" });
+      const renamed = bullets(human.dir)[0];
+      sync(log, human, { name: "" });
+      return { unspecified, renamed, none: bullets(human.dir)[0], state: JSON.parse(read(human.dir, "state.json")).name };
+    }],
+    then: ["no name given leaves the headers as they were, a new name rewrites them all, and the empty name takes it away", ({ unspecified, renamed, none, state }, { log, human }) => {
+      try {
+        expect(unspecified).toBe("- **10:00:00Z Mattias to lsrc:0** Kom ihåg att autocompact-gränsen ska vara sjuttio procent");
+        expect(renamed).toBe("- **10:00:00Z Matti to lsrc:0** Kom ihåg att autocompact-gränsen ska vara sjuttio procent");
+        expect(none).toBe("- **10:00:00Z lsrc:0** Kom ihåg att autocompact-gränsen ska vara sjuttio procent");
+        expect(state).toBe("");
+      } finally { human.remove(); log.remove(); }
     }],
   });
 });

@@ -57,6 +57,51 @@ export const MESSAGES = Object.freeze({
     text: "Sista meddelandet om autocompact före åäö-gränsen" },
 });
 
+/** The name his unit headers carry when `human.name` is set in the amux config (v7). */
+export const HIS_NAME = "Mattias";
+
+/**
+ * A voice message that reached the pane in pieces (v7). The gaps are 20 s and exactly 120 s, so `first`, `second` and
+ * `third` are one run; `apart` came 121 s after `third`, and `elsewhere` went to another pane in between.
+ */
+export const BURST = Object.freeze({
+  first: { id: "burst:1", ts: "2026-10-20T07:07:54.000Z", agent: "lsrc", pane: 0, text: "Första delen av tanken om gränsen" },
+  second: { id: "burst:2", ts: "2026-10-20T07:08:14.000Z", agent: "lsrc", pane: 0, text: "Andra delen\nmed en rad till" },
+  elsewhere: { id: "burst:3", ts: "2026-10-20T07:08:30.000Z", agent: "api", pane: 1, text: "Något helt annat till en annan panel" },
+  third: { id: "burst:4", ts: "2026-10-20T07:10:14.000Z", agent: "lsrc", pane: 0, text: "Sista delen, exakt två minuter senare" },
+  apart: { id: "burst:5", ts: "2026-10-20T07:12:15.000Z", agent: "lsrc", pane: 0, text: "Ett eget meddelande efter mer än två minuter" },
+});
+/** A message between `third` and `apart`: with it the two gaps are 46 s and 75 s, and the run grows to five. */
+export const BETWEEN = Object.freeze({ id: "burst:6", ts: "2026-10-20T07:11:00.000Z", agent: "lsrc", pane: 0, text: "Och något mitt emellan" });
+
+/**
+ * Notices as amux types them into a pane (v7): the tag in front, then the text the sender gives it. Each reaches the
+ * log as a pane-hook row, the way a typed prompt does. The texts are made up; only the tags are amux's own.
+ */
+export const NOTICES = Object.freeze([
+  ["[stall-watch] ", "1 mänskliga meddelanden till api:0 saknar verifierat kvitto, äldsta 7 min."],
+  ["[pause-compact] ", "Din kontext är 400k tokens, 2 gånger din budget."],
+  ["[krasch-recovery] ", "Värden startade om 03:12 mitt i din pågående turn."],
+  ["[idle-capacity] ", "api:2 har inte kunnat arbeta på 20 min: kvotgräns."],
+  ["[model-watch] ", "Du är nedgraderad opus → sonnet."],
+  ["[amux-link-turn:turn-test-1]\n", "svara på det här"],
+  ["[AMUX leveransstopp · observerat 2026-10-20T07:00:00.000Z]\n", "Din uppgift till api:0 har inte nått mottagaren."],
+  ["[drift-guard] ", "Läs om reglerna i AGENTS.md."],
+].map(([tag, tail], index) => ({ id: `notice:${index}`, ts: new Date(Date.parse("2026-10-18T10:00:00.000Z") + index * 3_600_000).toISOString(),
+  agent: "lsrc", pane: 2, source: "pane-hook", text: `${tag}${tail}` })));
+
+/** Prompts of 39 and 40 characters: the first is too short to count as repeated, the second is not. */
+export const SHORT_PROMPT = "Ta nästa punkt i listan och skriv klart";
+export const LONG_PROMPT = "Ta nästa punkt i listan och skriv klart.";
+/** A prompt typed into a pane over and over, as a loop does. */
+export const LOOP_PROMPT = "Fortsätt med nästa uppgift i kön och rapportera när den är klar";
+
+/** `times` copies of one text typed into a pane, an hour apart from `firstTs`, as pane-hook rows. */
+export function typedTimes(text, times, { idPrefix, firstTs = "2026-10-12T09:00:00.000Z", agent = "lsrc", pane = 3, source = "pane-hook" } = {}) {
+  return Array.from({ length: times }, (_, index) => ({ id: `${idPrefix}:${index + 1}`,
+    ts: new Date(Date.parse(firstTs) + index * 3_600_000).toISOString(), agent, pane, source, text }));
+}
+
 /**
  * Creates an empty log in its own directory. `ask`, `post`, `rotate` and `partial` make it grow the way the bridge
  * does; `remove` deletes the directory.

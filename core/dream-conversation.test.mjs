@@ -179,6 +179,25 @@ feature("Dream reads the conversation log before any journal", () => {
     }],
   });
 
+  unit("answeredShare counts no amux notice or repeated prompt as his", {
+    given: ["one answered ask of his, an amux notice typed into its pane, a 63-character prompt typed three times in a second pane, and one typed twice in a third", () => {
+      const LOOP = "Fortsätt med nästa uppgift i kön och rapportera när den är klar";
+      return { coverageStartMs: SINCE,
+        asks: [
+          ask("human", 0, at(1), "kolla loggen och rapportera"),
+          ask("notice", 0, at(2), "[stall-watch] 1 mänskliga meddelanden till lsrc:1 saknar verifierat kvitto, äldsta 7 min.", "pane-hook"),
+          ask("loop-1", 1, at(3), LOOP, "pane-hook"), ask("loop-2", 1, at(4), LOOP, "pane-hook"), ask("loop-3", 1, at(5), LOOP, "pane-hook"),
+          ask("twice-1", 2, at(6), "Ta nästa punkt i listan och skriv klart.", "pane-hook"), ask("twice-2", 2, at(7), "Ta nästa punkt i listan och skriv klart.", "pane-hook"),
+        ],
+        posts: [post(0, at(1, 5), "reply", "loggen är läst")],
+      };
+    }],
+    when: ["measuring the settled asks", (data) => answeredShare(data, { nowMs: NOW })],
+    then: ["the notice and the three copies are not asks of his; the prompt typed twice is, and stays unanswered", (result) => {
+      expect(result).toEqual({ asked: 3, answered: 1, share: 1 / 3, unanswered: { "lsrc:2": 2 } });
+    }],
+  });
+
   unit("the shadow counts settled human asks that got an answer posted", {
     given: ["three discord asks on lsrc:1, one answered, one too recent, plus an unanswered cli brief", () => ({
       coverageStartMs: SINCE,

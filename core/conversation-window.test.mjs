@@ -195,6 +195,24 @@ feature("the conversation window in the search daemon", () => {
     cleanup: endDaemonWorld,
   });
 
+  component("the daemon writes his day files under the name that comes with the question, and keeps them when a question names none", {
+    given: ["a daemon over the three-file log", () => daemonWorld()],
+    when: ["asking with his name, then asking with no name after a message of his arrives", async ({ log, dir, home }) => {
+      await daemonConversation("autocompact", { dir, humanName: "Mattias" });
+      const named = readFileSync(join(home, "human", "2026-10-05.md"), "utf8");
+      log.ask({ id: "ask:later", ts: "2026-10-20T11:59:55.000Z", agent: "lsrc", pane: 0, text: "Ett meddelande efter första frågan" });
+      await daemonConversation("autocompact", { dir });
+      return { named, kept: readFileSync(join(home, "human", "2026-10-05.md"), "utf8"),
+        later: readFileSync(join(home, "human", "2026-10-20.md"), "utf8") };
+    }],
+    then: ["the first question writes 'Mattias to api:0', and the question with no name neither undoes it nor leaves the new message without it", ({ named, kept, later }) => {
+      expect(named).toContain("- **05:39:58Z Mattias to api:0** Okej, ja men vi kör Sonnet för genomförandet och Opus planerar\n");
+      expect(kept).toBe(named);
+      expect(later).toContain("- **11:59:55Z Mattias to lsrc:0** Ett meddelande efter första frågan\n");
+    }],
+    cleanup: endDaemonWorld,
+  });
+
   component("the daemon syncs his day files at its first question and when a message of his arrives, not for agents' rows", {
     given: ["a daemon with a recorder around the sync", async () => {
       const calls = [];

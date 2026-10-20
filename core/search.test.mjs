@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
-  loadSearchRoots, withEventLedgerRoot, withHumanWordsRoot, escapeRegex, snippetPattern, cleanSnippet, dateFromPath, anchorGlobs,
+  loadSearchRoots, withEventLedgerRoot, withHumanWordsRoot, humanNameOf, escapeRegex, snippetPattern, cleanSnippet, dateFromPath, anchorGlobs,
   scoreHit, dedupeByFile, runRg, filesWithAllWords, lexicalSearch,
   searchEventLedger,
   renderJsonlLine, expandHit, formatHits, withScore,
@@ -89,6 +89,30 @@ feature("his messages as a search root", () => {
       expect(twice).toEqual(once);
       expect(off).toEqual(roots);
       expect(fromEnv.at(-1).path).toBe("/elsewhere/search-human");
+    }],
+  });
+});
+
+feature("his name on the root of his messages", () => {
+  unit("human.name of the config travels on his root to every caller, and is left off when unset", {
+    given: ["a config with a name, a config without one, and one whose name would break a header", () => ({
+      named: { human: { name: "Mattias" } },
+      bare: { search: { roots: [] } },
+      broken: { human: { name: "  **Mat\ntias**  " } },
+      notText: { human: { name: 42 } },
+    })],
+    when: ["reading the name and adding the root with it", ({ named, bare, broken, notText }) => ({
+      names: [named, bare, broken, notText].map(humanNameOf),
+      withName: withHumanWordsRoot([], "/state/search-human", humanNameOf(named)).at(-1),
+      withoutName: withHumanWordsRoot([], "/state/search-human", humanNameOf(bare)).at(-1),
+      existing: withHumanWordsRoot([{ name: "mine", path: "/state/search-human", glob: "*.md", exclude: [], semanticExclude: [], weight: 1, semantic: false }],
+        "/state/search-human", humanNameOf(named)).at(-1),
+    })],
+    then: ["the name is one clean line or empty, the root carries it as humanName, and a root that was configured by hand carries it too", ({ names, withName, withoutName, existing }) => {
+      expect(names).toEqual(["Mattias", "", "Mat tias", ""]);
+      expect(withName.humanName).toBe("Mattias");
+      expect("humanName" in withoutName).toBe(false);
+      expect(existing).toMatchObject({ kind: "human-words", semantic: true, humanName: "Mattias" });
     }],
   });
 });

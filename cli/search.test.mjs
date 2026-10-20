@@ -1,5 +1,5 @@
 import { component, expect, feature, unit } from "bdd-vitest";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { vi } from "vitest";
@@ -343,6 +343,31 @@ feature("the conversation log in the search CLI", () => {
       try {
         expect(text).toContain("2026-10-05.md");
         expect(text).toContain("Opus planerar");
+      } finally { endWorld(world); }
+    }],
+  });
+
+  component("writes his name from human.name in his day files, and tells the daemon the name with the question", {
+    given: ["a config with human.name, the three-file log and a folder for his messages", async () => {
+      const world = await conversationWorld();
+      const configPath = join(world.human.dir, "config.yaml");
+      writeFileSync(configPath, "human:\n  name: Mattias\nsearch:\n  roots: []\nagents: {}\n");
+      return { ...world, configPath, asked: [] };
+    }],
+    when: ["asking through the command while no daemon answers", async (world) => {
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await cmdSearch({ configPath: world.configPath }, "Sonnet genomförandet", { lexical: true, workspace: world.workspace },
+          { statePath: join(world.human.dir, "result.json"),
+            semantic: { ...noSemantic, conversation: async (query, options) => { world.asked.push(options); return null; } } });
+        return readFileSync(join(world.human.dir, "2026-10-05.md"), "utf8");
+      } finally { output.mockRestore(); warnings.mockRestore(); }
+    }],
+    then: ["his message is written under his name, and the question to the daemon carried the name", (day, world) => {
+      try {
+        expect(day).toContain("- **05:39:58Z Mattias to api:0** Okej, ja men vi kör Sonnet för genomförandet och Opus planerar");
+        expect(world.asked.map((options) => options.humanName)).toEqual(["Mattias"]);
       } finally { endWorld(world); }
     }],
   });

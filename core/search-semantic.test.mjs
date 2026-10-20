@@ -121,6 +121,22 @@ feature("the semantic index and his messages", () => {
     }],
   });
 
+  component("reindex writes his day files under the name his root carries", {
+    given: ["a log with one message of his, and a root for his messages that carries his name", world],
+    when: ["reindexing with an embedder that records what it embeds", async ({ human, dir }) => {
+      const embedded = [];
+      await reindex([{ ...humanRootOf(human.dir), humanName: "Mattias" }], { dir, model: semanticModel("Xenova/multilingual-e5-small"),
+        embed: async (texts, kind) => { embedded.push(...texts); return fakeEmbed(texts, kind); } });
+      return embedded;
+    }],
+    then: ["the unit it embeds is headed with his name", (embedded, fx) => {
+      try {
+        expect(embedded).toHaveLength(1);
+        expect(embedded[0]).toContain("- **14:30:00Z Mattias to lsrc:1** Kör testerna för autocompact nu");
+      } finally { end(fx); }
+    }],
+  });
+
   component("reindex still embeds the notes when the sync of his messages fails, and says so", {
     given: ["a root for his messages whose sync throws, and a note beside it", () => {
       const fx = world();
