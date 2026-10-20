@@ -28,18 +28,19 @@ function emptyLintPolicy(configPath, defaultWhatVerbs) {
     allowedWhatVerbs: defaultWhatVerbs,
     configPath,
     fileCaps: {},
+    rulesTrunk: null,
     configFindings: [],
   };
 }
 
-function configFinding(path, msg) {
+function configFinding(path, msg, suggestion = STYLE_SUGGESTIONS.STYLE013) {
   return {
     code: "STYLE013",
     sev: "error",
     msg,
     path,
     line: 1,
-    suggestion: STYLE_SUGGESTIONS.STYLE013,
+    suggestion,
   };
 }
 
@@ -69,6 +70,10 @@ function parseLintPolicy(source, path, defaultWhatVerbs) {
   policy.allowedWhatVerbs = Array.isArray(verbs)
     ? [...new Set([...defaultWhatVerbs, ...verbs.map(String).filter(Boolean)])]
     : defaultWhatVerbs;
+
+  const trunk = doc?.rules?.trunk;
+  if (typeof trunk === "string" && trunk.trim()) policy.rulesTrunk = trunk.trim();
+  else if (trunk !== undefined) policy.configFindings.push(configFinding(path, "rules.trunk must be a ref name", "name a branch or ref, such as origin/preview"));
 
   const caps = doc?.fileSize?.caps;
   if (caps === undefined) return policy;
@@ -106,7 +111,7 @@ function findLintConfigPath(root) {
 }
 
 /**
- * WHAT: Loads repo-local contract verbs and exact legacy source-size caps.
+ * WHAT: Loads repo-local contract verbs, exact legacy source-size caps and the rules trunk.
  * WHY: Keeps policy exceptions reviewable in the repository that owns them.
  */
 export function loadLintPolicy(root, defaultWhatVerbs) {

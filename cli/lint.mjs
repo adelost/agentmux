@@ -9,6 +9,22 @@ const FLAGS = {
   "update-baseline": "boolean", only: "string", skip: "string", limit: "number", help: "boolean", h: "boolean",
 };
 
+const RULES_CHECK_ID = "rules";
+const CHECK_IDS = [CONTRACT_CHECK_ID, RULES_CHECK_ID];
+
+/** WHAT: Runs the rules lint over repos and sets the exit code. WHY: Keeps the rules check off the default path and its modules unloaded until named. */
+async function lintRulesCommand(roots, flags, baselinePath) {
+  const rules = await import("../core/rules-lint.mjs");
+  let run = rules.lintRules(roots);
+  if (flags["update-baseline"]) {
+    rules.writeRulesBaseline(baselinePath, run);
+    console.log(`Updated rules baseline: ${baselinePath}\n`);
+  }
+  if (baselinePath) run = rules.applyBaseline(run, baselinePath);
+  console.log(rules.formatRulesReport(run, { limit: flags.limit || 80 }));
+  if (rules.hasErrors(run)) process.exitCode = 1;
+}
+
 /** WHAT: Dispatches scoped lint checks. WHY: Prevents strict mode from silently disabling mandatory size guards. */
 export async function cmdLint(args, ctx) {
   const { flags, positional } = parseFlags(args, FLAGS);
@@ -18,7 +34,7 @@ export async function cmdLint(args, ctx) {
   --strict                  Fail on active findings; mandatory size guards cannot be skipped
   --baseline <path>         Suppress non-size findings recorded in baseline
   --update-baseline         Record non-size findings, never size exceptions
-  --only contract           Select the known check
+  --only contract|rules     Select one check; rules runs only when named
   --skip contract           Disable checks in advisory mode only
   --all-agents              Scan configured agent directories
   --limit N                 Findings per root (default 80)
@@ -27,10 +43,10 @@ Policy history always uses actual trunk, independent of AMUX_LINT_BASE_REF.`);
   }
   const only = flags.only ? String(flags.only) : null;
   const skip = flags.skip ? String(flags.skip).split(",").map((s) => s.trim()).filter(Boolean) : [];
-  if ((only && only !== CONTRACT_CHECK_ID) || skip.some((name) => name !== CONTRACT_CHECK_ID)) {
-    throw new Error("amux lint: unknown check name; available: contract");
+  if ((only && !CHECK_IDS.includes(only)) || skip.some((name) => name !== CONTRACT_CHECK_ID)) {
+    throw new Error(`amux lint: unknown check name; available: ${CHECK_IDS.join(", ")}`);
   }
-  if (skip.includes(CONTRACT_CHECK_ID)) {
+  if (skip.includes(CONTRACT_CHECK_ID) && only !== RULES_CHECK_ID) {
     if (flags.strict) throw new Error("amux lint: strict mode cannot skip mandatory size guards");
     console.log("amux lint\nNo checks enabled (advisory mode).");
     return;
@@ -50,6 +66,7 @@ Policy history always uses actual trunk, independent of AMUX_LINT_BASE_REF.`);
     if (roots.length !== 1) throw new Error("amux lint: --update-baseline needs --baseline for multiple roots");
     baselinePath = join(roots[0], ".amux-lint-baseline.json");
   }
+  if (only === RULES_CHECK_ID) return lintRulesCommand(roots, flags, baselinePath);
   const results = lintRoots(roots, {
     changed: !!flags.changed, strict: !!flags.strict, baselinePath, updateBaseline: !!flags["update-baseline"],
   });
