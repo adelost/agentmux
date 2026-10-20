@@ -7,6 +7,7 @@ import { deliveryHead, wakeDeliveryTarget } from "./delivery-wake.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createSelfCompactStore } from "./self-compact.mjs";
+import { verifiedClaudeCompact } from "./verified-compact.mjs";
 
 function fixture({ fail = false, jobs = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-cost-test-")), path = join(root, "session.jsonl");
@@ -377,6 +378,41 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
     then: ["the attempt names the reset, and the fence opens at it", ({ retryAt, before, after }, ctx) => {
       try {
         expect(retryAt).toBe(Date.parse("2026-10-20T11:10:00Z"));
+        expect([before, after]).toEqual([false, true]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  // The same stop through the real compact: the screen showed the limit before the journal was read (11:06:53Z).
+  component("claw:2's compact refused on screen at 11:06Z may run again once the limit resets", {
+    given: ["claw:2's screen and journal as the session limit refused its /compact", () => {
+      const ctx = fixture();
+      ctx.clock = Date.parse("2026-10-20T11:06:51.635Z");
+      ctx.now = () => ctx.clock;
+      const path = ctx.identityFor().path;
+      ctx.agent.capturePromptEchoCursor = async () => captureJsonlAppendCursor("claude-prompt-events-v1", [path]);
+      ctx.agent.captureScreen = async () =>
+        "❯ /compact\n  ⎿  Error during compaction: You've hit your session limit · resets 1:10pm (Europe/Stockholm)\n";
+      ctx.compactFor = () => args => verifiedClaudeCompact({ ...args, now: ctx.now, sleep: async ms => { ctx.clock += ms; },
+        sendSlash: async () => {
+          ctx.append({ type: "system", subtype: "local_command", timestamp: "2026-10-20T11:06:53.063Z",
+            content: "<local-command-stderr>Error during compaction: You've hit your session limit · resets 1:10pm (Europe/Stockholm)</local-command-stderr>",
+            commandRun: { command: "compact", args: "" }, commandOutcome: { kind: "failed" } });
+          return { delivered: true, via: "command-receipt" };
+        } });
+      return ctx;
+    }],
+    when: ["the idle controller tries, then asks again before and after 11:10Z", async ctx => {
+      const maintenance = createContextMaintenance(ctx);
+      const refused = await maintenance.run("claw", 2);
+      ctx.clock = Date.parse("2026-10-20T11:09:00Z");
+      const before = maintenance.canAttempt("claw", 2, "one");
+      ctx.clock = Date.parse("2026-10-20T11:10:20Z");
+      return { refused, before, after: maintenance.canAttempt("claw", 2, "one") };
+    }],
+    then: ["the refusal names the 11:10Z reset, and the fence opens at it", ({ refused, before, after }, ctx) => {
+      try {
+        expect(refused).toMatchObject({ attempted: true, reason: "context-cost:provider-usage-limited",
+          retryAt: Date.parse("2026-10-20T11:10:00Z") });
         expect([before, after]).toEqual([false, true]);
       } finally { ctx.cleanup(); }
     }],

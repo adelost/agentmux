@@ -18,6 +18,8 @@ import {
 // own failure evidence.
 const CLAUDE_COMPACT_POLLS = 600;
 const CODEX_COMPACT_POLLS = 1_920;
+// Claude journaled claw:2's refused /compact 1.4 s after it (2026-10-20 11:06:53Z); five polls cover that.
+const REFUSAL_TEXT_POLLS = 5;
 
 const isCodexTurnClosed = (event) => event?.type === "event_msg"
   && (event?.payload?.type === "task_complete" || event?.payload?.type === "turn_aborted");
@@ -29,6 +31,10 @@ const waitFor = async (attempts, delayMs, sleep, predicate) => {
   }
   return false;
 };
+
+/** WHAT: Returns the last stop line a screen shows, from "You've hit your" to its end. WHY: Keeps the reset when the journal is late. */
+const screenStopText = (screen) => String(screen || "").split("\n")
+  .map((line) => /You(?:'|’)ve hit your .*$/u.exec(line)?.[0].trim()).filter(Boolean).at(-1) ?? null;
 
 /** WHAT: Routes one Claude compact through command and journal receipts. WHY: Prevents account rotation from killing unproven context. */
 export async function verifiedClaudeCompact({
@@ -75,6 +81,14 @@ export async function verifiedClaudeCompact({
   });
   const screen = await agent.captureScreen?.(agentName, pane).catch(() => "");
   const blocked = compactAccessBlocker(screen);
+  if (blocked === "provider-usage-limited") {
+    // Claude's words name the reset, when the compact may run again; claw:2's and ai:1's attempts at 11:06Z on
+    // 2026-10-20 ended on the screen without them, and nothing compacted the panes while their caches still lived.
+    let refusal = null;
+    await waitFor(REFUSAL_TEXT_POLLS, pollMs, sleep, () => Boolean(refusal = compactRefusal(cursor, submittedAt)));
+    const detail = refusal || screenStopText(screen);
+    return { ok: false, reason: blocked, ...(detail ? { detail } : {}) };
+  }
   if (blocked) return { ok: false, reason: blocked };
   if (!sent.delivered || sent.via !== "command-receipt") {
     return { ok: false, reason: "compact-command-unverified" };

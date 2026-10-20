@@ -7,6 +7,38 @@ import { sendSlashVerified } from "./delivery.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 import { validCodexCompactReceipt } from "./codex-launch-policy.mjs";
 import { contextMaintenanceAttempt } from "./context-maintenance.mjs";
+import { claudeRefusalResetAt } from "./claude-limit-evidence.mjs";
+
+// claw:2's journal and screen on 2026-10-20: /compact at 11:06:51.635Z, refused 1.4 s later.
+const SESSION_LIMIT_REFUSAL = {
+  type: "system", subtype: "local_command",
+  content: "<local-command-stderr>Error during compaction: You've hit your session limit · resets 1:10pm (Europe/Stockholm)</local-command-stderr>",
+  level: "info", timestamp: "2026-10-20T11:06:53.063Z", commandRun: { command: "compact", args: "" }, commandOutcome: { kind: "failed" },
+};
+const SESSION_LIMIT_SCREEN = "❯ /compact\n  ⎿  Error during compaction: You've hit your session limit · resets 1:10pm (Europe/Stockholm)\n";
+
+/** WHAT: Runs one Claude compact that meets the session limit while the screen already shows it. WHY: Replays claw:2 at 11:06Z. */
+async function compactAtSessionLimit({ journalWrites }) {
+  const root = mkdtempSync(join(tmpdir(), "amux-limit-screen-"));
+  const path = join(root, "session.jsonl");
+  writeFileSync(path, `${JSON.stringify({ type: "user", timestamp: "2026-10-20T11:06:40.000Z" })}\n`);
+  let clock = Date.parse("2026-10-20T11:06:51.635Z"), sleeps = 0;
+  try {
+    const result = await verifiedClaudeCompact({
+      agent: { capturePromptEchoCursor: async () => captureJsonlAppendCursor("claude-prompt-events-v1", [path]),
+        captureScreen: async () => SESSION_LIMIT_SCREEN },
+      agentName: "claw", pane: 2, paneDir: root,
+      latestIdentity: () => ({ sessionId: "same-session" }), now: () => clock,
+      sendSlash: async () => {
+        if (journalWrites) appendFileSync(path, `${JSON.stringify(SESSION_LIMIT_REFUSAL)}\n`);
+        return { delivered: true, via: "command-receipt" };
+      },
+      hasBoundary: () => false,
+      sleep: async (ms) => { sleeps += 1; clock += ms; },
+    });
+    return { result, sleeps };
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}
 
 feature("verified Claude compact", () => {
   unit("Not enough messages to compact ends the wait within one poll", {
@@ -155,6 +187,27 @@ feature("verified Claude compact", () => {
       expect(result).toEqual({ ok: false, reason: "provider-usage-limited",
         detail: "Error during compaction: You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm)" });
       expect(waited).toBe(0);
+    }],
+  });
+
+  // claw:2 and ai:1, 2026-10-20 11:06Z: the screen showed the limit first, so the attempt ended without Claude's
+  // words, no reset was known, and nothing compacted them after 11:10Z while their caches lived to 11:14Z.
+  unit("a usage limit on screen keeps Claude's journaled refusal, which names the reset", {
+    when: ["the compact meets the session limit and the screen shows it first", () => compactAtSessionLimit({ journalWrites: true })],
+    then: ["the attempt carries Claude's words and their reset is 11:10Z", ({ result }) => {
+      expect(result).toEqual({ ok: false, reason: "provider-usage-limited",
+        detail: "Error during compaction: You've hit your session limit · resets 1:10pm (Europe/Stockholm)" });
+      expect(claudeRefusalResetAt(result.detail, Date.parse("2026-10-20T11:06:53.063Z"))).toBe(Date.parse("2026-10-20T11:10:00Z"));
+    }],
+  });
+
+  unit("a usage limit on screen that the journal has not written keeps the screen's stop line", {
+    when: ["the screen shows the session limit and the journal stays silent", () => compactAtSessionLimit({ journalWrites: false })],
+    then: ["the stop line names the reset after a few polls, not a ten-minute wait", ({ result, sleeps }) => {
+      expect(result).toEqual({ ok: false, reason: "provider-usage-limited",
+        detail: "You've hit your session limit · resets 1:10pm (Europe/Stockholm)" });
+      expect(claudeRefusalResetAt(result.detail, Date.parse("2026-10-20T11:06:53.063Z"))).toBe(Date.parse("2026-10-20T11:10:00Z"));
+      expect(sleeps).toBeLessThanOrEqual(5);
     }],
   });
 
