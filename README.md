@@ -277,8 +277,8 @@ Whisper fallback is labelled in both the pane and Discord transcript.
 Search reuses one per-user model owner through a kernel-backed lease acquired
 before native weights load. Compatible package releases share a protocol
 socket; incompatible protocols or another index wait rather than load a second
-model. The default idle exit is two minutes (`AMUX_EMBEDDER_IDLE_MIN` overrides
-it). Health pings do not extend it; active queries, model loading and background
+model. The default idle exit is 30 minutes after the last question (`AMUX_EMBEDDER_IDLE_MIN`
+overrides it). Health pings do not extend it; active queries, model loading and background
 index work prevent shutdown. An older pre-lease worker is left running and
 new callers report an explicit lexical-only handover until it finishes.
 The V8 heap flag is not an RSS limit; native model memory is outside that cap.

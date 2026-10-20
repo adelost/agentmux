@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createEmbedderIdle, legacyEmbedderPid } from "./search-embedder-lifecycle.mjs";
+import { createEmbedderIdle, embedderIdleMs, legacyEmbedderPid } from "./search-embedder-lifecycle.mjs";
 
 const model = vi.hoisted(() => ({ version: "before-release", load: vi.fn(), score: vi.fn(), exit: vi.fn() }));
 vi.mock("node:module", async original => {
@@ -29,6 +29,12 @@ beforeEach(() => {
 afterEach(async () => { await delay(60); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
 
 describe("one warm search model owner", () => {
+  it("stays loaded for 30 minutes after the last question unless AMUX_EMBEDDER_IDLE_MIN says otherwise", () => {
+    expect(embedderIdleMs({})).toBe(30 * 60_000);
+    expect(embedderIdleMs({ AMUX_EMBEDDER_IDLE_MIN: "2" })).toBe(2 * 60_000);
+    expect(embedderIdleMs({ AMUX_EMBEDDER_IDLE_MIN: "0.5" })).toBe(30_000);
+    expect(embedderIdleMs({ AMUX_EMBEDDER_IDLE_MIN: "nonsense" })).toBe(30 * 60_000);
+  });
   it("distinguishes an old live worker from new lease contenders without stopping either", () => {
     const proc = join(home, "proc");
     for (const [pid, marker] of [[101, false], [102, true]]) {

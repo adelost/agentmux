@@ -4,6 +4,9 @@ import { join } from "node:path";
 /** WHAT: Names the shared model-owner lease. WHY: Prevents releases or alternate indexes from loading native models beside an existing owner. */
 export const embedderLeasePath = () => join(process.env.HOME, ".agentmux", "search-embedder.lock");
 
+/** The default is 30 minutes; AMUX_EMBEDDER_IDLE_MIN overrides it. WHAT: Returns how long the search daemon stays loaded after its last question. WHY: Keeps the model warm through a work session; AMUX_EMBEDDER_IDLE_MIN=2 restores the old two minutes. */
+export const embedderIdleMs = (env = process.env) => Math.max(0.001, Number(env.AMUX_EMBEDDER_IDLE_MIN) || 30) * 60_000;
+
 /** WHAT: Returns an older worker without the shared lease. WHY: Keeps an upgrade from duplicating a still-running pre-lease model. */
 export function legacyEmbedderPid({ proc = "/proc", ownPid = process.pid, uid = process.getuid() } = {}) {
   for (const entry of readdirSync(proc).filter(name => /^\d+$/u.test(name))) {

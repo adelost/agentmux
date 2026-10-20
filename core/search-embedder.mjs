@@ -1,8 +1,10 @@
 // Warm semantic lookups for amux search. Loading the model and 100 MB of
 // vectors took 2–13 s per CLI call, so semantic search was opt-in and rarely
 // used. A small per-user daemon keeps both loaded behind a Unix socket and
-// exits after an idle period; the CLI never waits for a cold start. When the
-// daemon is not up yet, that one query is answered lexically and says so.
+// exits after an idle period (30 minutes after the last question); the CLI
+// never waits for a cold start. When the daemon is not up yet, that one query
+// is answered lexically and says so. The daemon also holds the conversation
+// log's word index (core/conversation-window.mjs) and answers op conversation.
 
 import { createConnection, createServer } from "node:net";
 import { spawn } from "node:child_process";
@@ -17,12 +19,15 @@ import { exitAfterGpu, gpuEnv, gpuReady, reindexRunning } from "./search-gpu.mjs
 import { searchPassages } from "./search-passages.mjs";
 import { isTopicPath } from "./memory-topic-search.mjs";
 import { acquireFileLease } from "./file-lease.mjs";
-import { createEmbedderIdle, embedderLeasePath, legacyEmbedderPid } from "./search-embedder-lifecycle.mjs";
+import { createEmbedderIdle, embedderIdleMs, embedderLeasePath, legacyEmbedderPid } from "./search-embedder-lifecycle.mjs";
+import { createConversationWindow } from "./conversation-window.mjs";
+import { syncHumanWords } from "./search-human-words.mjs";
+import { humanWordsDir } from "./search.mjs";
 
 // Bump for incompatible request/response changes, not for unrelated releases.
-const PROTOCOL_VERSION = 1;
+// 2: op conversation, answered from the daemon's word index over the conversation log.
+const PROTOCOL_VERSION = 2;
 
-const IDLE_MS = () => Math.max(0.001, Number(process.env.AMUX_EMBEDDER_IDLE_MIN) || 2) * 60_000;
 const CONNECT_MS = 150;
 const DAEMON_HEAP_MB = 1536;
 
@@ -118,6 +123,20 @@ export async function daemonPassages(query, roots, { max = 30, workspace, dates 
 }
 
 /**
+ * WHAT: Returns the conversation log's hits from the warm daemon, or null if it cannot answer.
+ * WHY: Keeps a question from scanning 238 MB of log; the daemon reads new rows first.
+ */
+export async function daemonConversation(query, { max = 12, dir = indexDir(), model = semanticModel().name } = {}) {
+  try {
+    const result = await request(embedderSocketPath(dir, model), { op: "conversation", query, max }, 30_000);
+    if (!Array.isArray(result.hits) || result.unavailable) return null;
+    result.hits.timing = result.timing;
+    result.hits.warning = result.warning;
+    return result.hits;
+  } catch { return null; }
+}
+
+/**
  * WHAT: Returns cross-encoder scores for candidate texts, or null when the daemon is down.
  * WHY: Keeps a cold query from waiting on a model load; it keeps first-stage order instead.
  */
@@ -144,8 +163,8 @@ export function warmStart(rootsJson, { segments, live, search = searchPassages }
 }
 
 /** WHAT: Routes semantic and passage queries on a socket until idle. WHY: Keeps model and vectors loaded across CLI calls without a permanent process. */
-export async function serveEmbedder({ dir = indexDir(), model = semanticModel(), idleMs = IDLE_MS(),
-  load = loadEmbedder, loadRanking = loadReranker, exit = exitAfterGpu } = {}) {
+export async function serveEmbedder({ dir = indexDir(), model = semanticModel(), idleMs = embedderIdleMs(),
+  load = loadEmbedder, loadRanking = loadReranker, exit = exitAfterGpu, syncHuman = syncHumanWords } = {}) {
   const lease = acquireFileLease(embedderLeasePath());
   if (!lease) return null;
   try {
@@ -155,13 +174,13 @@ export async function serveEmbedder({ dir = indexDir(), model = semanticModel(),
       lease.release();
       return null;
     }
-    const server = await serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking, exit });
+    const server = await serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking, exit, syncHuman });
     if (!server) lease.release();
     return server;
   } catch (error) { lease.release(); throw error; }
 }
 
-async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking, exit }) {
+async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking, exit, syncHuman }) {
   const socketPath = embedderSocketPath(dir, model.name);
   mkdirSync(dirname(socketPath), { recursive: true });
   if (existsSync(socketPath)) {
@@ -169,6 +188,10 @@ async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking
     if (alive) return;
     rmSync(socketPath, { force: true });
   }
+  // The conversation window is built from warm start, in the background, beside the model load; the first question
+  // about the log waits for it.
+  const conversation = createConversationWindow();
+  const windowReady = conversation.refresh().catch(() => {});
   const embed = await load(model, { threads: 2 });
   // The reranker loads in the background; until then queries keep the
   // first-stage order instead of waiting. The GPU model is preferred; any
@@ -194,6 +217,31 @@ async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking
     weight: reranker.weight, note: rerankNote } : { note: rerankNote };
   const segments = new Map();
   const live = createLiveIndex({ dir, embed });
+  // His day files are brought up to date when the daemon has not synced yet or a message of his has arrived since, so
+  // the passage step of the same question reads them current. A failed sync is tried again by the next question.
+  let syncDue = true;
+  const answerConversation = async (query, max) => {
+    const timing = {};
+    let started = performance.now();
+    let humanAsks;
+    try {
+      await windowReady;
+      ({ humanAsks } = await conversation.refresh());
+    } catch (error) { return { hits: [], unavailable: `conversation window failed: ${error.message}` }; }
+    timing["d:conversationTail"] = performance.now() - started;
+    started = performance.now();
+    let warning;
+    if (syncDue || humanAsks) {
+      try { syncHuman(); syncDue = false; } catch (error) {
+        warning = `his messages could not be copied to ${humanWordsDir()}: ${error.message}`;
+      }
+    }
+    timing["d:humanSync"] = performance.now() - started;
+    started = performance.now();
+    const hits = conversation.search(query, { max });
+    timing["d:conversationSearch"] = performance.now() - started;
+    return { hits, timing, ...(warning ? { warning } : {}) };
+  };
   let idle;
   // allowHalfOpen: the client half-closes after its request; the answer
   // still has to go back on the same connection.
@@ -213,6 +261,10 @@ async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking
           const timing = {};
           const scores = await reranker.score(String(query), texts.slice(0, reranker.candidates).map(String), timing);
           socket.end(JSON.stringify({ scores, ...rerankInfo(), timing }));
+          return;
+        }
+        if (op === "conversation") {
+          socket.end(JSON.stringify(await answerConversation(String(query), Number(max) || 12)));
           return;
         }
         if (op === "passages") {
@@ -245,7 +297,7 @@ async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking
       }
     });
   });
-  idle = createEmbedderIdle({ idleMs, busy: () => rerankLoading || live.pendingFiles() > 0, close: () => server.close() });
+  idle = createEmbedderIdle({ idleMs, busy: () => rerankLoading || live.pendingFiles() > 0 || conversation.busy(), close: () => server.close() });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(socketPath, resolve);
