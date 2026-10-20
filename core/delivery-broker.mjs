@@ -94,7 +94,6 @@ export function createDeliveryBroker({
   const { runExclusive, peerWaiting: sessionPeerWaiting, settle: settleLanes } = createSessionLanes({ queue, now });
   let timer = null, started = false, stopped = false;
   let startupBarrier = Promise.resolve();
-
   async function acknowledge(job, via = "echo") {
     const current = queue.read(job.agentName, job.pane, job.id) || job;
     const acknowledged = queue.update(current, {
