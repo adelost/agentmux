@@ -1,6 +1,8 @@
 import { feature, unit, expect } from "bdd-vitest";
+import { isAskToHuman } from "./orchestrator-checkpoint.mjs";
 import {
   askAnchorKey,
+  askStatusIsOpen,
   attachAskLineAnchors,
   buildAskEntries,
   classifyAskTurn,
@@ -32,13 +34,39 @@ feature("ask-history: classifyAskTurn", () => {
     then: ["it is working", (status) => expect(status).toBe("working")],
   });
 
-  unit("assistant question is needs-you", {
+  // Touched: this test expected needs-you for a bare question. lsrc:0's order of 2026-10-20 is that needs-you means his
+  // hands only (docs/DESIGN-quiet-panes.md, chapter 12), so the same reply is now answered.
+  unit("a bare question to the human is answered, not needs-you", {
     when: ["classifying a reply that asks for confirmation", () =>
       classifyAskTurn(turn({
         items: [text("Vill du att jag mergar detta?")],
         isComplete: true,
       }))],
-    then: ["it is needs-you", (status) => expect(status).toBe("needs-you")],
+    then: ["it is answered", (status) => expect(status).toBe("answered")],
+  });
+
+  unit("needs-you only for his hands", {
+    given: ["four finished replies: a login he must do, a yes or no the delegate can give, a bare question, and a login asked of an agent's thread", () => ({
+      login: turn({ items: [text("Zon 3 är byggd. Logga in på Play Console i din webbläsare, sedan kör jag vidare.")], isComplete: true }),
+      decision: turn({ items: [text("Läget: zon 3 byggs. Väntar på dig. Ja eller nej till ett liveparti, högst cirka 1 USD.")], isComplete: true }),
+      question: turn({ items: [text("Vill du att jag tar rad 7 först?")], isComplete: true }),
+      agentThread: turn({ userPrompt: "[from lsrc:2]\n\nladda upp bygget", items: [text("Bygget finns i out-mappen. Logga in på Play Console i din webbläsare först.")], isComplete: true }),
+    })],
+    when: ["classifying each", (turns) => Object.fromEntries(Object.entries(turns).map(([name, one]) => [name, classifyAskTurn(one)]))],
+    then: ["only the login is needs-you, the decision shows as delegate and stays open, and a login is his hands whoever asked", (statuses) => {
+      expect(statuses).toEqual({ login: "needs-you", decision: "delegate", question: "answered", agentThread: "needs-you" });
+      expect(askStatusIsOpen("delegate")).toBe(true);
+      expect(askStatusIsOpen("answered")).toBe(false);
+    }],
+  });
+
+  unit("the waiting rule can be swapped to read an ask as it was classified before", {
+    given: ["a bare question and the old rule, which called any question to the human needs-you", () => ({
+      reply: turn({ items: [text("Vill du att jag tar rad 7 först?")], isComplete: true }),
+      legacy: (reply, prompt) => (isAskToHuman(reply, prompt) ? "needs-you" : null),
+    })],
+    when: ["classifying it by the new and by the old rule", ({ reply, legacy }) => [classifyAskTurn(reply), classifyAskTurn(reply, { waiting: legacy })]],
+    then: ["the replay can set the two side by side", (statuses) => expect(statuses).toEqual(["answered", "needs-you"])],
   });
 
   unit("a question answering an inter-agent envelope is answered, not needs-you (SRC-0053 A)", {

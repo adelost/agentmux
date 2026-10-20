@@ -7,6 +7,7 @@ export function formatAskStatus(status) {
     case "working": return "🟡 working";
     case "partial": return "⚠️ partial";
     case "needs-you": return "🔴 needs-you";
+    case "delegate": return "↪ delegate";
     case "done": return "✅ done";
     case "answered": return "☑️ answered";
     case "unverified": return "❔ unverified";

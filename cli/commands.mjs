@@ -117,16 +117,16 @@ import {
 import { cmdLint } from "./lint.mjs";
 import { cmdMemory } from "./memory.mjs";
 import {
-  askAnchorKey,
-  attachAskLineAnchors,
   buildAskEntries,
   filterAskEntries,
   joinAskLedgerEntries,
+  quietWaitingStatus,
   summarizeAskEntries,
 } from "../core/ask-history.mjs";
 import { persistAskCompletionEvidence, readAskLedger } from "../core/ask-ledger.mjs";
 import { backfillAskLedgerFromDeliveryQueue } from "../core/ask-ledger-backfill.mjs";
 import { formatAskEntry } from "./ask-format.mjs";
+import { attachDisplayedAskLineAnchors } from "./ask-anchors.mjs";
 import { formatAskOverview } from "./ask-overview.mjs";
 import { cmdConversationAsks } from "./conversation.mjs";
 import { cmdLog } from "./log.mjs";
@@ -1012,49 +1012,9 @@ async function cmdWatch(ctx, flags) {
 
 // --- Asks: human directive ledger -----------------------------------------
 
-function promptFromJsonlLine(event) {
-  if (event?.type === "user" && typeof event.message?.content === "string") {
-    return { timestamp: event.timestamp || null, prompt: event.message.content };
-  }
-  if (event?.type === "event_msg" && event.payload?.type === "user_message" && typeof event.payload.message === "string") {
-    return { timestamp: event.timestamp || null, prompt: event.payload.message };
-  }
-  return null;
-}
-
-function collectAskLineAnchors(jsonlFile) {
-  const out = new Map();
-  if (!jsonlFile) return out;
-  let text;
-  try { text = readFileSync(jsonlFile, "utf-8"); }
-  catch { return out; }
-
-  const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    let event;
-    try { event = JSON.parse(lines[i]); } catch { continue; }
-    const anchor = promptFromJsonlLine(event);
-    if (!anchor?.prompt) continue;
-    const key = askAnchorKey(anchor.timestamp, anchor.prompt);
-    if (!out.has(key)) out.set(key, i + 1);
-  }
-  return out;
-}
-
-function attachDisplayedAskLineAnchors(rows) {
-  const cache = new Map();
-  return rows.map((row) => {
-    if (!row.jsonlFile) return row;
-    if (!cache.has(row.jsonlFile)) {
-      cache.set(row.jsonlFile, collectAskLineAnchors(row.jsonlFile));
-    }
-    return attachAskLineAnchors([row], cache.get(row.jsonlFile))[0];
-  });
-}
 async function cmdAsks(ctx, flags, positional = []) {
   if (flags.help || flags.h) {
-    console.log(`Usage: amux asks [agent] [--since 2h] [--open] [--list | --full] [--raw] [--all-sources] [--all-repos] [--summary]\n\nDefault: canonical posted answers, grouped by agent and recent pane.\n--list prints source-bound rows; --full includes complete posted answer text.\n--raw explicitly uses legacy provider diagnostics and line anchors.\n--open keeps unresolved rows; --all-sources includes agent/automation input.\n--all-repos includes archived agents; --summary groups by repository.\nExample: amux asks claw --open; amux asks claw --pane 5 --full -n 3`);
+    console.log(`Usage: amux asks [agent] [--since 2h] [--open] [--list | --full] [--raw] [--all-sources] [--all-repos] [--summary]\n\nDefault: canonical posted answers, grouped by agent and recent pane.\n--list prints source-bound rows; --full includes complete posted answer text.\n--raw explicitly uses legacy provider diagnostics and line anchors.\n--open keeps unresolved rows; needs-you means the operator's hands (a login, a card, a key), a decision for the delegate shows as delegate; --all-sources includes agent/automation input.\n--all-repos includes archived agents; --summary groups by repository.\nExample: amux asks claw --open; amux asks claw --pane 5 --full -n 3`);
     return;
   }
   if (!flags.raw) return cmdConversationAsks(flags, positional, ctx);
@@ -1417,7 +1377,7 @@ async function cmdDone(ctx, flags) {
     else if (live) working.push(entry);
     else if (bucket.turns === 0) idleCount++;
     else if (userSpokeLast && ageMs > STALL_MIN_MS) stalled.push(entry);             // directive unanswered → dropped
-    else if (isAskToHuman(bucket.lastAssistantText, bucket.lastUserText)) needsYou.push(entry); // agent asked the HUMAN something
+    else if (quietWaitingStatus(bucket.lastAssistantText) === "needs-you") needsYou.push(entry); // the pane waits for his hands
     else if (inWindow) doneRecent.push(entry);                                       // replied within the window
     else idleCount++;                                                                // old + already replied
   }
@@ -3082,6 +3042,8 @@ export async function dispatch(argv, ctx) {
       const { flags } = parseFlags(rest, FLAG_SPECS.done);
       return cmdDone(ctx, flags);
     }
+
+    case "quiet": return (await import("./quiet.mjs")).cmdQuiet(rest, ctx);
 
     case "compact": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.compact);

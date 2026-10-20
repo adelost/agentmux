@@ -19,7 +19,7 @@ export function conversationGroups(log, agent, pane) {
 }
 
 /** WHAT: Builds ask status from the complete posted answers. WHY: Keeps an engine restart or a legacy preview from changing conversation evidence. */
-export function conversationAskEntries(log, { nowMs = Date.now() } = {}) {
+export function conversationAskEntries(log, { nowMs = Date.now(), waiting } = {}) {
   const byPane = new Map();
   for (const ask of log.asks) {
     if (isSystemNoiseDirective(ask.verbatim)) continue;
@@ -33,7 +33,7 @@ export function conversationAskEntries(log, { nowMs = Date.now() } = {}) {
     const byId = new Map(asks.map(ask => [ask.id, ask]));
     for (const turn of turns) for (const id of turn.logIds) {
       const ask = byId.get(id);
-      const [entry] = buildAskEntries({ agent: ask.agent, pane: ask.pane, nowMs,
+      const [entry] = buildAskEntries({ agent: ask.agent, pane: ask.pane, nowMs, waiting,
         turns: [{ ...turn, timestamp: ask.ts, userPrompt: ask.verbatim, isComplete: turn.items.length > 0 }] });
       entries.push({ ...entry, ledgerId: id, ledgerPath: ask.ledgerPath, source: ask.source,
         reply: turn.items.map(item => item.content).join("\n\n"),

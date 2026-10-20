@@ -4,18 +4,31 @@
 //      pane → jsonl location when work was handed out but not clearly closed.
 // DOES NOT: Read files, inspect tmux, parse config, or decide pane ownership.
 
-import { isAskToHuman, looksDone, previewText } from "./orchestrator-checkpoint.mjs";
+import { looksDone, previewText } from "./orchestrator-checkpoint.mjs";
 import { isLiveStatus } from "./pane-status.mjs";
 import { inferAskOrigin } from "./ask-origin.mjs";
+import { classifyQuiet } from "./quiet-classify.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 
-const OPEN_STATUSES = new Set(["open", "working", "partial", "needs-you", "unverified"]);
+const OPEN_STATUSES = new Set(["open", "working", "partial", "needs-you", "delegate", "unverified"]);
 const LIVE_MATCH_WINDOW_MS = 15 * 60 * 1000;
 
+// needs-you means his hands only (docs/DESIGN-quiet-panes.md, I-3); a decision the delegate can make shows as delegate.
+const WAITING_STATUS = { hands: "needs-you", decision: "delegate" };
+
+/** WHAT: Maps a reply to the status of what it waits for, or null. WHY: Keeps the question of what a pane waits for in classifyQuiet. */
+export const quietWaitingStatus = (reply) => WAITING_STATUS[classifyQuiet(reply).class] ?? null;
+
+/**
+ * `waiting(reply, prompt)` names the status of what the reply waits for, or null; the replay passes the old rule to set the two side by side.
+ * WHAT: Maps one ask turn to open, working, partial, needs-you, delegate, done or answered.
+ * WHY: Keeps needs-you for the operator's hands, and shows a decision for the delegate as delegate.
+ */
 export function classifyAskTurn(turn = {}, opts = {}) {
   const {
     isLatest = false,
     paneStatus = "unknown",
+    waiting = quietWaitingStatus,
   } = opts;
 
   const items = Array.isArray(turn.items) ? turn.items : [];
@@ -26,9 +39,8 @@ export function classifyAskTurn(turn = {}, opts = {}) {
   if (!reply) return isLatest && live ? "working" : "open";
   if (isLatest && live && !turn.isComplete) return "working";
   if (looksDoneForAsk(reply) || looksDoneForAsk(fullReply)) return "done";
-  // Provenance-aware: a question answering an inter-agent envelope is that
-  // agent's ball, not the human's — it classifies as answered instead.
-  if (isAskToHuman(reply, turn.userPrompt)) return "needs-you";
+  const waits = waiting(reply, turn.userPrompt);
+  if (waits) return waits;
   if (!turn.isComplete) return "partial";
   return "answered";
 }
@@ -37,6 +49,7 @@ export function askStatusIsOpen(status) {
   return OPEN_STATUSES.has(status);
 }
 
+/** WHAT: Builds ask entries from a pane's turns, each with its status. WHY: Keeps the status rule in classifyAskTurn instead of in each caller. */
 export function buildAskEntries({
   agent,
   pane,
@@ -44,6 +57,7 @@ export function buildAskEntries({
   jsonlFile = null,
   paneStatus = "unknown",
   nowMs = Date.now(),
+  waiting,
 } = {}) {
   const out = [];
   for (let i = 0; i < turns.length; i++) {
@@ -55,6 +69,7 @@ export function buildAskEntries({
     const status = classifyAskTurn(turn, {
       isLatest: i === turns.length - 1,
       paneStatus,
+      ...(waiting ? { waiting } : {}),
     });
     out.push({
       agent,
