@@ -7,8 +7,8 @@ import { accountEngineForCommand } from "../core/runtime-account-profiles.mjs";
 import { createTmuxAdapter } from "../core/tmux.mjs";
 import { readQuotaSnapshot } from "../core/quota-usage.mjs";
 import { quotaAccountCatalog } from "../core/quota-profiles.mjs";
-import { claudeWeeklyRoom } from "../core/claude-quota-recovery.mjs";
-import { codexAccountHasRoom } from "../core/codex-limit-recovery.mjs";
+import { accountWithRoom } from "../core/account-room.mjs";
+export { accountWithRoom } from "../core/account-room.mjs";
 import { createIdleCapacityAlarm } from "../core/idle-capacity-alarm.mjs";
 import { parseQuotaWarningConfig } from "./quota-warning.mjs";
 
@@ -29,29 +29,6 @@ export function parseIdleCapacityConfig(env = process.env) {
     pane: match ? Number(match[2]) : null,
     pollMs: positiveInt(env.AMUX_IDLE_CAPACITY_POLL_MS, 5 * 60_000),
   };
-}
-
-const codexWeeklyPercent = (account) => account.limits?.find((limit) => limit.limitId === "codex")
-  ?.windows?.find((window) => window.windowMinutes === 10080)?.usedPercent;
-
-/**
- * WHAT: Picks the account of one engine with the most weekly room below the reserve level.
- * WHY: An account at its reserve would stop a moved pane again within minutes.
- */
-export function accountWithRoom(accounts, engine, { reservePercent = 90 } = {}) {
-  let best = null;
-  for (const account of accounts || []) {
-    if (!account?.ok || account.provider !== engine) continue;
-    const weekly = engine === "codex" ? codexWeeklyPercent(account) : null;
-    const usedPercent = engine === "claude"
-      ? claudeWeeklyRoom(account, { reservePercent })
-      : codexAccountHasRoom(account) && Number(weekly) < reservePercent ? Number(weekly) : null;
-    if (usedPercent !== null && (!best || usedPercent < best.usedPercent)) {
-      best = { name: account.name || account.profile?.key, profileId: account.profile?.id, usedPercent,
-        profileKeys: [account.profile?.key, ...(account.sharedBy || []).map((member) => member.key)].filter(Boolean) };
-    }
-  }
-  return best;
 }
 
 function enginePanes(configPath) {
