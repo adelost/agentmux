@@ -12,7 +12,8 @@ const KNOWN_EXTENSIONS = "md mdx mjs cjs js jsx ts tsx json jsonc yml yaml toml 
 const EXTENSION = new RegExp(`\\.(?:${KNOWN_EXTENSIONS.join("|")})$`, "i");
 const SEGMENT = "(?:\\([\\p{L}\\p{N}_-]+\\)|\\[[\\p{L}\\p{N}_.-]+\\]|[\\p{L}\\p{N}_@~+.%-]+)";
 const PATH_SHAPE = new RegExp(`^(?:\\./|\\.\\./|~/|/)?(?:${SEGMENT}/)*${SEGMENT}/?$`, "u");
-const NOT_A_PATH = /[<>*{}$|\\^`]|\.\.\.|:\/\/|\s/;
+const TEMPLATE_MARK = /[<>*{}$]|\.\.\.|YYYY|MM-DD/;
+const NOT_A_PATH = new RegExp(`${TEMPLATE_MARK.source}|[|\\\\^\`]|:\\/\\/|\\s`);
 const WEB_HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|io|dev|org|net|app|ai|se|co|me|xyz|cloud)(?:\/|$)/i;
 const PRODUCT_NAME = /^(?:node|next|nuxt|vue|react|express|three|d3|chart|socket|alpine|ember|backbone|nest|deno|bun)\.(?:js|io)$/i;
 const PNPM_BUILTINS = new Set("add install i update up upgrade remove rm uninstall link ln unlink import rebuild rb prune fetch publish pack outdated list ls why audit exec dlx create init store config root bin env setup doctor patch deploy approve-builds licenses self-update help".split(" "));
@@ -60,7 +61,7 @@ function cleanToken(raw) {
 function pathOf(raw) {
   if (NOT_A_PATH.test(raw)) return null;
   const token = cleanToken(raw);
-  if (!token || !PATH_SHAPE.test(token) || PRODUCT_NAME.test(token)) return null;
+  if (!token || !PATH_SHAPE.test(token) || PRODUCT_NAME.test(token) || (!token.includes("/") && /^\.[\w-]+$/.test(token))) return null;
   if (/^@[\w.-]+\/[\w.-]+$/.test(token) || token.startsWith("@/")) return null;
   if (/^[A-Za-z]{1,3}\/[A-Za-z]{1,3}$/.test(token) || /^[\d./]+$/.test(token) || WEB_HOST.test(token)) return null;
   const last = token.replace(/\/$/, "").split("/").pop();
@@ -116,7 +117,7 @@ function linkRefs(text, line) {
 
 function proseSegments(text) {
   const segments = [];
-  for (const m of text.matchAll(/`([^`]+)`/g)) segments.push({ text: m[1], before: text.slice(0, m.index) });
+  for (const m of text.matchAll(/`([^`]+)`/g)) if (!TEMPLATE_MARK.test(m[1])) segments.push({ text: m[1], before: text.slice(0, m.index) });
   return segments;
 }
 

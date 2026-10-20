@@ -30,6 +30,8 @@ const REFERENCE_TEXT = [
 const SKIPPED_TEXT = [
   "Shapes: `docs/<repo>/plan.md`, `src/*.ts`, `$HOME/x.md`, `a/{b,c}.md`, `docs/...` and `~/<name>/x`.",
   "", "", "",
+  "Templates: daily notes in `memory/YYYY-MM-DD.md`, a tag `<!-- template: dating/person -->` and `.svelte` files.",
+  "", "", "",
   "This is an example: `docs/example-only.md` and `npm run made-up`.",
   "", "", "",
   "t.ex. `docs/swedish-example.md` finns inte.",

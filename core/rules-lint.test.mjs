@@ -326,6 +326,40 @@ feature("rules lint severity, reach and read-only", () => {
     }],
   });
 
+  component("reports a symlinked, copied or lone CLAUDE.md read from trunk", {
+    given: ["three repos whose trunk has a symlink, a copy and only CLAUDE.md", () => {
+      const world = newWorld();
+      const linked = pushedRepo(world, "linked", { "AGENTS.md": SIX_RULES, "CLAUDE.md": { link: "AGENTS.md" } });
+      const copied = pushedRepo(world, "copied", { "AGENTS.md": SIX_RULES, "CLAUDE.md": SIX_RULES });
+      const lone = pushedRepo(world, "lone", { "CLAUDE.md": "# Only Claude\n- one\n" });
+      return { world, linked, copied, lone };
+    }],
+    when: ["linting the three repos", ({ world, linked, copied, lone }) => lint(world, [linked, copied, lone])],
+    then: ["each is a certain error of its own kind", (run) => {
+      const only = (i, tag) => run.repos[i].findings.filter((f) => f.tag === tag);
+      expect(only(0, "shape")).toEqual([expect.objectContaining({ sev: "error", file: "CLAUDE.md", msg: expect.stringMatching(/symlink to AGENTS\.md/) })]);
+      expect(only(1, "shape")).toEqual([expect.objectContaining({ sev: "error", msg: expect.stringMatching(/copy of AGENTS\.md/) })]);
+      expect(only(2, "codex")).toEqual([expect.objectContaining({ sev: "error", msg: expect.stringMatching(/Codex reads none of these rules/) })]);
+    }],
+  });
+
+  component("reports every certain class and every heuristic once on a rich repo", {
+    given: ["a rich repo with dead references, a lost quote, counts, a status claim, a repeat and 33 KB", () => {
+      const world = newWorld({ layers: { "lsrc/.agents/CLAUDE.md": SHARED } });
+      return { world, repo: richRepo(world) };
+    }],
+    when: ["linting it", ({ world, repo }) => lint(world, repo)],
+    then: ["the findings per check are exactly the planted ones", (run) => {
+      const tally = {};
+      for (const f of run.repos[0].findings) tally[`${f.tag}:${f.sev}`] = (tally[`${f.tag}:${f.sev}`] || 0) + 1;
+      expect(tally).toEqual({
+        "exists:error": 3, "link:error": 1, "removed:error": 1,
+        "count:warn": 2, "status:warn": 1, "size:warn": 1, "layer-dup:warn": 1,
+      });
+      expect(findings(run, "exists").map((f) => f.line)).toEqual([2, 2, 3]);
+    }],
+  });
+
   component("errors when neither the setting nor an import loads AGENTS.md", {
     given: ["a second profile without the setting, one repo without an import and one with it", () => {
       const world = newWorld();
@@ -352,19 +386,23 @@ feature("rules lint command", () => {
       const world = newWorld();
       const bad = pushedRepo(world, "bad", { "AGENTS.md": "# Rules\nSee `docs/gone.md`.\n" });
       const good = pushedRepo(world, "good");
-      return { world, bad, good };
+      const imported = pushedRepo(world, "imported", { "AGENTS.md": SIX_RULES, "CLAUDE.md": "@AGENTS.md\n" });
+      return { world, bad, good, imported };
     }],
-    when: ["running the command for both, strict and not, and for the clean repo alone", async ({ world, bad, good }) => {
+    when: ["running the command for both, strict and not, and for the clean repo alone", async ({ world, bad, good, imported }) => {
       const both = await runCli(world, ["--only", "rules", bad.root, good.root]);
       const plainExit = process.exitCode; process.exitCode = 0;
       await runCli(world, ["--only", "rules", "--strict", bad.root]);
       const strictExit = process.exitCode; process.exitCode = 0;
       await runCli(world, ["--only", "rules", good.root]);
-      return { both, plainExit, strictExit, cleanExit: process.exitCode };
+      const cleanExit = process.exitCode || 0; process.exitCode = 0;
+      writeFileSync(join(world.home, ".claude", "settings.json"), "{}");
+      await runCli(world, ["--only", "rules", imported.root]);
+      return { both, plainExit, strictExit, cleanExit, machineExit: process.exitCode };
     }],
-    then: ["errors exit 1 either way, the report shows both repos and a summary", ({ both, plainExit, strictExit, cleanExit }, { bad }) => {
-      expect([plainExit, strictExit]).toEqual([1, 1]);
-      expect(cleanExit || 0).toBe(0);
+    then: ["errors exit 1 either way, a missing setting too, and the report shows both repos and a summary", ({ both, plainExit, strictExit, cleanExit, machineExit }, { bad }) => {
+      expect([plainExit, strictExit, machineExit]).toEqual([1, 1, 1]);
+      expect(cleanExit).toBe(0);
       expect(both).toContain("✗ AGENTS.md:2 `docs/gone.md` is not on origin/main [exists]");
       expect(both).toMatch(/2 repos · 1 error · \d+ warnings? · \d+\.\d s/);
       expect(both).toContain(bad.root);
@@ -436,6 +474,22 @@ feature("rules lint command", () => {
       expect(again).toMatch(/1 baselined/);
       expect(saved).toContain("x.mjs:CONTRACT010:class A: missing WHAT: tag");
       expect(saved.some((key) => /^AGENTS\.md:rules\.exists:`docs\/gone\.md` is not on origin\/main$/.test(key))).toBe(true);
+    }],
+  });
+
+  unit("never truncates errors behind the limit", {
+    given: ["a repo with three errors and three warnings and a limit of one", () => ({
+      home: "/nowhere", machine: [], ms: 0,
+      repos: [{ root: "/r", header: "/r \u00B7 trunk origin/main", skipped: null, findings: [
+        ...[1, 2, 3].map((n) => ({ tag: "exists", sev: "error", file: "AGENTS.md", line: n, msg: `error ${n}` })),
+        ...[4, 5, 6].map((n) => ({ tag: "count", sev: "warn", file: "AGENTS.md", line: n, msg: `warning ${n}` })),
+      ] }],
+    })],
+    when: ["formatting with limit 1", (run) => formatRulesReport(run, { limit: 1 })],
+    then: ["all errors show, one warning shows and the rest is counted", (text) => {
+      expect(text.match(/\[exists\]/g)).toHaveLength(3);
+      expect(text.match(/\[count\]/g)).toHaveLength(1);
+      expect(text).toContain("  ... 2 more");
     }],
   });
 
