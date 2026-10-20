@@ -23,10 +23,11 @@ The outcome:
 1. When a pane ends a turn and stays quiet, amux classifies why, once per episode, and acts only when it is obvious:
    - **his hands** (a login, a payment card, a key, hardware, his own test): no message; one line in a short list
      that lsrc:0 shows him;
-   - **a decision the delegate can make** ("väntar på dig", "ditt ja", "ja eller nej", "Beslut för Mattias", without
-     his hands): forwarded to lsrc:0 at once, and one reminder if lsrc:0 has not answered the pane in 30 minutes;
+   - **a decision the delegate can make** (a yes or no: "ditt ja", "ja eller nej", "Beslut för Mattias", without his
+     hands, on a line that asks rather than reports): forwarded to lsrc:0 at once, one per pane until lsrc:0 answers it,
+     and one reminder if lsrc:0 has not answered the pane in 30 minutes;
    - **quota**: the existing park and resume; nothing new;
-   - **work left and no named blocker**: one nudge to its lead;
+   - **work left and no named blocker, quiet for 20 minutes**: one nudge to its lead;
    - **done, an empty queue or no clear reason**: it sleeps.
 2. `needs-you` in `amux asks` and `amux done` means his hands only, so 103 shrinks to the real few.
 3. No notice, from quiet or from the idle-capacity alarm, about a pane that is working or thinking; an idle-capacity
@@ -174,8 +175,9 @@ classifyQuiet(reply, { parked }):                     # quiet-classify.mjs, pure
   if waiting matches HANDS (logga in, inloggning, login, betalkort, card, payment method, API-nyckel, api key,
      lösenord, 2FA, SMS-kod, hårdvara, hardware, din telefon, i din webbläsare, ditt eget test, testa själv, koppla in):
      return hands
-  if waiting matches DECISION (väntar på dig, väntar på ditt, ditt ja, ja eller nej, ja/nej, beslut för mattias,
-     needs your yes, needs your decision, waiting on you): return decision
+  if a waiting line that is not a SUMMARY, GOAL, DONE or VERIFIED line matches DECISION (ditt ja, ja eller nej, ja/nej,
+     ditt beslut, beslut för <operator>, needs your yes, needs your decision, your decision): return decision
+     # v4: "väntar på dig" alone is no decision; in the replay it waited on another pane or reported rows waiting on him
   if LEFT: has content other than none/inget/ingenting/- and no BLOCKED:/väntar på/blocked by: return left
   if DONE: or OPEN: none or looksDone(reply): return done
   return unclear
@@ -184,13 +186,14 @@ classifyQuiet(reply, { parked }):                     # quiet-classify.mjs, pure
 
 episodes(ledger rows of the last 6 h, now):           # quiet-episodes.mjs
   for each pane: last turn-final reply (post kind reply) with no ask or post after it
-  quiet when now - reply.ts >= 3 min
+  quiet when now - reply.ts >= 3 min, or 20 min when the class is left (v4)
   key = pane + hash(normalized waiting line) or the reply id; the same line in later replies keeps the key
   # tests: "sends one forward for three replies with the same line", "a new ask ends the episode",
   #        "a pane still working has no episode"
 
 act(episode, seen, send, now):                        # cli/quiet.mjs
-  decision and not seen[key]: send(lsrc:0, forward, key); seen[key] = sent or unknown
+  decision and not seen[key] and no forward about the pane in 30 min that lsrc:0 has not answered (v4):
+     send(lsrc:0, forward, key); seen[key] = sent or unknown
   decision and seen[key] and no ask from lsrc:0 to the pane since and now - sent >= 30 min and not seen[key:reminder]:
      send(lsrc:0, reminder, key:reminder)
   left and lead active in 2 h and lead != pane and not seen[key]: send(lead, nudge, key)
@@ -276,7 +279,27 @@ classifyAskTurn(turn):                                # ask-history.mjs
     `core/ask-origin.mjs` (`[quiet]` among amux's own tags, 2 lines), 30 min.
   - Changed `core/idle-capacity-alarm.mjs` (the live status and the closed episode, 15 lines) and its test, 30 min.
   - The replay and its review, 40 min.
-  - Total *estimated* 5.5h for a Sonnet builder plus 40 min of api:0's review.
+  - Total *estimated* 5.5h for a Sonnet builder plus 40 min of api:0's review. *Measured*: 49 min of building (the
+    builder's 2 967 s) and about 60 min of review and the v4 fix round.
+
+### Results, 20 Oct, the replay of 06:00 to 10:00Z
+
+*Measured* on the real log; each action read against the ledger by api:0 (who asked, how long the pane stayed quiet,
+what ended the quiet).
+
+| Rules | Episodes | Hands | Decision | Left | Forward | Nudge | Wrong actions | needs-you |
+|---|---|---|---|---|---|---|---|---|
+| v3, as built | 151 | 5 | 7 | 31 | 6 | 14 | 3 forwards, 13 nudges | 8 → 2 |
+| v4 | 122 | 5 | 3 | 3 | 2 | 1 | none found | 8 → 2 |
+
+- v3's wrong forwards: claw:0 06:10Z (a report to lsrc:0 that rows wait on him), api:0 08:26Z (a SUMMARY explaining
+  a rule that needs his yes), skydive:3 08:44Z (waiting on lsrc:1's line). claw:0's one decision went out at 09:13Z
+  and again at 09:22Z in another wording.
+- v3's wrong nudges: 13 of 14 panes went on by themselves 3 to 15 minutes after the nudge would have gone (their own
+  background jobs, other panes' asks). The one real stop, claw:3 at 08:19Z, stayed quiet for 155 minutes.
+- v4: the forwards are claw:2 06:47Z ("Beslut för Mattias") and claw:0 09:13Z, the 156 decision once; its 09:19, 09:26
+  and 09:30Z wordings wait for lsrc:0's answer. The nudge is claw:3 at 08:39Z.
+- needs-you now: skyvw:3 08:25Z (a report that names a login check, borderline) and skyvw:0 09:39Z.
 
 ## 11. Rollout and rollback
 
@@ -329,7 +352,7 @@ classifyAskTurn(turn):                                # ask-history.mjs
 
 | # | Task | Owner | State | Prio | Estimate | Spec | Done when |
 |---|---|---|---|---|---|---|---|
-| 50 | `amux quiet`: classify why a pane went quiet and take only the obvious action | api:0 | open: after row 49; Sonnet builds, api:0 reviews | P1 | 5.5h | [Quiet §6](DESIGN-quiet-panes.md#6-pseudocode) | the replay forwards claw:0's 156 line once and needs-you in 06:00–10:00Z falls to the real few, counts in §10 |
+| 50 | `amux quiet`: classify why a pane went quiet and take only the obvious action | api:0 | done: 8ee4097b (1.25.282) | P1 | 5.5h | [Quiet §6](DESIGN-quiet-panes.md#6-pseudocode) | the replay forwards claw:0's 156 line once and needs-you in 06:00–10:00Z falls to the real few, counts in §10 |
 
 ## 14. Open questions
 
@@ -345,3 +368,7 @@ None for him. Calls made by api:0:
 - v1, 2026-10-20 10:05Z: first version, from his 10:1xZ request and lsrc:0's order.
 - v2, 2026-10-20 11:30Z: outcome 3, UC-7, I-4 and R-6 from lsrc:0's input on stale idle-capacity notices at 11:15Z.
 - v3, 2026-10-20 11:40Z: `resumeStatus` counts only this episode's recovery (lsrc:0's 11:16Z skyvw:1 and skyvw:2 case).
+- v4, 2026-10-20 13:0xZ, from api:0's review of the replay (R-1's detection): a decision needs a yes or no on a line
+  that asks, one decision per pane until the delegate answers, and work left waits 20 quiet minutes. Results in §10.
+  The builder's departures are kept: hands words stand free of file names, GOAL lines never count, chunked replies
+  are one reply, a refused send is tried three times 10 minutes apart. lsrc:0 told with the release.
