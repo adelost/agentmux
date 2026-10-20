@@ -1,6 +1,6 @@
 # amux lint --only rules: the repos' rule files checked against trunk
 
-Version: 2 · 2026-10-20 09:10Z · owner of the design: api:0 · page: none yet
+Version: 3 · 2026-10-20 17:4xZ · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -42,7 +42,8 @@ n/a: a command-line tool with no screens. The report follows `amux lint`'s form.
 |---|---|---|---|
 | `amux lint --help` | `--only contract\|rules    Select one check; rules runs only when named` | 80 | v1 |
 | Repo header | `~/lsrc/swoop-sim · trunk origin/main, fetched 2026-10-20 09:36 · on main, 0 behind` | 110 | v1 |
-| Error | ``✗ AGENTS.md:142 `tests/e2e/parallel-pipeline.test.ts` is not on origin/master [exists]`` | 120 | v1 |
+| Error | ``✗ AGENTS.md:12 script `test:e2e` is not in any package.json on origin/master [exists]`` | 120 | v1 |
+| Warning | ``⚠ AGENTS.md:142 `tests/e2e/parallel-pipeline.test.ts` is not on origin/master [path]`` | 120 | v3 |
 | Warning | `⚠ .claude/CLAUDE.md:9 "72 task handlers" is a count that rots [count]` | 120 | v1 |
 | Warning | `⚠ AGENTS.md:40 repeats the shared layer, .agents/CLAUDE.md:14 (0.81) [layer-dup]` | 120 | v1 |
 | Info | `ℹ AGENTS.md: 6 protected lines, his dated words [protected]` | 80 | v1 |
@@ -110,12 +111,14 @@ flowchart LR
     `origin/preview` ("Källan är git-grenen `preview`", its CLAUDE.md, while origin/HEAD is origin/main).
 - Invariants:
   - **I-1** Read-only. Every git call goes through one `gitRead`, which allows only rev-parse, symbolic-ref,
-    for-each-ref, ls-tree, show, cat-file, rev-list, log, grep and `config --get`. Enforced in `rules-lint.mjs`,
+    for-each-ref, ls-tree, show, cat-file, rev-list, log, grep, check-ignore and `config --get`. Enforced in `rules-lint.mjs`,
     guarded by `core/rules-lint.test.mjs`, "runs only read-only git commands".
-  - **I-2** Errors are certain. Only these are errors: a path, script, target, branch or anchor missing on trunk; a
+  - **I-2** Errors are certain. Only these are errors: a script, target, branch, link or anchor missing on trunk; a
     CLAUDE.md that is a symlink, a copy or a link to AGENTS.md; a missing setting with no import; a checkout detached
     behind trunk or more than 50 commits behind; a protected line removed without a copy; a repo with only
     CLAUDE.md. Enforced by the severity table in `rules-lint.mjs`, guarded by "keeps heuristics as warnings".
+    A missing path is a warning (v3: 1 of 26 was right), and a path the checkout's ignore rules cover is not
+    reported; guarded by "warns on a missing path and skips one the checkout ignores".
   - **I-3** His words are never duplicate candidates. Enforced in `rules-lint-text.mjs`, guarded by
     `core/rules-lint-text.test.mjs`, "never lists a protected line as a duplicate".
 
@@ -290,7 +293,15 @@ The approach that already worked was ai:0's audit; C runs its mechanical half in
   - Changed `cli/lint.mjs` (`--only rules`, 30 lines) and `core/lint-ratchet.mjs` (`rules.trunk`, 10 lines), 30 min.
   - The probe of step 1 and the full run, 30 min.
   - Total *estimated* 5h for a Sonnet builder, at the search build's pace, plus 45 min of api:0's review of the run.
-- The full run's result: *to be measured* after the build and written here.
+- The full run's result, *measured* over the same 18 repos:
+  - v2 code, 15:17Z: 31 errors, 15 warnings, 3.1 s. 26 errors were missing paths and 1 was right (cad
+    `viewer/`); the rest named outputs the checkout ignores (11, each confirmed with `git check-ignore`),
+    deliberately absent files (7), other repos (4), how-to examples (2) and a runtime flag file (1).
+  - v3 code, 17:4xZ: 5 errors, 32 warnings (16 path, 6 branch, 6 loaded, 3 status, 1 size), 4.3 s. The 5 errors are
+    all true: cutkit's checkout 553 behind origin/master, 2 protected lines removed from cutkit's AGENTS.md (34556c6
+    on 14 Oct, fc5c474 on 29 Sep), and skybar and skydive-manifest with CLAUDE.md as their only rule file.
+  - skybar still compares with origin/main while its panes work on `preview`; its owner adds `rules.trunk:
+    origin/preview` to skybar's `.amux-lint.yml`.
 
 ## 11. Rollout and rollback
 
@@ -358,3 +369,5 @@ None for him. Calls made by api:0:
 - v1, 2026-10-20 07:55Z: first version, from lsrc:0's order and ai:0's audit.
 - v2, 2026-10-20 09:10Z: his 07:14:57Z and 07:17:39Z ask and lsrc:0's scope (P2, after the search release, ai:0's
   ten checks) in §1. My note to lsrc:3 that he never asked for a tool was wrong.
+- v3, 2026-10-20 17:4xZ: a missing path is a warning and ignored paths are skipped (I-2, §2), from the full run in
+  §10 (1 of 26 missing-path errors was right). My decision as owner. Told: lsrc:0.

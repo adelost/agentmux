@@ -395,6 +395,8 @@ explicit `REMOVE:/MERGE:/REFACTOR:/DEPRECATED:` debt tags for symbols that
 should not get a fake `WHY:` yet.
 With `--strict`, active errors and debt fail the command; style warnings are
 reported without failing.
+`amux lint --only rules [repos...]` checks each repo's AGENTS.md and CLAUDE.md against trunk and exits 1 on an
+error; design and severities: `docs/DESIGN-lint-rules.md`.
 See `docs/contract-lint.md` for the writing rules.
 
 ## Churn visibility
