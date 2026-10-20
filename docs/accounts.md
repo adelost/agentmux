@@ -67,11 +67,11 @@ it off.
 ## Which account is in use
 
 Under each account `amux quota` prints the panes that run on it right now, for
-example `i bruk: api:0–2, claw:0`, or `ingen panel`. It reads the config dir of
+example `in use: api:0–2, claw:0`, or `no pane`. It reads the config dir of
 the live engine process under each tmux pane (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
 `KIMI_CODE_HOME`, else the default home), not the selection a pane gets at its
 next start. A logged-out login no pane runs on is folded into one last line,
-`Utloggade: Claude attrois · Kimi 1 · Kimi 2`. A pane on a dir no profile knows
+`Logged out: Kimi 1 · Kimi 2`. A pane on a dir no profile knows
 is named with that dir.
 
 ## Logins
