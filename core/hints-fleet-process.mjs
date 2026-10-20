@@ -12,12 +12,12 @@
 // WHAT: Defines the fleet-process section of the generated agent policy. WHY: Keeps cross-project process rules in one layer so no per-repo copy can drift.
 export const FLEET_PROCESS_HINTS = `## Rule layers: who owns what
 
-Keep each rule in one layer. Fix duplicate rules instead of obeying stale copies.
+Keep each rule in one layer; fix duplicates instead of obeying stale copies.
 
 1. **This file (amux):** fleet process, ownership, delivery and memory logging;
    edit its shared source in agentmux, never per-project copies.
 2. **An optional work board:** its workflow/API docs own ticket states and wire
-   mechanics; without a configured board, board rules do not apply.
+   mechanics; with no configured board, its rules do not apply.
 3. **Each code repo:** \`AGENTS.md\` and linked docs own data, gates, commands
    and deploy contracts. Current user instructions and checkout restrictions
    stay authoritative.
@@ -61,25 +61,23 @@ plus magnitude does NOT prove causation.
 
 ## Multi-agent edit protocol
 
-Parallelize where the current user, repo and workspace policy permits.
+Parallelize where user, repo and workspace policy permit.
 AMUX never authorizes extra checkouts against that policy.
 
-1. **Respect checkout policy.** Use a branch/worktree only where allowed.
+1. **Respect checkout policy.** Branch/worktree only where allowed.
    In canonical-only workspaces, preserve other agents' WIP and live writers;
-   use sequential handover before overlapping edits or branch changes.
-   Never stash, discard or relocate their work to get around a conflict.
-   Allowed parallel work needs no file-claim ceremony.
-2. **Resolve conflicts with fresh proof:** follow staffing rule 6 below.
-   The owner inspects conflict-resolved hunks, including code they did not
-   write, and flags them in the handoff or an explicitly requested review.
-3. **Version bumps must be unique:** the new version must not already
-   appear in \`git log --oneline -3\`.
+   use sequential handover before overlapping edits or branch changes; never
+   stash, discard or relocate their work around a conflict. Allowed parallel
+   work needs no file-claim ceremony.
+2. **Resolve conflicts with fresh proof** (staffing rule 6): the owner
+   inspects conflict-resolved hunks, also code they did not write, and flags
+   them in the handoff or an explicitly requested review.
+3. **Version bumps are unique:** the new version is not already in
+   \`git log --oneline -3\`.
 
-Commit + push within 30 min of starting an edit; WIP outside git is
-invisible to other agents.
-
-Missing dependencies: follow the repo's setup (\`amux --help\`: \`worktree-deps\`).
-A bootstrap does not replace staffing rule 6's verification.
+Commit + push within 30 min of starting an edit; WIP outside git is invisible
+to other agents. Missing dependencies: the repo's setup (\`amux --help\`:
+\`worktree-deps\`); a bootstrap does not replace staffing rule 6's verification.
 
 ## Subagents
 
@@ -91,11 +89,10 @@ short written brief.
 ## Context and compaction
 
 - Never mid-turn, or while a subagent or terminal works, a prompt is open or a delivery is pending.
-- A big context compacts when its turn ends; leaders keep more than builders.
-- Idle Claude panes compact before their prompt cache expires.
-- Idle Codex panes compact sooner: their cache expires sooner.
+- A big context compacts at its turn end; leaders keep more than builders.
+- Idle panes compact before their prompt cache expires, Codex panes sooner since theirs expires sooner.
 - A pane idle past its cache's life compacts before its next delivery, when that pays back.
-- A pane's own recurring check waits less than its idle compaction after its last call: Claude under 50 minutes, through Claude Code's self-paced /loop, never an hourly cron; Codex under 25.
+- A pane's own recurring check waits less than its idle compaction after its last call: Claude under 50 minutes (Claude Code's self-paced /loop, never an hourly cron), Codex under 25.
 - At banked boundaries: \`amux compact --self --continue-file HANDOFF\`. \`--no-resume\` means maintenance only.
 - Bounded tasks go to a fresh subagent with a brief; continue your own work after a compact.
 - Write what a compact loses to files as you work: quotes, numbers, decisions.
@@ -109,7 +106,7 @@ A function with 6+ trunk commits among its lines in 60 days is a hotspot:
 before changing it, read it and its fix diffs, then record
 \`amux churn verdict '<path>::<name>' REWRITE|SPLIT|KEEP "<why>"\` (Claude
 panes are held at \`git commit\` until it exists; other engines run
-\`amux churn check\` first). It is reflection, not a rewrite: KEEP when fixes
+\`amux churn check\` first). Reflection, not a rewrite: KEEP when fixes
 came from constants, copy, upstream values or features, SPLIT or REWRITE when
 from its own branching or state; a small split goes in the same change.
 
@@ -234,12 +231,11 @@ from its own branching or state; a small split goes in the same change.
 
 ## Minnesloggning
 
-- Dagfilssektioner är digests: använd täta bullets, inte löpande stycken.
-- Max cirka 10 rader per manuell sektion. Flytta tekniska detaljer och
-  återanvändbara how-tos till \`memory/references/\`, persondetaljer till
-  \`memory/people/\`, och länka därifrån.
+- Dagfilssektioner är digests: täta bullets, inga löpande stycken, max cirka 10
+  rader per manuell sektion. Tekniska detaljer och återanvändbara how-tos till
+  \`memory/references/\`, persondetaljer till \`memory/people/\`, länkade därifrån.
 - Skriv allt viktigt, men duplicera inte samma status i flera sektioner.
-  \`amux dream\` kör i den synliga kuratorpanelen, högst en tur per natt, och
+- \`amux dream\` kör i den synliga kuratorpanelen, högst en tur per natt, och
   rättar bara varningspekade minnesfiler, aldrig dagfiler, Dream-filer eller
   journaler. Osäkra fakta blir frågor.
 `;
