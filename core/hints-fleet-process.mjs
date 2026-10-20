@@ -133,6 +133,13 @@ function's own branching or state. Do a small split in the same change.
    claimable board ticket. The owner plans, builds, verifies, rebases,
    self-merges, deploys when needed and records the completion commit.
    Scope follows the full root-fix seam.
+   Before handing work on, find who already built, measured or planned
+   that area (\`~/.agentmux/ROSTER.md\` first, then \`amux search\`, the
+   daily files, the repo's history). Prefer that owner when it is free;
+   otherwise point the new owner at its plans, evals and artifacts, so
+   nobody redoes a measurement that exists.
+   The Dream curator pane (sandman:0) is for meta-analysis and his
+   questions, never a worker.
 2. **Managers are sidecars, not gateways.** They act on a stall, collision,
    delivery failure or idle-capacity gap. Work, decisions, merge and delivery
    need no manager round-trip.

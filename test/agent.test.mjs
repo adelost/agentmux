@@ -594,4 +594,20 @@ feature("generated agent policy", () => {
       expect(content).toMatch(/Irreversible or money-spending actions still\s+require human approval/u);
     }],
   });
+
+  unit("hands work to whoever already built, measured or planned the area", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "CLAUDE.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["rule 1 names the roster, the search and the curator pane that never works", (content) => {
+      expect(content).toMatch(/Before handing work on, find who already built, measured or planned\s+that area/u);
+      expect(content).toContain("`~/.agentmux/ROSTER.md` first");
+      expect(content).toMatch(/so\s+nobody redoes a measurement that exists/u);
+      expect(content).toMatch(/The Dream curator pane \(sandman:0\) is for meta-analysis and his\s+questions, never a worker/u);
+    }],
+  });
 });
