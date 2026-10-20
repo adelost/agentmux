@@ -1,6 +1,6 @@
 # amux search: his messages as units, the conversation log in the daemon, 30 minutes warm while memory is free
 
-Version: 7 · 2026-10-20 09:35Z · owner of the design: api:0 · page: none yet
+Version: 10 · 2026-10-20 16:3xZ · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -551,6 +551,20 @@ start and end of each run.
   a rule that orders his own units.
 - Time, from the file list: new `core/search-his-words.mjs` (40 lines) and its test (60 lines), 40 min;
   `cli/search.mjs` (6 lines) and two tests, 20 min; the proof before and after, 15 min. Total *estimated* 1.3h.
+- *Measured*, 20 Oct 16:12-16:16Z, one machine, warm daemon, the three builds run back to back so the corpus is the
+  same: 1.25.284 (before), row 53 without the topic-merge reorder (2b913fd4), installed 1.25.285 (after).
+
+| Set | Before | Row 53 without the reorder | After (1.25.285) |
+|---|---|---|---|
+| v14 to v16 hit@1 / hit@3, MRR | 0 / 67 %, 0.28 | 67 / 100 %, 0.78 | 67 / 100 %, 0.78 |
+| v14 to v16 ranks | v14 -, v15 3, v16 2 | v14 1, v15 1, v16 3 | v14 1, v15 1, v16 3 |
+| The 47, hit@1 / hit@3, MRR | 87 / 94 %, 0.91 | not run | 87 / 94 %, 0.91, every rank the same |
+| v14 to v16 lexical | 33 / 33 % (builder, 1.25.282) | 33 / 33 % (builder) | 33 / 33 %, v14 -, v15 4, v16 1 |
+
+- v16 at 3: every hit above it is a unit of his, most from that day; their order is the reranker's (R-10). The
+  builder measured v16 at 2 three hours earlier, before those units existed. The review's reorder of the unranked topic
+  merge changed no rank here; it keeps derived topic pages below his units when the reranker did not rank topics.
+- Time: the builder's commits landed about 1 h after its brief (12:15 to 13:15Z) against 1.3 h estimated.
 
 ## 11. Rollout and rollback
 
@@ -626,7 +640,7 @@ start and end of each run.
 | 46 | Memory guard: the daemon starts only with room for its peak and closes under the floor | api:0 | done: 7ecf4e59 |  | 0.7h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | under 8 GB free the daemon closes within 30 s, and none starts under 12 GB; tests red before, green after |
 | 47 | QMD's hybrid mode against the 47 blind questions | api:0 | dropped: no yes from him for a tool |  | 1h | [Search §8](DESIGN-search-daemon.md#8-alternatives) | QMD hybrid's hit@1, hit@3 and median on the 47 questions stand beside ours in §8, with the choice |
 | 49 | His units name him, join a run of messages to one pane, and leave automation out | api:0 | done: b41ec5f6 (1.25.279) | P1 | 2h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | the 47 and v14 to v16 before and after in §10, and Dream's answer share before and after |
-| 53 | His units first for a question for his words; agent rows stay below as context | api:0 | open: after row 50 | P1 | 1.3h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | v14 to v16 at hit@1 warm and no loss on the 47, before and after in §10 |
+| 53 | His units first for a question for his words; agent rows stay below as context | api:0 | done: 21fbc3e1 (1.25.285) | P1 | 1.3h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | v14 to v16 at hit@1 warm and no loss on the 47, before and after in §10 |
 
 ## 14. Open questions
 
@@ -662,3 +676,6 @@ None for him. Calls made by api:0:
 - v9, 2026-10-20 12:4xZ: outcome 5, UC-7, I-5, R-9, R-10 and row 53 from lsrc:0's order of 12:2xZ: his units first
   for a question for his words. The prototype in §10 reaches 2 of 3 at hit@1; v16's order between two of his own
   messages is left to the reranker. The row's builder starts after row 50's.
+- v10, 2026-10-20 16:3xZ: row 53's measured results in §10 and row 53 done (1.25.285). The review added one reorder:
+  the unranked topic merge leads with derived topic pages, so his units are put first after it as well. v16 sits at 3
+  behind two newer units of his; the target hit@1 holds for v14 and v15. lsrc:0 told.
