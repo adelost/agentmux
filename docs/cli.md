@@ -155,6 +155,9 @@ before, is also one joined unit, in `YYYY-MM-DD.joined.md`. amux's own notices,
 the pane's copy of a prompt amux delivered, and a prompt of 40 characters or
 more typed 3 or more times are not his. The files are derived from the
 conversation log and can be deleted; `AMUX_SEARCH_HUMAN=0` turns them off.
+A question for his words ("vad sa <name>", "hans ord", "<name>s beslut",
+"what did he say") lists his own messages first; notes, conversation rows and
+topic pages that quote him follow as context, and no hit is dropped.
 
 `--deep` adds the much larger raw session archives. Result state is isolated per
 terminal or tmux pane, so one agent cannot replace another agent's `--show N`

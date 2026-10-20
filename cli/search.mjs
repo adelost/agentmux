@@ -69,7 +69,9 @@ from the amux config and the pane. A run of his messages to one pane, each
 within 2 minutes of the one before, is also one joined unit, in
 YYYY-MM-DD.joined.md. amux's own notices, what amux typed into a pane, and
 prompts of 40+ characters repeated 3 or more times are not his
-(AMUX_SEARCH_HUMAN=0 turns this off).
+(AMUX_SEARCH_HUMAN=0 turns this off). A question for his words ("vad sa
+<name>", "hans ord", "<name>s beslut", "what did he say") lists his own
+messages first; notes and rows that quote him follow as context.
 The canonical conversation log (last 30 days) is searched by the warm daemon
 from memory. A cold answer leaves the agents' rows out and says so.
 Use --source conversation to scan the log itself for exact posted words;
@@ -297,7 +299,9 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   hits = preferDates(hits, dates);
   // After the merge, so his units also lead the conversation and ledger rows that quote him; those stay below.
   if (forHisWords) hits = hisWordsFirst(hits, humanRoot?.path);
-  const top = topicsRanked ? hits.slice(0, flags.max ?? 12) : mergeTopicHits(hits, topicHits, flags.max ?? 12);
+  let top = topicsRanked ? hits.slice(0, flags.max ?? 12) : mergeTopicHits(hits, topicHits, flags.max ?? 12);
+  // The unranked merge leads with up to two topic pages, which are derived; his own words still lead (design v9, I-5).
+  if (forHisWords) top = hisWordsFirst(top, humanRoot?.path);
   lap("merge");
   return { top, total: hits.length + topicHits.length, elapsedMs: Date.now() - startedAt, timing, pool, reranked };
 }
