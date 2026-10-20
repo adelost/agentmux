@@ -84,11 +84,48 @@ export const NOTICES = Object.freeze([
   ["[krasch-recovery] ", "Värden startade om 03:12 mitt i din pågående turn."],
   ["[idle-capacity] ", "api:2 har inte kunnat arbeta på 20 min: kvotgräns."],
   ["[model-watch] ", "Du är nedgraderad opus → sonnet."],
-  ["[amux-link-turn:turn-test-1]\n", "svara på det här"],
   ["[AMUX leveransstopp · observerat 2026-10-20T07:00:00.000Z]\n", "Din uppgift till api:0 har inte nått mottagaren."],
   ["[drift-guard] ", "Läs om reglerna i AGENTS.md."],
 ].map(([tag, tail], index) => ({ id: `notice:${index}`, ts: new Date(Date.parse("2026-10-18T10:00:00.000Z") + index * 3_600_000).toISOString(),
   agent: "lsrc", pane: 2, source: "pane-hook", text: `${tag}${tail}` })));
+
+/** The marker line the Link connector puts in front of his message from the phone (channels/link-connector.mjs, linkTurnPrompt). */
+export const linkTurn = (id, words) => `[amux-link-turn:${id}]\n${words}`;
+
+/**
+ * His messages from the phone (v7), as the pane records them: the marker line with the turn's id, then his words. `bare` is
+ * a marker with no words and `mention` a typed message that only talks about the marker. `delivered` is the connector's own
+ * row of one more turn, which passes no source, so the log says "unknown", and `copy` is the pane's record of it 4 s later.
+ */
+export const LINK = Object.freeze({
+  plain: { id: "link:1", ts: "2026-10-18T09:00:00.000Z", agent: "lsrc", pane: 2, source: "pane-hook",
+    text: linkTurn("turn-test-1", "Kan du kolla autocompact-gränsen?\nSvara kort när det är klart.") },
+  voice: { id: "link:2", ts: "2026-10-18T09:30:00.000Z", agent: "lsrc", pane: 2, source: "pane-hook",
+    text: linkTurn("turn-test-2", `${VOICE_PREFIX}Hej från telefonen, gränsen behöver dokumenteras`) },
+  bare: { id: "link:3", ts: "2026-10-18T10:00:00.000Z", agent: "lsrc", pane: 2, source: "pane-hook", text: "[amux-link-turn:turn-test-3]" },
+  mention: { id: "link:4", ts: "2026-10-18T10:30:00.000Z", agent: "lsrc", pane: 2, source: "pane-hook",
+    text: "Vad gör [amux-link-turn:turn-test-4] egentligen i panelen?" },
+  delivered: { id: "delivery:link-5", ts: "2026-10-18T11:00:00.000Z", agent: "lsrc", pane: 2, source: "unknown",
+    text: linkTurn("turn-test-5", "Nästa sak från telefonen: sammanfatta dagen") },
+  copy: { id: "hook:link-5", ts: "2026-10-18T11:00:04.000Z", agent: "lsrc", pane: 2, source: "pane-hook",
+    text: linkTurn("turn-test-5", "Nästa sak från telefonen: sammanfatta dagen") },
+});
+
+/**
+ * Deliveries that amux typed into a pane and that no person wrote (v7), each with the pane-hook row the pane made of it 4 s
+ * later. Their words read like a person's, so only the delivery tells the copy from a message he typed.
+ */
+export const AMUX_DELIVERIES = Object.freeze([
+  ["self-compact", "Fortsätt där du slutade och dokumentera gränsen för autocompact"],
+  ["cli", "Granska ändringen i paret och säg till när testerna är gröna"],
+  ["delivery-recovery", "Din uppgift till api:0 lämnades av sig själv efter ett omstartat nät"],
+].map(([source, text], index) => {
+  const ms = Date.parse("2026-10-16T08:00:00.000Z") + index * 3_600_000;
+  return Object.freeze({
+    delivered: { id: `amux:${source}`, ts: new Date(ms).toISOString(), agent: "api", pane: 3 + index, source, text },
+    copy: { id: `amux:${source}:copy`, ts: new Date(ms + 4000).toISOString(), agent: "api", pane: 3 + index, source: "pane-hook", text },
+  });
+}));
 
 /** Prompts of 39 and 40 characters: the first is too short to count as repeated, the second is not. */
 export const SHORT_PROMPT = "Ta nästa punkt i listan och skriv klart";

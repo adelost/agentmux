@@ -198,6 +198,24 @@ feature("Dream reads the conversation log before any journal", () => {
     }],
   });
 
+  unit("answeredShare counts no pane-hook copy of an amux delivery as his", {
+    given: ["one answered ask of his, and a self-compact delivery on a second pane with the pane's copy of it 4 seconds later", () => {
+      const text = "Fortsätt där du slutade och dokumentera gränsen för autocompact";
+      const copyAt = new Date(Date.parse(at(2)) + 4000).toISOString();
+      return { coverageStartMs: SINCE,
+        asks: [
+          ask("human", 0, at(1), "kolla loggen och rapportera"),
+          ask("compact", 1, at(2), text, "self-compact"), ask("compact-copy", 1, copyAt, text, "pane-hook"),
+        ],
+        posts: [post(0, at(1, 5), "reply", "loggen är läst")],
+      };
+    }],
+    when: ["measuring the settled asks", (data) => answeredShare(data, { nowMs: NOW })],
+    then: ["the copy is the delivery's: the only ask of his is the answered one", (result) => {
+      expect(result).toEqual({ asked: 1, answered: 1, share: 1, unanswered: {} });
+    }],
+  });
+
   unit("the shadow counts settled human asks that got an answer posted", {
     given: ["three discord asks on lsrc:1, one answered, one too recent, plus an unanswered cli brief", () => ({
       coverageStartMs: SINCE,

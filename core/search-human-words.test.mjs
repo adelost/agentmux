@@ -6,8 +6,8 @@ import { AMUX_PANE_TAGS, isHumanAsk } from "./ask-origin.mjs";
 import { acquireFileLease } from "./file-lease.mjs";
 import { syncHumanWords } from "./search-human-words.mjs";
 import { markdownUnits } from "./search-units.mjs";
-import { BETWEEN, BURST, createHumanDir, createLog, createThreeFileLog, HIS_NAME, LONG_MESSAGE, LONG_PROMPT, LOOP_PROMPT, MESSAGES, NOTICES,
-  NOW_MS, SHORT_PROMPT, typedTimes, VOICE_PREFIX } from "../test/fixtures/conversation-log.mjs";
+import { AMUX_DELIVERIES, BETWEEN, BURST, createHumanDir, createLog, createThreeFileLog, HIS_NAME, LINK, LONG_MESSAGE, LONG_PROMPT, LOOP_PROMPT, MESSAGES,
+  NOTICES, NOW_MS, SHORT_PROMPT, typedTimes, VOICE_PREFIX } from "../test/fixtures/conversation-log.mjs";
 
 const sync = (log, human, options = {}) => syncHumanWords({ dir: human.dir, ledgerPath: log.path, nowMs: NOW_MS, ...options });
 const dayFiles = (dir) => readdirSync(dir).filter((name) => /^\d{4}-\d{2}-\d{2}\.md$/u.test(name)).sort();
@@ -430,7 +430,7 @@ feature("his messages as day files", () => {
     when: ["asking whether each row is his", ({ rows }) => rows.map(isHumanAsk)],
     then: ["none is his, each tag names the file that sends it, and that file holds the tag", (answers, { list }) => {
       expect(list.map(({ tag }) => tag)).toEqual(expect.arrayContaining(["[stall-watch]", "[pause-compact]", "[krasch-recovery]", "[idle-capacity]",
-        "[model-watch]", "[amux-link-turn", "[AMUX leveransstopp", "[drift-guard]"]));
+        "[model-watch]", "[AMUX leveransstopp", "[drift-guard]"]));
       expect(answers.every((answer) => answer === false)).toBe(true);
       for (const { tag, sender } of list) {
         expect(sender, tag).toBeTruthy();
@@ -533,6 +533,67 @@ feature("his messages as day files", () => {
         expect(none).toBe("- **10:00:00Z lsrc:0** Kom ihåg att autocompact-gränsen ska vara sjuttio procent");
         expect(state).toBe("");
       } finally { human.remove(); log.remove(); }
+    }],
+  });
+
+  // Row 49, review round: the Link marker is not automation, and a pane's copy of an amux delivery is not his.
+  component("keeps his Link words and drops only the marker", {
+    given: ["his messages from the phone as the pane records them (two lines, a voice message, a marker with no words), a typed message that only mentions the marker, and one more turn that has the connector's own row as well as the pane's copy", () => {
+      const log = createLog();
+      for (const message of [LINK.plain, LINK.voice, LINK.bare, LINK.mention, LINK.delivered, LINK.copy]) log.ask(message);
+      return { log, human: createHumanDir() };
+    }],
+    when: ["syncing with his name", ({ log, human }) => {
+      sync(log, human, { name: HIS_NAME });
+      return { files: readdirSync(human.dir).sort(), day: read(human.dir, "2026-10-18.md") };
+    }],
+    then: ["each turn is one unit of his words alone, the voice one keeps its flag, a marker with no words is nothing, the mention stays as written, and the connector's row makes no second unit", ({ files, day }, { log, human }) => {
+      try {
+        expect(day).toBe(`${header("2026-10-18")}`
+          + "- **09:00:00Z Mattias to lsrc:2** Kan du kolla autocompact-gränsen?\n  Svara kort när det är klart.\n"
+          + "- **09:30:00Z Mattias to lsrc:2 voice** Hej från telefonen, gränsen behöver dokumenteras\n"
+          + "- **10:30:00Z Mattias to lsrc:2** Vad gör [amux-link-turn:turn-test-4] egentligen i panelen?\n"
+          + "- **11:00:04Z Mattias to lsrc:2** Nästa sak från telefonen: sammanfatta dagen\n");
+        expect(files).toEqual([".lease", "2026-10-18.md", "state.json"]);
+      } finally { human.remove(); log.remove(); }
+    }],
+  });
+
+  component("a pane-hook copy of an amux delivery is not his", {
+    given: ["his typed message, his Discord message with its copy, three deliveries that amux typed into panes (self-compact, cli, delivery-recovery) with their copies, and two more copies of a self-compact delivery: one 15 minutes after it, one 15 minutes 1 second after", () => {
+      const quarter = Date.parse("2026-10-16T12:00:00.000Z");
+      const edge = (id, pane, afterMs) => {
+        const text = `Fortsätt med nästa punkt i planen, ${id}`;
+        return [{ id: `edge:${id}`, ts: new Date(quarter).toISOString(), agent: "api", pane, source: "self-compact", text },
+          { id: `edge:${id}:copy`, ts: new Date(quarter + afterMs).toISOString(), agent: "api", pane, source: "pane-hook", text }];
+      };
+      return {
+        his: [MESSAGES.typed, MESSAGES.delivery, MESSAGES.hookCopy],
+        amux: AMUX_DELIVERIES.flatMap(({ delivered, copy }) => [delivered, copy]),
+        quarterHour: [...edge("on-time", 7, 15 * 60_000), ...edge("late", 8, 15 * 60_000 + 1000)],
+      };
+    }],
+    when: ["syncing the log in one go, and in two syncs where every delivery comes before its copy and the first sync also saves a message of his", ({ his, amux, quarterHour }) => {
+      const run = (...batches) => {
+        const log = createLog();
+        const human = createHumanDir();
+        try {
+          for (const batch of batches) { for (const message of batch) log.ask(message); sync(log, human); }
+          return bullets(human.dir);
+        } finally { human.remove(); log.remove(); }
+      };
+      const all = [...his, ...amux, ...quarterHour];
+      const isCopy = (message) => message.source === "pane-hook" && message !== MESSAGES.typed;
+      return { together: run(all), inTwoSyncs: run(all.filter((message) => !isCopy(message)), all.filter(isCopy)) };
+    }],
+    then: ["only what he wrote is a unit: his typed message, his Discord message once, and the copy that came after the quarter hour; a copy within it is the delivery's, whether the log is synced in one go or in two", (result) => {
+      const expected = [
+        "- **05:39:58Z api:0** Okej, ja men vi kör Sonnet för genomförandet och Opus planerar",
+        "- **12:15:01Z api:8** Fortsätt med nästa punkt i planen, late",
+        "- **14:30:00Z lsrc:1** Kör testerna för autocompact nu",
+      ];
+      expect(result.together).toEqual(expected);
+      expect(result.inTwoSyncs).toEqual(expected);
     }],
   });
 });
