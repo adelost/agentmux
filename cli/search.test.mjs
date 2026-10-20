@@ -372,3 +372,91 @@ feature("the conversation log in the search CLI", () => {
     }],
   });
 });
+
+// A question for his words lists his units first (docs/DESIGN-search-daemon.md v9: UC-7, I-5, R-9). The world is made up:
+// the reranker puts two agents' notes above one unit of his, and the warm daemon adds a conversation row, so his unit is
+// the last of four until the question asks for him.
+const HIS_WORDS_QUESTION = "vad sa Mattias om lyktschemat";
+const TODAYS_ORDER = ["conversation row", "agent note", "agent summary", "his unit"];
+const conversationRow = { path: "/daemon/ask-ledger.jsonl", line: 0, root: "conversation", weight: 2, layer: "L1", date: "2026-10-20",
+  timestamp: "2026-10-20T07:00:00.000Z", conversationId: "row-quoting-him", agent: "api", pane: 0, eventKind: "post",
+  dedupeKey: "conversation:row-quoting-him", matches: 4, score: 9, snippet: "api:0 skrev att Mattias sa att lyktschemat ska ligga kvar" };
+
+const hisWordsWorld = () => {
+  const human = createHumanDir();
+  const notes = mkdtempSync(join(tmpdir(), "amux-search-his-words-"));
+  const units = [
+    ["agent note", notes, "memory", "agent-note.md", "api:0 antecknade att Mattias sa att lyktschemat ska ligga kvar.", 3],
+    ["agent summary", notes, "memory", "agent-summary.md", "api:1 sammanfattade att lyktschemat ligger kvar enligt Mattias.", 2],
+    ["his unit", human.dir, "human", "2026-10-20.md", "**09:00:00Z Mattias to api:0** Lyktschemat ska ligga kvar som det är.", 1],
+  ].map(([label, dir, root, file, bullet, score], rank) => {
+    const path = join(dir, file);
+    const text = `# 2026-10-20\n- ${bullet}\n`;
+    writeFileSync(path, text);
+    const info = statSync(path);
+    const start = text.indexOf("\n") + 1;
+    return { label, path, bullet, score, dense: { path, line: 2, root, weight: 3, date: "2026-10-20", sim: 0.9 - rank * 0.1,
+      unit: { start, length: text.length - start - 1, section: { start: 0, end: text.length } }, indexedMtimeMs: info.mtimeMs, indexedSize: info.size } };
+  });
+  // The first stage is empty on purpose: the reranker judges the three dense hits and nothing the lexical layer would add.
+  const semantic = {
+    query: async () => ({ hits: units.map((unit) => unit.dense), reranker: { kind: "gpu", candidates: 30, perFile: 2, semanticK: 30, note: null } }),
+    passages: async () => [],
+    rerank: async (_question, texts) => ({ scores: texts.map((text) => units.find((unit) => text.includes(unit.bullet))?.score ?? 0), weight: 1, kind: "gpu" }),
+    conversation: async () => [conversationRow],
+  };
+  const labelOf = (hit) => hit.conversationId ? "conversation row" : units.find((unit) => unit.path === hit.path)?.label ?? hit.path;
+  const rootsFor = (name) => [
+    { name: "memory", path: notes, glob: "*.md", exclude: [], semanticExclude: [], weight: 3, semantic: true, kind: null },
+    { ...humanRootOf(human.dir), ...(name ? { humanName: name } : {}) },
+  ];
+  return { human, notes, semantic, labelOf, rootsFor };
+};
+const endHisWordsWorld = (world) => { world.human.remove(); rmSync(world.notes, { recursive: true, force: true }); };
+const askForHisWords = (world, question, { name = "Mattias", ...flags } = {}) =>
+  collectSearchHits(question, world.rootsFor(name), world.notes, flags, { warn: () => {}, semantic: world.semantic, syncHuman: () => {} })
+    .then(({ top }) => top.map(world.labelOf));
+
+feature("a question for his words in the search CLI", () => {
+  component("puts his units above agent rows for a question for his words", {
+    given: ["two agent notes and a conversation row that the ranking puts above one unit of his", hisWordsWorld],
+    when: ["asking for his words with his name configured, and the same question with none", async (world) => ({
+      named: await askForHisWords(world, HIS_WORDS_QUESTION),
+      unnamed: await askForHisWords(world, HIS_WORDS_QUESTION, { name: "" }),
+    })],
+    then: ["without his name the row and both notes lead as before; with it his unit is first and all four stay", ({ named, unnamed }, world) => {
+      try {
+        expect(unnamed).toEqual(TODAYS_ORDER);
+        expect(named).toEqual(["his unit", "conversation row", "agent note", "agent summary"]);
+      } finally { endHisWordsWorld(world); }
+    }],
+  });
+
+  component("keeps the order of every other question", {
+    given: ["the same world, with his name configured", hisWordsWorld],
+    when: ["asking what an agent noted, another pane's words, and the words of a person whose name only contains his", async (world) => {
+      const orders = [];
+      for (const question of ["vad antecknade api:0 om lyktschemat", "vad sa api:0 om lyktschemat", "vad sa Mattiasson om lyktschemat"]) {
+        orders.push(await askForHisWords(world, question));
+      }
+      return orders;
+    }],
+    then: ["each keeps today's order, with his unit last", (orders, world) => {
+      try { for (const order of orders) expect(order).toEqual(TODAYS_ORDER); } finally { endHisWordsWorld(world); }
+    }],
+  });
+
+  component("reaches a unit of his that the cut would drop when the question is for his words", {
+    given: ["the same world and a list cut to two hits", hisWordsWorld],
+    when: ["asking for his words with --max 2, with his name configured and with none", async (world) => ({
+      named: await askForHisWords(world, HIS_WORDS_QUESTION, { max: 2 }),
+      unnamed: await askForHisWords(world, HIS_WORDS_QUESTION, { max: 2, name: "" }),
+    })],
+    then: ["without his name his unit is cut off; with it his unit leads the cut list", ({ named, unnamed }, world) => {
+      try {
+        expect(unnamed).toEqual(["conversation row", "agent note"]);
+        expect(named).toEqual(["his unit", "conversation row"]);
+      } finally { endHisWordsWorld(world); }
+    }],
+  });
+});

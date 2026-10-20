@@ -27,6 +27,7 @@ import { documentWindow, firstAnswerRank, formatEvalReport, parseGoldenCases, su
 import { classifyQuery, fuseRankings, semanticSearchHits } from "../core/search-fusion.mjs";
 import { daemonAlive, daemonConversation, daemonPassages, daemonRerank, semanticQuery, startEmbedder } from "../core/search-embedder.mjs";
 import { syncHumanWords } from "../core/search-human-words.mjs";
+import { asksForHisWords, hisWordsFirst } from "../core/search-his-words.mjs";
 import { exitAfterGpu, gpuEnv, holdReindexLock } from "../core/search-gpu.mjs";
 import { spawnSync } from "node:child_process";
 import { blendRerank, RERANK_CANDIDATES, rerankText } from "../core/search-rerank.mjs";
@@ -153,6 +154,8 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   const ledgerRoot = roots.find((root) => root.kind === "event-ledger");
   // His name comes from the root whatever --source says, so a question about the log never writes the day files without it.
   const humanName = allRoots.find((root) => root.kind === "human-words")?.humanName;
+  // The intent comes from the question as typed, not from the content temporalIntent leaves (design v9).
+  const forHisWords = asksForHisWords(query, humanName);
   const conversation = await conversationStep(content, flags, { semantic, warn, humanName });
   Object.assign(timing, conversation.hits.timing || {});
   // The daemon brings his day files up to date when it answers; otherwise this process does, before they are read.
@@ -283,6 +286,8 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   }
   if (perFile > 2) ranked = ranked.filter(topPassagesPerFile(3));
   ranked = preferDates(ranked, dates);
+  // Before the cut to max, so a unit of his ranked 26th still enters (design v9, R-9).
+  if (forHisWords) ranked = hisWordsFirst(ranked, humanRoot?.path);
   if (fileAnd && !flags.raw && !exactDocument && ranked.length < 3) {
     const fileLevel = lexicalSearch(content, lexicalRoots, { includeFileAnd: true }).filter(hit => hit.layer === "L2"
       && !isTopicPath(hit.path, workspace));
@@ -290,6 +295,8 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   }
   if (ranked.length) hits = mergePassageHits(hits, ranked.slice(0, flags.max ?? 12));
   hits = preferDates(hits, dates);
+  // After the merge, so his units also lead the conversation and ledger rows that quote him; those stay below.
+  if (forHisWords) hits = hisWordsFirst(hits, humanRoot?.path);
   const top = topicsRanked ? hits.slice(0, flags.max ?? 12) : mergeTopicHits(hits, topicHits, flags.max ?? 12);
   lap("merge");
   return { top, total: hits.length + topicHits.length, elapsedMs: Date.now() - startedAt, timing, pool, reranked };
