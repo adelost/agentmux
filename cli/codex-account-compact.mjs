@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { createContextMaintenance } from "../core/context-maintenance.mjs";
+import { isDeliveryInFlight } from "../core/delivery-queue-policy.mjs";
 import { latestCodexSessionIdentity } from "../core/codex-jsonl-reader.mjs";
 import { nightlyCompactDecision } from "../core/nightly-compact.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
@@ -10,7 +11,9 @@ import { observeNightlyPane } from "./nightly-compact.mjs";
 export async function compactCodexBeforeSwitch(ctx, target, { dry = false } = {}) {
   if (target.engine !== "codex" || !target.sourceHome) throw new Error("Codex switch requires its verified source home");
   const name = target.agent.name, pane = target.pane.index;
-  const facts = await observeNightlyPane(ctx, target, { queue: ctx.deliveryQueue });
+  // A queued job waits for the switch; only a delivery in flight holds its compact.
+  const inFlight = { list: (agentName, index) => ctx.deliveryQueue.list(agentName, index).filter(isDeliveryInFlight) };
+  const facts = await observeNightlyPane(ctx, target, { queue: inFlight });
   const reason = nightlyCompactDecision(facts, { enabled: true, maxTokens: readContextCostPolicy().maxTokens, idleMinutes: 0 }, null, { force: true });
   if (reason) return { ok: false, reason: `compact-skipped:${reason}` };
   const maintenance = createContextMaintenance({
@@ -19,5 +22,5 @@ export async function compactCodexBeforeSwitch(ctx, target, { dry = false } = {}
     identityFor: (_engine, dir) => latestCodexSessionIdentity(dir, { sessionDirs: [join(target.sourceHome, "sessions")], sessionId: target.sessionId }),
     log: message => console.error(`account compact | ${message}`),
   });
-  return maintenance.run(name, pane, { required: true, dry });
+  return maintenance.run(name, pane, { required: true, dry, beforeDelivery: true });
 }

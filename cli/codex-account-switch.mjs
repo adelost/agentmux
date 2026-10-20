@@ -15,7 +15,7 @@ import { prepareCodexAccountHandover } from "../core/codex-account-handover.mjs"
 import { driveCodexStatus } from "../core/codex-status.mjs";
 import { contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
 import { findBlockingPrompt } from "../core/dismiss.mjs";
-import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
+import { isDeliveryInFlight } from "../core/delivery-queue-policy.mjs";
 import { defaultDeliveryQueueDir } from "../core/delivery-queue.mjs";
 import { acquireFileLease } from "../core/file-lease.mjs";
 import { accountSwitchStatus, registerAccountSwitchBatch } from "./codex-account-status.mjs";
@@ -26,7 +26,8 @@ import { codexWeeklyLimitReached } from "../core/codex-limit-recovery.mjs";
 export const CODEX_ACCOUNT_REQUESTS = "codex_account_requests_v1";
 const running = new Set();
 const keyOf = (name, pane) => `${name}:${pane}`;
-const pendingJobs = (ctx, name, pane) => ctx.deliveryQueue.list(name, pane).some(job => !TERMINAL_DELIVERY_STATES.has(job.status));
+// A queued job waits for the move and lands after it, in order; only a delivery in flight holds a switch.
+const deliveryInFlight = (ctx, name, pane) => ctx.deliveryQueue.list(name, pane).some(isDeliveryInFlight);
 const requestOf = (ctx, key) => ctx.state.get(`${CODEX_ACCOUNT_REQUESTS}:${key}`, null);
 const save = (ctx, key, value, replace = false) => {
   const field = `${CODEX_ACCOUNT_REQUESTS}:${key}`;
@@ -47,7 +48,7 @@ async function observe(ctx, name, pane, deps) {
   if (process?.running === false || process?.shell || process?.dead) return { dormant: true };
   if (!process?.running) return { blocked: "process-unknown" };
   if (await ctx.agent.isBusy(name, pane)) return { blocked: "working" };
-  if (pendingJobs(ctx, name, pane)) return { blocked: "delivery-pending" };
+  if (deliveryInFlight(ctx, name, pane)) return { blocked: "delivery-in-flight" };
   const screen = await ctx.agent.captureScreen(name, pane);
   if (findBlockingPrompt(screen)) return { blocked: "modal-open" };
   const transport = await ctx.agent.promptTransportState(name, pane, "");
@@ -113,7 +114,7 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
         || windows.some(window => window.usedPercent >= 100)) throw new Error("target has no verified quota room");
     if (observed.dormant) {
       lease = ctx.deliveryQueue.acquireSessionLease(name, pane);
-      if (!lease || pendingJobs(ctx, name, pane)) return pending("delivery-lease-busy");
+      if (!lease || deliveryInFlight(ctx, name, pane)) return pending("delivery-lease-busy");
       const fresh = await observe(ctx, name, pane, deps);
       if (!fresh.dormant) return pending("pane-started");
       const identity = deps.identity(dir, { sessionDirs: [join(current.home, "sessions")] });
@@ -141,11 +142,16 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
       setCodexProfile(ctx.state, name, pane, target.id);
       return finish(ctx, key, request, { kind: "selected", dormant: true, sessionId: identity?.sessionId || null });
     }
+    // The probe types /status, so it holds the session lease as a delivery would; the compact takes its own.
+    lease = ctx.deliveryQueue.acquireSessionLease(name, pane);
+    if (!lease) return pending("delivery-lease-busy");
     let native = await deps.status({ agent: ctx.agent, name, pane });
     if (!native.ok && ["compose", "parse"].includes(native.stage)) {
       const gate = await observe(ctx, name, pane, deps);
       if (!gate.blocked && !gate.dormant && gate.current.id === current.id) native = await deps.status({ agent: ctx.agent, name, pane });
     }
+    lease.release();
+    lease = null;
     if (!native.ok || !native.status?.session) return pending(`native-source-status:${native.stage || "session-missing"}`);
     const identityOptions = { sessionDirs: [join(current.home, "sessions")], sessionId: native.status.session };
     const before = deps.identity(dir, identityOptions);

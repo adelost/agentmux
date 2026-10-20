@@ -189,6 +189,44 @@ describe("Codex operator account switches", () => {
       expect(fx.data.codex_profile_by_pane).toBeUndefined();
     } finally { fx.clean(); }
   });
+  // 20 Oct 17:05Z: six panes held deliveries the quota floor refused on their spent account; the switch waited for them.
+  it("moves a pane whose queued delivery waits for an account with room", async () => {
+    const fx = fixture();
+    fx.ctx.deliveryQueue.list = () => [{ id: "floor-held", status: "pending", lastReason: "wake-refused:quota-floor" }];
+    try {
+      const r = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(r.rows[0].status).toBe("switched");
+      expect(fx.calls.map(call => call.step)).toEqual(["prepare", "compact", "transfer", "restart"]);
+    } finally { fx.clean(); }
+  });
+  it("leaves a pane pending while a delivery is being written to it", async () => {
+    const fx = fixture();
+    fx.ctx.deliveryQueue.list = () => [{ id: "typing", status: "pasting" }];
+    try {
+      const r = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(r.rows[0]).toMatchObject({ status: "pending", reason: "delivery-in-flight" });
+      expect(fx.calls).toEqual([]);
+    } finally { fx.clean(); }
+  });
+  it("reads the native status only under the session lease, so it never types into a delivery", async () => {
+    const fx = fixture(), status = fx.options.status;
+    fx.ctx.deliveryQueue.acquireSessionLease = () => null;
+    fx.options.status = async input => { fx.calls.push({ step: "status" }); return status(input); };
+    try {
+      const r = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(r.rows[0]).toMatchObject({ status: "pending", reason: "delivery-lease-busy" });
+      expect(fx.calls.map(call => call.step)).toEqual(["prepare"]);
+    } finally { fx.clean(); }
+  });
+  it("selects a dormant pane whose queued delivery will start it on the new account", async () => {
+    const fx = fixture({ dormant: true });
+    fx.ctx.deliveryQueue.list = () => [{ id: "floor-held", status: "pending", lastReason: "wake-refused:quota-floor" }];
+    try {
+      const r = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(r.rows[0].status).toBe("selected-for-next-start");
+      expect(fx.data.codex_profile_by_pane["claw:0"]).toBe("2");
+    } finally { fx.clean(); }
+  });
   it("dry-run has no request, profile, compact, transfer or restart writes", async () => {
     const fx = fixture();
     try {

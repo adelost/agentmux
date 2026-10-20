@@ -8,6 +8,9 @@ export const TERMINAL_DELIVERY_STATES = new Set([
   "acknowledged", "cancelled", DELIVERED_UNVERIFIED_STATE,
 ]);
 
+/** WHAT: Checks whether a delivery may be writing to its pane now. WHY: Keeps a queued job, which waits for the session lease, from holding work done under that lease. */
+export const isDeliveryInFlight = job => !TERMINAL_DELIVERY_STATES.has(job.status) && job.status !== "pending";
+
 /** WHAT: Calculates bounded retries for blocked delivery. WHY: Keeps persistent safety holds from creating a busy retry loop. */
 export function blockedRetryMs(job, { drafted = false } = {}) {
   const base = drafted ? 5_000 : 3_000;
