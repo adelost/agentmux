@@ -1,6 +1,6 @@
 # amux search: his messages as units, the conversation log in the daemon, 30 minutes warm while memory is free
 
-Version: 6 · 2026-10-20 09:10Z · owner of the design: api:0 · page: none yet
+Version: 7 · 2026-10-20 09:35Z · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -15,6 +15,11 @@ His questions of 20 Oct 07:12Z about the memory a warm daemon holds, and his ans
 api:0 and asks for everything to be written down (daily log 2026-10-20, api:0's heading on the search daemon's
 memory), add outcome 3.
 
+After 1.25.277, lsrc:0 asked why his exact words still do not come first (v14 to v16 stayed at 33 %). The cause,
+measured 09:2xZ: his units never hold his name, so "vad sa Mattias om …" favours notes that say it; voice splits one
+thought over several messages; and 1 398 of the 8 303 units were automation typed into panes. lsrc:0's order of
+09:3xZ adds outcome 4 and asks how Dream's answer statistic moves, with the same proof before and after.
+
 The outcome:
 
 1. The daemon follows the canonical conversation log incrementally and reads only new lines. His messages become
@@ -23,6 +28,8 @@ The outcome:
 2. The daemon stays warm for 30 minutes after the last search, not 2.
 3. The daemon holds memory only while the machine has room. It does not start without room for its peak, and it
    closes when free memory falls under a floor.
+4. His units name him, his messages to one pane within about 2 minutes also form one joined unit (the single units
+   stay), and no automation counts as his: amux's own notices, and long prompts repeated 3 or more times.
 
 Principles, in the order they decide:
 
@@ -46,6 +53,8 @@ n/a: a command-line tool with no screens. The result lists keep their form. What
 | Place | Product text | Max length | Stage |
 |---|---|---|---|
 | Result source of a message of his | `~/.agentmux/search-human/2026-10-20.md:14` and the snippet `**HH:MM:SSZ agent:pane voice** <his words>` | 220 | v1 |
+| The same, with his name (v7) | `**07:07:54Z Mattias to lsrc:0 voice** <his words>` | 220 | v7 |
+| A joined unit (v7) | `~/.agentmux/search-human/2026-10-20.joined.md:3` and `**07:07:54Z to 07:08:14Z Mattias to lsrc:0, 2 messages** <his words>` | 240 | v7 |
 | Warning when the daemon is cold and no `--source conversation` | `ℹ conversation log is searched by the warm search daemon, which is not up; this answer leaves it out` | 110 | v1, words v4 |
 | `amux search --help` | "The search daemon stays loaded for 30 minutes after the last question" in place of "exits when idle" | 80 | v1 |
 | `amux search --help`, appended to the line above | ", while at least 8 GB RAM is free" | 40 | v2 |
@@ -130,12 +139,17 @@ flowchart LR
 - Switches:
   - `AMUX_EMBEDDER_IDLE_MIN` decides how long the daemon stays up after the last question (default 30, was 2);
   - `AMUX_SEARCH_HUMAN=0` leaves the human root out of every search and stops the sync;
+  - `human.name` in `~/.agentmux/agentmux.yaml` is the name his unit headers carry ("Mattias" here); unset, the
+    headers carry none;
   - `AMUX_EMBEDDER_MIN_FREE_GB` decides the memory floor (default 8). The daemon starts only with the floor plus
     5 GB free, because its peak was 3.8 GB and the conversation window adds about 0.5 GB (§10), and closes within 30 s when free memory falls under the floor.
     0 turns the guard off.
 - Invariants:
   - **I-1** No question reads a log byte twice in a warm daemon. Enforced in `ledger-tail.mjs`, guarded by
     `core/ledger-tail.test.mjs`, "reads only bytes appended since the last call".
+  - **I-2b** (v7) A message joins one joined unit when his previous message to the same pane came 2 minutes or less
+    before it; nothing that amux typed into a pane, and no long prompt repeated 3 or more times in the window, is his.
+    Enforced in `search-human-words.mjs` and `ask-origin.mjs` (`humanAsksOf`), guarded by the v7 tests in §6.
   - **I-2** Each message of his is exactly one unit (split only by the 1 600-character cap), with its words unchanged
     apart from the bridge's voice prefix. Enforced in `search-human-words.mjs`, guarded by
     `core/search-human-words.test.mjs`, "writes each message of his once, word for word".
@@ -242,6 +256,22 @@ syncHumanWords(dir, now):                             # search-human-words.mjs
   #        "drops agents' briefs and system wrappers", "merges a delivery with its pane-hook copy",
   #        "deletes days past the window", "resumes after a failed append without losing a message"
 
+v7 changes to syncHumanWords and isHumanAsk:          # search-human-words.mjs, ask-origin.mjs
+  a state.json of an older format version -> delete the day files and state, then rebuild from the log
+  header = "- **HH:MM:SSZ <human.name> to agent:pane[ voice]** "   (no name when human.name is unset)
+  humanAsksOf(asks in the window):                    # ask-origin.mjs, also used by answeredShare
+    keep isHumanAsk(ask), where isHumanAsk now also refuses a prompt that starts with one of amux's own tags
+      (every bracket tag amux types into a pane, collected from its send sites, for example [stall-watch])
+    drop every ask whose authored text, 40 characters or longer, occurs 3 or more times among the window's asks
+  a text that reaches 3 copies -> its copies already written leave the day files
+  joined: for each day that changed, rewrite <day>.joined.md from that day's bullets: runs of his messages to the
+    same pane with gaps of 2 minutes or less, 2 or more messages, one bullet each
+    "- **HH:MM:SSZ to HH:MM:SSZ <name> to agent:pane, N messages** " + the texts, one per indented line
+  # tests: "writes his name in each unit's header", "joins his messages to one pane within 2 minutes and keeps the
+  #        singles", "keeps amux's own notices out", "keeps a prompt repeated three times out and removes its copies",
+  #        "rebuilds the day files when their format changes"; dream-conversation.test.mjs
+  #        "answeredShare counts no amux notice or repeated prompt as his"
+
 conversationWindow.search(query, max):                # conversation-window.mjs (daemon)
   add(tail(...)) first: rows into the 30-day window, tokens into an inverted index (token -> row ids)
   words = unique searchTokens(query); empty -> []
@@ -329,7 +359,7 @@ when he asks for less.
   - Mitigation: verbatim text, only the bridge's voice prefix removed; offsets saved after the write.
   - Detection: "writes each message of his once, word for word"; the three verbatim questions v14 to v16.
   - Fallback: `--source conversation` still reads the log itself. Owner api:0.
-- **R-2 Agents' words are counted as his.** Possible.
+- **R-2 Agents' words are counted as his.** Happened: 1 398 of the 8 303 units of v1 were automation (v7 fixes it).
   - Mitigation: the same predicate as the Dream answer statistic (`HUMAN_ASK_SOURCES` and `inferAskOrigin`), moved
     to one exported function.
   - Detection: "drops agents' briefs and system wrappers".
@@ -492,6 +522,7 @@ start and end of each run.
 | 45 | Release with before and after on the same machine | api:0 | done: 7ecf4e59 |  | 0.5h | [Search §12](DESIGN-search-daemon.md#12-tests) | installed release; 47 questions and v14 to v16 warm and cold before and after, with load averages, in §10 |
 | 46 | Memory guard: the daemon starts only with room for its peak and closes under the floor | api:0 | done: 7ecf4e59 |  | 0.7h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | under 8 GB free the daemon closes within 30 s, and none starts under 12 GB; tests red before, green after |
 | 47 | QMD's hybrid mode against the 47 blind questions | api:0 | dropped: no yes from him for a tool |  | 1h | [Search §8](DESIGN-search-daemon.md#8-alternatives) | QMD hybrid's hit@1, hit@3 and median on the 47 questions stand beside ours in §8, with the choice |
+| 49 | His units name him, join a run of messages to one pane, and leave automation out | api:0 | working: Sonnet builds, api:0 reviews | P1 | 2h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | the 47 and v14 to v16 before and after in §10, and Dream's answer share before and after |
 
 ## 14. Open questions
 
@@ -520,3 +551,5 @@ None for him. Calls made by api:0:
 - v5, 2026-10-20 09:00Z: row 47 dropped. It was my proposal, and his 2026-08-04 rule asks for his yes per tool.
 - v6, 2026-10-20 09:10Z: the results of 1.25.277 in §10, the timer table at the measured 4.2 GB, the Small first boxes
   and rows 43 to 46 done.
+- v7, 2026-10-20 09:35Z: outcome 4 and row 49 from the cause of 09:2xZ and lsrc:0's order: his name in the headers,
+  joined units within 2 minutes, automation out through one `humanAsksOf` that Dream's answer share uses too.
