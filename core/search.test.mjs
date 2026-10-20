@@ -1,9 +1,10 @@
 import { unit, component, feature, expect } from "bdd-vitest";
+import { vi } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
-  loadSearchRoots, withEventLedgerRoot, escapeRegex, snippetPattern, cleanSnippet, dateFromPath, anchorGlobs,
+  loadSearchRoots, withEventLedgerRoot, withHumanWordsRoot, escapeRegex, snippetPattern, cleanSnippet, dateFromPath, anchorGlobs,
   scoreHit, dedupeByFile, runRg, filesWithAllWords, lexicalSearch,
   searchEventLedger,
   renderJsonlLine, expandHit, formatHits, withScore,
@@ -61,6 +62,33 @@ feature("search config — roots from agents.yaml", () => {
     then: ["one non-semantic ledger root is present", (roots) => {
       expect(roots.filter((root) => root.name === "ledger")).toHaveLength(1);
       expect(roots.at(-1)).toMatchObject({ path: "/state/events.jsonl", weight: 2, semantic: false });
+    }],
+  });
+});
+
+feature("his messages as a search root", () => {
+  unit("his day files are one semantic root, added once, and left out with AMUX_SEARCH_HUMAN=0", {
+    given: ["one configured root and a folder for his messages", () => ({
+      roots: loadSearchRoots({ search: { roots: [{ name: "memory", path: "/memory" }] } }),
+      dir: "/state/search-human",
+    })],
+    when: ["adding the root, adding it again, then with the switch off, then with the folder taken from the environment", ({ roots, dir }) => {
+      const once = withHumanWordsRoot(roots, dir);
+      const twice = withHumanWordsRoot(once, dir);
+      vi.stubEnv("AMUX_SEARCH_HUMAN", "0");
+      const off = withHumanWordsRoot(roots, dir);
+      vi.unstubAllEnvs();
+      vi.stubEnv("AMUX_SEARCH_HUMAN_DIR", "/elsewhere/search-human");
+      const fromEnv = withHumanWordsRoot(roots);
+      vi.unstubAllEnvs();
+      return { roots, once, twice, off, fromEnv };
+    }],
+    then: ["one Markdown root of weight 3 that the reindex embeds, the same after a second call, none when off, and the folder follows the environment", ({ roots, once, twice, off, fromEnv }) => {
+      expect(once.at(-1)).toEqual({ name: "human", path: "/state/search-human", glob: "*.md", exclude: [], semanticExclude: [],
+        weight: 3, semantic: true, kind: "human-words" });
+      expect(twice).toEqual(once);
+      expect(off).toEqual(roots);
+      expect(fromEnv.at(-1).path).toBe("/elsewhere/search-human");
     }],
   });
 });

@@ -1,10 +1,12 @@
 import { component, expect, feature, unit } from "bdd-vitest";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { vi } from "vitest";
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openIndex, rankUnits, reindex, semanticModel } from "./search-semantic.mjs";
 import { createLiveIndex } from "./search-live-index.mjs";
 import { parseGoldenCases } from "./search-eval.mjs";
+import { createHumanDir, createLog, MESSAGES, NOW_MS } from "../test/fixtures/conversation-log.mjs";
 
 // A deterministic stand-in for the model: one dimension per keyword.
 const KEYWORDS = ["axel", "bumbi", "kassör"];
@@ -84,6 +86,60 @@ feature("semantic unit index", () => {
     when: ["parsing", (text) => parseGoldenCases(text)],
     then: ["only the case is read, with the day it was written", (cases) => {
       expect(cases).toEqual([{ id: "n1", query: "q", expect: ["a"], kind: "other", split: "heldout", asOf: "2026-10-10" }]);
+    }],
+  });
+});
+
+feature("the semantic index and his messages", () => {
+  const humanRootOf = (dir) => ({ name: "human", path: dir, glob: "*.md", exclude: [], semanticExclude: [], weight: 3, semantic: true, kind: "human-words" });
+  const world = () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW_MS);
+    const log = createLog();
+    log.ask(MESSAGES.typed);
+    vi.stubEnv("AMUX_ASK_LEDGER_PATH", log.path);
+    const human = createHumanDir();
+    return { log, human, dir: mkdtempSync(join(tmpdir(), "amux-human-index-")) };
+  };
+  const end = ({ log, human, dir }) => { vi.useRealTimers(); vi.unstubAllEnvs(); log.remove(); human.remove(); rmSync(dir, { recursive: true, force: true }); };
+
+  component("reindex brings his day files up to date before it embeds the folder", {
+    given: ["a log with one message of his, an empty folder for it as a root, and an empty index", world],
+    when: ["reindexing with an embedder that records what it embeds", async ({ human, dir }) => {
+      const embedded = [];
+      const result = await reindex([humanRootOf(human.dir)], { dir, model: semanticModel("Xenova/multilingual-e5-small"),
+        embed: async (texts, kind) => { embedded.push(...texts); return fakeEmbed(texts, kind); } });
+      return { embedded, result, written: existsSync(join(human.dir, "2026-10-19.md")) };
+    }],
+    then: ["the day file was written first, and its bullet is in the index with its day as the title", ({ embedded, result, written }, fx) => {
+      try {
+        expect(written).toBe(true);
+        expect(result).toMatchObject({ files: 1, chunks: 1 });
+        expect(embedded).toEqual([expect.stringContaining("Human messages, 2026-10-19")]);
+        expect(embedded[0]).toContain("- **14:30:00Z lsrc:1** Kör testerna för autocompact nu");
+      } finally { end(fx); }
+    }],
+  });
+
+  component("reindex still embeds the notes when the sync of his messages fails, and says so", {
+    given: ["a root for his messages whose sync throws, and a note beside it", () => {
+      const fx = world();
+      const notes = mkdtempSync(join(tmpdir(), "amux-human-notes-"));
+      writeFileSync(join(notes, "people.md"), "# People\n**Axel** — systerson\n");
+      return { ...fx, notes };
+    }],
+    when: ["reindexing both roots", async ({ human, dir, notes }) => {
+      const logged = [];
+      const result = await reindex([{ name: "memory", path: notes, semantic: true, exclude: [], weight: 3 }, humanRootOf(human.dir)],
+        { dir, model: semanticModel("Xenova/multilingual-e5-small"), embed: fakeEmbed, log: (line) => logged.push(line),
+          syncHuman: () => { throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" }); } });
+      return { logged, result };
+    }],
+    then: ["the note is indexed and the failure is in the log", ({ logged, result }, fx) => {
+      try {
+        expect(result).toMatchObject({ files: 1 });
+        expect(logged.join("\n")).toContain("ENOSPC");
+      } finally { rmSync(fx.notes, { recursive: true, force: true }); end(fx); }
     }],
   });
 });

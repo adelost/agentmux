@@ -112,6 +112,36 @@ export function withEventLedgerRoot(roots, ledgerPath) {
   }];
 }
 
+/** WHAT: Resolves the folder of his messages as day files. WHY: Keeps tests and experiments off the real folder, the way the index folder can be moved. */
+export const humanWordsDir = () => process.env.AMUX_SEARCH_HUMAN_DIR || join(process.env.HOME, ".agentmux", "search-human");
+
+/** WHAT: Checks whether his messages are searched. WHY: Lets one switch, AMUX_SEARCH_HUMAN=0, stop both the root and the sync that fills it. */
+export const humanWordsEnabled = () => process.env.AMUX_SEARCH_HUMAN !== "0";
+
+/**
+ * His messages are copied from the conversation log into one Markdown file per day, so every layer that serves notes
+ * serves his exact words too. Like the event ledger, the folder is infrastructure, not personal configuration.
+ * WHAT: Returns normalized roots containing the folder of his day files.
+ * WHY: Prevents older personal configs from leaving his messages out of search and of the nightly reindex.
+ */
+export function withHumanWordsRoot(roots, dir = humanWordsDir()) {
+  if (!humanWordsEnabled()) return roots;
+  const path = expandTilde(dir);
+  if (roots.some((root) => root.path === path)) {
+    return roots.map((root) => root.path === path ? { ...root, kind: "human-words", semantic: true } : root);
+  }
+  return [...roots, {
+    name: "human",
+    path,
+    glob: "*.md",
+    exclude: [],
+    semanticExclude: [],
+    weight: 3,
+    semantic: true,
+    kind: "human-words",
+  }];
+}
+
 // rg anchors slash-containing globs to the CWD, not the search root, so a
 // config exclude like "transcripts/**" silently matches nothing when amux
 // runs from elsewhere (observed 2026-07-10: 34 "excluded" transcripts got

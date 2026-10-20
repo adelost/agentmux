@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, statSync, mkdirSync, renameSync } from "fs
 import { createHash } from "crypto";
 import { basename, join } from "path";
 import { dateFromPath, execRg } from "./search.mjs";
+import { syncHumanWords } from "./search-human-words.mjs";
 import { markdownUnits } from "./search-units.mjs";
 
 /** WHAT: Names the unit index layout version. WHY: Keeps old chunk indexes from being read as unit indexes. */
@@ -174,11 +175,15 @@ export function semanticIndexStatus({ now = Date.now(), maxAgeMs = 36 * 60 * 60 
  */
 export async function reindex(roots, { log = () => {}, device = "cpu",
   maxUnits = Number(process.env.AMUX_REINDEX_MAX_UNITS) || (device === "cuda" ? 200_000 : 25_000),
-  dir = indexDir(), embed = null, model = semanticModel() } = {}) {
+  dir = indexDir(), embed = null, model = semanticModel(), syncHuman = syncHumanWords } = {}) {
   const semRoots = roots.filter((root) => root.semantic);
   if (!semRoots.length) {
     log("Inga rötter med semantic: true i config — inget att indexera.");
     return { files: 0, chunks: 0 };
+  }
+  // His messages are a copy of the conversation log; bring the day files up to date before the files are listed.
+  for (const root of semRoots.filter((candidate) => candidate.kind === "human-words")) {
+    try { syncHuman({ dir: root.path }); } catch (error) { log(`⚠ his messages could not be brought up to date: ${error.message}`); }
   }
   const startedAt = Date.now();
   const prev = loadIndex(dir);
