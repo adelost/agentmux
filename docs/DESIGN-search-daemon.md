@@ -1,6 +1,6 @@
-# amux search: his messages as units, the conversation log in the daemon, 30 minutes warm
+# amux search: his messages as units, the conversation log in the daemon, 30 minutes warm while memory is free
 
-Version: 1 · 2026-10-20 07:05Z · owner of the design: api:0 · page: none yet
+Version: 2 · 2026-10-20 07:35Z · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -11,20 +11,28 @@ review of 20 Oct (https://claude.ai/artifact/5zFCbJGLAyRyRMShphPAbp). In the rev
 1.18 s on 10 Oct. 3.9 s of that is the conversation-log scan from f568d7c0, which reads all 238 MB on every question.
 18 of 69 real searches in 48 h ran cold, because the daemon closes after 2 minutes, and the cold path gives 70 % hit@3.
 
+His questions of 20 Oct 07:12Z about the memory a warm daemon holds, and his answer at 07:26Z that leaves the choice to
+api:0 and asks for everything to be written down (daily log 2026-10-20, api:0's heading on the search daemon's
+memory), add outcome 3.
+
 The outcome:
 
 1. The daemon follows the canonical conversation log incrementally and reads only new lines. His messages become
    their own searchable units in the same layers as the notes (BM25, bge-m3, the reranker), so his exact words can
    come up in step one. No question rescans the whole log.
 2. The daemon stays warm for 30 minutes after the last search, not 2.
+3. The daemon holds memory only while the machine has room. It does not start without room for its peak, and it
+   closes when free memory falls under a floor.
 
 Principles, in the order they decide:
 
 1. Same answers, less time. A change that loses hit@1 or hit@3 on the 47 blind questions does not ship.
-2. One writer per derived file. The log stays the only source; derived files can always be rebuilt from it.
-3. Reuse the note pipeline. His messages become Markdown units, so parsing, BM25, the live overlay, the nightly
+2. No memory the machine needs. The daemon gives its RAM back before anything else runs short; a cold answer is the
+   price.
+3. One writer per derived file. The log stays the only source; derived files can always be rebuilt from it.
+4. Reuse the note pipeline. His messages become Markdown units, so parsing, BM25, the live overlay, the nightly
    reindex, the reranker and `--show` work unchanged.
-4. Honest output. A layer that did not run says so on the result, as the semantic layer does today.
+5. Honest output. A layer that did not run says so on the result, as the semantic layer does today.
 
 Non-goals:
 
@@ -40,6 +48,9 @@ n/a: a command-line tool with no screens. The result lists keep their form. What
 | Result source of a message of his | `~/.agentmux/search-human/2026-10-20.md:14` and the snippet `**05:39:58Z api:0 voice** Okej, ja men …` | 220 | v1 |
 | Warning when the daemon is cold and no `--source conversation` | `ℹ conversation log is searched by the warm search daemon; it is starting, so this answer leaves it out` | 110 | v1 |
 | `amux search --help` | "The search daemon stays loaded for 30 minutes after the last question" in place of "exits when idle" | 80 | v1 |
+| `amux search --help`, appended to the line above | ", while at least 8 GB RAM is free" | 40 | v2 |
+| Notice when the guard keeps the daemon down | `ℹ 6.2 GB RAM free, the search daemon starts at 12 GB; lexical only this time; showing first-stage order` | 110 | v2 |
+| The daemon's own log line when it closes for memory | `search-embedder: closing, 7.4 GB RAM free is under the 8 GB floor` | 80 | v2 |
 
 ## 3. Use cases
 
@@ -65,6 +76,12 @@ n/a: a command-line tool with no screens. The result lists keep their form. What
   - Stage v1. Sequence: §5 seq-cold.
 - **UC-5 Night.** The nightly reindex first brings the derived files up to date, then embeds them on the GPU with
   the notes. Stage v1. No sequence: one local process, no new boundary.
+- **UC-6 Memory runs short.** A build fills RAM until 7 GB is free while the daemon is warm.
+  - Within 30 s the daemon closes, after any question in flight, and gives back about 3 GB RAM and 2.3 GB VRAM
+    (*measured* warm, §7). Its log says why.
+  - Questions get the cold answer with the guard's notice until 12 GB is free; none of them starts the daemon.
+  - Cost: cold answers (70 % hit@3) while memory is short. Stage v2. No sequence: each process reads
+    `/proc/meminfo` itself, no new boundary.
 - **Unhappy cases:**
   - Log rotation (a 32 MB file is renamed and a new `ask-ledger.jsonl` starts): the reader follows the renamed file
     by inode to its end, then starts the new file at 0.
@@ -93,6 +110,7 @@ flowchart LR
   F --> P[search-passages BM25] --> R[reranker]
   F --> V[live index and nightly reindex: bge-m3]
   W ==> D[search-embedder daemon: op conversation]
+  M[memory guard: MemAvailable] ==> D
   D --> C[cli/search.mjs collectSearchHits]
   P --> C
   V --> C
@@ -110,7 +128,10 @@ flowchart LR
 - One exit: n/a: nothing leaves the machine. The derived files are mode 600 in `~/.agentmux`, like the log.
 - Switches:
   - `AMUX_EMBEDDER_IDLE_MIN` decides how long the daemon stays up after the last question (default 30, was 2);
-  - `AMUX_SEARCH_HUMAN=0` leaves the human root out of every search and stops the sync.
+  - `AMUX_SEARCH_HUMAN=0` leaves the human root out of every search and stops the sync;
+  - `AMUX_EMBEDDER_MIN_FREE_GB` decides the memory floor (default 8). The daemon starts only with the floor plus
+    4 GB free, because its measured peak is 3.8 GB, and closes within 30 s when free memory falls under the floor.
+    0 turns the guard off.
 - Invariants:
   - **I-1** No question reads a log byte twice in a warm daemon. Enforced in `ledger-tail.mjs`, guarded by
     `core/ledger-tail.test.mjs`, "reads only bytes appended since the last call".
@@ -119,6 +140,9 @@ flowchart LR
     `core/search-human-words.test.mjs`, "writes each message of his once, word for word".
   - **I-3** Warm conversation hits equal what `searchConversationLog` returns for the same rows. Enforced in
     `conversation-window.mjs`, guarded by `core/conversation-window.test.mjs`, "finds the same rows as the scan".
+  - **I-4** The daemon never starts without room for its peak, and never stays more than 30 s under the floor.
+    Enforced in `core/search-embedder.mjs` (`memoryRoom`), guarded by `core/search-embedder-lifecycle.test.mjs`,
+    "does not start without room for its peak" and "closes when free memory falls under the floor".
 
 ## 5. Behaviour (UML)
 
@@ -177,10 +201,12 @@ sequenceDiagram
 %% id: state-daemon
 stateDiagram-v2
   [*] --> Down
-  Down --> Loading: a question finds no socket
+  Down --> Loading: a question finds no socket, and the floor plus 4 GB is free
+  Down --> Down: a question finds no socket, and less is free (lexical answer)
   Loading --> Warm: model, vectors and the conversation window loaded
   Warm --> Warm: a question resets the 30-minute timer
   Warm --> Down: 30 minutes without a question, nothing pending
+  Warm --> Down: free memory under the floor at a 30 s check, after the question in flight
 ```
 
 ## 6. Pseudocode
@@ -230,6 +256,23 @@ collectSearchHits conversation step:                  # cli/search.mjs
   else: warn the conversation log was left out; syncHumanWords() so his day files are current
   # tests: search.test (cli) "uses the daemon's conversation hits when it is warm",
   #        "leaves the scan out when cold unless --source conversation"
+
+memoryRoom(needGb):                                   # search-embedder.mjs
+  floor = AMUX_EMBEDDER_MIN_FREE_GB (default 8); floor == 0 -> { room: true }          # guard off
+  free = MemAvailable of /proc/meminfo, in GB
+  unreadable -> { room: true }, and the daemon logs "memory guard off: no /proc/meminfo" once
+  return { room: free >= needGb, free }
+
+startEmbedder():
+  r = memoryRoom(floor + 4)
+  not r.room -> return { unavailable: "<free> GB RAM free, the search daemon starts at <floor + 4> GB; lexical only this time" }
+  spawn as today
+
+daemon, every 30 s while up (unref'd timer):
+  not memoryRoom(floor).room -> log "closing, <free> GB RAM free is under the <floor> GB floor";
+                                close at the first moment no question is in flight, by the idle timer's close
+  # tests: search-embedder-lifecycle.test.mjs "does not start without room for its peak",
+  #        "closes when free memory falls under the floor", "a floor of 0 turns the guard off"
 ```
 
 ## 7. Platform limits
@@ -240,10 +283,20 @@ collectSearchHits conversation step:                  # cli/search.mjs
   rename(2)).
 - His messages: about 7 400 in 30 days, about 2 million characters. *Measured* by sandman:0. A first count of mine
   over all files gave 8 854 in October, before the pane-hook copies merge, so the builder reports the real count.
-- Daemon memory: 4.1 GB RSS on 10 Oct with a 1 536 MB V8 heap cap. *Measured* 10 Oct; v1 measures it warm and
-  writes it in §10.
-- GPU: RTX 3090, 24 GB. 3.9 GB in use 06:5xZ without the daemon. *Measured* (`nvidia-smi`). The reranker's VRAM is
-  measured warm in v1.
+- Daemon memory on 1.25.275, *measured* 07:15Z (`~/.agentmux/artifacts/search-daemon-2026-10-20/warm.log`): 1.67 GB
+  RSS before the models, 1.95 GB with the query model, 2.8 to 2.9 GB warm with the GPU reranker, 3.4 to 3.8 GB while
+  the live overlay embedded the day's changed notes, peak 3.81 GB. It was 4.1 GB on 10 Oct.
+- GPU: RTX 3090, 24 GB. 3.94 GB in use without the daemon and 6.25 GB warm, so the reranker holds 2.3 GB. Back to
+  3.94 GB when the daemon closed 2 minutes after the last question. *Measured* (`nvidia-smi`), same run.
+- CPU: one start with three questions used 323 s user and 16 s system CPU in 192 s. Each start embeds every note
+  changed since the nightly reindex again, because the overlay lives only in memory (`core/search-live-index.mjs`).
+  *Measured*, same run.
+- Cold first question: 9.6 s at load 3. *Measured*, same run.
+- Machine: the WSL VM has 54.2 GB, with 39.5 GB available and 12.9 of 16 GB swap used at 07:15Z. *Measured*
+  (`free -m`). MemAvailable is the VM's view and does not see pressure on the Windows side. *Documented*: WSL2 runs
+  Linux in a VM with its own memory limit (https://learn.microsoft.com/en-us/windows/wsl/wsl-config, `memory`).
+- Search pattern: 229 `amux search` calls in the agents' transcripts (Claude and Codex, subagents included) in the
+  48 h before 07:15Z. *Measured* (`search_times.py` in the same folder). sandman:0 counted 69 by another method.
 - CPU embedding in the live overlay: at most 4 000 units per 30 s scan (`MAX_UNITS_PER_SCAN`). The first backfill
   runs as one GPU reindex instead.
 - Load: the machine runs the fleet's tests, load about 20 on 24 cores at 06:5xZ. *Measured*. Timings are compared
@@ -257,8 +310,13 @@ collectSearchHits conversation step:                  # cli/search.mjs
 | **B. Derived Markdown for his words, plus an in-memory word index in the daemon (chosen)** | under 50 ms | 3h | reuses every layer and the reindex; nothing new to rank | the derived files disagree with the log in a test |
 | C. His messages as a new unit type inside the semantic index, with no files | under 50 ms | 5h | needs new code in BM25, the overlay, the reranker text and `--show` | the Markdown form loses his words' exactness |
 | D. SQLite FTS over the whole log | about 10 ms | 4h | a native dependency, and it gives no semantic units of his | the window grows past 1 GB |
+| E. QMD (github.com/tobi/qmd) as the engine | *to be measured*, row 47 | 1h to compare | its keyword mode was tried on 20 Sep: 17/20 first and 20/20 in three on 20 keyword questions, 1/20 on whole questions; its hybrid mode was never tried | its hybrid mode beats ours on the 47 blind questions at a similar median |
 
 The approach that already worked was the 10 Oct pipeline at 1.18 s. B is that pipeline with one more root.
+
+Warm time, decided by the table in §10: 30 minutes cuts cold searches from 71 % to 10 %, and the memory guard gives
+the RAM back whenever anything else needs it. Reopen when the daemon logs a close for memory more than once a day, or
+when he asks for less.
 
 ## 9. Risks
 
@@ -275,10 +333,10 @@ The approach that already worked was the 10 Oct pipeline at 1.18 s. B is that pi
   - Mitigation: rows keep only the fields the scan uses, and the index holds row ids.
   - Detection: RSS and VRAM measured warm, written in §10.
   - Fallback: shorter window for agents' rows. Owner api:0.
-- **R-4 Warm for 30 minutes holds about 4 GB RAM and the reranker's VRAM while no one searches.** Certain.
-  - Mitigation: none beyond the timer; the numbers go in §10 for his judgment.
-  - Detection: the measurement.
-  - Fallback: `AMUX_EMBEDDER_IDLE_MIN`. Owner api:0.
+- **R-4 Warm for 30 minutes holds 2.8 to 3.8 GB RAM and 2.3 GB VRAM while no one searches.** Certain, 34 of 48 h.
+  - Mitigation: the memory guard (I-4) gives the RAM back when free memory falls under 8 GB.
+  - Detection: "closes when free memory falls under the floor"; the daemon's log line of §2.
+  - Fallback: `AMUX_EMBEDDER_IDLE_MIN` and `AMUX_EMBEDDER_MIN_FREE_GB`. Owner api:0.
 - **R-5 Cold answers lose the agents' conversation rows.** Certain, for the first question after 30 minutes.
   - Mitigation: his messages stay in the cold path through BM25, and the warning says what was left out.
   - Detection: the `--lexical` and cold runs in §12.
@@ -287,12 +345,35 @@ The approach that already worked was the 10 Oct pipeline at 1.18 s. B is that pi
   - Mitigation: inode and size checks, dedupe by id.
   - Detection: "reads a rewritten file again".
   - Fallback: delete `state.json`, and the next sync rebuilds. Owner api:0.
+- **R-7 The guard flaps: the daemon starts, loads 3.8 GB, falls under the floor and closes, again and again.**
+  Possible when free memory sits near the floor.
+  - Mitigation: a start needs the floor plus 4 GB, more than the measured peak of 3.8 GB.
+  - Detection: "does not start without room for its peak".
+  - Fallback: raise `AMUX_EMBEDDER_MIN_FREE_GB`. Owner api:0.
+- **R-8 The guard misses memory pressure on the Windows side.** Possible, because MemAvailable is the VM's view (§7).
+  - Mitigation: the 30-minute timer still bounds the time the memory is held.
+  - Detection: none in the code. His report, or the Windows task manager's figure for the WSL VM.
+  - Fallback: a lower `AMUX_EMBEDDER_IDLE_MIN`. Owner api:0.
 
 ## 10. Cost and time
 
 - Money: none. Local CPU and GPU.
 - Time per question: today 5.46 s median warm (*measured*, review). After: about 1.6 s (*estimated*).
-- Daemon resources while warm: *to be measured* in v1 and written here (RSS, VRAM).
+- Daemon resources while warm, *measured* on 1.25.275 (§7): 2.8 to 3.8 GB RSS, 2.3 GB VRAM, and 323 CPU-s for one
+  start with three questions. With the conversation window: *to be measured* after v1 and written here.
+- Warm time against the real pattern (§7, 229 searches in 48 h), with RAM at 3 GB while warm. *Measured* pattern,
+  *estimated* average:
+
+| Timer | Cold searches | Warm of 48 h | RAM on average |
+|---|---|---|---|
+| 2 min (until v1) | 163 (71 %) | 6.3 h | 0.4 GB |
+| 10 min | 72 (31 %) | 21.4 h | 1.3 GB |
+| 15 min | 50 (22 %) | 26.3 h | 1.6 GB |
+| 30 min (chosen) | 24 (10 %) | 34.4 h | 2.2 GB |
+| 60 min | 8 (3 %) | 41.7 h | 2.6 GB |
+
+- Starts fall from 163 to 24 per 48 h, and with them the CPU each start spends embedding the day's changed notes
+  again. *Estimated* from the code (§7).
 - Time, from the file list:
   - New `core/ledger-tail.mjs` (70 lines) and its test, 45 min.
   - New `core/search-human-words.mjs` (110 lines) and its test, 75 min.
@@ -301,13 +382,16 @@ The approach that already worked was the 10 Oct pipeline at 1.18 s. B is that pi
     `core/search.mjs` (the human root, 15 lines), `core/ask-origin.mjs` and `core/dream-conversation.mjs` (the shared
     predicate, 10 lines), `core/search-semantic.mjs` (sync before reindex, 5 lines), 45 min.
   - The measurements before and after, 30 min.
-  - Total *estimated* 4.5h for a Sonnet builder plus 30 min of api:0's review. The eval runs dominate the wall time.
+  - The memory guard: `core/search-embedder.mjs` (`memoryRoom`, the start check and the 30 s check, 30 lines),
+    `cli/search.mjs` (one help line) and three lifecycle tests, 40 min.
+  - Total *estimated* 5.2h for Sonnet builders plus 30 min of api:0's review. The eval runs dominate the wall time.
 
 ## 11. Rollout and rollback
 
 - Order: release, install, stop the daemon, one `amux search --reindex` on the GPU for the backfill, then the
   measurements. Everyone gets it at once.
-- Switches: `AMUX_SEARCH_HUMAN=0` leaves the root out, and `AMUX_EMBEDDER_IDLE_MIN=2` restores the old timer.
+- Switches: `AMUX_SEARCH_HUMAN=0` leaves the root out, `AMUX_EMBEDDER_IDLE_MIN=2` restores the old timer, and
+  `AMUX_EMBEDDER_MIN_FREE_GB=0` turns the memory guard off.
 - Turning it off leaves the day files in place. They are derived, never read again, and can be deleted.
 - Migrations: none. The semantic index gains the new root's units on its next reindex.
 - Texts in the same release: `SEARCH_HELP` (the daemon's lifetime and the human root).
@@ -334,12 +418,11 @@ The approach that already worked was the 10 Oct pipeline at 1.18 s. B is that pi
 | `core/conversation-window.test.mjs` | I-3, UC-1 | component | 15 | 2 |
 | `cli/search.test.mjs` | UC-1, UC-4, R-5 | component | 10 | 3 |
 | `core/search.test.mjs` | UC-2 | component | 5 | 3 |
-| `core/search-embedder-lifecycle.test.mjs` | R-4 | unit | 3 | 1 |
+| `core/search-embedder-lifecycle.test.mjs` | R-4, R-7, I-4, UC-6 | unit | 10 | 1 |
 | `core/search-semantic.test.mjs` | UC-5 | component | 3 | 3 |
 | `existing ask-origin and dream-conversation tests` | existing, R-2 | unit | 0 | 2 |
 
-- Budget: write 71 min of the 270 min in chapter 13 (26 %, at the line because three new modules each need a reader,
-  a writer and a seam test); targeted run 17 s.
+- Budget: write 78 min of the 330 min of build in chapter 13 (rows 43, 44 and 46; 24 %); targeted run 17 s.
 - Full proof: none: no money, sign-in, deletion of user data or migration. The derived files are a private copy of
   his words on the same machine, in the same folder as their source, mode 600.
 - Touched tests: `existing ask-origin and dream-conversation tests` are kept unchanged; the predicate moves without
@@ -366,6 +449,8 @@ The approach that already worked was the 10 Oct pipeline at 1.18 s. B is that pi
 | 43 | His messages as search units, and the conversation log in the daemon without rescans | api:0 | working: Sonnet builds, api:0 reviews | 4.5h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | warm median about 1.6 s with no loss in hit@1 or hit@3 on the 47 blind questions |
 | 44 | Daemon warm for 30 minutes, with its RAM and VRAM measured | api:0 | working: Sonnet builds, api:0 reviews | 0.3h | [Search §11](DESIGN-search-daemon.md#11-rollout-and-rollback) | the daemon stays up 30 minutes after a question, and §10 holds its measured RSS and VRAM |
 | 45 | Release with before and after on the same machine | api:0 | open | 0.5h | [Search §12](DESIGN-search-daemon.md#12-tests) | installed release; 47 questions and v14 to v16 warm and cold before and after, with load averages, in §10 |
+| 46 | Memory guard: the daemon starts only with room for its peak and closes under the floor | api:0 | open: Sonnet builds after 43, api:0 reviews | 0.7h | [Search §6](DESIGN-search-daemon.md#6-pseudocode) | under 8 GB free the daemon closes within 30 s, and none starts under 12 GB; tests red before, green after |
+| 47 | QMD's hybrid mode against the 47 blind questions | api:0 | open: after 45 | 1h | [Search §8](DESIGN-search-daemon.md#8-alternatives) | QMD hybrid's hit@1, hit@3 and median on the 47 questions stand beside ours in §8, with the choice |
 
 ## 14. Open questions
 
@@ -374,7 +459,13 @@ None for him. Calls made by api:0:
 - His messages are copied as Markdown into `~/.agentmux/search-human/`, so every existing layer serves them.
 - The window stays 30 days, as the conversation search has today.
 - A cold question leaves out the agents' conversation rows instead of scanning 238 MB.
+- 30 minutes warm, with a memory guard at 8 GB free and starts at 12 GB. He left the choice to api:0 at 07:26Z, and
+  the table in §10 decided it.
+- No change of engine now. QMD's hybrid mode is measured on the same 47 questions after the release (row 47).
 
 ## 15. Changes
 
 - v1, 2026-10-20 07:05Z: first version, from lsrc:0's decision and sandman:0's review.
+- v2, 2026-10-20 07:35Z: outcome 3 and the memory guard (principle 2, I-4, UC-6, R-7, R-8, row 46) after his
+  questions on memory at 07:12Z and his answer at 07:26Z; measured RSS, VRAM, CPU and the timer table in §7 and §10;
+  QMD as option E and row 47. Row 43's builder is not affected; row 46 gets its own brief.

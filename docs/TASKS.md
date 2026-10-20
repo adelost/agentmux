@@ -6,6 +6,8 @@ Historical runtime receipt (2026-09-20): **1.25.84 / 4241763cd9acae64bf6de40305b
 
 | # | Outcome | Owner | Done when | State | Closed on |
 |---|---|---|---|---|---|
+| 47 | QMD's hybrid mode against the 47 blind questions ([Search §8](DESIGN-search-daemon.md#8-alternatives)) | api:0 | QMD hybrid's hit@1, hit@3 and median on the 47 questions stand beside ours in §8, with the choice | Open | |
+| 46 | Memory guard: the search daemon starts only with room for its peak and closes under the floor ([Search §6](DESIGN-search-daemon.md#6-pseudocode)) | api:0 | Under 8 GB free the daemon closes within 30 s, and none starts under 12 GB; tests red before, green after | Open | |
 | 45 | Release the search build with before and after on the same machine ([Search §12](DESIGN-search-daemon.md#12-tests)) | api:0 | Installed release; the 47 blind questions and v14 to v16 warm and `--lexical`, before and after, with load averages, in §10 | Open | |
 | 44 | Keep the search daemon warm for 30 minutes and measure what it holds ([Search §11](DESIGN-search-daemon.md#11-rollout-and-rollback)) | api:0 | The daemon stays up 30 minutes after a question; its RSS and the reranker's VRAM measured warm and written in §10 | In progress | |
 | 43 | His messages as search units, and the conversation log in the daemon without rescans ([Search §6](DESIGN-search-daemon.md#6-pseudocode)) | api:0 | Warm median about 1.6 s with no loss in hit@1 or hit@3 on the 47 blind questions; no question rescans the log | In progress | |
