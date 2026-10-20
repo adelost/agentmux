@@ -1,8 +1,25 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 /** WHAT: Names the shared model-owner lease. WHY: Prevents releases or alternate indexes from loading native models beside an existing owner. */
 export const embedderLeasePath = () => join(process.env.HOME, ".agentmux", "search-embedder.lock");
+
+/** WHAT: Names the file that keeps the search daemon's stderr. WHY: Lets a reader find why the daemon failed or closed, such as under the memory floor. */
+export const embedderLogPath = () => join(process.env.HOME, ".agentmux", "search-embedder.log");
+
+const LOG_MAX_BYTES = 1024 * 1024;
+
+/**
+ * WHAT: Returns a descriptor for appending to the daemon's log.
+ * WHY: Keeps the daemon's stderr, which `stdio: "ignore"` lost, without letting the log grow past 1 MiB.
+ */
+export function openEmbedderLog(path) {
+  // A log over 1 MiB is renamed to <log>.1 first, replacing an older one. A new log gets mode 600.
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  try { if (statSync(path).size > LOG_MAX_BYTES) renameSync(path, `${path}.1`); }
+  catch (error) { if (error.code !== "ENOENT") throw error; } // no log yet, or one that vanished: nothing to move aside
+  return openSync(path, "a", 0o600);
+}
 
 /** The default is 30 minutes; AMUX_EMBEDDER_IDLE_MIN overrides it. WHAT: Returns how long the search daemon stays loaded after its last question. WHY: Keeps the model warm through a work session; AMUX_EMBEDDER_IDLE_MIN=2 restores the old two minutes. */
 export const embedderIdleMs = (env = process.env) => Math.max(0.001, Number(env.AMUX_EMBEDDER_IDLE_MIN) || 30) * 60_000;

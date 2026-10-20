@@ -6,10 +6,11 @@
 // never waits for a cold start. When the daemon is not up yet, that one query
 // is answered lexically and says so. The daemon also holds the conversation
 // log's word index (core/conversation-window.mjs) and answers op conversation.
+// Its stderr, such as why it closed for memory, is appended to ~/.agentmux/search-embedder.log.
 
 import { createConnection, createServer } from "node:net";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,7 +21,7 @@ import { exitAfterGpu, gpuEnv, gpuReady, reindexRunning } from "./search-gpu.mjs
 import { searchPassages } from "./search-passages.mjs";
 import { isTopicPath } from "./memory-topic-search.mjs";
 import { acquireFileLease } from "./file-lease.mjs";
-import { createEmbedderIdle, embedderIdleMs, embedderLeasePath, embedderMinFreeGb, legacyEmbedderPid } from "./search-embedder-lifecycle.mjs";
+import { createEmbedderIdle, embedderIdleMs, embedderLeasePath, embedderLogPath, embedderMinFreeGb, legacyEmbedderPid, openEmbedderLog } from "./search-embedder-lifecycle.mjs";
 import { parseMeminfo } from "./memory-guard.mjs";
 import { createConversationWindow } from "./conversation-window.mjs";
 import { syncHumanWords } from "./search-human-words.mjs";
@@ -32,8 +33,9 @@ const PROTOCOL_VERSION = 2;
 
 const CONNECT_MS = 150;
 const DAEMON_HEAP_MB = 1536;
-// The daemon's measured peak is 3.81 GB (design §7), so a start needs the floor plus 4 GB: after the load it is still over the floor.
-const DAEMON_PEAK_GB = 4;
+// A start needs the floor plus this much free (design §4, R-7). The daemon's measured peak is 3.81 GB and its conversation
+// window adds 0.5 GB, so after the load it is still over the floor and the guard does not close it again.
+const START_HEADROOM_GB = 5;
 const MEMORY_CHECK_MS = 30_000;
 const KB_PER_GB = 1024 * 1024;
 const gbText = (gb) => String(Math.round(gb * 10) / 10);
@@ -105,27 +107,36 @@ export async function daemonAlive({ dir = indexDir(), model = semanticModel().na
   return request(embedderSocketPath(dir, model), { ping: true }, CONNECT_MS).then(() => true, () => false);
 }
 
-/** WHAT: Schedules the daemon start in the background when free RAM covers its peak. WHY: Keeps the query from waiting on a cold load, and a start from starving the machine. */
-export function startEmbedder({ dir = indexDir(), model = semanticModel().name, roots = null, readAvailableKb, env = process.env } = {}) {
-  // Without the floor plus the daemon's peak free, the start is refused; readAvailableKb and env are for the memory check's tests.
-  const need = embedderMinFreeGb(env) + DAEMON_PEAK_GB;
-  const memory = memoryRoom(need, { readAvailableKb, env });
-  if (!memory.room) return { unavailable: `${memory.free.toFixed(1)} GB RAM free, the search daemon starts at ${gbText(need)} GB; lexical only this time` };
+/** WHAT: Schedules the background daemon start unless the model has an owner or RAM is short. WHY: Keeps the query from waiting on a cold load, and a start from starving the machine. */
+export function startEmbedder({ dir = indexDir(), model = semanticModel().name, roots = null, readAvailableKb, env = process.env,
+  logPath = embedderLogPath() } = {}) {
+  // The owner is checked before memory: a daemon that is loading has already lowered MemAvailable, and the memory notice
+  // would blame the wrong thing. readAvailableKb, env and logPath are for tests.
   const lease = acquireFileLease(embedderLeasePath());
   if (!lease) return { unavailable: "search model owner busy or starting; lexical only this time" };
   let legacyPid;
   try { legacyPid = legacyEmbedderPid(); } finally { lease.release(); }
   if (legacyPid) return { unavailable: `existing search worker ${legacyPid} must finish before upgrade; lexical only this time` };
+  const need = embedderMinFreeGb(env) + START_HEADROOM_GB;
+  const memory = memoryRoom(need, { readAvailableKb, env });
+  if (!memory.room) return { unavailable: `${memory.free.toFixed(1)} GB RAM free, the search daemon starts at ${gbText(need)} GB; lexical only this time` };
   const script = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "search-embedder.mjs");
-  // A bounded V8 heap makes the long-lived daemon collect per-query garbage
-  // (rerank inputs, unit scores) instead of growing; golden dev reached 5.3 GB
-  // RSS without it against a 4.2 GB budget.
-  const child = spawn(process.execPath, [`--max-old-space-size=${DAEMON_HEAP_MB}`, script, "--shared-owner-v1"], {
-    detached: true, stdio: "ignore",
-    env: { ...(gpuEnv(process.env) || process.env), AMUX_SEARCH_INDEX_DIR: dir, AMUX_SEARCH_MODEL: model,
-      ...(Array.isArray(roots) ? { AMUX_SEARCH_WARM_ROOTS: JSON.stringify(roots) } : {}) },
-  });
-  child.unref();
+  // The daemon's stderr is appended to its log; the parent closes its own copy of the descriptor once the child has one.
+  // A log that cannot be opened is said, not dropped: the search carries on lexically instead of failing.
+  let log;
+  try { log = openEmbedderLog(logPath); }
+  catch (error) { return { unavailable: `the search daemon's log could not be opened (${error.message}); lexical only this time` }; }
+  try {
+    // A bounded V8 heap makes the long-lived daemon collect per-query garbage
+    // (rerank inputs, unit scores) instead of growing; golden dev reached 5.3 GB
+    // RSS without it against a 4.2 GB budget.
+    const child = spawn(process.execPath, [`--max-old-space-size=${DAEMON_HEAP_MB}`, script, "--shared-owner-v1"], {
+      detached: true, stdio: ["ignore", "ignore", log],
+      env: { ...(gpuEnv(process.env) || process.env), AMUX_SEARCH_INDEX_DIR: dir, AMUX_SEARCH_MODEL: model,
+        ...(Array.isArray(roots) ? { AMUX_SEARCH_WARM_ROOTS: JSON.stringify(roots) } : {}) },
+    });
+    child.unref();
+  } finally { closeSync(log); }
 }
 
 /**
