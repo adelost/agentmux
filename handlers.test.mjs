@@ -109,13 +109,15 @@ import { sendSlashVerified as deliverSlashCommand } from "./core/delivery.mjs";
 function fakeSlashAgent(captures) {
   const calls = [];
   let captureIdx = 0;
+  let submitted = false;
   return {
     calls,
     dismissBlockingPrompt: async () => { calls.push("dismiss"); return null; },
-    sendOnly: async (name, cmd, pane) => { calls.push(`send:${cmd}`); },
+    sendOnly: async (name, cmd, pane) => { calls.push(`send:${cmd}`); submitted = true; },
     sendEnter: async () => { calls.push("enter"); },
     capturePane: async () => {
       calls.push("capture");
+      if (!submitted) return "pane before submit\n\n❯ \n";
       return captures[Math.min(captureIdx++, captures.length - 1)];
     },
   };
@@ -135,7 +137,7 @@ feature("deliverSlashCommand", () => {
     })],
     then: ["delivered without rescues, dismiss ran first", ({ result, agent }) => {
       expect(result).toEqual({ delivered: true, rescues: 0 });
-      expect(agent.calls.slice(0, 2)).toEqual(["dismiss", "send:/model fable"]);
+      expect(agent.calls.filter((call) => call.startsWith("send:"))).toEqual(["send:/model fable"]);
       expect(agent.calls).not.toContain("enter");
     }],
   });

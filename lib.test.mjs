@@ -1,4 +1,5 @@
 import { unit, feature, expect } from "bdd-vitest";
+import { slashProse } from "./test/slash-prose-fixture.mjs";
 import {
   stripAnsi, splitMessage, esc, parseEnv, buildChannelMap,
   formatDuration, extractActivity, parsePane, parseCommand, parseUseArg,
@@ -397,6 +398,12 @@ feature("parsePane", () => {
 });
 
 feature("parseCommand", () => {
+  unit("slash prose headings and file paths are not local commands", {
+    when: ["parsing the input-stop shapes", () => slashProse.map(parseCommand)],
+    then: ["all remain ordinary messages", (results) =>
+      expect(results).toEqual(slashProse.map(() => null))],
+  });
+
   unit("returns null for non-command text", {
     when: ["parsing plain text", () => parseCommand("fix the bug")],
     then: ["null", (r) => expect(r).toBeNull()],

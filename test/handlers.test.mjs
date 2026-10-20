@@ -5,6 +5,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { createHandlers, renderCatchupLine, formatCatchupTime } from "../handlers.mjs";
 import { codexModelCatalog } from "../core/codex-profiles.mjs";
+import { slashProse } from "./slash-prose-fixture.mjs";
+import { deliverToPane } from "../core/delivery.mjs";
+import { codexUserPrompt } from "../core/codex-user-events.mjs";
 
 // --- Test helpers ---
 
@@ -129,6 +132,32 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatus
 // --- Tests ---
 
 feature("onMessage routing", () => {
+  component("a slash prose heading queues as a complete ordinary message", {
+    given: ["the rejected-heading incident shape", () => ({
+      ...setup(), msg: mockMsg({ content: slashProse[0] }),
+    })],
+    when: ["Discord queues it and the normal delivery sends it", async ({ onMessage, msg, agent, deliveryBroker }) => {
+      await onMessage(msg);
+      const request = deliveryBroker.enqueue.mock.calls[0]?.[0];
+      let received = null;
+      agent.sendOnly = async (_name, text) => {
+        if (!text.trimStart().startsWith("/")) received = text;
+      };
+      agent.waitForPromptEcho = async (_name, _pane, expected) => codexUserPrompt({
+        type: "event_msg", payload: { type: "user_message", message: received },
+      }) === expected;
+      return { result: await deliverToPane(agent, request.agentName, request.pane, request.text,
+        { verifyText: request.verifyText, attempts: 1, settleMs: 0, sleep: async () => {} }), received };
+    }],
+    then: ["the original prose is ingested with its exact physical receipt", ({ result, received }, { deliveryBroker, msg }) => {
+      const request = deliveryBroker.enqueue.mock.calls[0]?.[0];
+      expect(request?.kind).not.toBe("slash");
+      expect(received?.endsWith(msg.content)).toBe(true);
+      expect(request?.verifyText).toBe(request?.text);
+      expect(result).toMatchObject({ delivered: true, via: "echo" });
+    }],
+  });
+
   component("ignores bot messages", {
     given: ["a message from a bot", () => ({ ...setup(), msg: mockMsg({ isBot: true }) })],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],

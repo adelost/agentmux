@@ -177,15 +177,15 @@ export function buildChannelMap(yamlContent) {
 
 /**
  * Parse a command from message text.
- * Returns { cmd, args } if it starts with /, otherwise null.
+ * Returns { cmd, args } for a command token, otherwise null, including slash prose and paths.
  * Works on the prompt AFTER parsePane has stripped the pane prefix.
+ * WHAT: Parses a syntactically valid command and its arguments.
+ * WHY: Keeps slash-leading prose from entering the engine command lane.
  */
 export function parseCommand(text) {
   const trimmed = text.trim().replace(/^\/\//, "/");
-  if (!trimmed.startsWith("/")) return null;
-  const spaceIdx = trimmed.indexOf(" ");
-  if (spaceIdx === -1) return { cmd: trimmed.toLowerCase(), args: "" };
-  return { cmd: trimmed.slice(0, spaceIdx).toLowerCase(), args: trimmed.slice(spaceIdx + 1) };
+  const match = trimmed.match(/^\/([a-z][\w:-]*)(?:\s([\s\S]*))?$/i);
+  return match ? { cmd: `/${match[1].toLowerCase()}`, args: match[2] ?? "" } : null;
 }
 
 /**

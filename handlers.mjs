@@ -782,11 +782,9 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
   const ts = () => new Date().toLocaleTimeString("sv");
 
+  /** WHAT: Frames slash-leading prose as a message. WHY: Keeps literal text out of the engine command parser. */
   function promptForAgent(cleanPrompt) {
-    // TTS is explicit only. A channel's TTS state must not mutate the
-    // prompt sent to the agent; use `amux say "..."` only when the user
-    // explicitly asks for spoken output.
-    return cleanPrompt;
+    return cleanPrompt.trimStart().startsWith("/") ? `[amux message]\n\n${cleanPrompt}` : cleanPrompt;
   }
 
   // streamResponse and hasReadyResponse were removed in 1.16.32 — agent
@@ -808,7 +806,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           agentName: mapping.name,
           pane,
           text: promptToSend,
-          verifyText: cleanPrompt,
+          verifyText: promptToSend,
           source: "discord",
           idempotencyKey: msg.channelId && msg.id
             ? `discord:${msg.channelId}:${msg.id}`
@@ -825,7 +823,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         // Test/embedded fallback. Production always injects the durable broker.
         const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
           sendPromptVerified(agent, mapping.name, pane, promptToSend, {
-            verifyText: cleanPrompt,
+            verifyText: promptToSend,
             attempts: 1,
             echoTimeoutMs: Math.max(50, Math.min(6_000, pollInterval * 500)),
           }));
