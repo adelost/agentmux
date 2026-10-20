@@ -273,14 +273,15 @@ feature("tmux pane usability and attachment health", () => {
       ],
     })],
     when: ["checking operator geometry", (fleet) => checkTmuxPaneGeometry(fleet)],
-    then: ["doctor is red, factual, and gives resize plus attach recovery", (result) => {
+    then: ["doctor is red, factual, and gives the resize recovery, never an attach", (result) => {
       expect(result.status).toBe(FAIL);
       expect(result.detail).toContain("claw:0 26x7");
       expect(result.detail).toContain("ai:2 59x24");
       expect(result.detail).toContain("operator minimum");
       expect(result.detail).toContain(`${TMUX_MIN_PANE_COLUMNS}x${TMUX_MIN_PANE_ROWS}`);
       expect(`${result.detail} ${result.hint}`).not.toMatch(/delivery|ingest|prompt|queue/iu);
-      expect(result.hint).toContain("attach a client");
+      // Row 52: every window is pinned manual 340x100, so a client no longer changes pane size.
+      expect(result.hint).not.toMatch(/attach/iu);
       expect(result.hint).toContain("tmux resize-window");
       expect(formatDoctorReport([result])).toContain("❌  tmux pane geometry");
     }],

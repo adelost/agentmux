@@ -72,7 +72,7 @@ export function checkTmuxPaneGeometry({ panes = [], error = null, required = tru
   const detail = undersized.map((pane) => `${pane.session}:${pane.pane} ${pane.width}x${pane.height}`).join(", ");
   return check("tmux pane geometry", FAIL,
     `${undersized.length}/${panes.length} below operator minimum ${TMUX_MIN_PANE_COLUMNS}x${TMUX_MIN_PANE_ROWS}: ${detail}`,
-    "attach a client, or run tmux resize-window -t SESSION -x 340 -y 100 on the amux socket");
+    "run tmux resize-window -t SESSION -x 340 -y 100 on the amux socket");
 }
 
 /** WHAT: Calculates doctor severity for tmux client attachment. WHY: Keeps detached-resurrection risk visible even when pane dimensions are currently safe. */

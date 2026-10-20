@@ -317,4 +317,19 @@ feature("tmux adapter: parsed reads", () => {
     when: ["reading a format value", ({ t }) => t.display("claw:.0", "#{pane_current_command}")],
     then: ["trimmed", (v) => expect(v).toBe("bash")],
   });
+
+  unit("windowSize reads the window's columns and rows through one display", {
+    given: ["a window tmux reports as 340x100", () => fakeTmux({ stdout: "340x100\n" })],
+    when: ["reading its size", async ({ t, calls }) => ({ size: await t.windowSize("claw"), calls })],
+    then: ["one display-message read, parsed to numbers", ({ size, calls }) => {
+      expect(calls).toEqual([PREFIX + `display-message -t 'claw' -p '#{window_width}x#{window_height}'`]);
+      expect(size).toEqual({ columns: 340, rows: 100 });
+    }],
+  });
+
+  unit("windowSize refuses an answer it cannot read", {
+    given: ["tmux answering with text instead of a size", () => fakeTmux({ stdout: "can't find session: claw\n" })],
+    when: ["reading the size", ({ t }) => t.windowSize("claw").catch((error) => error)],
+    then: ["an error, never a guessed size", (error) => expect(error.message).toContain("unreadable window size for 'claw'")],
+  });
 });

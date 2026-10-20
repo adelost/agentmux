@@ -95,6 +95,14 @@ export function createTmuxAdapter({ socket, exec }) {
       return Number.isSafeInteger(value) && value >= 0 ? value : 0;
     },
 
+    /** The window's current size as { columns, rows }. Throws on an answer that is not WxH; a guess is never returned. */
+    async windowSize(name) {
+      const answer = await display(name, "#{window_width}x#{window_height}");
+      const match = /^(\d+)x(\d+)$/u.exec(answer);
+      if (!match) throw new Error(`unreadable window size for '${name}': ${JSON.stringify(answer)}`);
+      return { columns: Number(match[1]), rows: Number(match[2]) };
+    },
+
     async resizeWindow(name, cols, rows) {
       await raw(`resize-window -t ${q(name)} -x ${Number(cols)} -y ${Number(rows)}`);
     },
