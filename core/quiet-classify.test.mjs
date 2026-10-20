@@ -19,6 +19,26 @@ feature("quiet: why a pane went quiet", () => {
     }],
   });
 
+  // Design v4, from the review of the 06:00 to 10:00Z replay: three of the six forwards were a report, an explanation and
+  // a reply to another pane. A decision asks for a yes or no, or names one for the operator, on a line that asks.
+  unit("a waiting line without a yes or no is not a decision", {
+    given: ["a reply to another pane that waits on its line, and a report that rows wait on him", () => [
+      "Jag uppdaterar den sparade pausen och väntar på din rad om att värden är fri.",
+      "SUMMARY: rapporten är skickad.\nOPEN: Raderna 17 och 92 stänger jag efter stämpeln. 71 och 79 väntar på Mattias.",
+    ]],
+    when: ["classifying each", (replies) => replies.map((reply) => classify(reply).class)],
+    then: ["neither is a decision", (classes) => expect(classes).not.toContain("decision")],
+  });
+
+  unit("a summary that explains a rule needing his yes is not a decision", {
+    given: ["a SUMMARY line that names his yes in passing, and a GOAL line that restates one", () => [
+      "SUMMARY: rad 47 är struken, eftersom din regel kräver ditt ja för varje verktyg.\nDONE: raden struken.",
+      "GOAL: ditt ja eller nej på rad 12 inhämtat.\nNOW: läser koden.",
+    ]],
+    when: ["classifying each", (replies) => replies.map((reply) => classify(reply).class)],
+    then: ["neither is a decision", (classes) => expect(classes).not.toContain("decision")],
+  });
+
   unit("a login is his hands", {
     given: ["a reply that asks him to sign in to a console in his browser", () => replyEndingWith(LINES.login)],
     when: ["classifying it", (reply) => classify(reply)],

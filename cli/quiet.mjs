@@ -26,8 +26,9 @@ const USAGE = `Usage: amux quiet --act
 
 Why a pane went quiet, and the one obvious action, from the conversation log. Rules, no model call.
   --act      Look at the last 6 hours once (the stall-watch cron runs it every 2 minutes). A decision the delegate can make
-             is forwarded to the delegate (lsrc:0, or AMUX_QUIET_DELEGATE) with one reminder after 30 minutes. Work left with
-             no blocker is one nudge to the pane's lead (ROSTER.md). A login, card, key, hardware or a test only the operator
+             is forwarded to the delegate (lsrc:0, or AMUX_QUIET_DELEGATE) with one reminder after 30 minutes, one decision per
+             pane until the delegate answers. Work left with no blocker, after 20 quiet minutes, is one nudge to the pane's
+             lead (ROSTER.md). A login, card, key, hardware or a test only the operator
              can do goes on the hands list and gets no message. Anything else sleeps. One message per pane and episode, never
              to a pane with no ledger row in 2 hours, never about a pane that is working now, never resent after an unknown
              outcome. AMUX_QUIET=0 prints what it would send and sends and marks nothing.

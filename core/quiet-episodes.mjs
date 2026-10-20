@@ -1,5 +1,6 @@
 // Finds the panes that went quiet, and remembers what amux already did about each (docs/DESIGN-quiet-panes.md,
-// chapters 4 and 6). An episode is a pane's turn-final reply that no ask and no later output followed for 3 minutes.
+// chapters 4 and 6). An episode is a pane's turn-final reply that no ask and no later output followed for 3 minutes,
+// or for 20 when the reply leaves work with no blocker.
 // Its key is the pane plus the pane's own waiting line, so the same line in later replies is the same episode.
 // This module is the only writer of quiet-seen.json and quiet-hands.json.
 
@@ -13,6 +14,15 @@ import { operatorName } from "./runtime-defaults.mjs";
 
 /** WHAT: Defines how long a pane must give no sign of work before it counts as quiet. WHY: Keeps a pane between two tool calls from being judged. */
 export const QUIET_AFTER_MS = 3 * 60_000;
+/**
+ * In the replay of 2026-10-20 06:00 to 10:00Z, 13 of the 14 panes nudged after 3 quiet minutes went on by themselves
+ * within 3 to 15 minutes (their own background jobs, other panes' asks); the one real stop stayed quiet for 155 minutes.
+ * WHAT: Defines how long a pane with work left stays quiet before its lead is told.
+ * WHY: Keeps a pane that waits on its own job from being reported as stopped (design v4).
+ */
+export const LEFT_QUIET_MS = 20 * 60_000;
+
+const quietNeedMs = (verdict, quietMs) => (verdict.class === "left" ? Math.max(quietMs, LEFT_QUIET_MS) : quietMs);
 /** WHAT: Defines how far back the cron reads the conversation log. WHY: Limits one run to a tail of the log, not the whole of it. */
 export const SCAN_MS = 6 * 3_600_000;
 /** WHAT: Defines how long a pane may show no ledger row before it counts as dormant. WHY: Keeps a message from waking a pane nobody uses. */
@@ -70,7 +80,7 @@ export function episodeKey(pane, verdict, replyId) {
 /**
  * `isParked(pane, unit)` says whether the quota park held the pane at that reply. An episode that a later ask or output
  * ended is returned too, with `endedMs` set; an open one has `endedMs` null. `sinceMs` is the first reply with the same key.
- * WHAT: Collects every reply that its pane left quiet for 3 minutes, with its class and key.
+ * WHAT: Collects every reply left quiet long enough for its class, with its class and key.
  * WHY: Keeps the cron and the replay on one definition of a quiet pane.
  */
 export function quietEpisodes(log, { untilMs, quietMs = QUIET_AFTER_MS, operator = operatorName(), isParked = () => false } = {}) {
@@ -79,12 +89,13 @@ export function quietEpisodes(log, { untilMs, quietMs = QUIET_AFTER_MS, operator
     const [agent, paneIndex] = [pane.slice(0, pane.lastIndexOf(":")), Number(pane.slice(pane.lastIndexOf(":") + 1))];
     const units = replyUnits(rows).map((unit) => {
       const verdict = classifyQuiet(unit.reply, { parked: isParked(pane, unit), operator });
-      return { ...unit, pane, agent, paneIndex, verdict, key: episodeKey(pane, verdict, unit.replyId), quietFromMs: unit.endMs + quietMs };
+      const needMs = quietNeedMs(verdict, quietMs);
+      return { ...unit, pane, agent, paneIndex, verdict, key: episodeKey(pane, verdict, unit.replyId), needMs, quietFromMs: unit.endMs + needMs };
     });
     const first = new Map();
     for (const unit of units) if (!first.has(unit.key)) first.set(unit.key, unit.startMs);
-    for (const unit of units) {
-      if ((unit.endedMs ?? untilMs) - unit.endMs >= quietMs) episodes.push({ ...unit, sinceMs: first.get(unit.key) });
+    for (const { needMs, ...unit } of units) {
+      if ((unit.endedMs ?? untilMs) - unit.endMs >= needMs) episodes.push({ ...unit, sinceMs: first.get(unit.key) });
     }
   }
   return episodes.sort((left, right) => left.quietFromMs - right.quietFromMs);

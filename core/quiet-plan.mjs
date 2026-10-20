@@ -101,11 +101,23 @@ function blockedByPrior(episode, prior, label, nowMs) {
   return skipped(episode, spent ? `${label} failed ${prior.attempts} times, so it is not sent again` : `${label} failed; it is tried again 10 min after the last try`, spent);
 }
 
+// The newest forward about a pane in the last 30 minutes that went out, or null.
+const recentForwardAbout = (pane, seen, nowMs) => Object.entries(seen)
+  .filter(([key, entry]) => key.startsWith(`quiet:${pane}:`) && entry.kind === "forward" && entry.state !== "failed"
+    && nowMs - entry.at < REMIND_AFTER_MS)
+  .map(([, entry]) => entry).sort((left, right) => right.at - left.at)[0] ?? null;
+
 function decisionPlan(episode, context) {
   const { nowMs, seen, delegate, index } = context;
   const { pane, key, verdict } = episode;
   if (pane === delegate) return skipped(episode, `${pane} is the delegate, so its own decision stays with it`);
   const forwarded = seen[key];
+  // One decision per pane at a time: another wording of it waits for the delegate's answer or the reminder (design v4;
+  // claw:0 asked one decision in two wordings at 09:10 and 09:19Z on 2026-10-20).
+  const earlier = forwarded ? null : recentForwardAbout(pane, seen, nowMs);
+  if (earlier && !index.asksAfter(pane, earlier.at, nowMs).some((ask) => senderOf(ask) === delegate)) {
+    return skipped(episode, `a decision of ${pane} went to ${delegate} at ${clockOf(earlier.at)} and is not answered yet`, false);
+  }
   if (!forwarded || forwarded.state === "failed") {
     const forward = { kind: "forward", target: delegate, key, text: forwardText({ pane, sinceMs: episode.sinceMs, line: verdict.line }), prior: forwarded };
     return blockedByPrior(episode, forwarded, "the forward", nowMs) ?? outgoing(episode, forward, context);

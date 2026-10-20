@@ -28,14 +28,18 @@ const HANDS = Object.freeze([
 
 // A GOAL line restates the request; it never asks for anything.
 const GOAL_LINE = /^[\s>*_`#-]*GOAL:/u;
+// A summary, a goal or a completion line reports, so it never holds a decision (design v4: a SUMMARY that explained a
+// rule needing his yes was forwarded in the replay of 06:00 to 10:00Z).
+const REPORT_LINE = /^[\s>*_`#-]*(?:SUMMARY|GOAL|DONE|VERIFIED):/u;
 
 const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
-// What the delegate can answer without him. The configured operator's name stands where the design says his name.
+// What the delegate can answer without him: a yes or no, or a decision named for him. The configured operator's name
+// stands where the design says his name. "väntar på dig" alone is no decision (design v4): in the replay it waited on
+// another pane's line, or reported rows that wait on him.
 const decisionWords = (operator) => [
-  /väntar\s+på\s+(?:dig|ditt|din)\b/iu, new RegExp(`väntar\\s+på\\s+${escaped(operator)}`, "iu"),
-  /\bditt\s+ja\b/iu, /ja\s+eller\s+nej/iu, /\bja\/nej\b/iu, new RegExp(`beslut\\s+för\\s+${escaped(operator)}`, "iu"),
-  /needs\s+your\s+(?:yes|decision)/iu, /waiting\s+on\s+you\b/iu,
+  /\bditt\s+ja\b/iu, /ja\s+eller\s+nej/iu, /\bja\/nej\b/iu, /\bditt\s+beslut\b/iu, new RegExp(`beslut\\s+för\\s+${escaped(operator)}`, "iu"),
+  /needs\s+your\s+(?:yes|decision)/iu, /\byour\s+decision\b/iu,
 ];
 
 const BLOCKER = [/\bBLOCKED:/u, /väntar\s+på/iu, /blocked\s+by/iu];
@@ -111,7 +115,7 @@ export function classifyQuiet(reply, { parked = false, operator = operatorName()
   const lines = waitingLines(text);
   const hands = handsIn(lines);
   if (hands) return verdict("hands", plainLine(hands.line), hands.what);
-  const decision = lastLineMatching(lines, decisionWords(operator));
+  const decision = lastLineMatching(lines.filter((line) => !REPORT_LINE.test(line)), decisionWords(operator));
   if (decision) return verdict("decision", plainLine(decision));
   const left = leftWork(text);
   if (left) return verdict("left", left);

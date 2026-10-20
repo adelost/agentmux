@@ -40,7 +40,32 @@ function world({ rows, now, status = () => "idle", outcome = "sent", park = {}, 
   };
 }
 
+// Design v4: in the replay of 06:00 to 10:00Z, claw:0 asked one decision in two wordings (09:10 and 09:19Z) and both
+// were forwarded within 9 minutes.
+const TWO_WORDINGS = [
+  postRow("claw:4", "09:10:00", replyEndingWith("- **Utan ditt ja** blir det ett klipp utan röster.")),
+  askRow("claw:4", "09:15:00", "[from skydive:2]\n\nStatus på tåget?"),
+  postRow("claw:4", "09:19:00", replyEndingWith(LINES.decision)),
+];
+
 feature("amux quiet --act: the one obvious action", () => {
+  component("forwards one decision per pane until the delegate has answered it", {
+    given: ["claw:4 asks a yes or no at 09:10 and again in other words at 09:19, once with lsrc:0 answering in between", () => ({
+      unanswered: world({ rows: [...TWO_WORDINGS, ...ACTIVE_PANES], now: "09:14:00" }),
+      answered: world({ rows: [...TWO_WORDINGS, askRow("claw:4", "09:16:00", "[from lsrc:0]\n\nVänta med det."), ...ACTIVE_PANES], now: "09:14:00" }),
+    })],
+    when: ["the cron runs at 09:14 and at 09:23 in both", async (worlds) => {
+      for (const w of Object.values(worlds)) { await w.run(["--act"]); w.at("09:23:00"); await w.run(["--act"]); }
+      return worlds;
+    }],
+    then: ["one forward while unanswered; a new wording after an answer is forwarded again", ({ unanswered, answered }) => {
+      try {
+        const toDelegate = (w) => w.sent.filter((message) => message.agent === "lsrc" && message.pane === 0).length;
+        expect([toDelegate(unanswered), toDelegate(answered)]).toEqual([1, 2]);
+      } finally { unanswered.remove(); answered.remove(); }
+    }],
+  });
+
   component("forwards a decision once and reminds once", {
     given: ["claw:0 with the same decision line in three replies, and lsrc:0 active", () => world({ rows: [...CLAW_UNTIL_THIRD_REPLY, ...ACTIVE_PANES], now: "09:34:00" })],
     when: ["the cron runs at 09:34, 09:36, 10:05 and 10:30", async (w) => {
@@ -83,11 +108,12 @@ feature("amux quiet --act: the one obvious action", () => {
     }],
   });
 
+  // The cron's clock is 20 minutes after the stop since design v4, where work left counts as quiet only then.
   component("nudges an active lead once for work left", {
     given: ["claw:3 stopped with work left at 09:40, and claw:0, its lead by the roster's pane 0 rule, active at 09:30", () => world({
-      rows: [postRow("claw:3", "09:40:00", `NOW: zon 3 byggs\n${LINES.left}`), askRow("claw:0", "09:30:00", "Läget?")], now: "09:44:00",
+      rows: [postRow("claw:3", "09:40:00", `NOW: zon 3 byggs\n${LINES.left}`), askRow("claw:0", "09:30:00", "Läget?")], now: "10:01:00",
     })],
-    when: ["the cron runs twice", async (w) => { await w.run(["--act"]); w.at("09:46:00"); await w.run(["--act"]); return w; }],
+    when: ["the cron runs twice", async (w) => { await w.run(["--act"]); w.at("10:03:00"); await w.run(["--act"]); return w; }],
     then: ["one nudge to claw:0 that quotes the LEFT line", (w) => {
       try {
         expect(w.sent).toHaveLength(1);
@@ -99,7 +125,7 @@ feature("amux quiet --act: the one obvious action", () => {
 
   component("never nudges a dormant lead", {
     given: ["claw:3 stopped with work left at 09:40, and claw:0 last seen at 07:30", () => world({
-      rows: [postRow("claw:3", "09:40:00", `NOW: zon 3 byggs\n${LINES.left}`), askRow("claw:0", "07:30:00", "Läget?")], now: "09:44:00",
+      rows: [postRow("claw:3", "09:40:00", `NOW: zon 3 byggs\n${LINES.left}`), askRow("claw:0", "07:30:00", "Läget?")], now: "10:01:00",
     })],
     when: ["the cron runs", async (w) => { await w.run(["--act"]); return w; }],
     then: ["nothing is sent and nothing is marked as sent, so a lead that wakes is still told", (w) => {

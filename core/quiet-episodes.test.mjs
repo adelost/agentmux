@@ -53,6 +53,19 @@ feature("quiet: one episode per pane and waiting line", () => {
     }],
   });
 
+  // Design v4, from the replay of 06:00 to 10:00Z: 13 of the 14 panes nudged after 3 quiet minutes went on by themselves
+  // within 3 to 15 minutes (their own background jobs, other panes' asks); the one real stop stayed quiet for 155 minutes.
+  unit("work left is an episode only after 20 quiet minutes, a decision after 3", {
+    given: ["claw:3 ending with work left and claw:0 ending with a yes or no, both at 11:00", () => [
+      postRow("claw:3", "11:00:00", `NOW: zon 3 byggd\n${LINES.left}`),
+      postRow("claw:0", "11:00:00", replyEndingWith(LINES.decision)),
+    ]],
+    when: ["looking at 11:04, 11:15 and 11:21", (rows) => ["11:04", "11:15", "11:21"].map((clock) => openEpisodes(scan(rows, clock)).map((episode) => episode.pane).sort())],
+    then: ["the decision is open from 11:03, the work left only from 11:20", (seen) => {
+      expect(seen).toEqual([["claw:0"], ["claw:0"], ["claw:0", "claw:3"]]);
+    }],
+  });
+
   unit("a pane still working has no episode", {
     given: ["three panes at 12:00: a reply 2 minutes ago, a reply and another reply a minute ago, and a reply, an ask and a reply", () => [
       [postRow("claw:1", "11:58:00", "Zon 3 klar.")],
