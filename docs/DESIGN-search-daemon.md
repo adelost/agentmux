@@ -508,6 +508,8 @@ start and end of each run.
 | `core/ask-origin.mjs` | `core/search-human-words.test.mjs`, `existing ask-origin and dream-conversation tests` |
 | `core/dream-conversation.mjs` | `existing ask-origin and dream-conversation tests` |
 | `core/search-semantic.mjs` | `core/search-semantic.test.mjs` |
+| `sync.mjs` (row 49 fix, `human` in the generated config) | `sync.test.mjs` |
+| `core/dream-config.mjs` (moved from `sync.mjs` unchanged) | `sync.test.mjs` |
 
 | Test | Guards | Level | Write min | Run s |
 |---|---|---|---|---|
@@ -519,6 +521,7 @@ start and end of each run.
 | `core/search-embedder-lifecycle.test.mjs` | R-4, R-7, I-4, UC-6 | unit | 10 | 1 |
 | `core/search-semantic.test.mjs` | UC-5 | component | 3 | 3 |
 | `existing ask-origin and dream-conversation tests` | existing, R-2 | unit | 0 | 2 |
+| `sync.test.mjs` | UC-2 (his name reaches the CLI), existing Dream section tests | component | 5 | 2 |
 
 - Budget: write 78 min of the 330 min of build in chapter 13 (rows 43, 44 and 46; 24 %); targeted run 17 s.
 - Full proof: none: no money, sign-in, deletion of user data or migration. The derived files are a private copy of
