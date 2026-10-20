@@ -8,6 +8,7 @@ import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createSelfCompactStore } from "./self-compact.mjs";
 import { verifiedClaudeCompact } from "./verified-compact.mjs";
+import { composerAgent } from "../test/fixtures/composer-agent.mjs";
 
 function fixture({ fail = false, jobs = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-cost-test-")), path = join(root, "session.jsonl");
@@ -858,6 +859,57 @@ feature("a self-request before the next delivery", () => {
         expect(result.ok).toBe(true);
         expect(ctx.calls).toEqual(["compact"]);
       } finally { ctx.cleanup(); rmSync(ctx.dir, { recursive: true, force: true }); }
+    }],
+  });
+});
+
+// skyvw:3, 2026-10-20: the idle compact wrote its intent at 12:23:35.3Z and typed /compact; a bridge restart 0.8 s later
+// ended the bridge before its Enter. The intent stayed ATTEMPTING, the command stayed in the composer, and every
+// delivery from 12:25:30Z was refused for 50 minutes until a person pressed Enter.
+feature("a compact its writer never finished", () => {
+  const STOPPED_BRIDGE_PID = 4_000_001;
+  const NEXT_DELIVERY = "[from lsrc:2] row 322";
+  /** WHAT: skyvw:3's cut compact: its intent, and /compact unsent in a Codex composer. WHY: The 12:23Z failure shape. */
+  const cutCompact = ({ record, alive }) => {
+    const ctx = fixture();
+    const { agent: paneAgent, pane } = composerAgent({ dialect: "codex", composer: "/compact" });
+    ctx.state.set("context_maintenance_by_pane_v1", { "skyvw:3": { sessionId: "one", status: "ATTEMPTING",
+      cursor: captureJsonlAppendCursor("context-maintenance-v1", [ctx.identityFor().path]), cell: "compact-once", beforeTokens: 199_327,
+      at: ctx.now() - 115_000, ...record } });
+    Object.assign(ctx.agent, { getContext: async () => ({ tokens: 1_000 }), promptTransportState: paneAgent.promptTransportState,
+      captureScreen: paneAgent.captureScreen, clearInputLine: paneAgent.clearInputLine, sendEscape: paneAgent.sendEscape });
+    return { ...ctx, resolveTarget: () => ({ dir: "/pane", engine: "codex" }), writerAlive: () => alive, pane, paneAgent };
+  };
+  const deliverNext = async ctx => {
+    const admitted = await createContextMaintenance(ctx).beforeWork({ agentName: "skyvw", pane: 3, id: "next" });
+    let refused = null;
+    try { await ctx.paneAgent.sendOnly("skyvw", NEXT_DELIVERY, 3); } catch (error) { refused = error.message; }
+    return { admitted, refused, intent: ctx.state.get("context_maintenance_by_pane_v1")["skyvw:3"] };
+  };
+
+  component("is withdrawn before the next delivery, which then lands", {
+    when: ["the next delivery comes for a stopped bridge's intent and for a 50-minute-old one without a writer", async () =>
+      Promise.all([{ record: { pid: STOPPED_BRIDGE_PID }, alive: false }, { record: { at: 100_000_000 - 50 * 60_000 }, alive: true }]
+        .map(async shape => { const ctx = cutCompact(shape); try { return { ...await deliverNext(ctx), pane: ctx.pane }; } finally { ctx.cleanup(); } }))],
+    then: ["the /compact is erased unsent, the delivery is submitted, and the policy may decide again", rows => {
+      for (const { admitted, refused, intent, pane } of rows) {
+        expect(refused).toBeNull();
+        expect(pane.submitted).toEqual([NEXT_DELIVERY]);
+        expect(admitted.ok).toBe(true);
+        expect(intent).toMatchObject({ status: "NOT_SENT", reason: "abandoned-before-submit" });
+      }
+    }],
+  });
+
+  component("is left alone while its writer still runs, which may still press Enter", {
+    given: ["the intent of a live writer and its /compact in the composer", () => cutCompact({ record: { pid: STOPPED_BRIDGE_PID }, alive: true })],
+    when: ["the next delivery comes", deliverNext],
+    then: ["no key touches the composer and the intent stays open", ({ intent }, ctx) => {
+      try {
+        expect(ctx.pane.keys).toEqual([]);
+        expect(ctx.pane.composer).toBe("/compact");
+        expect(intent.status).toBe("ATTEMPTING");
+      } finally { ctx.cleanup(); }
     }],
   });
 });

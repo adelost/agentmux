@@ -16,6 +16,20 @@ export const COMPOSER_KEY_ALLOWLIST = Object.freeze([
 const ALLOWED = new Set(COMPOSER_KEY_ALLOWLIST);
 export const CLEARLINE_RECIPE = Object.freeze(["Escape", "C-a", "C-k"]);
 
+// Codex 0.163 reads an Escape and the key after it in one write as Alt+key: "Escape C-a C-k" in one tmux write left
+// every draft in place, while the same keys with Escape written alone cleared it (real 0.163 probe, 2026-10-20). Two
+// Escapes stay one write, as Claude's verified double Escape was sent.
+/** WHAT: Builds the tmux writes for composer keys. WHY: Keeps an Escape from fusing with the next key into Alt+key. */
+export function composerKeyWrites(keys) {
+  const writes = [[]];
+  for (const key of keys) {
+    const write = writes.at(-1);
+    if (write.at(-1) === "Escape" && key !== "Escape") writes.push([key]);
+    else write.push(key);
+  }
+  return writes;
+}
+
 /** WHAT: Builds the visible editor's clear sequence. WHY: Prevents collapsed Claude pastes from surviving logical-line deletion. */
 export function clearComposerRecipe(snapshot) {
   const line = composerLines(snapshot)[0] ?? "";

@@ -11,7 +11,7 @@ import { esc, stripAnsi } from "../lib.mjs";
 import { isShellProcess } from "../core/tui-stall-recovery.mjs";
 import { appendEvent, latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import {
-  escapeComposerRecipe,
+  composerKeyWrites, escapeComposerRecipe,
   normalizeComposerKeys,
 } from "../core/composer-control.mjs";
 import { readParkState, shouldBlockSend, blockedSendMessage } from "../core/pane-park.mjs";
@@ -261,7 +261,7 @@ async function sendComposerControl(ctx, name, pane, keys, {
   // invisible mutation that automation can safely assume did not happen.
   record(event("requested"));
   try {
-    await ctx.tmux(`send-keys -t '${esc(name)}:.${Number(pane)}' ${keyList.join(" ")}`);
+    for (const keys of composerKeyWrites(keyList)) await ctx.tmux(`send-keys -t '${esc(name)}:.${Number(pane)}' ${keys.join(" ")}`);
   } catch (error) {
     try { record(event("failed", String(error.message || error).slice(0, 200))); }
     catch { /* requested is the durable provenance floor */ }

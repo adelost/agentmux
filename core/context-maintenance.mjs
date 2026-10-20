@@ -16,9 +16,20 @@ import { isCodexCompaction } from "./codex-compaction.mjs";
 import { isRecoveredClaudeCompactAttempt } from "./claude-quota-target.mjs";
 import { claudeRefusalResetAt } from "./claude-limit-evidence.mjs";
 import { QUOTA_PARK_ORIGIN } from "./quota-park.mjs";
+import { withdrawDraft } from "./draft-withdrawal.mjs";
 
 const STATE_KEY = "context_maintenance_by_pane_v1";
 const paneKey = (name, pane) => `${name}:${pane}`;
+// The longest compact wait (Codex, 1 920 polls of 1 s) plus a margin: no live writer owns an older attempt.
+const COMPACT_WRITER_LIFETIME_MS = 40 * 60_000;
+const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; } };
+
+/** WHAT: Tells whether the process that began a compact attempt has stopped. WHY: Only then may another pass touch what it typed. */
+function compactWriterGone(record, { now, alive }) {
+  if (record.pid === process.pid) return false;
+  if (record.pid && !alive(record.pid)) return true;
+  return now - record.at > COMPACT_WRITER_LIFETIME_MS;
+}
 const compactEvent = e => isCodexCompaction(e)
   || (e?.type === "system" && e.subtype === "compact_boundary");
 // Claude journals a typed slash command ("/compact", "/model x") as its own
@@ -75,15 +86,26 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null, no
 export function beginContextCompact(state, name, pane, identity) {
   if (!state) return;
   const cursor = captureJsonlAppendCursor("context-maintenance-v1", [identity.path]);
-  write(state, paneKey(name, pane), { sessionId: identity.sessionId, cursor, status: "ATTEMPTING", at: Date.now() });
+  write(state, paneKey(name, pane), { sessionId: identity.sessionId, cursor, status: "ATTEMPTING", at: Date.now(), pid: process.pid });
 }
 
 /** WHAT: Builds shared warm and cold context protection. WHY: Keeps paid compact attempts durable, serialized and bound to exact session evidence. */
 export function createContextMaintenance({ agent, state, queue, resolveTarget, now = Date.now, log = () => {}, policy = readContextCostPolicy(),
   identityFor = latestPaneSessionIdentity, activityFor = latestConversationActivityMs, journalFor = getContextPercent,
   compactFor = engine => engine === "codex" ? verifiedCodexCompact : verifiedClaudeCompact, coldBeforeDelivery = null,
-  selfRequests = null, notify = async () => {}, quotaRecoveryFor = () => ({ options: { queue } }) }) {
+  selfRequests = null, notify = async () => {}, quotaRecoveryFor = () => ({ options: { queue } }), writerAlive = processAlive }) {
   const existing = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity, now());
+
+  // skyvw:3 2026-10-20 12:23Z: a bridge restart ended the idle compact between typing /compact and its Enter. Its intent
+  // stayed ATTEMPTING and the command stayed in the composer, so every delivery was refused for 50 minutes. A command
+  // still in the composer was provably never sent: erase it and let the policy decide again.
+  async function withdrawAbandonedCompact(name, pane, record) {
+    const { outcome } = await withdrawDraft({ agent, job: { agentName: name, pane, text: record.command || "/compact" } });
+    if (outcome !== "cleared") return record;
+    write(state, paneKey(name, pane), { ...record, status: "NOT_SENT", reason: "abandoned-before-submit", finishedAt: now() });
+    log(`${name}:${pane} erased the compact command a stopped writer left unsent; the policy decides again`);
+    return null;
+  }
 
   // skyvw:0 2026-10-11: lsrc:4 (370k) and lsrc:5 (310k) got new work after 50
   // idle minutes and started on a cold Codex cache; the 60-minute, 210k cold
@@ -135,6 +157,9 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const identity = identityFor(target.engine, target.dir);
     if (!identity) return { ok: true, skipped: "no-session" };
     let prior = existing(name, pane, identity);
+    if (prior?.status === "ATTEMPTING" && compactWriterGone(prior, { now: now(), alive: writerAlive })) {
+      prior = await withdrawAbandonedCompact(name, pane, prior);
+    }
     if (prior?.status === "VERIFIED") return { ok: true, cell: "receipt-exists" };
     const context = await (agent.getContext?.(name, pane) ?? agent.getContextPercent(name, pane));
     let activity = activityFor(target.dir, target.engine, { recoverCodexHistory: true });
@@ -201,7 +226,10 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
         if (!idle.ok) return { ok: false, reason: `context-cost:${idle.stage}:${idle.error}` };
       }
       const cursor = captureJsonlAppendCursor("context-maintenance-v1", [identity.path]);
-      const record = { sessionId: identity.sessionId, cursor, status: "ATTEMPTING", at: now(), cell: decision.cell, beforeTokens: context.tokens };
+      const command = focus && target.engine === "claude" ? `/compact ${focus}` : "/compact";
+      // pid and command let the next pass erase what this attempt typed if this process stops before its Enter.
+      const record = { sessionId: identity.sessionId, cursor, status: "ATTEMPTING", at: now(), cell: decision.cell, beforeTokens: context.tokens,
+        pid: process.pid, command };
       intent = record;
       write(state, paneKey(name, pane), record);
       const compact = compactFor(target.engine);
@@ -217,8 +245,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
           onSubmitting: async () => { submitted = true; await options?.onSubmitting?.(); } });
       } };
       const result = await compact({ agent: guardedAgent, agentName: name, pane, paneDir: target.dir,
-        latestIdentity: dir => identityFor(target.engine, dir), maxRescues: 0,
-        ...(focus && target.engine === "claude" ? { command: `/compact ${focus}` } : {}),
+        latestIdentity: dir => identityFor(target.engine, dir), maxRescues: 0, command,
         onCommandAccepted: () => writer?.releaseSession?.() });
       // A usage limit refused the compact before it spent anything; it may run again once that limit resets.
       const retryAt = result.reason === "provider-usage-limited" ? claudeRefusalResetAt(result.detail, now()) : null;

@@ -56,14 +56,16 @@ feature("tmux adapter: command strings", () => {
       expect(calls[0]).toBe(PREFIX + `send-keys -t 'claw:.1' -l -- 'don'\\''t --help me'`)],
   });
 
-  unit("clearInputLine clears a multiline composer without submitting", {
+  // Codex 0.163 reads an Escape and the C-a after it in one write as Alt+C-a, so one "Escape C-a C-k" write left the
+  // draft in place; the same keys with Escape in its own write clear it (real 0.163 probe, 2026-10-20).
+  unit("clearInputLine writes Escape on its own, then C-a C-k, without submitting", {
     given: ["adapter", () => fakeTmux()],
     when: ["clearing the composer", async ({ t, calls }) => {
       await t.clearInputLine("claw:.1");
       return calls;
     }],
-    then: ["uses the canonical Escape,C-a,C-k recipe without C-u", (calls) =>
-      expect(calls[0]).toBe(PREFIX + `send-keys -t 'claw:.1' Escape C-a C-k`)],
+    then: ["Escape cannot fuse with C-a, and C-u is never sent", (calls) =>
+      expect(calls).toEqual([PREFIX + `send-keys -t 'claw:.1' Escape`, PREFIX + `send-keys -t 'claw:.1' C-a C-k`])],
   });
 
   unit("runShell wraps the line verbatim (config cmds may hold quotes)", {

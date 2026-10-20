@@ -8,6 +8,7 @@ import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 import { validCodexCompactReceipt } from "./codex-launch-policy.mjs";
 import { contextMaintenanceAttempt } from "./context-maintenance.mjs";
 import { claudeRefusalResetAt } from "./claude-limit-evidence.mjs";
+import { composerAgent } from "../test/fixtures/composer-agent.mjs";
 
 // claw:2's journal and screen on 2026-10-20: /compact at 11:06:51.635Z, refused 1.4 s later.
 const SESSION_LIMIT_REFUSAL = {
@@ -404,6 +405,44 @@ feature("verified Codex compact", () => {
     }],
   });
 });
+
+// skyvw:3, 2026-10-20: a /compact amux typed stayed unsubmitted in the composer, and every delivery after it was refused
+// as "composer is not empty (starts with: /compact)" for 50 minutes, until a person pressed Enter.
+feature("a compact command the engine did not take never stays in the composer", () => {
+  unit("Codex: the unverified /compact is withdrawn, never submitted", {
+    given: ["a Codex pane whose composer keeps the typed /compact", () => ({ ...codexRollout(), ...composerAgent({ dialect: "codex" }) })],
+    when: ["the compact cannot verify that Codex took the command", async (ctx) => ({ ...ctx,
+      result: await verifiedCodexCompact({ agent: ctx.agent, agentName: "skyvw", pane: 3, paneDir: "/pane",
+        latestIdentity: () => ctx.identity, sendSlash: typeWithoutSubmit(ctx.pane), sleep: async () => {}, pollAttempts: 1 }) })],
+    then: ["the composer is empty for the next delivery and no Enter was pressed", ({ root, result, pane }) => {
+      expect(result).toMatchObject({ ok: false, reason: "compact-command-unverified" });
+      expect(pane.composer).toBe(""); expect(pane.enters).toBe(0);
+      rmSync(root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("Claude: the unverified /compact is withdrawn, never submitted", {
+    given: ["a Claude pane whose composer keeps the typed /compact", () => {
+      const fx = composerAgent({ dialect: "claude" });
+      fx.agent.capturePromptEchoCursor = async () => ({ kind: "test", positions: { "/pane/session.jsonl": 0 } });
+      return fx;
+    }],
+    when: ["the compact has no receipt that Claude took the command", async (ctx) => ({ ...ctx,
+      result: await verifiedClaudeCompact({ agent: ctx.agent, agentName: "claw", pane: 2, paneDir: "/pane",
+        latestIdentity: () => ({ sessionId: "same-session" }), sendSlash: typeWithoutSubmit(ctx.pane), sleep: async () => {}, pollAttempts: 1 }) })],
+    then: ["the composer is empty for the next delivery and no Enter was pressed", ({ result, pane }) => {
+      expect(result).toMatchObject({ ok: false, reason: "compact-command-unverified" });
+      expect(pane.composer).toBe(""); expect(pane.enters).toBe(0);
+    }],
+  });
+});
+
+/** WHAT: A command sender that types into the pane and never submits. WHY: Reproduces a command left in the composer. */
+const typeWithoutSubmit = (pane) => async (_agent, _agentName, _pane, command) => {
+  pane.composer = command;
+  pane.typed.push(command);
+  return { delivered: false, rescues: 0 };
+};
 
 function codexRollout() {
   const root = mkdtempSync(join(tmpdir(), "amux-codex-compact-"));

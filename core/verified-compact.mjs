@@ -7,6 +7,7 @@ import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
 import { compactAccessBlocker } from "./nightly-compact.mjs";
 import { isCodexCompaction } from "./codex-compaction.mjs";
+import { withdrawDraft } from "./draft-withdrawal.mjs";
 import {
   captureJsonlAppendCursor, hasJsonlEventAfterCursor,
 } from "./jsonl-append-cursor.mjs";
@@ -31,6 +32,11 @@ const waitFor = async (attempts, delayMs, sleep, predicate) => {
   }
   return false;
 };
+
+// skyvw:3, 2026-10-20: a /compact amux typed stayed unsent in the composer and every delivery was refused for 50 minutes.
+/** WHAT: Erases a compact command the engine did not take, only when the composer holds exactly it. WHY: Frees the composer for the next delivery. */
+const withdrawUnsentCommand = async (agent, agentName, pane, command, sleep) =>
+  (await withdrawDraft({ agent, job: { agentName, pane, text: command }, wait: sleep })).outcome;
 
 /** WHAT: Returns the last stop line a screen shows, from "You've hit your" to its end. WHY: Keeps the reset when the journal is late. */
 const screenStopText = (screen) => String(screen || "").split("\n")
@@ -91,7 +97,7 @@ export async function verifiedClaudeCompact({
   }
   if (blocked) return { ok: false, reason: blocked };
   if (!sent.delivered || sent.via !== "command-receipt") {
-    return { ok: false, reason: "compact-command-unverified" };
+    return { ok: false, reason: "compact-command-unverified", withdrawn: await withdrawUnsentCommand(agent, agentName, pane, command, sleep) };
   }
   let refusal = null, empty = false;
   const boundary = await waitFor(
@@ -158,7 +164,9 @@ export async function verifiedCodexCompact({
     maxRescues,
     sleep,
   });
-  if (!command.delivered) return { ok: false, reason: "compact-command-unverified" };
+  if (!command.delivered) {
+    return { ok: false, reason: "compact-command-unverified", withdrawn: await withdrawUnsentCommand(agent, agentName, pane, "/compact", sleep) };
+  }
   await onCommandAccepted();
 
   // Codex writes the compaction before it closes the compact turn, so a

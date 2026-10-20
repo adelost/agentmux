@@ -16,9 +16,8 @@
 //   untouched; specs come from code (dismiss.mjs), never user input.
 
 import { esc } from "../lib.mjs";
-import { CLEARLINE_RECIPE } from "./composer-control.mjs";
+import { CLEARLINE_RECIPE, composerKeyWrites } from "./composer-control.mjs";
 
-const CLEAR_COMPOSER_KEYS = CLEARLINE_RECIPE.join(" ");
 const PANE_ROW_FORMAT = "#{pane_index}|#{pane_id}|#{pane_dead}|#{pane_current_command}|#{pane_current_path}";
 
 /** WHAT: Parses list-panes rows strictly. WHY: Keeps a malformed listing from becoming a guessed pane layout. */
@@ -225,7 +224,7 @@ export function createTmuxAdapter({ socket, exec }) {
 
     /** Clear the TUI composer with the canonical no-submit recovery recipe. */
     async clearInputLine(target) {
-      await sendKeys(target, CLEAR_COMPOSER_KEYS);
+      for (const keys of composerKeyWrites(CLEARLINE_RECIPE)) await sendKeys(target, keys.join(" "));
     },
 
     /** Exit copy/view/choose mode without leaking a keystroke (-X cancel). */

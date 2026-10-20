@@ -53,7 +53,9 @@ const opts = (fx, extra = {}) => ({
 });
 
 feature("composer control adapter", () => {
-  unit("allowlisted keys have a durable fence, exact tmux write and two mirrors", {
+  // Codex 0.163 reads an Escape and the key after it in one write as Alt+key (real probe, 2026-10-20), so an Escape
+  // before another key is its own tmux write; the receipt still names the keys as one control.
+  unit("allowlisted keys have a durable fence, exact tmux writes and two mirrors", {
     given: ["a target and broker channel", () => fixture()],
     when: ["sending bounded keys", async (fx) => {
       const receipt = await sendComposerKeys(
@@ -69,7 +71,8 @@ feature("composer control adapter", () => {
         target: "target:0",
       });
       expect(fx.tmuxCalls).toEqual([
-        "send-keys -t 'target:.0' Escape C-a C-k",
+        "send-keys -t 'target:.0' Escape",
+        "send-keys -t 'target:.0' C-a C-k",
       ]);
       expect(fx.events.map((event) => event.event)).toEqual([
         "composer_control_requested",
@@ -106,7 +109,7 @@ feature("composer control adapter", () => {
     }],
   });
 
-  unit("clearline is one exact Escape,C-a,C-k write", {
+  unit("clearline writes Escape alone, then C-a C-k, which clears a Codex 0.163 draft", {
     given: ["a Codex composer that actually empties after the clear", () => {
       const fx = fixture({ discord: false });
       fx.ctx.agent.captureScreen.mockResolvedValueOnce("› composer").mockResolvedValue("› ");
@@ -116,10 +119,10 @@ feature("composer control adapter", () => {
       const receipt = await clearPaneComposer(fx.ctx, "target", 0, opts(fx));
       return { fx, receipt };
     }],
-    then: ["C-u is absent", ({ fx, receipt }) => {
+    then: ["Escape is its own write and C-u is absent", ({ fx, receipt }) => {
       expect(receipt.action).toBe("clearline");
       expect(receipt.keys).toEqual(["Escape", "C-a", "C-k"]);
-      expect(fx.tmuxCalls[0]).not.toContain("C-u");
+      expect(fx.tmuxCalls).toEqual(["send-keys -t 'target:.0' Escape", "send-keys -t 'target:.0' C-a C-k"]);
       rmSync(fx.root, { recursive: true, force: true });
     }],
   });
