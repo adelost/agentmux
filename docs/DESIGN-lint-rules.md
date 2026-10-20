@@ -1,6 +1,6 @@
 # amux lint --only rules: the repos' rule files checked against trunk
 
-Version: 3 · 2026-10-20 17:4xZ · owner of the design: api:0 · page: none yet
+Version: 4 · 2026-10-20 18:2xZ · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -360,8 +360,21 @@ ai-gateway, skydive-manifest, haunt-lab, chat-helper, yt-subtl, cad, agent-sessi
 None for him. Calls made by api:0:
 
 - The name is `amux lint --only rules`, so one lint command keeps one set of targets and one report.
-- No schedule in v1. A finding needs an owner who acts on it; the run at each audit and before a rule-file commit is
-  enough until a dead path reaches a pane twice.
+- Daily run (v4, lsrc:0's order of 2026-10-20 ~18:0xZ; it replaces my v1 call of no schedule). A crontab line at
+  07:30 local runs `bin/rules-lint-daily.mjs` from the installed release over the repos listed one per line in
+  `~/.agentmux/rules-lint-repos.txt` (today the 18 of §10; a missing file fails loudly, the public repo holds no
+  paths). Each repo's errors go to its owner: the Lead pane of its row in `~/.agentmux/ROSTER.md` "Projects now",
+  matched by path or name; a repo with no row goes to lsrc:0, the lead of fleet dispatch.
+  - One message per owner, with only the errors not sent before (keys kept in `~/.agentmux/rules-lint-daily.json`).
+    An error repeated every day would wake a pane for nothing (staffing rule 3). Warnings are not sent;
+    `amux lint --only rules` shows them on demand.
+  - The first run records the open errors without sending them. Today's one error, cutkit's checkout 556 commits
+    behind, has its owner's decision: skyvw:0 at 17:49Z, not before Bumbi.
+  - `--dry` prints each owner and its message and sends nothing.
+  - Done when: installed with the crontab line; `--dry` over the 18 repos names cutkit's owner as skyvw:0; a live
+    run with one new error sends one message, and a second run sends none.
+  - Build: P2, about 1.5 h, a Codex builder when P2 work is allowed on Codex again (lsrc:0 17:3xZ: Codex A only
+    P0/P1 until he decides on credits and resets).
 - CLAUDE.md beside AGENTS.md may stay "@AGENTS.md" until the probe of step 1 shows a double load.
 
 ## 15. Changes
@@ -371,3 +384,5 @@ None for him. Calls made by api:0:
   ten checks) in §1. My note to lsrc:3 that he never asked for a tool was wrong.
 - v3, 2026-10-20 17:4xZ: a missing path is a warning and ignored paths are skipped (I-2, §2), from the full run in
   §10 (1 of 26 missing-path errors was right). My decision as owner. Told: lsrc:0.
+- v4, 2026-10-20 18:2xZ: the daily run in §14, from lsrc:0's order; only new errors go to each owner. A 18:20Z run
+  over the 18 repos had 1 error and 30 warnings; the owners had fixed the other 4 errors. Told: lsrc:0.
