@@ -294,11 +294,11 @@ function rowTimes(text, { skipFirst }) {
 }
 
 /**
- * WHAT: Lists the ledger files with the time span each holds, from their first and last rows.
- * WHY: Lets a window read open only the archives it overlaps. Rows are appended in about time order;
- * an unreadable edge widens the span instead of hiding the file.
+ * Rows are appended in about time order, so the first and last rows of a file give its span.
+ * WHAT: Returns each ledger file with the time span its rows cover.
+ * WHY: Keeps a window read from opening archives outside it; an unreadable edge widens the span.
  */
-function ledgerSpans(path) {
+export function ledgerSpans(path) {
   const current = resolve(path);
   return askLedgerFiles(path).map((file) => {
     const head = readSlice(file, false);
