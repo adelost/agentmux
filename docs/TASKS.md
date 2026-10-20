@@ -6,6 +6,7 @@ Historical runtime receipt (2026-09-20): **1.25.84 / 4241763cd9acae64bf6de40305b
 
 | # | Outcome | Owner | Done when | State | Closed on |
 |---|---|---|---|---|---|
+| 51 | Retry an idle compact that a session-window stop refused, right after the reset while the pane's cache still lives (under 60 min since its last call) | api:0 | A replay of 20 Oct 11:11–11:23Z retries api:0, claw:2 and ai:1 after the reset; saved tokens counted against sandman:0's 1.37M cold writes | Open · P2: after rows 49, 50 and 48 (lsrc:0 as his delegate; his yes in PRIORITIES 11:30:33Z) | |
 | 50 | `amux quiet`: classify why a pane went quiet and take only the obvious action ([Quiet §6](DESIGN-quiet-panes.md#6-pseudocode)) | api:0 | The replay of 06:00–10:00Z forwards claw:0's 156 line once and needs-you falls to the real few, counts in §10 | Open · P1: after row 49 | |
 | 49 | His search units name him, join a run of his messages to one pane, and leave automation out ([Search §6](DESIGN-search-daemon.md#6-pseudocode)) | api:0 | The 47 and v14 to v16 before and after in §10, and Dream's answer share before and after | In progress · P1: Sonnet builds, api:0 reviews | |
 | 48 | `amux lint --only rules`: the rules audit's ten checks over the repos' rule files ([Rules lint §6](DESIGN-lint-rules.md#6-pseudocode)) | api:0 | Installed; one run over the 18 repos in §10 with every error checked against trunk; exit 1 on errors | Open · P2: after row 49 (P1); first builder stopped before any change | |
