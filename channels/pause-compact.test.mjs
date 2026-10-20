@@ -139,12 +139,12 @@ feature("quota wind-down in the pause poll (component)", () => {
       try { expect(ctx.queue.list("lsrc", 2)).toHaveLength(1); expect(ctx.requests.list()).toEqual([]); expect(ctx.runs).toEqual([]); } finally { ctx.cleanup(); }
     }],
   });
-  component("dry mode logs would-notice and would-nudge without writes", {
+  component("dry mode logs would-notice, would-compact and would-nudge without writes", {
     given: ["dry wind-down", () => windDownFixture({ mode: "dry" })],
     when: ["polling at 5 and 3 %", async ctx => { await ctx.poll(); ctx.advance(300_000); await ctx.poll(); }],
-    then: ["only dry outcomes", (_result, ctx) => {
+    then: ["only dry outcomes, the compact once, as design §11 compares them with the replay", (_result, ctx) => {
       try {
-        expect(ctx.lines.map(line => line.outcome)).toEqual(["would-notice", "would-nudge"]);
+        expect(ctx.lines.map(line => line.outcome)).toEqual(["would-notice", "would-compact", "would-nudge"]);
         expect(ctx.queue.list("lsrc", 2)).toEqual([]); expect(ctx.requests.list()).toEqual([]); expect(ctx.runs).toEqual([]);
       } finally { ctx.cleanup(); }
     }],

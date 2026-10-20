@@ -22,7 +22,7 @@ import { accountSwitchStatus, registerAccountSwitchBatch } from "./codex-account
 import { isCompactedCodexSession } from "../core/codex-compacted-session.mjs";
 import { codexWeeklyLimitReached } from "../core/codex-limit-recovery.mjs";
 import { windDownCompactReceipt } from "../core/quota-wind-down-move.mjs";
-import { moveTarget, quotaObservedAt, windDownContinuation } from "../core/quota-wind-down.mjs";
+import { moveTarget, quotaObservedAt, windDownContinuation, windDownMovesEnabled } from "../core/quota-wind-down.mjs";
 import { accountWindows, codexCreditHold, codexCreditsAllowed } from "../core/quota-park.mjs";
 
 /** WHAT: Defines explicit pane-local account request keys. WHY: Keeps operator intent separate from provider quota evidence and unrelated state writers. */
@@ -73,8 +73,7 @@ function finish(ctx, key, request, result) {
 }
 
 function windDownProof(ctx, name, pane, request, identity, now) {
-  if (process.env.AMUX_QUOTA_WIND_DOWN_MOVE === "false" || ["off", "dry"].includes(process.env.AMUX_QUOTA_WIND_DOWN)
-      || !(Number(request.episode?.split("|").at(-1)) > now) || identity?.sessionId !== request.sessionId) return null;
+  if (!windDownMovesEnabled() || !(Number(request.episode?.split("|").at(-1)) > now) || identity?.sessionId !== request.sessionId) return null;
   return windDownCompactReceipt({ state: ctx.state, agentName: name, pane, identity, beganAt: request.beganAt, now });
 }
 

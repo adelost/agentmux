@@ -4,6 +4,7 @@ import { readClaudeQuotaBudgeted } from "../core/claude-quota-budget.mjs";
 import { runtimeProfileCatalog } from "../core/runtime-account-profiles.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { runRequestedCodexSwitch } from "../cli/codex-account-switch.mjs";
+import { windDownMovesEnabled } from "../core/quota-wind-down.mjs";
 
 /** WHAT: Routes poll-admitted moves to each engine's existing lifecycle. WHY: Keeps wind-down on the exact-session switch paths without a second scheduler. */
 export function createQuotaWindDownMover({ agent, state, queue, configPath, tmuxSocket, tmuxExec, accountFor,
@@ -16,7 +17,7 @@ export function createQuotaWindDownMover({ agent, state, queue, configPath, tmux
     windDown: { state, agent, identityFor, profiles, readTargetQuota }, now });
   const ctx = { agent, state, deliveryQueue: queue, configPath };
   return async input => {
-    if (process.env.AMUX_QUOTA_WIND_DOWN_MOVE === "false") return { moved: false, reason: "wind-down-moves-disabled" };
+    if (!windDownMovesEnabled()) return { moved: false, reason: "wind-down-moves-disabled" };
     const fresh = await accountFor(`${input.agentName}:${input.pane}`, { fresh: true });
     if (fresh?.account?.key !== input.from.key) return { moved: false, reason: "wind-down-source-changed" };
     if (input.engine === "claude") return coordinator.moveAfterWindDown(input);

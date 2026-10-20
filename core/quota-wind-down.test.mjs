@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { windDownStage, compactPays, moveTarget, windDownNotice, windDownContinuation } from "./quota-wind-down.mjs";
+import { windDownStage, compactPays, moveTarget, windDownNotice, windDownContinuation, readWindDownMode, windDownMovesEnabled } from "./quota-wind-down.mjs";
 
 const at = time => Date.parse(`2026-10-20T${time}Z`);
 const session = { kind: "session", usedPercent: 94, resetsAt: "2026-10-20T11:10:00Z" };
@@ -71,5 +71,19 @@ feature("quota wind-down decisions (unit)", () => {
       "[AMUX QUOTA WIND-DOWN · 3 %] Claude S is about to stop. End your turn at the next clean boundary; amux compacts this session then.",
       "[AMUX QUOTA WIND-DOWN · MOVED] This session was compacted and moved from Claude S to Claude A, which has room. Continue the task from the compact summary. Do not repeat an external side effect that already has a receipt.",
     ])],
+  });
+  unit("the switch starts dry until a live stop is read", {
+    when: ["reading unset, set and invalid switches", () => [readWindDownMode({}), readWindDownMode({ AMUX_QUOTA_WIND_DOWN: "on" }),
+      () => readWindDownMode({ AMUX_QUOTA_WIND_DOWN: "yes" }), windDownMovesEnabled({}), windDownMovesEnabled({ AMUX_QUOTA_WIND_DOWN: "on" }),
+      windDownMovesEnabled({ AMUX_QUOTA_WIND_DOWN: "on", AMUX_QUOTA_WIND_DOWN_MOVE: "false" })]],
+    then: ["dry by default (design §11), moves only when on", ([unset, on, invalid, ...moves]) => {
+      expect([unset, on]).toEqual(["dry", "on"]);
+      expect(invalid).toThrow("AMUX_QUOTA_WIND_DOWN must be off, dry or on");
+      expect(moves).toEqual([false, true, false]);
+    }],
+  });
+  unit("a week notice names the reset day", {
+    when: ["formatting a week notice days before its reset", () => windDownNotice({ stage: "notice", account: "Claude S", leftPercent: 4.2, window: "week", resetAt: Date.parse("2026-10-27T03:00:00Z") })],
+    then: ["the date precedes the time", text => expect(text).toContain("of its week window left (resets Oct 27 03:00Z).")],
   });
 });

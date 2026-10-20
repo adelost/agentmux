@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -6,6 +6,9 @@ import { switchCodexAccounts, codexAccountRequest, runRequestedCodexSwitch } fro
 import { rememberContextCompact } from "../core/context-maintenance.mjs";
 
 describe("Codex quota wind-down (component)", () => {
+  // These cases exercise moves, which run only with wind-down on; the shipped default is dry (design §11).
+  beforeAll(() => { vi.stubEnv("AMUX_QUOTA_WIND_DOWN", "on"); });
+  afterAll(() => { vi.unstubAllEnvs(); });
   async function windDown({ verified = true, divergent = false } = {}) {
     const fx = fixture(), now = Date.now();
     if (verified) await fx.options.compact();

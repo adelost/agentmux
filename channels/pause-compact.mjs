@@ -18,7 +18,7 @@ import { QUOTA_FLOOR_DEFAULT_PERCENT, QUOTA_PARK_ORIGIN, QUOTA_PARK_POLICY, code
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
 import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 import { isLiveStatus } from "../core/pane-status.mjs";
-import { compactPays, moveTarget, QUOTA_WIND_DOWN_ORIGIN, windDownNotice, windDownStage } from "../core/quota-wind-down.mjs";
+import { compactPays, moveTarget, QUOTA_WIND_DOWN_ORIGIN, readWindDownMode, windDownNotice, windDownStage } from "../core/quota-wind-down.mjs";
 export { createQuotaParkFacts } from "./quota-park.mjs";
 export { createQuotaParkStore } from "../core/quota-park-store.mjs";
 export { codexCreditsAllowed, quotaFloorPercent } from "../core/quota-park.mjs";
@@ -39,7 +39,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   selfRequests = null, notify = async () => {}, cacheLifeMs = readContextCostPolicy().coldMs, deliveryBroker = null,
   parkFor = null, parkStore = null, floorPercent = QUOTA_FLOOR_DEFAULT_PERCENT, creditsAllowed = false,
   limitReceiptFor = (engine, paneDir) => (engine === "claude" ? activeClaudeLimitReceipt(paneDir) : null),
-  windDownMode = process.env.AMUX_QUOTA_WIND_DOWN || "on", windDownMove = process.env.AMUX_QUOTA_WIND_DOWN_MOVE !== "false",
+  windDownMode = readWindDownMode(), windDownMove = process.env.AMUX_QUOTA_WIND_DOWN_MOVE !== "false",
   moveAfterWindDown = null, compactReceiptFor = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity, now()),
   cursorFor = path => captureJsonlAppendCursor("self-compact-request-v1", [path]) }) {
   if (!["off", "dry", "on"].includes(windDownMode)) throw new Error("AMUX_QUOTA_WIND_DOWN must be off, dry or on");
@@ -179,14 +179,16 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       && (receipt.finishedAt ?? receipt.at) >= episode.beganAt;
     const readAfter = Math.max(verified ? receipt.finishedAt ?? receipt.at : -Infinity, now() - 10 * 60_000);
     const target = windDownMove ? moveTarget({ engine, accounts: facts.accounts, from: facts.account, readAfter }) : null;
-    if (!verified && !episode.requested && selfRequests && windDownMode === "on" && !selfRequests.read(name, pane)
+    if (!verified && !episode.requested && selfRequests && !selfRequests.read(name, pane)
         && compactPays({ ...stage, engine, working, lastActivityAt: lastActivityMs, target })) {
       const limit = limitReceiptFor(engine, paneDir);
       if (!limit || limit.stop === "grace-note") {
-        const result = selfRequests.request({ agent: name, pane, tokens, origin: QUOTA_WIND_DOWN_ORIGIN,
-          lastCompactAt: lastCompactAt(name, pane, paneKey, identity?.path) });
+        // Dry mode names the compacts it would request, so a live stop can be checked against the replay.
+        const result = windDownMode === "dry" ? { ok: true } : selfRequests.request({ agent: name, pane, tokens,
+          origin: QUOTA_WIND_DOWN_ORIGIN, lastCompactAt: lastCompactAt(name, pane, paneKey, identity?.path) });
         episode.requested = result.ok;
-        report(paneKey, episodeKey, { ...line, outcome: result.ok ? "wind-down-requested" : "wind-down-held", detail: result.detail || line.detail });
+        const outcome = windDownMode === "dry" ? "would-compact" : result.ok ? "wind-down-requested" : "wind-down-held";
+        report(paneKey, episodeKey, { ...line, outcome, detail: result.detail || line.detail });
       }
     }
     if (!verified || !target || working || status !== "idle" || episode.moved) return false;

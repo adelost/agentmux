@@ -1,4 +1,5 @@
 import { feature, component, expect } from "bdd-vitest";
+import { afterAll, beforeAll, vi } from "vitest";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,6 +40,9 @@ function windDownFixture({ verified = true, busy = false, draft = false, session
 }
 
 feature("verified quota wind-down moves (component)", () => {
+  // These cases exercise moves, which run only with wind-down on; the shipped default is dry (design §11).
+  beforeAll(() => { vi.stubEnv("AMUX_QUOTA_WIND_DOWN", "on"); });
+  afterAll(() => { vi.unstubAllEnvs(); });
   for (const unsafe of ["other-session", "before-episode", "new-work", "live-delivery", "stale-target", "session-lease"]) {
     component(`I-2 refuses ${unsafe}`, {
       given: ["one missing move invariant", () => {

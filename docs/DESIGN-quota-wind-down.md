@@ -1,6 +1,6 @@
 # Quota wind-down: notice at 5 %, nudge at 3 %, compact, then a move to room
 
-Version: 2 · 2026-10-20 17:3xZ · owner of the design: api:0 · page: none yet
+Version: 3 · 2026-10-20 22:5xZ · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -38,7 +38,7 @@ to the pane's Discord channel as every amux notice is.
 
 | String | Where | Max length |
 |---|---|---|
-| `[AMUX QUOTA WIND-DOWN · 5 %] {account} has {left} % of its {window} window left (resets {HH:MM}Z). Finish the current step and start no new large one; amux compacts this session when your turn ends.` | pane, at 5 % | 240 |
+| `[AMUX QUOTA WIND-DOWN · 5 %] {account} has {left} % of its {window} window left (resets {HH:MM}Z, a week window {Mon D HH:MM}Z). Finish the current step and start no new large one; amux compacts this session when your turn ends.` | pane, at 5 % | 240 |
 | `[AMUX QUOTA WIND-DOWN · 3 %] {account} is about to stop. End your turn at the next clean boundary; amux compacts this session then.` | pane, at 3 % | 180 |
 | `[AMUX QUOTA WIND-DOWN · MOVED] This session was compacted and moved from {from} to {to}, which has room. Continue the task from the compact summary. Do not repeat an external side effect that already has a receipt.` | pane, after a move | 260 |
 
@@ -96,8 +96,10 @@ flowchart LR
   the notices are durable through the broker's idempotency keys `quota-wind-down:{5|3}:{pane}:{episode}`.
 - One exit: notices leave only through `deliveryBroker.enqueue`; a move only through the coordinator's exact-session
   restart (Claude) or `runRequestedCodexSwitch` (Codex).
-- Switches: `AMUX_QUOTA_WIND_DOWN=off|dry|on` (default on; dry logs `would-notice`, `would-nudge`, `would-move` to
-  `~/.agentmux/pause-compact.jsonl`); `AMUX_QUOTA_WIND_DOWN_MOVE=false` keeps the notices and compacts and moves nothing.
+- Switches: `AMUX_QUOTA_WIND_DOWN=off|dry|on` (default dry until §11's first live stop is read, then on; dry logs
+  `would-notice`, `would-compact`, `would-nudge`, `would-move` to `~/.agentmux/pause-compact.jsonl`);
+  `AMUX_QUOTA_WIND_DOWN_MOVE=false` keeps the notices and compacts and moves nothing. One reader,
+  `readWindDownMode` in `core/quota-wind-down.mjs`, serves the poll and both move paths.
 - Invariants:
   - **I-1** At most one notice and one nudge per pane per episode. Enforced in `channels/pause-compact.mjs` (episode
     map and idempotency keys), guarded by `channels/pause-compact.test.mjs`, "one notice and one nudge per episode,
@@ -234,6 +236,12 @@ windDownStep(pane):                                    # channels/pause-compact.
 - **R-6** The pace forecast is wrong when use speeds up near the end. Mitigation: re-evaluated each poll; the floor and
   park still stop work at 3 %. Detection: the replay compares forecast and reading (15:13:20Z: forecast 6.3 %, read 6 %).
   Owner: api:0.
+- **R-8** The bridge stops after a Claude move's restart and before its MOVED continuation is queued: the pane sits
+  idle on the new account with its compacted context, and its task waits for the next message. Likely low (a window of
+  seconds per move), cost a stalled task. Mitigation, required before `on`: queue the continuation paused before the
+  restart and release it after, as `recoverTarget` does for a limit banner, plus a poll step that releases or cancels a
+  paused one after a restart. Detection: a component test that cuts the move after the restart. Fallback:
+  `AMUX_QUOTA_WIND_DOWN_MOVE=false`. Owner: api:0. Codex is covered: its move is a durable per-pane request.
 - **R-7** A move while the pane works or types. Mitigation: `classifyClaudeRotationPane` must say running (idle, empty
   composer, no live delivery, known session). Detection: test "no move while busy or drafted". Owner: api:0.
 
@@ -265,8 +273,9 @@ the panes stopped are *measured*):
 
 ## 11. Rollout and rollback
 
-- Order: release with `AMUX_QUOTA_WIND_DOWN=dry` for the first stop it sees, read the dry lines against the replay, then
-  `on` (his yes covers the moves). Everyone at once.
+- Order: release dry (the code default, since the bridge's env file holds secrets) for the first stop it sees, read the
+  dry lines against the replay, close R-8, then release with the default `on` (his yes covers the moves). Everyone at
+  once.
 - Switches: `AMUX_QUOTA_WIND_DOWN=off|dry|on`; `AMUX_QUOTA_WIND_DOWN_MOVE=false`.
 - Turning it off leaves nothing behind: the episodes are in memory, the notices are ordinary acknowledged jobs.
 - Migrations: none.
@@ -338,3 +347,7 @@ None for him; his yes covers the moves. Calls made by api:0:
 - v2, 2026-10-20 17:3xZ: the replay fixture with per-pane facts and expected panes (§10, §12) and the threshold example
   with 94.0 % (§12); stop 2 compacts 6 without a move, not 10, once `compactPays` is applied. Why: api:6 stopped
   before code on a 95.0 % example in my brief that contradicts §6 and on §10 lacking per-pane data. Told: api:6.
+- v3, 2026-10-20 22:5xZ: the first release defaults to dry in code (§4, §11), dry also logs `would-compact` so a live
+  stop can be checked against the replay, a week notice names its reset day (§2), and R-8 (a Claude move cut after its
+  restart) must close before `on`. Why: api:0's review of api:6's build 9218922d; the env file is not edited by agents.
+  Told: api:6.

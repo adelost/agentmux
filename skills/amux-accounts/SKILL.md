@@ -51,8 +51,9 @@ window warns at 5 % left and nudges once at 3 %. A move requires a VERIFIED
 compact of this session in this episode, an idle pane, an empty composer, no
 live delivery and another account with room in both windows read after the
 compact. The exact session continues there. `AMUX_QUOTA_WIND_DOWN=off|dry|on`
-(default on) controls wind-down; `AMUX_QUOTA_WIND_DOWN_MOVE=false` disables its
-moves while keeping notices and worthwhile compacts.
+(default dry: it only logs `would-*` lines to `~/.agentmux/pause-compact.jsonl`)
+controls wind-down; `AMUX_QUOTA_WIND_DOWN_MOVE=false` disables its moves while
+keeping notices and worthwhile compacts.
 At `AMUX_QUOTA_FLOOR_PERCENT` left on the week (default 3 %, 0 is off) amux
 starts no new automatic delivery to panes on that account and the quota park
 compacts them at their turn end; the owner's own message still goes through.

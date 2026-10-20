@@ -6,6 +6,16 @@ export const QUOTA_WIND_DOWN_ORIGIN = "quota-wind-down";
 const MAX_AGE_MS = 10 * 60_000;
 const millis = value => typeof value === "number" ? value : Date.parse(value);
 
+/** WHAT: Reads the wind-down switch. WHY: Keeps every reader dry until a live stop's dry lines are read (design §11). */
+export function readWindDownMode(env = process.env) {
+  const mode = env.AMUX_QUOTA_WIND_DOWN || "dry";
+  if (!["off", "dry", "on"].includes(mode)) throw new Error("AMUX_QUOTA_WIND_DOWN must be off, dry or on");
+  return mode;
+}
+
+/** WHAT: Returns whether wind-down may move a pane. WHY: Keeps both engines' move paths behind the same two switches. */
+export const windDownMovesEnabled = (env = process.env) => readWindDownMode(env) === "on" && env.AMUX_QUOTA_WIND_DOWN_MOVE !== "false";
+
 /** WHAT: Returns the nearest window's forecast stage at its own pace. WHY: Prevents five-minute readings from delaying a 5 % notice. */
 export function windDownStage({ windows = [], now, observedAt }) {
   const live = windows.flatMap(window => {
@@ -55,8 +65,10 @@ export function moveTarget({ engine, accounts = [], from, readAfter, reservePerc
 /** WHAT: Formats the two wind-down notices. WHY: Keeps every delivery on the design's same words. */
 export function windDownNotice({ stage, account, leftPercent, window, resetAt }) {
   if (stage === "nudge") return `[AMUX QUOTA WIND-DOWN · 3 %] ${account} is about to stop. End your turn at the next clean boundary; amux compacts this session then.`;
-  const left = Math.round(leftPercent * 10) / 10;
-  return `[AMUX QUOTA WIND-DOWN · 5 %] ${account} has ${left} % of its ${window} window left (resets ${new Date(resetAt).toISOString().slice(11, 16)}Z). Finish the current step and start no new large one; amux compacts this session when your turn ends.`;
+  const left = Math.round(leftPercent * 10) / 10, reset = new Date(resetAt);
+  // A week resets days later, so its time alone would read as today.
+  const day = window === "week" ? `${reset.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })} ` : "";
+  return `[AMUX QUOTA WIND-DOWN · 5 %] ${account} has ${left} % of its ${window} window left (resets ${day}${reset.toISOString().slice(11, 16)}Z). Finish the current step and start no new large one; amux compacts this session when your turn ends.`;
 }
 
 /** WHAT: Formats the continuation after a verified move. WHY: Prevents repeating side effects with existing receipts. */

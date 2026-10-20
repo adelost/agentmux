@@ -1,4 +1,5 @@
 import { feature, component, expect } from "bdd-vitest";
+import { afterAll, beforeAll, vi } from "vitest";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -64,6 +65,9 @@ function flow({ move = true } = {}) {
 }
 
 feature("quota wind-down composed path (component)", () => {
+  // These cases exercise moves, which run only with wind-down on; the shipped default is dry (design §11).
+  beforeAll(() => { vi.stubEnv("AMUX_QUOTA_WIND_DOWN", "on"); });
+  afterAll(() => { vi.unstubAllEnvs(); });
   for (const move of [true, false]) {
     component(`notice, turn-end compact and ${move ? "verified move with continuation" : "disabled move"}`, {
       given: ["real poll, broker, request store, maintenance and coordinator; external process/quota boundaries doubled", () => flow({ move })],

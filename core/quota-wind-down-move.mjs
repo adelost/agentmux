@@ -2,7 +2,7 @@ import { configuredClaudeTarget } from "./claude-quota-target.mjs";
 import { contextMaintenanceAttempt } from "./context-maintenance.mjs";
 import { classifyClaudeRotationPane } from "./account-rotation.mjs";
 import { isDeliveryInFlight } from "./delivery-queue-policy.mjs";
-import { moveTarget, quotaObservedAt, windDownContinuation } from "./quota-wind-down.mjs";
+import { moveTarget, quotaObservedAt, windDownContinuation, windDownMovesEnabled } from "./quota-wind-down.mjs";
 
 /** WHAT: Reads a verified compact within this episode and session. WHY: Prevents failed, old or superseded context from authorizing a move. */
 export function windDownCompactReceipt({ state, agentName, pane, identity, beganAt, now = Date.now() }) {
@@ -17,8 +17,7 @@ export function createClaudeWindDownMove({ queue, lifecycle, configPath, now, wi
   return async function moveAfterWindDown(input) {
     const { agentName, pane, target, episode, beganAt, from } = input;
     const refuse = reason => ({ moved: false, reason });
-    if (!windDown || process.env.AMUX_QUOTA_WIND_DOWN_MOVE === "false"
-        || ["off", "dry"].includes(process.env.AMUX_QUOTA_WIND_DOWN)) return refuse("wind-down-not-configured");
+    if (!windDown || !windDownMovesEnabled()) return refuse("wind-down-not-configured");
     const configured = configuredClaudeTarget(agentName, pane, { configPath });
     if (!configured || !episode?.startsWith(`${agentName}:${pane}|`)
         || !(Number(episode.split("|").at(-1)) > now())) return refuse("wind-down-episode-ended");
