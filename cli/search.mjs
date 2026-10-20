@@ -111,7 +111,8 @@ const SEMANTIC_RESERVED = 50;
 export const SEMANTIC_LAYER = Object.freeze({ query: semanticQuery, passages: daemonPassages, rerank: daemonRerank,
   conversation: daemonConversation, start: startEmbedder });
 
-const COLD_CONVERSATION_WARNING = "ℹ conversation log is searched by the warm search daemon; it is starting, so this answer leaves it out";
+// It says only that the daemon is not up: a start refused for lack of memory made "it is starting" false (design §2).
+const COLD_CONVERSATION_WARNING = "ℹ conversation log is searched by the warm search daemon, which is not up; this answer leaves it out";
 const CONVERSATION_MAX = 12;
 
 /**
@@ -188,7 +189,8 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   let reranker = null;
   const semanticAllowed = !flags.raw && !flags.lexical && !flags.fast;
   const useSemantic = lexicalRoots.length > 0 && semanticAllowed && (flags.semantic || classifyQuery(content) === "natural");
-  // A question that does not ask the semantic layer would never start the daemon, and the warning says it is starting.
+  // A question that does not ask the semantic layer would never start the daemon, so a cold conversation step starts it
+  // for the next question, and says why when the start is refused.
   if (conversation.cold && semanticAllowed && !useSemantic) {
     const started = semantic.start?.({ roots: lexicalRoots });
     if (started?.unavailable) warn(`⚠ ${started.unavailable}`);

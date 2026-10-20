@@ -232,8 +232,9 @@ feature("search CLI contract", () => {
   });
 });
 
-// The conversation log is searched by the warm daemon; a cold answer leaves it out (docs/DESIGN-search-daemon.md, chapter 6).
-const COLD_WARNING = "ℹ conversation log is searched by the warm search daemon; it is starting, so this answer leaves it out";
+// The conversation log is searched by the warm daemon; a cold answer leaves it out (docs/DESIGN-search-daemon.md, chapter 2).
+// It does not say the daemon is starting: a start refused for lack of memory made that false.
+const COLD_WARNING = "ℹ conversation log is searched by the warm search daemon, which is not up; this answer leaves it out";
 
 // The root of his day files, as the design shapes it; cmdSearch adds it by itself (last test below).
 const humanRootOf = (path) => ({ name: "human", path, glob: "*.md", exclude: [], semanticExclude: [], weight: 3, semantic: true, kind: "human-words" });
