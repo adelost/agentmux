@@ -35,6 +35,10 @@ export const QUOTA_PARK_POLICY = Object.freeze({
   outlastMs: Object.freeze({ claude: 50 * 60_000, codex: 25 * 60_000 }),
   // How long a pending park compact may hold quota recovery's move of a stopped pane.
   moveWaitMs: 10 * 60_000,
+  // 2026-10-20: the park at 3 % came 11 s before Claude S's session stopped its panes, and a reading can be ten
+  // minutes old. A window forecast to stop a pane within this lead parks it too, so its turn and compact still fit.
+  leadMs: 20 * 60_000,
+  windowMs: Object.freeze({ session: 5 * 3_600_000, week: 7 * 86_400_000 }),
 });
 
 const KIND = { session: "session", weekly_all: "week" };
@@ -55,24 +59,48 @@ export function accountWindows(account) {
 }
 
 /**
+ * WHAT: Returns when a window runs out at its average pace since it opened.
+ * WHY: Keeps a fast window from stopping panes before any reading shows its last 3 %.
+ */
+export function predictedStopAt(window, now, policy = QUOTA_PARK_POLICY) {
+  if (window.usedPercent >= 100) return now;
+  const elapsed = now - (Date.parse(window.resetsAt) - policy.windowMs[window.kind]);
+  // The first minutes of a window say too little about its pace.
+  if (!(elapsed >= policy.leadMs) || !(window.usedPercent > 0)) return Infinity;
+  return now + (100 - window.usedPercent) * (elapsed / window.usedPercent);
+}
+
+/** WHAT: Checks whether any window opened after a moment. WHY: Keeps a note read before a reset from describing the new window. */
+const openedSince = (windows, at, policy) => Number.isFinite(at)
+  && windows.some((window) => Date.parse(window.resetsAt) - policy.windowMs[window.kind] > at);
+
+/**
  * WHAT: Checks whether a pane's account is about to stop it for longer than its cache lives.
  * WHY: Keeps compaction to stops that end in a cold read; Claude's grace note means the stop is here.
  */
-export function quotaParkDecision({ engine, windows = [], graceNote = false, now }, policy = QUOTA_PARK_POLICY) {
+export function quotaParkDecision({ engine, windows = [], graceNote = false, graceNoteAt = NaN, working = true, lastActivityAt = NaN, now },
+  policy = QUOTA_PARK_POLICY) {
   const outlastMs = policy.outlastMs[engine];
   if (!outlastMs) return { park: false, cell: "engine" };
   const live = windows.filter((window) => Number.isFinite(window.usedPercent) && Date.parse(window.resetsAt) > now);
+  // A note read before a window reset belongs to a stop that is over (skybar:1 at 11:10:11Z on 2026-10-20).
+  const note = graceNote && !openedSince(live, graceNoteAt, policy);
   // A spent window has stopped the pane already and its account refuses the compact; within Claude's grace it still runs.
-  if (!graceNote && live.some((window) => window.usedPercent >= 100)) return { park: false, cell: "already-stopped" };
-  const near = live.filter((window) => 100 - window.usedPercent <= policy.leftPercent);
+  if (!note && live.some((window) => window.usedPercent >= 100)) return { park: false, cell: "already-stopped" };
+  const atFloor = (window) => 100 - window.usedPercent <= policy.leftPercent;
+  const near = live.filter((window) => atFloor(window) || predictedStopAt(window, now, policy) - now <= policy.leadMs);
   // At the grace note a fresh reading may not show the window full yet; the fullest one is stopping the pane.
-  const stopping = near.length ? near : graceNote ? live.toSorted((left, right) => right.usedPercent - left.usedPercent).slice(0, 1) : [];
-  if (!stopping.length) return { park: false, cell: graceNote ? "reset-unknown" : "room" };
+  const stopping = near.length ? near : note ? live.toSorted((left, right) => right.usedPercent - left.usedPercent).slice(0, 1) : [];
+  if (!stopping.length) return { park: false, cell: note ? "reset-unknown" : "room" };
   // The pane runs again only when every stopping window has reset.
   const last = stopping.reduce((latest, window) => (Date.parse(window.resetsAt) > Date.parse(latest.resetsAt) ? window : latest));
   const resetAt = Date.parse(last.resetsAt);
-  if (resetAt - now <= outlastMs) return { park: false, cell: "cache-outlives-stop", window: last.kind, resetAt };
-  return { park: true, cell: near.length ? "near-limit" : "grace-note", window: last.kind, resetAt };
+  // A window at the floor, or the grace note, stops the pane now; one forecast to run out, at its forecast.
+  const stopAt = Math.max(now, Math.min(...stopping.map((window) => (atFloor(window) || !near.length ? now : predictedStopAt(window, now, policy)))));
+  // A working pane keeps its cache warm until the stop; an idle one's cache has aged since its last activity.
+  const cacheFrom = working || !Number.isFinite(lastActivityAt) ? stopAt : lastActivityAt;
+  if (resetAt - cacheFrom <= outlastMs) return { park: false, cell: "cache-outlives-stop", window: last.kind, resetAt };
+  return { park: true, cell: near.length ? "near-limit" : "grace-note", window: last.kind, resetAt, leftPercent: Math.max(0, 100 - last.usedPercent) };
 }
 
 /**
@@ -137,6 +165,7 @@ function roomAfterPark({ park, windows, observedAt, now, resetGraceMs }, policy)
   const parked = windows.find((window) => window.kind === park.window);
   if (!parked) return { action: "wait", reason: `the reading has no ${park.window} window` };
   const left = 100 - parked.usedPercent;
-  if (left <= policy.leftPercent) return { action: "wait", reason: `its ${park.window} window has ${left} % left` };
+  // A pane parked before its window ran low waits for more room than it had then, not only for the floor.
+  if (left <= Math.max(policy.leftPercent, park.leftPercent ?? 0)) return { action: "wait", reason: `its ${park.window} window has ${left} % left` };
   return { action: "resume", reason: `${park.account?.name || "its account"} has ${left} % of its ${park.window} window left` };
 }

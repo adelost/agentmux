@@ -161,7 +161,8 @@ export function createAutoCompact({
       if (contextMaintenance) {
         const result = await contextMaintenance.run(agentName, paneIdx);
         log(`${paneKey}: ${result.compacted ? "compact verified" : result.reason || result.cell || "within policy"}`);
-        if (result.attempted && !result.ok) await postCompactFailed(agentName, paneIdx, paneKey, result.detail || result.reason);
+        if (result.attempted && !result.ok) await postCompactFailed(agentName, paneIdx, paneKey, result.detail || result.reason, result.retryAt);
+        if (Number.isFinite(result.retryAt)) compactFloors.delete(paneKey); // refused unspent by a limit: warned again after its reset
         if (!result.ok && !result.attempted) refusal = result.reason ?? "refused before sending";
         return refusal;
       }
@@ -297,8 +298,8 @@ export function createAutoCompact({
       .catch((err) => log(`${kind} notice send failed for ${paneKey}: ${err.message}`));
   }
 
-  const postCompactFailed = (name, idx, key, reason) =>
-    postCompactNotice(name, idx, key, formatCompactFailedMessage(key, reason), "compact-failed");
+  const postCompactFailed = (name, idx, key, reason, retryAt) =>
+    postCompactNotice(name, idx, key, formatCompactFailedMessage(key, reason, retryAt), "compact-failed");
 
   // lsrc:3 review 2026-10-10: only a notice Discord accepted counts; a rejected one is tried on the next poll.
   async function postCompactHeld(agentName, paneIdx, paneKey, reason, { lastActivityMs, contextTokens }) {

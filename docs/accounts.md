@@ -27,11 +27,19 @@ order. A failed restart retries on the new account at the next poll. A session
 window never moves a pane, and forecasts never do.
 `AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false` disables it.
 
+The quota park compacts a pane at its turn end before its account stops it for
+longer than the pane's prompt cache lives. It parks at 3 % left, or earlier when a
+window's pace since it opened says it runs out within 20 minutes: a reading can be
+ten minutes old, and twenty panes spend Claude's last 3 % of five hours in minutes.
+A running subagent or background job does not hold that compact, and an idle
+pane's cache counts from its last activity. A compact a usage limit refused spent
+nothing; it runs again after the reset Claude names, while the cache is still warm.
+
 A Claude pane the quota park compacted and told to stop has no limit receipt.
 The park is recorded in `~/.agentmux/quota-parks/`, and the quota sidecar sends
 that pane the same same-session recovery prompt as soon as a reading taken after
-the park shows room on its account (a free reset, any early room) or the window's
-reset time passes. When that room comes, a pane that is working on a later request
+the park shows more room than the park saw (a free reset, any early room) or the
+window's reset time passes. When that room comes, a pane that is working on a later request
 or has a message in its queue is left alone; a message it already finished does not
 count. A park notice still in the queue is cancelled either way.
 

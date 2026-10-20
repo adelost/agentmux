@@ -14,6 +14,8 @@ import { regainSessionLease } from "./session-lease.mjs";
 import { finishSelfCompactRequest, selfCompactSuperseded } from "./self-compact-resume.mjs";
 import { isCodexCompaction } from "./codex-compaction.mjs";
 import { isRecoveredClaudeCompactAttempt } from "./claude-quota-target.mjs";
+import { claudeRefusalResetAt } from "./claude-limit-evidence.mjs";
+import { QUOTA_PARK_ORIGIN } from "./quota-park.mjs";
 
 const STATE_KEY = "context_maintenance_by_pane_v1";
 const paneKey = (name, pane) => `${name}:${pane}`;
@@ -54,7 +56,7 @@ export function lastContextCompactAt(state, name, pane) {
 }
 
 /** WHAT: Reads the current context-generation fence. WHY: Keeps warm, cold and nightly maintenance from repeating a paid attempt without new work. */
-export function contextMaintenanceAttempt(state, name, pane, identity = null) {
+export function contextMaintenanceAttempt(state, name, pane, identity = null, now = Date.now()) {
   const record = state?.get?.(STATE_KEY, {})?.[paneKey(name, pane)];
   if (!record || record.status === "NOT_SENT" || (identity && record.sessionId !== identity.sessionId)) return null;
   const files = Object.keys(record.cursor?.positions || {});
@@ -64,6 +66,8 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null) {
     write(state, paneKey(name, pane), verified);
     return verified;
   }
+  // A compact the provider's usage limit refused spent nothing, so its fence ends when that limit resets.
+  if (record.status === "FAILED" && now >= record.retryAt) return null;
   return record;
 }
 
@@ -79,7 +83,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   identityFor = latestPaneSessionIdentity, activityFor = latestConversationActivityMs, journalFor = getContextPercent,
   compactFor = engine => engine === "codex" ? verifiedCodexCompact : verifiedClaudeCompact, coldBeforeDelivery = null,
   selfRequests = null, notify = async () => {}, quotaRecoveryFor = () => ({ options: { queue } }) }) {
-  const existing = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity);
+  const existing = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity, now());
 
   // skyvw:0 2026-10-11: lsrc:4 (370k) and lsrc:5 (310k) got new work after 50
   // idle minutes and started on a cold Codex cache; the 60-minute, 210k cold
@@ -216,10 +220,13 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
         latestIdentity: dir => identityFor(target.engine, dir), maxRescues: 0,
         ...(focus && target.engine === "claude" ? { command: `/compact ${focus}` } : {}),
         onCommandAccepted: () => writer?.releaseSession?.() });
-      write(state, paneKey(name, pane), { ...record, status: result.ok ? "VERIFIED" : "FAILED", reason: result.reason || null, finishedAt: now() });
+      // A usage limit refused the compact before it spent anything; it may run again once that limit resets.
+      const retryAt = result.reason === "provider-usage-limited" ? claudeRefusalResetAt(result.detail, now()) : null;
+      write(state, paneKey(name, pane), { ...record, status: result.ok ? "VERIFIED" : "FAILED", reason: result.reason || null, finishedAt: now(),
+        ...(retryAt ? { retryAt } : {}) });
       log(`${name}:${pane} ${decision.cell}: ${result.ok ? "compact verified" : result.reason}`);
       return result.ok ? { ok: true, compacted: true, receipt: result }
-        : { ok: false, attempted: true, reason: `context-cost:${result.reason}`, detail: result.detail || null };
+        : { ok: false, attempted: true, reason: `context-cost:${result.reason}`, detail: result.detail || null, ...(retryAt ? { retryAt } : {}) };
     } catch (error) {
       if (intent) write(state, paneKey(name, pane), { ...intent, status: submitted ? "FAILED" : "NOT_SENT", reason: error.message, finishedAt: now() });
       log(`${name}:${pane} context compact failed: ${error.message}`);
@@ -254,8 +261,9 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     if (!request) return null;
     const target = resolveTarget(agentName, pane);
     const identity = target && identityFor(target.engine, target.dir);
-    const background = identity ? coldBeforeDelivery?.background({ engine: target.engine, sessionPath: identity.path,
-      sessionId: identity.sessionId, paneDir: target.dir, now: now() }) : null;
+    // A park's compact is due before the stop, even while a subagent or job still works.
+    const background = identity && request.origin !== QUOTA_PARK_ORIGIN ? coldBeforeDelivery?.background({ engine: target.engine,
+      sessionPath: identity.path, sessionId: identity.sessionId, paneDir: target.dir, now: now() }) : null;
     if (background) { log(`${agentName}:${pane} self-compact held before delivery: ${background}`); return null; }
     const context = await (agent.getContext?.(agentName, pane) ?? agent.getContextPercent(agentName, pane));
     const admission = selfCompactAdmission({ tokens: context?.tokens, lastCompactAt: lastContextCompactAt(state, agentName, pane), now: now() });

@@ -187,8 +187,8 @@ feature("a working pane far past its budget", () => {
 // lsrc:0 2026-10-19: a pane its account will stop for longer than its prompt cache lives
 // compacts first, so the restart after the reset is not a cold read of a huge context.
 feature("a pane whose account is about to stop it", () => {
-  const nearLimit = resetInMs => {
-    let now = NOW;
+  const nearLimit = (resetInMs, { background = null } = {}) => {
+    let now = NOW, supersede = false;
     const dir = mkdtempSync(join(tmpdir(), "amux-quota-park-"));
     const session = join(dir, "s1.jsonl");
     writeFileSync(session, "{}\n");
@@ -196,15 +196,18 @@ feature("a pane whose account is about to stop it", () => {
     const parks = createQuotaParkStore({ dir: join(dir, "parks") });
     const runs = [], lines = [];
     const pause = createPauseCompact({ modes: { claude: "on", codex: "on" }, now: () => now, state: { get: () => ({}) },
-      contextMaintenance: { run: async (name, pane, options) => { runs.push({ pane: `${name}:${pane}`, ...options }); return { ok: true, compacted: true }; } },
+      contextMaintenance: { run: async (name, pane, options) => { runs.push({ pane: `${name}:${pane}`, ...options }); return { ok: true, compacted: true }; },
+        selfRequestSuperseded: () => supersede },
       record: line => lines.push(line), identityFor: () => ({ path: session, sessionId: "s1" }),
-      backgroundFor: { claude: () => null, codex: () => null }, journalCompactFor: () => null, selfRequests: requests,
+      backgroundFor: { claude: () => background, codex: () => null }, journalCompactFor: () => null, selfRequests: requests,
       parkFor: async () => ({ account: { name: "Claude S", key: "claude:1" },
         windows: [{ kind: "session", usedPercent: 97, resetsAt: new Date(NOW + resetInMs).toISOString() }] }),
       parkStore: parks, limitReceiptFor: () => null });
     const poll = facts => pause.consider({ agentConfig: lsrc, pane: 2, engine: "claude", paneDir: "/lsrc/.agents/2",
       status: "idle", inCopyMode: false, contextTokens: 150_000, ...facts });
     return { runs, lines, requests, parks, poll, turnEndsThenWait: async () => { const ended = now; now += 61_000; return poll({ lastActivityMs: ended }); },
+      working: () => { now += 30_000; return poll({ status: "working", lastActivityMs: now }); },
+      newInput: async () => { supersede = true; now += 30_000; const sent = await poll({ status: "working", lastActivityMs: now }); supersede = false; return sent; },
       cleanup: () => rmSync(dir, { recursive: true, force: true }) };
   };
 
@@ -219,6 +222,34 @@ feature("a pane whose account is about to stop it", () => {
         // Quota recovery resumes it from this record once Claude S has room (lsrc:0, 2026-10-19).
         expect(ctx.parks.list()).toEqual([expect.objectContaining({ agentName: "lsrc", pane: 2, state: "parked",
           account: { name: "Claude S", key: "claude:1" }, window: "session", resetAt: NOW + 4 * 3_600_000 })]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  // 2026-10-20 10:19Z: api:0, claw:1 and claw:2 were parked, held by a job still writing, and stopped uncompacted.
+  component("a pane whose subagent or job still works is compacted at its turn end all the same", {
+    given: ["the same pane while a job wrote 38 s ago, like api:0", () => nearLimit(4 * 3_600_000,
+      { background: "a subagent or background job wrote 38s ago" })],
+    when: ["polling a minute after its turn ended", ctx => ctx.turnEndsThenWait()],
+    then: ["parked and compacted", (sent, ctx) => {
+      try {
+        expect(sent).toBe(true);
+        expect(ctx.lines.map(line => `${line.outcome}:${line.cell}`)).toEqual(["parked:quota-park", "compacted:self-request"]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  // claw:1 at 10:24:58Z and api:0 at 10:31:39Z: new input dropped the park, and nothing parked them again for that stop.
+  component("a park that new input superseded parks the pane again at its next turn end", {
+    given: ["the same pane, parked while its turn runs", () => nearLimit(4 * 3_600_000)],
+    when: ["new input arrives, then the turn ends", async ctx => {
+      await ctx.working();
+      await ctx.newInput();
+      return ctx.turnEndsThenWait();
+    }],
+    then: ["parked, dropped, parked again and compacted", (sent, ctx) => {
+      try {
+        expect(sent).toBe(true);
+        expect(ctx.lines.map(line => `${line.outcome}:${line.cell}`))
+          .toEqual(["parked:quota-park", "dropped:self-request", "parked:quota-park", "compacted:self-request"]);
       } finally { ctx.cleanup(); }
     }],
   });

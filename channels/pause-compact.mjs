@@ -16,6 +16,7 @@ import { SELF_COMPACT_POLICY, formatSelfCompactNotice } from "../core/self-compa
 import { QUOTA_FLOOR_DEFAULT_PERCENT, QUOTA_PARK_ORIGIN, QUOTA_PARK_POLICY, quotaParkContinuation, quotaParkDecision } from "../core/quota-park.mjs";
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
 import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
+import { isLiveStatus } from "../core/pane-status.mjs";
 export { createQuotaParkFacts } from "./quota-park.mjs";
 export { createQuotaParkStore } from "../core/quota-park-store.mjs";
 export { quotaFloorPercent } from "../core/quota-park.mjs";
@@ -92,7 +93,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   // A pane its account is about to stop for longer than its cache lives files a self-request: the compact runs
   // at its turn end with the usual guards. A pane already stopped at the grace note gets no handoff, since quota
   // recovery resumes it; one stopped at the banner is not parked, since its account refuses the compact.
-  async function park({ name, pane, paneKey, engine, paneDir, tokens, quietMs, base }) {
+  async function park({ name, pane, paneKey, engine, paneDir, tokens, quietMs, status, base }) {
     // The compact pays only while the cache is warm; past its life it would read the whole context cold once more.
     if (!(quietMs < (engine === "codex" ? policy.codexIdleMs : cacheLifeMs))) return false;
     const facts = await parkFor(paneKey);
@@ -100,8 +101,9 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     if (!windows?.length) return false;
     const receipt = limitReceiptFor(engine, paneDir);
     if (receipt && receipt.stop !== "grace-note") return false;
-    // The park compacts at the floor, where new automatic work stops.
-    const decision = quotaParkDecision({ engine, windows, graceNote: Boolean(receipt), now: now() }, { ...QUOTA_PARK_POLICY, leftPercent: floorPercent });
+    // The park compacts at the floor, where new automatic work stops, or ahead of a window forecast to run out.
+    const decision = quotaParkDecision({ engine, windows, graceNote: Boolean(receipt), graceNoteAt: receipt?.observedAt,
+      working: isLiveStatus(status), lastActivityAt: now() - quietMs, now: now() }, { ...QUOTA_PARK_POLICY, leftPercent: floorPercent });
     const episode = `${decision.window}:${decision.resetAt}`;
     if (!decision.park || parked.get(paneKey) === episode) return false;
     parked.set(paneKey, episode);
@@ -117,7 +119,8 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     // Quota recovery resumes a Claude pane told to stop here as soon as this account has room again.
     if (result.ok && engine === "claude" && identity?.path) {
       parkStore?.record({ agentName: name, pane, account: facts.account || null, window: decision.window, resetAt: decision.resetAt,
-        parkedAt: result.request.requestedAt, identity: { engine, dir: paneDir, sessionId: identity.sessionId, path: identity.path }, cursor });
+        leftPercent: decision.leftPercent, parkedAt: result.request.requestedAt,
+        identity: { engine, dir: paneDir, sessionId: identity.sessionId, path: identity.path }, cursor });
     }
     report(paneKey, episode, result.ok ? { ...line, outcome: "parked" } : { ...line, outcome: "not-parked", detail: result.detail });
     return result.ok;
@@ -134,11 +137,14 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     }) ?? null;
     let request = readRequest();
     const quietMs = Number.isFinite(lastActivityMs) ? now() - lastActivityMs : NaN;
-    if (!request && parkFor && selfRequests && await park({ name, pane, paneKey, engine, paneDir, tokens: contextTokens, quietMs, base })) {
+    if (!request && parkFor && selfRequests && await park({ name, pane, paneKey, engine, paneDir, tokens: contextTokens, quietMs, status, base })) {
       request = readRequest();
     }
+    const parking = request?.origin === QUOTA_PARK_ORIGIN;
     if (request && contextMaintenance.selfRequestSuperseded?.(request)) {
       selfRequests.clear(name, pane);
+      // New input outdates the park's handoff, not its compact: the next turn end parks the pane again for this stop.
+      if (parking) parked.delete(paneKey);
       report(paneKey, request.requestedAt, { ...base, outcome: "dropped", detail: "new input or session superseded the saved handoff" });
       return false;
     }
@@ -163,7 +169,8 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const identity = identityFor(engine, paneDir);
     if (!identity?.path) return false;
     const decision = pauseCompactDecision({ ...facts,
-      background: backgroundFor[engine]({ sessionPath: identity.path, sessionId: identity.sessionId, paneDir, now: facts.now, policy }),
+      // A park compacts while a subagent or job still works: the stop turns the context cold before their results land.
+      background: parking ? null : backgroundFor[engine]({ sessionPath: identity.path, sessionId: identity.sessionId, paneDir, now: facts.now, policy }),
       lastCompactAt: lastCompactAt(name, pane, paneKey, identity.path) }, policy);
     const line = { at: new Date(facts.now).toISOString(), pane: paneKey, mode, tokens: contextTokens, limit: decision.budget ?? limit,
       leader: leaderPanes(agentConfig).has(pane), quietSec: Math.round(quietMs / 1000),

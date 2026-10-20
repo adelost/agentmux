@@ -311,11 +311,14 @@ export function formatWarningMessage(paneKey, contextTokens, graceMs) {
 
 // lsrc:2, 2026-09-27: "Auto-compact in 60s", then silence after the refusal.
 /**
- * WHAT: Formats the one notice for a compact that was attempted and did not run.
+ * WHAT: Formats the one notice for a compact that did not run, and when it runs again.
  * WHY: Keeps a refused compact from looking done after its warning.
  */
-export function formatCompactFailedMessage(paneKey, reason) {
-  return `Auto-compact of **${paneKey}** did not run: ${reason}. No new attempt until the pane has done new work.`;
+export function formatCompactFailedMessage(paneKey, reason, retryAt = null) {
+  const next = Number.isFinite(retryAt)
+    ? `Tried again after the reset at ${new Date(retryAt).toISOString().slice(11, 16)}Z if its prompt cache is still warm.`
+    : "No new attempt until the pane has done new work.";
+  return `Auto-compact of **${paneKey}** did not run: ${reason}. ${next}`;
 }
 
 // lsrc:2, 2026-10-02: warned at 09:03, refused before sending, then silence

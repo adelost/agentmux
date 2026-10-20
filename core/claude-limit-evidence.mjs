@@ -162,6 +162,16 @@ export function parseClaudeLimitResetAt(text, observedAtMs) {
 }
 
 /**
+ * WHAT: Reads when the usage limit that refused a Claude command resets, from Claude's error line.
+ * WHY: Keeps a refused compact, which spent nothing, retryable once that limit resets.
+ */
+export function claudeRefusalResetAt(text, observedAtMs) {
+  // Claude prefixes the limit: "Error during compaction: You've hit your session limit · resets 1:10pm (Europe/Stockholm)".
+  const limit = /You(?:'|’)ve hit your .*$/u.exec(String(text || ""))?.[0];
+  return limit ? parseClaudeLimitResetAt(limit, observedAtMs) : null;
+}
+
+/**
  * WHAT: Extracts one unsuperseded limit receipt from append-only session events.
  * WHY: Prevents screen text or stale watchdog observations from authorizing restarts.
  */

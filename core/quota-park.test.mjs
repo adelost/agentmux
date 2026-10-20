@@ -18,6 +18,41 @@ feature("which stops a pane is parked for", () => {
   });
 });
 
+// 2026-10-20: the park at 3 % came 11 s before Claude S's session stopped its panes at 10:19:37Z. api:0, idle with a
+// job running since 09:59Z, was never compacted and read 577k tokens cold at 11:11Z; claw:2 and ai:1 followed at 11:23Z.
+feature("parking a pane while there is still time to compact it", () => {
+  const at = Date.parse("2026-10-20T09:50:00Z");
+  const session = (usedPercent, resetsAt = "2026-10-20T11:10:00Z") => ({ kind: "session", usedPercent, resetsAt });
+  unit("a session forecast to run out within 20 minutes parks a working pane before 3 % is left", {
+    when: ["Claude S has used 93 % of a session that opened 3 h 40 min ago", () => quotaParkDecision({ engine: "claude",
+      windows: [session(93)], now: at })],
+    then: ["parked for the session, with the 7 % it had left", decision => expect(decision)
+      .toMatchObject({ park: true, cell: "near-limit", window: "session", leftPercent: 7 })],
+  });
+  unit("an idle pane's cache ages from its last activity, so a stop a working pane outlives parks an idle one", {
+    when: ["3 % is left, the reset 45 min away; one pane works, one has been idle 20 min", () => {
+      const windows = [session(97, new Date(at + 45 * 60_000).toISOString())];
+      return [quotaParkDecision({ engine: "claude", windows, working: true, now: at }),
+        quotaParkDecision({ engine: "claude", windows, working: false, lastActivityAt: at - 20 * 60_000, now: at })];
+    }],
+    then: ["the working pane keeps its warm cache, the idle one is parked", ([working, idle]) => {
+      expect(working).toMatchObject({ park: false, cell: "cache-outlives-stop" });
+      expect(idle).toMatchObject({ park: true, window: "session" });
+    }],
+  });
+  unit("a grace note read before its window reset parks nothing in the new window", {
+    when: ["skybar:1 at 11:10:11Z with its note of 10:19:37Z, the session just reset and the week at 38 %", () => quotaParkDecision({
+      engine: "claude", graceNote: true, graceNoteAt: Date.parse("2026-10-20T10:19:37Z"), now: Date.parse("2026-10-20T11:10:11Z"),
+      windows: [session(0, "2026-10-20T16:10:00Z"), { kind: "week", usedPercent: 38, resetsAt: "2026-10-27T04:00:00Z" }] })],
+    then: ["no park, since the account has room", decision => expect(decision).toEqual({ park: false, cell: "room" })],
+  });
+  unit("the first 20 minutes of a window are no forecast", {
+    when: ["a session 5 min old has used 25 %", () => quotaParkDecision({ engine: "claude", now: at,
+      windows: [session(25, new Date(at + 295 * 60_000).toISOString())] })],
+    then: ["no park", decision => expect(decision).toEqual({ park: false, cell: "room" })],
+  });
+});
+
 // lsrc:0 2026-10-19: the parked Claude S panes should have resumed when the free reset gave the account room.
 feature("when a parked pane resumes", () => {
   const parked = { window: "week", resetAt: Date.parse("2026-10-20T04:00:00Z"), parkedAt: "2026-10-19T19:53:00.000Z",
@@ -51,6 +86,17 @@ feature("when a parked pane resumes", () => {
       expect(decided).toEqual(["resume", "drop", "drop", "wait"]);
       expect([unread, reads]).toEqual(["wait", 0]);
     }],
+  });
+  // A pane parked before its window ran low still works; the same 8 % is no room returning.
+  unit("a pane parked with 8 % left resumes only once its window has more room than at the park", {
+    when: ["a reading at 8 % left, then one of a fresh session", () => {
+      const early = { window: "session", resetAt: Date.parse("2026-10-20T11:10:00Z"), parkedAt: "2026-10-20T09:55:00.000Z",
+        leftPercent: 8, account: { name: "Claude S" } };
+      const read = (usedPercent, resetsAt) => parkResumeDecision({ park: early, windows: [{ kind: "session", usedPercent, resetsAt }],
+        observedAt: Date.parse("2026-10-20T10:01:00Z"), now: Date.parse("2026-10-20T10:01:30Z") }).action;
+      return [read(92, "2026-10-20T11:10:00Z"), read(0, "2026-10-20T15:10:00Z")];
+    }],
+    then: ["wait, then resume", actions => expect(actions).toEqual(["wait", "resume"])],
   });
 });
 

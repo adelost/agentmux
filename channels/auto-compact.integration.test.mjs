@@ -316,6 +316,43 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     }],
   });
 
+  // claw:2 and ai:1, 2026-10-20: the session limit refused their idle compacts at 11:06Z. Its reset at 11:10Z came
+  // while their caches still lived, and nothing tried again; at 11:23Z they read 606k and 190k tokens cold.
+  component("a compact a usage limit refused is warned and run again once that limit has reset", {
+    given: ["a pane whose first compact the session limit refused, with the reset already passed", () => {
+      const { path, dir } = writeYaml();
+      writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000099\n  panes:\n    - name: claude\n      cmd: claude\n  discord:\n    "ch-test": 0\n`);
+      const sends = [];
+      const state = { runs: 0 };
+      const retryAt = Date.now() - 1_000;
+      const contextMaintenance = {
+        canAttempt: () => true,
+        run: async () => (state.runs++ === 0
+          ? { ok: false, attempted: true, reason: "context-cost:provider-usage-limited", retryAt,
+            detail: "Error during compaction: You’ve hit your session limit · resets 1:10pm (Europe/Stockholm)" }
+          : { ok: true, compacted: true }),
+      };
+      const agent = {
+        paneProcessState: async () => ({ running: true }),
+        capturePane: async () => CONTENT.full100,
+        dismissBlockingPrompt: async () => null,
+        sendEnter: async () => {},
+      };
+      const config = { ...DEFAULT_CONFIG, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
+      const ac = createAutoCompact({
+        agent, agentsYamlPath: path, discord: { send: async (_channel, text) => { sends.push(text); } },
+        tmux: async () => ({ stdout: "0 50" }), config, contextMaintenance, log: () => {},
+      });
+      return { ac, sends, state, retryAt };
+    }],
+    when: ["four poll ticks", async ({ ac }) => { await ticks(ac, 4); }],
+    then: ["refused with the reset named, then compacted on the next warning", (_, { sends, state, retryAt }) => {
+      expect(state.runs).toBe(2);
+      expect(sends[1]).toBe("Auto-compact of **test:0** did not run: Error during compaction: You’ve hit your session limit · resets 1:10pm "
+        + `(Europe/Stockholm). Tried again after the reset at ${new Date(retryAt).toISOString().slice(11, 16)}Z if its prompt cache is still warm.`);
+    }],
+  });
+
   // lsrc:2, 2026-10-02: warned 09:03, refused before sending while lsrc:3 held
   // the session lease, then silence until a cold compact 42 minutes later.
   component("a compact refused before sending is retried on the next poll", {

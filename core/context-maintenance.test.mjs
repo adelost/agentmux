@@ -352,6 +352,35 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
       } finally { ctx.cleanup(); }
     }],
   });
+  // claw:2 and ai:1 on 2026-10-20: their idle compacts met the session limit at 11:06Z and nothing tried again after
+  // its reset at 11:10Z, while their caches lived to 11:14Z and 11:15Z. At 11:23Z they read 606k and 190k cold.
+  component("a compact refused by Claude's session limit may run again once that limit resets", {
+    given: ["claw:2's compact refused at 11:06:34Z until 1:10pm Stockholm", () => {
+      const ctx = fixture();
+      ctx.clock = Date.parse("2026-10-20T11:06:34Z");
+      ctx.now = () => ctx.clock;
+      ctx.compactFor = () => async () => {
+        ctx.calls.push("compact");
+        return { ok: false, reason: "provider-usage-limited",
+          detail: "Error during compaction: You’ve hit your session limit · resets 1:10pm (Europe/Stockholm)" };
+      };
+      return ctx;
+    }],
+    when: ["the idle controller tries, then asks again before and after 11:10Z", async ctx => {
+      const maintenance = createContextMaintenance(ctx);
+      const refused = await maintenance.run("claw", 2);
+      ctx.clock = Date.parse("2026-10-20T11:09:00Z");
+      const before = maintenance.canAttempt("claw", 2, "one");
+      ctx.clock = Date.parse("2026-10-20T11:10:20Z");
+      return { retryAt: refused.retryAt, before, after: maintenance.canAttempt("claw", 2, "one") };
+    }],
+    then: ["the attempt names the reset, and the fence opens at it", ({ retryAt, before, after }, ctx) => {
+      try {
+        expect(retryAt).toBe(Date.parse("2026-10-20T11:10:00Z"));
+        expect([before, after]).toEqual([false, true]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
   component("pending messages behind a cold head cannot deadlock its compact", {
     given: ["a delivering head followed by another pending message", () => fixture({ jobs: [{ id: "head", status: "delivering" }, { id: "later", status: "pending" }] })],
     when: ["admitting the first work item", ctx => ctx.maintenance.beforeWork({ agentName: "claw", pane: 2, id: "head" })],
@@ -770,6 +799,28 @@ feature("a self-request before the next delivery", () => {
         expect(ctx.requests.list()).toEqual([]);
         await Promise.resolve();
         expect(ctx.notices).toEqual(["Self-compact **claw:2** at the end of its turn (120000 tokens), focus: behåll G4-siffrorna."]);
+      } finally { ctx.cleanup(); rmSync(ctx.dir, { recursive: true, force: true }); }
+    }],
+  });
+  // A park's compact is due before the stop; a job's result after the reset would land on a cold context anyway.
+  component("a quota park is compacted before the waiting prompt while a job still writes", {
+    given: ["claw:2 parked at 120k with a job that wrote 38 s ago and a delivery waiting", () => {
+      const ctx = fixture();
+      ctx.agent.getContext = async () => ({ tokens: 120_000 });
+      ctx.activityFor = () => ctx.now() - 5_000;
+      ctx.coldBeforeDelivery = { mode: () => "on", limits: () => ({ idleMs: 50 * 60_000, tokens: 80_000 }),
+        background: () => "a subagent or background job wrote 38s ago", record: () => {} };
+      const dir = mkdtempSync(join(tmpdir(), "amux-self-compact-"));
+      const requests = createSelfCompactStore({ dir, now: ctx.now });
+      requests.request({ agent: "claw", pane: 2, tokens: 120_000, origin: "quota-park" });
+      return { ...ctx, requests, dir };
+    }],
+    when: ["admitting the delivery", ctx => createContextMaintenance({ ...ctx, selfRequests: ctx.requests })
+      .beforeWork({ agentName: "claw", pane: 2, id: "next" })],
+    then: ["one compact first, then the prompt", (result, ctx) => {
+      try {
+        expect(result.ok).toBe(true);
+        expect(ctx.calls).toEqual(["compact"]);
       } finally { ctx.cleanup(); rmSync(ctx.dir, { recursive: true, force: true }); }
     }],
   });
