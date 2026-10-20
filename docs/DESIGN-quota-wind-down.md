@@ -1,6 +1,6 @@
 # Quota wind-down: notice at 5 %, nudge at 3 %, compact, then a move to room
 
-Version: 1 · 2026-10-20 16:5xZ · owner of the design: api:0 · page: none yet
+Version: 2 · 2026-10-20 17:3xZ · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -246,8 +246,13 @@ the panes stopped are *measured*):
 | Stop | Panes stopped | Notices / nudges | Compacted before the stop | Cold writes after the reset | Saved |
 |---|---|---|---|---|---|
 | 10:19:37Z, reset 11:10Z | 17 | 11 / 6 | 13 | 1.37M (api:0 577k, claw:2 606k, ai:1 190k; sandman:0) | about 1.18M *estimated*: all three compact first and restart from about 65k each |
-| 15:29:37Z, reset 16:10Z | 13 | 7 / 4 | 10 compact only with a move | 0 (*measured*: no restart after 16:10Z paused over 55 min) | 0; the stop was shorter than the cache |
+| 15:29:37Z, reset 16:10Z | 13 | 7 / 4 | 6, the panes idle at 5 % (10 with a move: the 7 working ones' caches outlive the 40-minute stop) | 0 (*measured*: no restart after 16:10Z paused over 55 min) | 0; the stop was shorter than the cache |
 
+- Fixture: `test/fixtures/quota-wind-down-20261020.json`, made by api:0's scratch replay over the events log, not by
+  the build. Per stop: opened, stop, reset, the 5 % and 3 % points; per pane: working at the 5 % point, last activity
+  before it, first turn end after it, nudged, compact pays (§6, no move target) and compacted before the stop; and
+  `expectedCompacted`: stop 1 ai:0, ai:1, ai:2, api:0, claw:0, claw:1, claw:2, lsrc:0, lsrc:1, skydive:0, skydive:1,
+  skydive:2, skyvw:2 (13); stop 2 claw:0, claw:2, lsrc:0, lsrc:2, skyvw:0, skyvw:1 (6).
 - Moves: none possible on 20 Oct; at both stops claude:2 had 97 % of its week used and wetterlind 100 %.
 - Not compacted before stop 1: lsrc:2, skyvw:0, skyvw:1 (no turn end) and skybar:1 (turn end 10:17:43Z, too late for a
   2-minute compact); none of them restarted cold.
@@ -275,6 +280,7 @@ the panes stopped are *measured*):
 | Changed path | Tests that run |
 |---|---|
 | `core/quota-wind-down.mjs` | `core/quota-wind-down.test.mjs` |
+| `test/fixtures/quota-wind-down-20261020.json` | `core/quota-wind-down.test.mjs` |
 | `channels/pause-compact.mjs` | `channels/pause-compact.test.mjs` |
 | `core/claude-quota-coordinator.mjs` | `core/claude-quota-coordinator.test.mjs` |
 | `core/hints-fleet-process.mjs` | `test/agent.test.mjs`, `test/hints-budget.test.mjs` |
@@ -291,8 +297,12 @@ the panes stopped are *measured*):
 - Full proof: the move restarts a pane's exact session; its guards (I-2, R-7) are tested one by one in
   `core/claude-quota-coordinator.test.mjs`.
 - Touched tests: none expected to change; the rule 3 pin in `test/agent.test.mjs` is extended, not replaced.
-- Hardest case: the replay of 20 Oct 10:19:37Z through the real `windDownStage` and `compactPays`, in dry mode, matching
-  §10's 13 panes.
+- Hardest case: the replay of both 20 Oct stops through the real `windDownStage` and `compactPays`, in dry mode. Input:
+  readings every 5 min on each stop's average pace (0 % at `opened`, 100 % at `stop`; *estimated*, the session window's
+  own readings are not kept) and the fixture's per-pane facts. Output must equal the fixture's `expectedCompacted`.
+- Threshold example for "notice at the 5 % point between readings": window opened 06:10Z, 94.0 % used read at
+  10:03:32Z (as in §5): no notice at 10:03:32Z (6 % left), a notice at 10:07:10Z (4.54 % forecast). That reading's own
+  5 % point is 10:06:01Z; UC-1's 10:07:08Z comes from the stop's average pace.
 - Rehearsal step: the dry replay on the installed release over that stop's events, cap 60 s.
 - Fixtures: a session window between readings, a week and a session both near, a stale reading, a pane idle at 5 %, a
   pane working through the stop, a compact refused at the limit, a target with week room but a low session, a bridge
@@ -325,3 +335,6 @@ None for him; his yes covers the moves. Calls made by api:0:
 
 - v1, 2026-10-20 16:5xZ: first version, from his 14:5xZ request and lsrc:0's row 55 order; the replay of both 20 Oct
   stops in §10.
+- v2, 2026-10-20 17:3xZ: the replay fixture with per-pane facts and expected panes (§10, §12) and the threshold example
+  with 94.0 % (§12); stop 2 compacts 6 without a move, not 10, once `compactPays` is applied. Why: api:6 stopped
+  before code on a 95.0 % example in my brief that contradicts §6 and on §10 lacking per-pane data. Told: api:6.
