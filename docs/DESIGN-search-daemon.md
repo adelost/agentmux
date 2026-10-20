@@ -1,6 +1,6 @@
 # amux search: his messages as units, the conversation log in the daemon, 30 minutes warm while memory is free
 
-Version: 3 · 2026-10-20 08:20Z · owner of the design: api:0 · page: none yet
+Version: 4 · 2026-10-20 08:40Z · owner of the design: api:0 · page: none yet
 <!-- stale: -->
 
 ## 1. Goal
@@ -46,11 +46,11 @@ n/a: a command-line tool with no screens. The result lists keep their form. What
 | Place | Product text | Max length | Stage |
 |---|---|---|---|
 | Result source of a message of his | `~/.agentmux/search-human/2026-10-20.md:14` and the snippet `**HH:MM:SSZ agent:pane voice** <his words>` | 220 | v1 |
-| Warning when the daemon is cold and no `--source conversation` | `ℹ conversation log is searched by the warm search daemon; it is starting, so this answer leaves it out` | 110 | v1 |
+| Warning when the daemon is cold and no `--source conversation` | `ℹ conversation log is searched by the warm search daemon, which is not up; this answer leaves it out` | 110 | v1, words v4 |
 | `amux search --help` | "The search daemon stays loaded for 30 minutes after the last question" in place of "exits when idle" | 80 | v1 |
 | `amux search --help`, appended to the line above | ", while at least 8 GB RAM is free" | 40 | v2 |
-| Notice when the guard keeps the daemon down | `ℹ 6.2 GB RAM free, the search daemon starts at 12 GB; lexical only this time; showing first-stage order` | 110 | v2 |
-| The daemon's own log line when it closes for memory | `search-embedder: closing, 7.4 GB RAM free is under the 8 GB floor` | 80 | v2 |
+| Notice when the guard keeps the daemon down | `⚠ 6.2 GB RAM free, the search daemon starts at 13 GB; lexical only this time` | 110 | v2 |
+| The daemon's line in `~/.agentmux/search-embedder.log` when it closes for memory | `search-embedder: closing, 7.4 GB RAM free is under the 8 GB floor` | 80 | v2 |
 
 ## 3. Use cases
 
@@ -79,8 +79,8 @@ n/a: a command-line tool with no screens. The result lists keep their form. What
   the notes. Stage v1. No sequence: one local process, no new boundary.
 - **UC-6 Memory runs short.** A build fills RAM until 7 GB is free while the daemon is warm.
   - Within 30 s the daemon closes, after any question in flight, and gives back about 3 GB RAM and 2.3 GB VRAM
-    (*measured* warm, §7). Its log says why.
-  - Questions get the cold answer with the guard's notice until 12 GB is free; none of them starts the daemon.
+    (*measured* warm, §7). `~/.agentmux/search-embedder.log` says why.
+  - Questions get the cold answer with the guard's notice until 13 GB is free; none of them starts the daemon.
   - Cost: cold answers (70 % hit@3) while memory is short. Stage v2. No sequence: each process reads
     `/proc/meminfo` itself, no new boundary.
 - **Unhappy cases:**
@@ -131,7 +131,7 @@ flowchart LR
   - `AMUX_EMBEDDER_IDLE_MIN` decides how long the daemon stays up after the last question (default 30, was 2);
   - `AMUX_SEARCH_HUMAN=0` leaves the human root out of every search and stops the sync;
   - `AMUX_EMBEDDER_MIN_FREE_GB` decides the memory floor (default 8). The daemon starts only with the floor plus
-    4 GB free, because its measured peak is 3.8 GB, and closes within 30 s when free memory falls under the floor.
+    5 GB free, because its peak was 3.8 GB and the conversation window adds about 0.5 GB (§10), and closes within 30 s when free memory falls under the floor.
     0 turns the guard off.
 - Invariants:
   - **I-1** No question reads a log byte twice in a warm daemon. Enforced in `ledger-tail.mjs`, guarded by
@@ -141,7 +141,7 @@ flowchart LR
     `core/search-human-words.test.mjs`, "writes each message of his once, word for word".
   - **I-3** Warm conversation hits equal what `searchConversationLog` returns for the same rows. Enforced in
     `conversation-window.mjs`, guarded by `core/conversation-window.test.mjs`, "finds the same rows as the scan".
-  - **I-4** The daemon never starts without room for its peak, and never stays more than 30 s under the floor.
+  - **I-4** The daemon never starts without room for its peak, and never stays more than 30 s under the floor, plus a question in flight.
     Enforced in `core/search-embedder.mjs` (`memoryRoom`), guarded by `core/search-embedder-lifecycle.test.mjs`,
     "does not start without room for its peak" and "closes when free memory falls under the floor".
 
@@ -202,7 +202,7 @@ sequenceDiagram
 %% id: state-daemon
 stateDiagram-v2
   [*] --> Down
-  Down --> Loading: a question finds no socket, and the floor plus 4 GB is free
+  Down --> Loading: a question finds no socket, and the floor plus 5 GB is free
   Down --> Down: a question finds no socket, and less is free (lexical answer)
   Loading --> Warm: model, vectors and the conversation window loaded
   Warm --> Warm: a question resets the 30-minute timer
@@ -265,15 +265,19 @@ memoryRoom(needGb):                                   # search-embedder.mjs
   return { room: free >= needGb, free }
 
 startEmbedder():
-  r = memoryRoom(floor + 4)
-  not r.room -> return { unavailable: "<free> GB RAM free, the search daemon starts at <floor + 4> GB; lexical only this time" }
-  spawn as today
+  lease busy or a legacy worker -> as today, "owner busy or starting"   # first: a loading daemon lowers MemAvailable
+  r = memoryRoom(floor + 5)
+  not r.room -> return { unavailable: "<free> GB RAM free, the search daemon starts at <floor + 5> GB; lexical only this time" }
+  spawn as today, stderr appended to ~/.agentmux/search-embedder.log, which moves to .log.1 past 1 MiB
 
 daemon, every 30 s while up (unref'd timer):
   not memoryRoom(floor).room -> log "closing, <free> GB RAM free is under the <floor> GB floor";
-                                close at the first moment no question is in flight, by the idle timer's close
+                                close at the first moment no question is in flight, by the idle timer's close,
+                                without waiting for background loading: that loading is what holds the memory
   # tests: search-embedder-lifecycle.test.mjs "does not start without room for its peak",
-  #        "closes when free memory falls under the floor", "a floor of 0 turns the guard off"
+  #        "closes when free memory falls under the floor", "a floor of 0 turns the guard off",
+  #        "reports the owner as busy, not memory, while another process loads",
+  #        "keeps the daemon's log and moves it aside past 1 MiB"
 ```
 
 ## 7. Platform limits
@@ -336,7 +340,7 @@ when he asks for less.
   - Fallback: shorter window for agents' rows. Owner api:0.
 - **R-4 Warm for 30 minutes holds 2.8 to 3.8 GB RAM and 2.3 GB VRAM while no one searches.** Certain, 34 of 48 h.
   - Mitigation: the memory guard (I-4) gives the RAM back when free memory falls under 8 GB.
-  - Detection: "closes when free memory falls under the floor"; the daemon's log line of §2.
+  - Detection: "closes when free memory falls under the floor"; the closing line in `~/.agentmux/search-embedder.log`.
   - Fallback: `AMUX_EMBEDDER_IDLE_MIN` and `AMUX_EMBEDDER_MIN_FREE_GB`. Owner api:0.
 - **R-5 Cold answers lose the agents' conversation rows.** Certain, for the first question after 30 minutes.
   - Mitigation: his messages stay in the cold path through BM25, and the warning says what was left out.
@@ -348,7 +352,7 @@ when he asks for less.
   - Fallback: delete `state.json`, and the next sync rebuilds. Owner api:0.
 - **R-7 The guard flaps: the daemon starts, loads 3.8 GB, falls under the floor and closes, again and again.**
   Possible when free memory sits near the floor.
-  - Mitigation: a start needs the floor plus 4 GB, more than the measured peak of 3.8 GB.
+  - Mitigation: a start needs the floor plus 5 GB, more than the measured peak of 3.8 GB plus the window's 0.5 GB (§10).
   - Detection: "does not start without room for its peak".
   - Fallback: raise `AMUX_EMBEDDER_MIN_FREE_GB`. Owner api:0.
 - **R-8 The guard misses memory pressure on the Windows side.** Possible, because MemAvailable is the VM's view (§7).
@@ -362,6 +366,9 @@ when he asks for less.
 - Time per question: today 5.46 s median warm (*measured*, review). After: about 1.6 s (*estimated*).
 - Daemon resources while warm, *measured* on 1.25.275 (§7): 2.8 to 3.8 GB RSS, 2.3 GB VRAM, and 323 CPU-s for one
   start with three questions. With the conversation window: *to be measured* after v1 and written here.
+- The daemon's V8 heap without the models, *measured* 07:5xZ on 617bd0d9 (`heap-check.mjs` in the evidence folder):
+  passage cache 432 MB; base index 14 MB, plus 242 MB of vectors outside the heap; conversation window 271 MB
+  (320 360 rows, 10.5 M postings). 717 MB of the 1 536 MB cap, so the cap stays. RSS rises 530 MB with the window.
 - Warm time against the real pattern (§7, 229 searches in 48 h), with RAM at 3 GB while warm. *Measured* pattern,
   *estimated* average:
 
@@ -395,7 +402,7 @@ when he asks for less.
   `AMUX_EMBEDDER_MIN_FREE_GB=0` turns the memory guard off.
 - Turning it off leaves the day files in place. They are derived, never read again, and can be deleted.
 - Migrations: none. The semantic index gains the new root's units on its next reindex.
-- Texts in the same release: `SEARCH_HELP` (the daemon's lifetime and the human root).
+- Texts in the same release: `SEARCH_HELP` (the daemon's lifetime and the human root) and `docs/cli.md`.
 - Rollback: install the previous release SHA (5f8a6776) with `bin/install-release.mjs`.
 
 ## 12. Tests
@@ -460,7 +467,7 @@ None for him. Calls made by api:0:
 - His messages are copied as Markdown into `~/.agentmux/search-human/`, so every existing layer serves them.
 - The window stays 30 days, as the conversation search has today.
 - A cold question leaves out the agents' conversation rows instead of scanning 238 MB.
-- 30 minutes warm, with a memory guard at 8 GB free and starts at 12 GB. He left the choice to api:0 at 07:26Z, and
+- 30 minutes warm, with a memory guard at 8 GB free and starts at 13 GB. He left the choice to api:0 at 07:26Z, and
   the table in §10 decided it.
 - No change of engine now. QMD's hybrid mode is measured on the same 47 questions after the release (row 47).
 
@@ -472,3 +479,7 @@ None for him. Calls made by api:0:
   QMD as option E and row 47. Row 43's builder is not affected; row 46 gets its own brief.
 - v3, 2026-10-20 08:20Z: two fragments of his words removed from §2 and UC-2. A public repo carries none of his
   text (fleet rule 10); they were mine in v1.
+- v4, 2026-10-20 08:40Z, from the review of rows 43 and 46: the start needs the floor plus 5 GB (the window adds
+  0.5 GB); the lease is checked before memory; the daemon's stderr goes to `~/.agentmux/search-embedder.log`, since
+  `stdio: "ignore"` lost every line; the cold warning no longer says the daemon is starting, which a refused start
+  made false; the guard closes without waiting for background loading. The fix round gets its own brief.
