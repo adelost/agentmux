@@ -34,6 +34,24 @@ feature("quiet: why a pane went quiet", () => {
     then: ["he must act anyway, so it is his hands", (verdict) => expect(verdict.class).toBe("hands")],
   });
 
+  // Departure from the design, found by the replay of 06:00 to 10:00Z: a word of the list inside a file name or a GOAL line
+  // made a tool trace and a restated goal look like a request for his hands.
+  unit("a file name or a GOAL line that holds a hands word is not a request for his hands", {
+    given: ["a tool trace with film-card-picture.ts and a GOAL line about his phone, and four real requests, three ending a sentence on a listed word and one with the word after a hyphen", () => ({
+      traces: ["`Run git show a83d8ae3b:cloud/src/film-card-picture.ts`", "Edit core/api-key-store.mjs and hardware-probe.mjs", "Run curl https://host/login.json"],
+      goal: "GOAL: Förklara varför din telefon visar en tom bildyta.",
+      requests: ["Du måste testa själv.", "Koppla in din telefon.", "Det behövs ett betalkort.", "Mattias egen Google-inloggning återstår."],
+    })],
+    when: ["classifying each", ({ traces, goal, requests }) => ({
+      traces: traces.map((reply) => classify(reply).class), goal: classify(goal).class, requests: requests.map((reply) => classify(reply).class),
+    })],
+    then: ["the traces and the GOAL line are not hands, and the requests are", (classes) => {
+      expect(classes.traces).not.toContain("hands");
+      expect(classes.goal).not.toBe("hands");
+      expect(classes.requests).toEqual(["hands", "hands", "hands", "hands"]);
+    }],
+  });
+
   unit("LEFT without a blocker is left work", {
     given: ["a reply with a LEFT line that has content and no blocker", () => `NOW: zon 3 byggd\n${LINES.left}`],
     when: ["classifying it", (reply) => classify(reply)],

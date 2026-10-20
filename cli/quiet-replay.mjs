@@ -82,6 +82,8 @@ function reportNeedsYou(log, sinceMs, untilMs, out) {
   for (const entry of before.sort((left, right) => left.tsMs - right.tsMs)) {
     out(`  ${entry.key} ${clockOf(entry.tsMs)} → ${statusOf.get(entry.ledgerId) ?? "not in the window"}`);
   }
+  const flaggedNow = after.sort((left, right) => left.tsMs - right.tsMs).map((entry) => `${entry.key} ${clockOf(entry.tsMs)}`);
+  out(`needs-you now: ${flaggedNow.join(", ") || "none"}`);
 }
 
 /**
@@ -103,7 +105,8 @@ export function replayQuiet(d, { sinceMs, untilMs }) {
   const leadFor = (pane) => leadOf(pane, d.rosterText, { delegate: d.delegate });
   const lines = simulate(episodes, { seen: {}, delegate: d.delegate, leadFor, index, untilMs });
 
-  d.out(`Quiet replay ${range(sinceMs, untilMs)}: reads the log, sends and writes nothing. Park state is the record on disk.`);
+  d.out(`Quiet replay ${range(sinceMs, untilMs)}: reads the log, sends and writes nothing.`);
+  d.out("Times are when a watcher that looks all the time would act. The cron looks every 2 minutes, and a pane that works then is skipped; the replay cannot know that, nor any park but the record on disk.");
   for (const { nowMs, episode, text } of lines) {
     d.out(`${clockOf(nowMs)} ${episode.pane.padEnd(10)} ${episode.verdict.class.padEnd(8)} ${text}`);
   }

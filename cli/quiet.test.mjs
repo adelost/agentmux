@@ -2,7 +2,7 @@ import { component, feature, expect } from "bdd-vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cmdQuiet } from "./quiet.mjs";
+import { cmdQuiet, sendThroughAmux } from "./quiet.mjs";
 import { createQuietStore } from "../core/quiet-episodes.mjs";
 import {
   ACTIVE_PANES, CLAW_156, LINES, ROSTER, askRow, ms, postRow, replyEndingWith, writeLedger,
@@ -139,6 +139,24 @@ feature("amux quiet --act: the one obvious action", () => {
     }],
   });
 
+  component("maps the outcome of amux's own send to sent, unknown or failed, with the key", {
+    given: ["the four ways sendToPane ends: queued, unverified, refused and thrown, and a double that records what it was asked", () => {
+      const asked = [];
+      const ending = (result) => async (...call) => { asked.push(call); if (result instanceof Error) throw result; return result; };
+      return { asked, queued: ending({ delivered: true, pending: true }), unverified: ending({ delivered: true, unverified: true }),
+        refused: ending({ delivered: false, blocked: true, reason: "human-quote" }), thrown: ending(new Error("unknown agent 'x'")) };
+    }],
+    when: ["sending one message through each", async ({ queued, unverified, refused, thrown }) => {
+      const message = { agent: "lsrc", pane: 0, text: "[quiet] test", key: "quiet:claw:0:abc" };
+      return Promise.all([queued, unverified, refused, thrown].map((deliverTo) => sendThroughAmux({}, message, deliverTo)));
+    }],
+    then: ["queued is sent, unverified is unknown and never resent, a refusal or an exception is failed, and the key rides along", (outcomes, { asked }) => {
+      expect(outcomes.map(({ outcome }) => outcome)).toEqual(["sent", "unknown", "failed", "failed"]);
+      expect(outcomes[2].detail).toBe("human-quote");
+      expect(asked.every(([, agent, pane, , options]) => agent === "lsrc" && pane === 0 && options.idempotencyKey === "quiet:claw:0:abc")).toBe(true);
+    }],
+  });
+
   component("lists his hands without a message", {
     given: ["skyvw:0 waiting for a login at 08:12", () => world({ rows: [postRow("skyvw:0", "08:12:00", replyEndingWith(LINES.login))], now: "08:20:00" })],
     when: ["the cron runs, lsrc:0 reads the list, then a message reaches skyvw:0 and the cron runs again", async (w) => {
@@ -255,6 +273,7 @@ feature("amux quiet --replay: what the cron would have done", () => {
         expect(text).toMatch(/needs-you in asks: before 2, after 1/u);
         expect(text).toMatch(/^ {2}claw:0 09:15Z → delegate$/mu);
         expect(text).toMatch(/^ {2}lsrc:2 09:50Z → answered$/mu);
+        expect(text).toMatch(/^needs-you now: skyvw:0 09:40Z$/mu);
         expect(w.sent).toEqual([]);
         expect(w.store.seen()).toEqual({});
         expect(w.store.hands()).toEqual({});

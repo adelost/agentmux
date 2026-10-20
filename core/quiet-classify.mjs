@@ -14,14 +14,20 @@ const TAIL_CHARS = 600;
 
 const WAITING_LINE = [/väntar\s+på/iu, /\bBLOCKED:/u, /ja\s+eller\s+nej/iu, /\bditt\s+ja\b/iu, /beslut\s+för/iu, /your\s+decision/iu];
 
-// What only he can do: a login, a payment card, a key, hardware, a test of his own.
+// What only he can do: a login, a payment card, a key, hardware, a test of his own. A listed word inside a file name or
+// an address (film-card-picture.ts, hardware-probe.mjs, /login.json) is code, not a request, so the words must stand free.
+// A hyphen in front is prose (Google-inloggning); a hyphen, a dot and a letter, or a slash after it is a name.
+const free = (source) => new RegExp(`(?<![/_])(?:${source})(?![/_-]|\\.\\w)`, "iu");
 const HANDS = Object.freeze([
-  ["login", [/logga\s+in\b/iu, /inloggning/iu, /\blogin\b/iu, /lösenord/iu, /\b2fa\b/iu, /sms-?kod/iu]],
-  ["payment", [/betalkort/iu, /\bcard\b/iu, /payment\s+method/iu]],
-  ["key", [/api-?nyckel/iu, /\bapi\s+key\b/iu]],
-  ["hardware", [/hårdvara/iu, /\bhardware\b/iu, /din\s+telefon/iu, /koppla\s+in\b/iu]],
-  ["test", [/i\s+din\s+webbläsare/iu, /ditt\s+eget\s+test/iu, /testa\s+själv/iu]],
-]);
+  ["login", [/logga\s+in\b/, /inloggning/, /\blogin\b/, /lösenord/, /\b2fa\b/, /sms-?kod/]],
+  ["payment", [/betalkort/, /\bcard\b/, /payment\s+method/]],
+  ["key", [/api-?nyckel/, /\bapi\s+key\b/]],
+  ["hardware", [/hårdvara/, /\bhardware\b/, /din\s+telefon/, /koppla\s+in\b/]],
+  ["test", [/i\s+din\s+webbläsare/, /ditt\s+eget\s+test/, /testa\s+själv/]],
+].map(([what, words]) => [what, words.map((word) => free(word.source))]));
+
+// A GOAL line restates the request; it never asks for anything.
+const GOAL_LINE = /^[\s>*_`#-]*GOAL:/u;
 
 const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
@@ -61,7 +67,7 @@ function waitingLines(reply) {
 const lastLineMatching = (lines, words) => lines.findLast((line) => words.some((word) => word.test(line))) ?? null;
 
 function handsIn(lines) {
-  const line = lastLineMatching(lines, HANDS.flatMap(([, words]) => words));
+  const line = lastLineMatching(lines.filter((candidate) => !GOAL_LINE.test(candidate)), HANDS.flatMap(([, words]) => words));
   if (!line) return null;
   const [what] = HANDS.find(([, words]) => words.some((word) => word.test(line)));
   return { line, what };

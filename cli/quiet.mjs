@@ -50,9 +50,9 @@ function readRoster(env) {
  * WHAT: Routes one quiet message through amux's own send path with its idempotency key.
  * WHY: Keeps every message on the delivery queue, so a double cron run cannot send it twice.
  */
-export async function sendThroughAmux(ctx, { agent, pane, text, key }) {
+export async function sendThroughAmux(ctx, { agent, pane, text, key }, deliverTo = sendToPane) {
   try {
-    const result = await sendToPane(ctx, agent, pane, text, { idempotencyKey: key, waitMs: SEND_WAIT_MS });
+    const result = await deliverTo(ctx, agent, pane, text, { idempotencyKey: key, waitMs: SEND_WAIT_MS });
     if (result?.unverified) return { outcome: "unknown" };
     return result?.delivered ? { outcome: "sent" } : { outcome: "failed", detail: result?.reason ?? "blocked" };
   } catch (error) {
