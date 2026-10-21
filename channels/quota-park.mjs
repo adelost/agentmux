@@ -9,6 +9,16 @@ import { quotaObservedAt } from "../core/quota-wind-down.mjs";
 const quotaProfiles = () => quotaAccountCatalog().filter((profile) => profile.provider !== "kimi");
 const accountKey = (account) => account.profile?.key || account.name;
 
+async function quotaReadWithin(read, timeoutMs) {
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error(`quota read exceeded ${timeoutMs}ms`),
+      { code: "QUOTA_READ_TIMEOUT" })), timeoutMs);
+  });
+  try { return await Promise.race([Promise.resolve().then(read), expired]); }
+  finally { clearTimeout(timer); }
+}
+
 /**
  * WHAT: Returns one pane's account facts from a snapshot and each account's last good reading.
  * WHY: Keeps how a failed or partial reading reads apart from when the snapshot is read.
@@ -39,6 +49,7 @@ export function createQuotaParkFacts({
   profiles = quotaProfiles,
   now = Date.now,
   maxAgeMs = 5 * 60_000,
+  readTimeoutMs = 30_000,
   log = (message) => console.log(`quota-park | ${message}`),
 } = {}) {
   let snapshot = null, readAt = -Infinity, reading = null;
@@ -46,20 +57,33 @@ export function createQuotaParkFacts({
   const lastGood = new Map();
   function fresh() {
     if (now() - readAt < maxAgeMs) return Promise.resolve(snapshot);
-    reading ||= read().then((next) => {
+    reading ||= quotaReadWithin(read, readTimeoutMs).then((next) => {
       snapshot = next;
       for (const account of next?.accounts || []) if (account.ok) lastGood.set(accountKey(account), account);
+      readAt = now();
       return next;
     })
-      .catch((error) => { log(`snapshot read failed: ${error.message}`); return snapshot; })
-      .finally(() => { readAt = now(); reading = null; });
+      .catch((error) => {
+        log(`snapshot read failed: ${error.message}`);
+        // A timed-out shared call releases every waiter, and never makes an old snapshot fresh.
+        if (error.code === "QUOTA_READ_TIMEOUT") return null;
+        readAt = now();
+        return snapshot;
+      })
+      .finally(() => { reading = null; });
     return reading;
   }
   // `fresh: true` keeps the cached readings but re-reads which account each pane runs on, so a pane quota
   // recovery just moved is judged by its new account (lsrc:0, 2026-10-19).
   return async (paneKey, { fresh: freshPanes = false } = {}) => {
     let current = await fresh();
-    if (freshPanes && current) current = withPanesInUse(current, await readPanes(), profiles());
+    if (freshPanes && current) {
+      try {
+        const panes = await quotaReadWithin(readPanes, readTimeoutMs);
+        if (!Array.isArray(panes)) return { unavailable: true };
+        current = withPanesInUse(current, panes, profiles());
+      } catch (error) { log(`pane reading failed: ${error.message}`); return { unavailable: true }; }
+    }
     return paneQuotaFacts({ snapshot: current, lastGood, paneKey, now: now() });
   };
 }

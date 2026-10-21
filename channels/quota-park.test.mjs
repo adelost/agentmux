@@ -3,10 +3,37 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createQuotaParkFacts } from "./quota-park.mjs";
+import { afterEach, vi } from "vitest";
+afterEach(() => vi.useRealTimers());
 
 // lsrc:0 2026-10-19: a pane quota recovery moved to an account with room keeps working under the floor,
 // even while the five-minute snapshot still lists it on the account it left.
 feature("which account a pane's quota facts come from", () => {
+  unit("a stalled shared read releases all waiters and then reads again", {
+    given: ["a quota reader with one unresolved read and a later good reading, under a named fake clock", () => {
+      vi.useFakeTimers();
+      let finishOld;
+      const good = { accounts: [{ ok: true, name: "room", provider: "claude", profile: { key: "claude:1" },
+        inUse: ["lsrc:0", "claw:0"], limits: [{ kind: "weekly_all", usedPercent: 10, resetsAt: "2026-11-01T00:00:00Z" }] }] };
+      const read = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; })).mockResolvedValue(good);
+      const facts = createQuotaParkFacts({ read, readTimeoutMs: 30_000, log: () => {} });
+      return { facts, read, good, finish: value => finishOld(value), settled: [] };
+    }],
+    when: ["two panes wait through the30s read bound", async w => {
+      void w.facts("lsrc:0").then(value => w.settled.push(value));
+      void w.facts("claw:0").then(value => w.settled.push(value));
+      await vi.advanceTimersByTimeAsync(30_000);
+      return w.settled;
+    }],
+    then: ["both receive unavailable, the next call reads anew and the old result cannot overwrite it", async (settled, w) => {
+      expect(settled).toEqual([{ unavailable: true }, { unavailable: true }]);
+      expect(w.read).toHaveBeenCalledTimes(1);
+      expect(await w.facts("lsrc:0")).toMatchObject({ account: { name: "room" } });
+      expect(w.read).toHaveBeenCalledTimes(2);
+      w.finish({ accounts: [] }); await Promise.resolve();
+      expect(await w.facts("lsrc:0")).toMatchObject({ account: { name: "room" } });
+    }],
+  });
   unit("wind-down receives provider reading time and candidate accounts, never cache refresh time", {
     given: ["a snapshot read now containing an older provider observation", () => ({ accounts: [{ ok: true, provider: "claude",
       name: "Claude S", profile: { key: "claude:1" }, inUse: ["claw:1"], limits: [],
