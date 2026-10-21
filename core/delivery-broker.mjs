@@ -18,7 +18,7 @@ import { runDeliveryPreflight } from "./delivery-stale.mjs";
 import { throwIfCancelRequested } from "./delivery-fence.mjs";
 import { createIngestProbeGate } from "./ingest-probe-gate.mjs";
 import { createWakeAdmissionGate } from "./wake-admission.mjs";
-import { deliveryHead, wakeDeliveryTarget } from "./delivery-wake.mjs";
+import { wakeDeliveryTarget } from "./delivery-wake.mjs";
 import {
   DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
   NOT_INGESTING_UNVERIFIED_STREAK, isTargetProvenNotIngesting, waitForDeliveryJob,
@@ -28,7 +28,8 @@ import { recoverHiddenDeliveryTui, recoverSubmittedTui } from "./tui-stall-recov
 import { submittedTransportHint, submittedTuiInspectionDue } from "./submitted-tui-recovery.mjs";
 import { needsZoomFallback, terminalizeSlashRejection } from "./slash-ingest-guard.mjs";
 import { createDeliveryMemoryContext, deliveryMemoryReceiptText } from "./delivery-memory-context.mjs";
-import { withDeliveryWriter } from "./delivery-writer.mjs";
+import { drainDeliveryJobs } from "./delivery-drain.mjs";
+import { preparationAgent } from "./delivery-preparation.mjs";
 import { createSessionLanes } from "./delivery-session-lane.mjs";
 const ACTIVE_RETRY_MS = 1_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
@@ -84,9 +85,11 @@ export function createDeliveryBroker({
   costAdmission = null, quotaFloor = null,
   bridgeDir = null,
   memoryContextOptions = {},
+  preparationTimeoutMs = 60_000,
 } = {}) {
   if (!agent) throw new Error("delivery broker requires agent");
   if (!queue) throw new Error("delivery broker requires queue");
+  agent = preparationAgent(agent);
   const memoryContext = createDeliveryMemoryContext({ agent, queue, now, log, ...memoryContextOptions });
   // Exact-target wake still requires release identity and memory admission.
   const wakeGate = typeof wakeAdmission === "function" ? wakeAdmission
@@ -575,8 +578,10 @@ export function createDeliveryBroker({
         return;
       }
     }
-    return withDeliveryWriter({ queue, agentName, pane, log }, async context => {
-      while (!stopped) {
+    return drainDeliveryJobs({ queue, agentName, pane, log, preparationTimeoutMs, now,
+      stopped: () => stopped, processJob, peerWaiting: sessionPeerWaiting,
+      yieldMaintenance: yieldSupersededMaintenance, answerBacklog: answerBacklogBehindProbe,
+      preflight: async () => {
         // Cancellation is a request, never a producer-side state rewrite.
         // All pre-delivery terminal paths run in one ordered pass under the
         // same writer lease as pane delivery.
@@ -585,22 +590,7 @@ export function createDeliveryBroker({
           exactEcho, acknowledge, notifyBlocked: maybeNotifyBlocked,
         });
 
-        // Every non-terminal head, including `submitted`, retains FIFO until its
-        // exact JSONL receipt; only an untyped job held for its cost lets the
-        // owner's own message pass. No TUI transition releases later writes.
-        const head = deliveryHead(queue.list(agentName, pane));
-        if (!head) return;
-        context.job = head;
-        const yielded = await yieldSupersededMaintenance(head);
-        if (yielded && TERMINAL_DELIVERY_STATES.has(yielded.status)) continue;
-        await answerBacklogBehindProbe(agentName, pane, head);
-        if (Number(head.nextAttemptAt || 0) > now()) return;
-        const outcome = await processJob(head, context.lease);
-        // The lane is the session's: after a finished job, another pane's waiting head goes first, so one pane's
-        // backlog never holds the session (claw, 2026-10-20 16:1xZ: claw:2 waited 11 minutes behind claw:0 and claw:1).
-        if (TERMINAL_DELIVERY_STATES.has(outcome.status) && !sessionPeerWaiting(agentName, pane)) continue;
-        return;
-      }
+      },
     });
   }
 

@@ -10,6 +10,7 @@ import { parseJsonlText, readTailWindow } from "./jsonl-reader.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { findBlockingPrompt } from "./dismiss.mjs";
 import { CAPACITY_CONTINUE_TEXT } from "./codex-capacity-recovery.mjs";
+import { assertDeliveryPreparation } from "./delivery-preparation.mjs";
 
 const STATE_KEY = "codex_limit_recovery";
 const windows = quota => quota?.limits?.find(limit => limit.limitId === "codex")?.windows || [];
@@ -59,6 +60,7 @@ export function createCodexLimitRecovery({ state, broker, agent, notify, log = c
     }
     const spare = await spareAccount(current);
     if (!spare) return hold("no-verified-spare-account");
+    assertDeliveryPreparation();
     const proof = transferSession(dir, current, spare.target);
     if (!proof.ok || !continuity(dir, current, spare.target).ok) return hold(proof.reason || "exact-session-unavailable");
     const switched = await switchAccount({ agent, state, name, pane, current, target: spare.target, continuity: proof,

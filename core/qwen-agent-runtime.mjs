@@ -15,6 +15,7 @@ import {
   submitQwenPrompt,
 } from "./qwen-jsonl-reader.mjs";
 import { esc } from "../lib.mjs";
+import { beginDeliveryInput } from "./delivery-preparation.mjs";
 
 const READY_TIMEOUT_MS = 45_000;
 
@@ -115,6 +116,7 @@ export function createQwenAgentRuntime({
 
   async function submitPrompt(agentName, pane, prompt) {
     const dir = paneDir(agentConfig(agentName).dir, pane);
+    beginDeliveryInput();
     return submitQwenPrompt(dir, prompt, { stateRoot });
   }
 

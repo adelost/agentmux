@@ -25,6 +25,7 @@ import { appendAskLedger, captureDeliveryAsk, defaultAskLedgerPath } from "./ask
 import { acquireFileLease } from "./file-lease.mjs";
 import { acquireSessionWriteLease } from "./session-lease.mjs";
 import { attachmentReplayConflict, persistAttachmentBackups, restoreAttachmentBackups } from "./delivery-assets.mjs";
+import { updateDeliveryJob } from "./delivery-queue-update.mjs";
 
 export * from "./delivery-queue-policy.mjs";
 import {
@@ -214,19 +215,7 @@ export function createDeliveryQueue({
     catch { return null; }
   }
 
-  function update(job, patch) {
-    const current = read(job.agentName, job.pane, job.id);
-    if (!current) throw new Error(`delivery job ${job.id} disappeared`);
-    const next = {
-      ...current,
-      ...patch,
-      metadata: patch.metadata ? { ...current.metadata, ...patch.metadata } : current.metadata,
-    };
-    delete next.path;
-    atomicReplace(current.path, next);
-    markChanged(current.agentName, current.pane);
-    return { ...next, path: current.path };
-  }
+  const update = (job, patch) => updateDeliveryJob(job, patch, { read, replace: atomicReplace, changed: markChanged });
 
   const operationalJob = (job) => !TERMINAL_DELIVERY_STATES.has(job.status)
     || needsDeliveryTerminalNotice(job)

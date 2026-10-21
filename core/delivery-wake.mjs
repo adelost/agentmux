@@ -6,6 +6,7 @@ import { isOwnerChannelJob } from "./ask-origin.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { quotaFloorHold, staleWindows } from "./quota-park.mjs";
 import { QUOTA_WIND_DOWN_ORIGIN } from "./quota-wind-down.mjs";
+import { deliveryPreparationStage } from "./delivery-preparation.mjs";
 
 const pendingState = (drafted, ownsPaneDraft) =>
   drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending");
@@ -52,10 +53,10 @@ export async function wakeDeliveryTarget({
   const floorReason = async () => {
     if (!quotaFloor || isOwnerChannelJob(job)) return null;
     const paneKey = `${job.agentName}:${job.pane}`;
-    const cached = await quotaFloor.windowsFor(paneKey).catch(() => ({ unavailable: true }));
+    const cached = await deliveryPreparationStage("quota-floor:cached", () => quotaFloor.windowsFor(paneKey)).catch(() => ({ unavailable: true }));
     if (!cached?.unavailable && !holdOf(cached)) return null;
     // A pane quota recovery just moved may still be listed on its old account; re-read where it runs now.
-    const fresh = await quotaFloor.windowsFor(paneKey, { fresh: true }).catch(() => null);
+    const fresh = await deliveryPreparationStage("quota-floor:fresh", () => quotaFloor.windowsFor(paneKey, { fresh: true })).catch(() => null);
     if (!fresh || fresh.unavailable) return "quota-floor: fresh account reading unavailable; existing hold remains";
     const hold = holdOf(fresh);
     // A clean-stop nudge may use the weekly reserve, never paid Codex credits.
@@ -72,7 +73,7 @@ export async function wakeDeliveryTarget({
     const floor = await floorReason();
     if (floor) return refuse(floor, true);
     if (!costAdmission) return { proceed: true, job: job.costHold ? queue.update(job, { costHold: null }) : job };
-    const verdict = await costAdmission(job, { lease }).catch(error => ({ ok: false, reason: error.message }));
+    const verdict = await deliveryPreparationStage("cost-admission", () => costAdmission(job, { lease })).catch(error => ({ ok: false, reason: error.message }));
     if (!verdict?.ok) return refuse(verdict?.reason || "context-cost-unverified", verdict?.held === true);
     return { proceed: true, job: job.costHold ? queue.update(job, { costHold: null }) : job };
   };

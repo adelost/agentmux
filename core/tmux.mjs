@@ -17,6 +17,7 @@
 
 import { esc } from "../lib.mjs";
 import { CLEARLINE_RECIPE, composerKeyWrites } from "./composer-control.mjs";
+import { assertDeliveryPreparation, beginDeliveryInput } from "./delivery-preparation.mjs";
 
 const PANE_ROW_FORMAT = "#{pane_index}|#{pane_id}|#{pane_dead}|#{pane_current_command}|#{pane_current_path}";
 
@@ -34,7 +35,7 @@ export function parsePaneRows(stdout, name) {
 }
 
 export function createTmuxAdapter({ socket, exec }) {
-  const raw = (cmd) => exec(`tmux -S '${esc(socket)}' ${cmd}`);
+  const raw = (cmd) => { assertDeliveryPreparation(); return exec(`tmux -S '${esc(socket)}' ${cmd}`); };
   const q = (s) => `'${esc(String(s))}'`;
 
   // Local functions, not `this.`-methods: every primitive stays safe to
@@ -212,6 +213,7 @@ export function createTmuxAdapter({ socket, exec }) {
 
     /** Literal text into the composer (fully escaped, -l -- stops option parsing). */
     async sendLiteral(target, text) {
+      beginDeliveryInput();
       await raw(`send-keys -t ${q(target)} -l -- ${q(text)}`);
     },
 
@@ -219,6 +221,7 @@ export function createTmuxAdapter({ socket, exec }) {
     sendKeys,
 
     async sendEnter(target) {
+      beginDeliveryInput();
       await sendKeys(target, "Enter");
     },
 
@@ -241,6 +244,7 @@ export function createTmuxAdapter({ socket, exec }) {
      * The line is wrapped in single quotes VERBATIM (see escaping contract).
      */
     async runShell(target, line) {
+      beginDeliveryInput();
       await raw(`send-keys -t ${q(target)} '${line}' Enter`);
     },
 
@@ -251,6 +255,7 @@ export function createTmuxAdapter({ socket, exec }) {
     },
 
     async pasteBuffer(bufName, target) {
+      beginDeliveryInput();
       // `load-buffer` isolates the payload; `-p` is what makes the receiving
       // TUI handle it as one bracketed paste instead of painting thousands of
       // individual cells before Enter. tmux adds the markers only when the
