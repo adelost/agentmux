@@ -136,7 +136,11 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   // lsrc:0 2026-10-20: two Codex panes compacted on paid credits after Codex A's 5 h window was spent at about 17:35Z.
   // Codex works on past a spent window on credits, so its compact waits for the reset like any automatic turn.
   async function creditHeld(paneKey, base) {
-    const facts = await parkFor(paneKey);
+    const facts = await parkFor(paneKey).catch(() => null);
+    if (!creditsAllowed && (!facts || facts.unavailable)) {
+      report(paneKey, "unavailable", { ...base, cell: "credit-hold", outcome: "held", detail: "account reading unavailable; paid-credit permission unverified" });
+      return true;
+    }
     const hold = codexCreditHold({ windows: facts?.windows, provider: facts?.account?.provider, creditsAllowed, now: now() });
     if (!hold) return false;
     report(paneKey, hold.resetsAt, { ...base, cell: "credit-hold", outcome: "held",

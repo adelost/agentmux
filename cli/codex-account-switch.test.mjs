@@ -80,6 +80,16 @@ describe("Codex quota wind-down (component)", () => {
       expect(fx.calls).toEqual([]); expect(fx.jobs).toEqual([]);
     } finally { fx.clean(); }
   });
+  it("a queued wind-down switch never probes an unreadable source", async () => {
+    const fx = await windDown(), quota = fx.options.quota;
+    fx.options.quota = async profile => profile.id === "1" ? { ok: false, error: "network_error" } : quota(profile);
+    fx.options.status = async () => { fx.calls.push({ step: "paid-source-turn" }); return { ok: false }; };
+    try {
+      const result = await runRequestedCodexSwitch(fx.ctx, "claw", 0, fx.options);
+      expect(fx.calls).toEqual([]);
+      expect(result).toMatchObject({ moved: false, reason: "wind-down-source-quota-unavailable" });
+    } finally { fx.clean(); }
+  });
 });
 
 function fixture({ busy = false, dormant = false, wrongModel = false } = {}) {

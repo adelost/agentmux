@@ -72,6 +72,13 @@ function finish(ctx, key, request, result) {
     native: result.status, status: result.dormant ? "selected-for-next-start" : result.kind };
 }
 
+async function windDownSourceHold(profile, deps) {
+  const quota = await deps.quota(profile);
+  if (!quota?.ok) return "wind-down-source-quota-unavailable";
+  return codexCreditHold({ windows: accountWindows(quota), provider: "codex", creditsAllowed: codexCreditsAllowed(), now: deps.now() })
+    ? "wind-down-source-credit-hold" : null;
+}
+
 function windDownProof(ctx, name, pane, request, identity, now) {
   if (!windDownMovesEnabled() || !(Number(request.episode?.split("|").at(-1)) > now) || identity?.sessionId !== request.sessionId) return null;
   return windDownCompactReceipt({ state: ctx.state, agentName: name, pane, identity, beganAt: request.beganAt, now });
@@ -141,8 +148,10 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
       setCodexProfile(ctx.state, name, pane, target.id);
       return finish(ctx, key, request, { kind: "same" });
     }
-    if (request.windDown && codexCreditHold({ windows: accountWindows(await deps.quota(current)), provider: "codex",
-      creditsAllowed: codexCreditsAllowed(), now: deps.now() })) return pending("wind-down-source-credit-hold");
+    if (request.windDown) {
+      const hold = await windDownSourceHold(current, deps);
+      if (hold) return pending(hold);
+    }
     deps.prepare(target, profiles[0]);
     const quota = await deps.quota(target);
     if (request.windDown && (quotaObservedAt(quota) > deps.now() || !moveTarget({ engine: "codex", accounts: [quota], from: request.windDown.from,
