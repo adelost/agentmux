@@ -14,7 +14,14 @@ if command -v amux >/dev/null 2>&1; then
   fi
 fi
 printf -v WATCHDOG_PATH '%q' "$DIR/bin/bridge-watchdog-cron.sh"
-ENTRY="* * * * * bash $WATCHDOG_PATH"
+# Cron has no interactive nvm PATH; both node and the CLI's env-node shebang need it.
+NODE_BIN="${NODE_BIN:-$(command -v node)}"
+AMUX="${AMUX:-$(command -v amux)}"
+[ -x "$NODE_BIN" ] && [ -x "$AMUX" ] || { echo "watchdog requires an installed node and amux" >&2; exit 1; }
+printf -v WATCHDOG_NODE '%q' "$NODE_BIN"
+printf -v WATCHDOG_AMUX '%q' "$AMUX"
+printf -v WATCHDOG_ENV_PATH '%q' "$(dirname "$NODE_BIN"):/usr/local/bin:/usr/bin:/bin"
+ENTRY="* * * * * PATH=$WATCHDOG_ENV_PATH NODE_BIN=$WATCHDOG_NODE AMUX=$WATCHDOG_AMUX bash $WATCHDOG_PATH"
 
 current=$(crontab -l 2>/dev/null || true)
 installed=$(printf '%s\n' "$current" | grep -F "bridge-watchdog-cron.sh" || true)
