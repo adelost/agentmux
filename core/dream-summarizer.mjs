@@ -36,13 +36,9 @@ export function dreamPaneEngine(pane = {}) {
  */
 function conversationHistory(conversation, agent, pane, cutoffMs) {
   if (!conversation) return null;
-  const { log, partialWindow = false } = conversation;
-  // A window that began before logging started has asks without their answers;
-  // only the shadow accepts that, marked as an incomplete history.
-  if (!partialWindow && log.coverageStartMs > cutoffMs) return null;
+  const { log } = conversation;
   const found = conversationForPane(log, agent, pane, cutoffMs);
-  // Without attributable posted work the provider journal remains necessary.
-  if (!found.answered || !found.turns.length) return null;
+  // An unanswered input still belongs in the digest; selecting the log never authorizes a raw-journal fallback.
   return { turns: found.turns, lastWriteMs: found.lastWriteMs, reachedSince: log.coverageStartMs <= cutoffMs, fromLog: true };
 }
 
@@ -56,7 +52,7 @@ export function collectDreamSources(agents, sinceMs, options = {}) {
   const unreadable = [];
   const skipped = [];
   for (const agent of agents) {
-    if (agent.backend === "native") {
+    if (agent.backend === "native" && !options.conversation) {
       for (let pane = 0; pane < (agent.panes || []).length; pane++) {
         skipped.push({ agent: agent.name, pane, reason: "native-history-adapter-required" });
       }

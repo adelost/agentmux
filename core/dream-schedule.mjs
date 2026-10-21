@@ -55,7 +55,7 @@ export function claimScheduledDream(workspace, dateKey, { home = process.env.HOM
 
 /** WHAT: Schedules at most one automatic attempt per day. WHY: Prevents quota loops and duplicate prompts across cron races, restarts and failed attempts. */
 export async function runScheduledDream({ workspace, home = process.env.HOME, now = new Date(), dry = false,
-  mode = "scheduled", healthOptions = {}, observe = observeDreamHealth, run,
+  mode = "scheduled", healthOptions = {}, observe = observeDreamHealth, run, recover,
 }) {
   const health = observe(workspace, { ...healthOptions, home, now });
   if (health.state === "disabled") return { skipped: "disabled" };
@@ -63,6 +63,10 @@ export async function runScheduledDream({ workspace, home = process.env.HOME, no
   if (now.getTime() < health.startMs || health.dateKey !== localDateKey(now)) return { skipped: "not-due" };
   const dateKey = health.dateKey;
   const prior = scheduledDreamEvidence(workspace, dateKey, { home, now });
+  if (prior && prior !== "already-validated" && mode === "catch-up" && recover) {
+    const restored = await recover({ workspace, home, dateKey, dry });
+    if (restored.recovered || restored.recoverable || restored.exitCode !== undefined) return restored;
+  }
   if (prior) return { skipped: prior, dateKey };
   const path = dreamAttemptPath(workspace, home, dateKey);
   if (existsSync(path)) return { skipped: "already-attempted", dateKey, path };

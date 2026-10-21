@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runScheduledDream } from "../core/dream-schedule.mjs";
 import { loadRuntimeEnv } from "../core/runtime-env.mjs";
+import { recoverLateDream } from "../core/dream-late-recovery.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 loadRuntimeEnv({ packageRoot: root });
@@ -13,6 +14,11 @@ try {
   const result = await runScheduledDream({
     workspace: process.env.OPENCLAW_WORKSPACE || process.env.AMUX_WORKSPACE,
     mode: args.includes("--catch-up") ? "catch-up" : "scheduled", dry: args.includes("--dry"),
+    recover: options => recoverLateDream({ ...options, run: command => new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [join(root, "bin/agent-cli.mjs"), ...command], { stdio: "inherit", env: process.env });
+      child.once("error", reject);
+      child.once("exit", (code, signal) => resolve(signal ? 1 : code ?? 1));
+    }) }),
     run: ({ dateKey, since, token, mode }) => new Promise((resolve, reject) => {
       const child = spawn("/bin/bash", [join(root, "bin/dream-cron.sh"), "--run-scheduled"], {
         stdio: "inherit", env: { ...process.env, AMUX_SCHEDULED_DREAM_DATE: dateKey,

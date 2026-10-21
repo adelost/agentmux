@@ -27,6 +27,16 @@ function run(fx, body = () => 0) {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("missed Dream admission", () => {
+  it("recovers a late original product on catch-up without dispatching another curation", async () => {
+    const fx = fixture();
+    writeFileSync(join(fx.workspace, "memory", "2026-09-09.md"), "<!-- amux-dream-failed:2026-09-09 04:00 dream-output-missing -->\n");
+    let calls = 0;
+    const result = await runScheduledDream({ ...fx, mode: "catch-up", run: () => { throw Error("must not send a new prompt"); },
+      recover: async ({ dateKey }) => { calls++; return { recovered: true, dateKey, runId: "original" }; } });
+    expect(result.recovered).toBe(true);
+    expect(result.runId).toBe("original");
+    expect(calls).toBe(1);
+  });
   it("catches the missed 04 run at 09, keeping the original source window", async () => {
     const fx = fixture();
     const result = await runScheduledDream({ ...fx, mode: "catch-up", run: run(fx, ({ dateKey }) => { finish(fx, dateKey); return 0; }) });

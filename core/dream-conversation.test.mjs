@@ -36,6 +36,18 @@ const log = {
 };
 
 feature("Dream reads the conversation log before any journal", () => {
+  unit("keeps an unanswered human input without reading a provider journal", {
+    when: ["collecting a log-only night with no posted reply", () => collectDreamSources([{ ...agents[0], panes: [agents[0].panes[0]] }], SINCE, {
+      now: NOW, conversation: { log: { coverageStartMs: SINCE - 1, asks: [ask("pending", 0, at(1), "mitt oavslutade uppdrag")], posts: [] } },
+      readHistory: () => { throw Error("provider journal is not a digest source"); },
+    })],
+    then: ["the unanswered request stays in the log-sourced packet", result => {
+      expect(result.unreadable).toEqual([]);
+      expect(result.sources).toHaveLength(1);
+      expect(result.sources[0].source).toBe("conversation-log");
+      expect(result.sources[0].entries[0].userPrompt).toContain("mitt oavslutade uppdrag");
+    }],
+  });
   unit("new posted work whose input predates the cursor never needs a raw journal", {
     given: ["a genuine prior input and an actual answer after the cursor", () => ({ coverageStartMs: SINCE - 3600000,
       asks: [ask("old-input", 0, at(1), "mitt äldre uppdrag")], posts: [post(0, at(3), "reply", "SUMMARY: arbetet fortsatte efter markören")],
@@ -116,11 +128,11 @@ feature("Dream reads the conversation log before any journal", () => {
       const observed = collectDreamSources(agents, SINCE, { receipts: { panes: {} }, readHistory, now: NOW, conversation: { log } });
       return { observed, batch: buildDreamBatch(observed.sources, "2026-10-12"), readHistory };
     }],
-    then: ["lsrc:0 comes from the log with its answers, lsrc:1 from its journal, Dream's own run is left out", ({ observed, batch, readHistory }) => {
-      expect(readHistory.mock.calls.map(([, dir]) => dir)).toEqual(["/work/.agents/1"]);
+    then: ["only posted log work enters the packet; no provider journal or Dream's own run is read", ({ observed, batch, readHistory }) => {
+      expect(readHistory.mock.calls).toHaveLength(0);
       expect(observed.unreadable).toEqual([]);
       const bySource = Object.fromEntries(observed.sources.map((item) => [`${item.agent}:${item.pane}`, item.source]));
-      expect(bySource).toEqual({ "lsrc:0": "conversation-log", "lsrc:1": "journal" });
+      expect(bySource).toEqual({ "lsrc:0": "conversation-log" });
       const pane = batch.payload.panes.find((item) => item.pane === "lsrc:0");
       expect(pane.turns.map((turn) => turn.user)).toEqual(["Mattias: släpp G4 idag", "[from skyvw:0] granska paret"]);
       expect(pane.turns[0].assistant).toBe(`${REPORT}\n[file: /tmp/g4.png]`);

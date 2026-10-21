@@ -209,7 +209,8 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
         console.log(`Dream: ${skipped.agent}:${skipped.pane} has ${skipped.deferredTurns} active turn(s) deferred; cursor unchanged.`);
       }
     }
-    const memoryRepair = (dependencies.readMemoryWarnings || readDreamMemoryWarnings)(workspaceDir, { now });
+    const memoryRepair = primarySource === "raw"
+      ? (dependencies.readMemoryWarnings || readDreamMemoryWarnings)(workspaceDir, { now }) : { warnings: [], omitted: 0 };
     const repairBytes = memoryRepair.warnings.length || memoryRepair.omitted ? Buffer.byteLength(JSON.stringify({ memoryRepair })) + 1 : 0;
     const batch = buildDreamBatch(observed.sources, dateKey, { ...dependencies.batchOptions,
       maxPromptBytes: (dependencies.batchOptions?.maxPromptBytes || DREAM_PROMPT_BYTES) - repairBytes });
@@ -218,7 +219,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   };
   // The conversation-log shadow only compares; a failure never stops Dream.
   const shadow = ({ receipts, observed, batch }) => {
-    const run = dependencies.shadow || (readHistory && dreamShadow);
+    const run = dependencies.shadow || (primarySource === "raw" && readHistory && dreamShadow);
     if (!run) return null;
     try {
       return { ...run({ agents, sinceMs: since.getTime(), receipts, readHistory, current: { observed, batch }, dateKey, nowMs: now.getTime() }), primarySource };
@@ -256,7 +257,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       input: {
         path: "<durable-local-input>", outputPath: "<isolated-summary-output>",
         sha256: "<sha256>", bytes: 0, runId: "<run-id>",
-        memoryFormat: 2,
+        memoryFormat: primarySource === "raw" ? 2 : 3,
         memoryRepair: !!batch.payload.memoryRepair,
       },
       memPath,
@@ -329,7 +330,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       const memoryReadAt = Date.now();
       const input = (dependencies.writeInput || writeDreamOwnerInput)({
         schemaVersion: 1,
-        memoryFormat: 2,
+        memoryFormat: primarySource === "raw" ? 2 : 3,
         dateKey,
         createdAt: now.toISOString(),
         workspace: workspaceDir,

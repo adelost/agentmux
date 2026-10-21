@@ -16,7 +16,9 @@ function fixture(file = "memory/references/source.md", text = "# Source\n- Verif
   mkdirSync(join(root, "memory", "references"), { recursive: true });
   writeFileSync(join(root, "MEMORY.md"), prefix);
   writeFileSync(join(root, file), text);
-  const home = process.env.HOME, janitor = process.env.AMUX_JANITOR_ENABLED;
+  const home = process.env.HOME, janitor = process.env.AMUX_JANITOR_ENABLED, source = process.env.AMUX_DREAM_SOURCE;
+  // Log-only nights no longer curate handwritten reference warnings; retain explicit legacy-mode repair proof.
+  process.env.AMUX_DREAM_SOURCE = "raw";
   process.env.HOME = root; process.env.AMUX_JANITOR_ENABLED = "false";
   const fx = { root, file, original: text, sends: 0, document: null };
   fx.deps = {
@@ -34,6 +36,7 @@ function fixture(file = "memory/references/source.md", text = "# Source\n- Verif
   fx.cleanup = () => {
     if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
     if (janitor === undefined) delete process.env.AMUX_JANITOR_ENABLED; else process.env.AMUX_JANITOR_ENABLED = janitor;
+    if (source === undefined) delete process.env.AMUX_DREAM_SOURCE; else process.env.AMUX_DREAM_SOURCE = source;
     rmSync(root, { recursive: true, force: true });
   };
   return fx;
@@ -52,6 +55,17 @@ function scriptedResult(fx, edit) {
 }
 
 feature("Dream gives memory warnings an actor without giving the model write authority", () => {
+  component("a log-derived night does not launch repair-only work from handwritten references", {
+    given: ["a reference warning but no conversation activity", () => fixture()],
+    when: ["running the default log source", async fx => {
+      process.env.AMUX_DREAM_SOURCE = "conversation-log";
+      await fx.run(); return fx;
+    }],
+    then: ["no extra model turn or reference edit", fx => {
+      expect(fx.sends).toBe(0);
+      expect(readFileSync(join(fx.root, fx.file), "utf8")).toBe(fx.original);
+    }], cleanup: fx => fx.cleanup(),
+  });
   unit("the curator cannot forge controller repair artifacts", {
     when: ["auditing real-shaped apply_patch calls outside the memory directory", () => ({
       receipt: curatorMemoryWrite(JSON.stringify({ tool: "apply_patch", input: "*** Begin Patch\n*** Add File: /private/run.memory-repair.json\n+{}\n*** End Patch" }), "/workspace/memory/2026-10-16.md"),

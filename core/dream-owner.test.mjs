@@ -58,6 +58,17 @@ feature("Dream candidate list", () => {
 });
 
 feature("configured Dream owner", () => {
+  unit("format three curates only the log packet and never loads handwritten day files", {
+    when: ["building a new nightly prompt", () => dreamOwnerPrompt({ owner: { agent: "test", pane: 0, engine: "claude" },
+      input: { path: "/packet.json", outputPath: "/summary.md", runId: "run", sha256: "hash", bytes: 10, memoryFormat: 3 },
+      memPath: "/handwritten-today.md", previousMemPath: "/handwritten-yesterday.md", dateKey: "2026-10-21", included: 1, omitted: 0, unreadable: 0 })],
+    then: ["the packet is the source; manual diaries are not source material", prompt => {
+      expect(prompt).toContain("/packet.json");
+      expect(prompt).not.toContain("/handwritten-today.md");
+      expect(prompt).not.toContain("/handwritten-yesterday.md");
+      expect(prompt).not.toContain("också det panelerna skrivit i dagsfilerna");
+    }],
+  });
   unit("resolves one existing Codex pane and rejects hidden fallback", {
     when: ["reading generated fleet config", () => ({
       selected: resolveDreamOwner({
