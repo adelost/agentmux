@@ -90,65 +90,20 @@ feature("daily memory section reminder", () => {
     }],
   });
 
-  integration("an append that grows a section past the rule is named once per session", {
-    given: ["today's note and a pane appending 18 lines through the shell", workspace],
-    when: ["the append, a short append, and the long section growing again", ({ home, note }) => {
-      appendFileSync(note, `\n## Lång (api:0, 10:00)\n${bullets(18, "lång")}\n`);
-      const command = `cat >> ${note} <<'EOF'\n...\nEOF`;
-      const first = hook(home, { tool_name: "Bash", tool_input: { command } });
-      const again = hook(home, { tool_name: "Bash", tool_input: { command } });
-      appendFileSync(note, `\n## Ny kort (api:2, 11:00)\n${bullets(4, "ny")}\n`);
-      const short = hook(home, { tool_name: "Bash", tool_input: { command } });
-      return { first, again, short };
-    }],
-    then: ["the first names the section and its size, the repeat and the short one stay silent", ({ first, again, short }, { home }) => {
-      expect(first.status, first.err).toBe(0);
-      expect(reminderOf(first.out)).toContain('"Lång (api:0, 10:00)" (18 rader)');
-      expect(reminderOf(first.out)).toContain("memory/references/");
-      expect(again.out).toBe("");
-      expect(short.out).toBe("");
-      rmSync(home, { recursive: true, force: true });
-    }],
-  });
-
-  integration("an edit is judged by the section its new text landed in, not the last one", {
-    given: ["today's note with a long section followed by a short one", () => {
+  integration("daily-file writes never prompt a worker to keep or compact a manual diary", {
+    given: ["today's long manual section, retained as history", () => {
       const ws = workspace();
-      appendFileSync(ws.note, `\n## Gammal lång (lsrc:0, 08:00)\n${bullets(17, "gammal")}\n\n## Sist (api:1, 12:00)\n- en rad\n`);
+      appendFileSync(ws.note, `\n## Old long section\n${bullets(20, "old")}\n`);
       return ws;
     }],
-    when: ["an Edit adds a line inside the long section, then one inside the short one", ({ home, note }) => ({
-      long: hook(home, { tool_name: "Edit", tool_input: { file_path: note, old_string: "- gammal 17", new_string: "- gammal 17" } }),
-      short: hook(home, { tool_name: "Edit", tool_input: { file_path: note, old_string: "- en rad", new_string: "- en rad" } }),
-    })],
-    then: ["only the edit inside the long section is reminded", ({ long, short }, { home }) => {
-      expect(reminderOf(long.out)).toContain('"Gammal lång (lsrc:0, 08:00)" (17 rader)');
-      expect(short.out).toBe("");
-      rmSync(home, { recursive: true, force: true });
-    }],
-  });
-
-  integration("writes outside today's or yesterday's daily note stay silent", {
-    given: ["a long section in an ordinary markdown file and in an old daily note", () => {
-      const ws = workspace();
-      const other = join(ws.home, "notes.md");
-      writeFileSync(other, `## Lång\n${bullets(20, "x")}\n`);
-      const old = join(ws.home, "ws", "memory", "2020-01-01.md");
-      writeFileSync(old, `## Lång\n${bullets(20, "x")}\n`);
-      return { ...ws, other, old };
-    }],
-    when: ["writing each of them", ({ home, other, old }) => ({
-      other: hook(home, { tool_name: "Write", tool_input: { file_path: other, content: "" } }),
-      old: hook(home, { tool_name: "Write", tool_input: { file_path: old, content: "" } }),
-      unreadable: spawnSync("bash", ["-c", MEMORY_SECTION_REMINDER_CMD], {
-        input: "not json memory/2026", env: { ...process.env, HOME: home }, encoding: "utf8",
-      }),
-    })],
-    then: ["nothing is said and nothing fails", ({ other, old, unreadable }, { home }) => {
-      expect(other.out).toBe("");
-      expect(old.out).toBe("");
-      expect(unreadable.status).toBe(0);
-      expect(unreadable.stdout).toBe("");
+    when: ["the real registered hook observes each writing tool", ({ home, note }) => [
+      ["Write", { file_path: note }],
+      ["Edit", { file_path: note, new_string: "old" }],
+      ["MultiEdit", { file_path: note, edits: [{ new_string: "old" }] }],
+      ["Bash", { command: `cat >> ${note}` }],
+    ].map(([tool_name, tool_input]) => hook(home, { session_id: tool_name, tool_name, tool_input }))],
+    then: ["automatic conversation logging and Dream need no manual daily reminder", (results, { home }) => {
+      for (const result of results) { expect(result.status, result.err).toBe(0); expect(result.out).toBe(""); }
       rmSync(home, { recursive: true, force: true });
     }],
   });

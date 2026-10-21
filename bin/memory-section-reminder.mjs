@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 /**
- * WHAT: Claude PostToolUse hook. When a write grows a section of today's or yesterday's daily memory note past the
- * section rule, or grows a project MEMORY.md past its size limit, it reminds once per section/file and session.
- * WHY: Mattias 2026-10-10, "blir du påmind om dem när de behövs": the rule reached writers only through a nightly
- * lint report, and 31 sections over 15 lines piled up in two days. It never blocks: the write already happened.
+ * WHAT: Emits a project MEMORY.md size hint once per file and session.
+ * WHY: Keeps the compact startup registry bounded without prompting workers to maintain manual daily diaries.
  */
 import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -42,11 +40,10 @@ try {
 }
 
 try {
-  const { reminderKey, sectionReminderText, touchedSections, writtenDailyNotes, writtenMemoryIndexes } = await import("../core/memory-section-reminder.mjs");
+  const { writtenMemoryIndexes } = await import("../core/memory-section-reminder.mjs");
   const { DEFAULT_MEMORY_POLICY, dateKeyDaysAgo, loadMemoryPolicy, localDateKey } = await import("../core/memory-policy.mjs");
-  const notes = writtenDailyNotes(payload);
   const indexes = writtenMemoryIndexes(payload);
-  if (!notes.length && !indexes.length) process.exit(0);
+  if (!indexes.length) process.exit(0);
 
   const state = readState();
   if (!state.sessions || typeof state.sessions !== "object") state.sessions = {};
@@ -73,20 +70,6 @@ try {
     session.day = localDateKey();
     const limit = String(maxChars).replace(/\B(?=(\d{3})+(?!\d))/gu, " ");
     messages.push(`MEMORY.md är ${chars} tecken, taket är ${limit}. Lägg minnet i rätt index-*.md och lämna högst ett krokord här.`);
-  }
-  for (const note of notes) {
-    let text;
-    try { text = readFileSync(note.path, "utf8"); } catch { continue; }
-    let maxLines = DEFAULT_MEMORY_POLICY.dailySectionMaxLines;
-    try { maxLines = loadMemoryPolicy(dirname(dirname(note.path))).dailySectionMaxLines; } catch {
-      // an invalid policy file is lint's to report; the default rule still applies here
-    }
-    const due = touchedSections(text, note.newStrings)
-      .filter((section) => section.lines > maxLines && !session.keys.includes(reminderKey(note, section)));
-    if (!due.length) continue;
-    session.keys.push(...due.map((section) => reminderKey(note, section)));
-    session.day = note.dateKey > session.day ? note.dateKey : session.day;
-    messages.push(sectionReminderText(note.dateKey, due));
   }
   if (!messages.length) process.exit(0);
 

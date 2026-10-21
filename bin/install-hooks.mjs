@@ -41,9 +41,9 @@ const FORK_GUARD_MATCHER = "Agent|Task";
 // TaskStop ends an agent without a SubagentStop, so its receipt is what frees the slot.
 const FORK_GUARD_RECEIPT_MATCHER = "Agent|Task|TaskStop";
 const FORK_SWITCH = "CLAUDE_CODE_FORK_SUBAGENT";
-// WHAT: Defines the PostToolUse command for the daily memory section rule.
-// WHY: Keeps unrelated tool calls from starting node; only daily notes and project indexes reach it.
-export const MEMORY_SECTION_REMINDER_CMD = `p=$(cat); case "$p" in *memory/20*|*memory/MEMORY.md*) printf '%s' "$p" | exec node "${join(__dir, "memory-section-reminder.mjs")}";; esac`;
+// WHAT: Defines the PostToolUse command for the compact project-memory index.
+// WHY: Keeps unrelated tool calls and daily diary writes from starting node; only project indexes reach it.
+export const MEMORY_SECTION_REMINDER_CMD = `p=$(cat); case "$p" in *memory/MEMORY.md*) printf '%s' "$p" | exec node "${join(__dir, "memory-section-reminder.mjs")}";; esac`;
 const MEMORY_SECTION_MATCHER = "Write|Edit|MultiEdit|Bash";
 const SETTINGS = join(homedir(), ".claude", "settings.json");
 
@@ -209,7 +209,7 @@ function main() {
   console.log(`Hotspot reflection on git commit: PreToolUse/Bash -> ${HOTSPOT_GUARD_CMD}`);
   console.log(`rm targets Claude Code stops for a person: PreToolUse/Bash -> ${RM_GUARD_CMD}`);
   console.log(`Forks banned: env ${FORK_SWITCH}=0, PreToolUse/${FORK_GUARD_MATCHER} -> ${FORK_GUARD_CMD}`);
-  console.log(`Daily memory section rule: PostToolUse/${MEMORY_SECTION_MATCHER} -> ${MEMORY_SECTION_REMINDER_CMD}`);
+  console.log(`Project memory index hint: PostToolUse/${MEMORY_SECTION_MATCHER} -> ${MEMORY_SECTION_REMINDER_CMD}`);
 }
 
 // Only run when executed, never on import. This file now exports a helper, and
