@@ -14,7 +14,7 @@ export function originalSourcePriority(hit) {
   return hit.sourcePriority ?? (hit.eventKind === "post" ? 1 : 2);
 }
 
-// WHAT: Sorts canonical conversation hits without removing context. WHY: Keeps source precedence consistent before the final result limit.
+// WHAT: Returns canonical conversation hits in source order without removing context. WHY: Keeps source precedence consistent before the final result limit.
 export function originalsFirst(hits) {
   return [...hits].sort((a, b) => originalSourcePriority(a) - originalSourcePriority(b));
 }
