@@ -17,6 +17,23 @@ const values = value => typeof value === "string" ? [value]
 const memoryTarget = (path, memPath) => !!path && (/\.(?:curator\.md|memory-repair\.json)$/u.test(String(path)) || String(path).toLowerCase().split(/[\\/]/u)
   .some(part => ["memory", "memory.md"].includes(part)) || resolve(path).startsWith(`${dirname(resolve(memPath))}/`));
 
+// Resolve only a single literal binding before the redirect. Dynamic or rebound variables remain unknown.
+function redirectTarget(command, path, at) {
+  const ref = /^\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))(?=\/|$)/u.exec(path || "");
+  if (!ref) return path;
+  const prefix = command.slice(0, at), name = ref[1] || ref[2];
+  if (/\b(?:eval|source|read|unset|declare|local|typeset)\b|(?:^|[;&|])\s*\.\s|`|\$\(/u.test(prefix)) return path;
+  const operators = shellOperators(prefix);
+  const bindings = [...operators.matchAll(new RegExp(`\\b${name}=(?!=)`, "gu"))];
+  if (bindings.length !== 1) return path;
+  const declaration = new RegExp(`(?:^|&&|;|\\n)\\s*${name}=`, "u").exec(operators);
+  if (!declaration) return path;
+  const value = prefix.slice(declaration.index + declaration[0].length).match(/^(\/[A-Za-z0-9_./-]+)\s*&&/u)?.[1];
+  if (!value || new RegExp(`\\b(?:for|select)\\s+${name}\\b|\\b${name}(?:\\+\\+|--|\\s*[+\\-]=)`, "u").test(prefix)) return path;
+  const suffix = path.slice(ref[0].length);
+  return /^\/[A-Za-z0-9_./-]*$/u.test(suffix) || !suffix ? value + suffix : path;
+}
+
 /** WHAT: Checks whether a curator tool can write memory. WHY: Prevents read results or restored bytes from hiding a curator's memory write. */
 export function curatorMemoryWrite(text, memPath) {
   let call;
@@ -43,7 +60,7 @@ export function curatorMemoryWrite(text, memPath) {
   const redirects = [...shellOperators(String(text)).matchAll(/(?<!=)>{1,2}(?:\|)?/gu)];
   if (redirects.some(match => {
     const target = String(text).slice(match.index + match[0].length).trimStart().match(/^(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/u);
-    const path = target?.[1] ?? target?.[2] ?? target?.[3];
+    const path = redirectTarget(String(text), target?.[1] ?? target?.[2] ?? target?.[3], match.index);
     return path && (memoryTarget(path, memPath) || inMemory && !path.startsWith("/") && !path.startsWith("&"));
   })) return true;
   const memory = inMemory || String(text).includes(dirname(resolve(memPath))) || /(?:^|[\s/'"=])memory\/|\.(?:curator\.md|memory-repair\.json)/u.test(String(text));

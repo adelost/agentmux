@@ -15,6 +15,23 @@ const heredoc = `cat >> /ws/memory/2026-10-08.md <<'EOF'\n${note}EOF`;
 const curatorSummary = "> Kuraterad av claw:1 efter verifierad kompaktering · run `r`.\n- KLART";
 
 feature("Dream commit beside fleet notes", () => {
+  unit("accepts a read into a uniquely bound absolute scratch path while refusing uncertain targets", {
+    when: ["the curator redirects from memory using a literal or uncertain shell binding", () => {
+      const commands = [
+        "S=/tmp/dream-scratch && awk '{print}' 2026-10-20.md > $S/selected.txt",
+        "S=/ws/memory && awk '{print}' 2026-10-20.md > $S/selected.txt",
+        "S=relative && awk '{print}' 2026-10-20.md > $S/selected.txt",
+        "awk '{print}' 2026-10-20.md > $S/selected.txt",
+        "S=/tmp/dream-scratch && S=/ws/memory && echo changed > $S/day.md",
+        "S=/tmp/dream-scratch && read S && echo changed > $S/day.md",
+        "echo 'S=/tmp/dream-scratch &&' && echo changed > $S/day.md",
+        "echo S=/tmp/dream-scratch && echo changed > $S/day.md",
+      ];
+      return commands.map(command => concurrentNotesVerdict(before, before, { memPath: "/ws/memory/2026-10-21.md",
+        ownerTexts: [JSON.stringify({ tool: "Bash", input: { command: `cd /ws/memory && ${command}` } })] }).ok);
+    }],
+    then: ["only the known external destination is accepted", accepted => expect(accepted).toEqual([true, false, false, false, false, false, false, false])],
+  });
   unit("accepts the 15 October insertion under another pane's existing heading", {
     given: ["the controller's file and another pane's bounded patch", () => ({
       before: "# 2026-10-15\n\n## lsrc:8\n- Existing decision.\n\n## claw:0\n- Existing release.\n",
