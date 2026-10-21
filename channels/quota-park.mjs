@@ -34,6 +34,8 @@ export function createQuotaParkFacts({
     let current = await fresh();
     if (freshPanes && current) current = withPanesInUse(current, await readPanes(), profiles());
     if (!current) return { unavailable: true };
+    // Only the pane listing sets inUse: without it, a pane at the floor would read as a pane on no account.
+    if (current.accounts?.length && !current.accounts.some((candidate) => Array.isArray(candidate.inUse))) return { unavailable: true };
     const account = current.accounts?.find((candidate) => candidate.inUse?.includes(paneKey));
     return account
       ? { account: { name: account.name || account.profile?.key || null, key: account.profile?.key || null,
