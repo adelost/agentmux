@@ -116,3 +116,26 @@ checks at their existing write owners. The state initial-read/stamp correction
 and fanout atomic update from309 remain intact in the combined source. The
 per-head writer split lowers broker and queue caps instead of bypassing them.
 Named model/account/receipt/clock I/O doubles spend no provider turns.
+
+A64 released as1.25.310, source4613f7379f88012a57afad8825125ee405a0acf0
+(implementation97e42759, exact net of the priorf71f32f7 bank). Fresh-trunk285
+targeted cases/15files and strict changed lint0;581 installed files match.
+Actual installed-owner proof:14 cases plus real private tmux/kernel queue,
+the delayed old write refused and one sibling input delivered. All three
+owned test PIDs are absent. Native model/session receipts are named cat-I/O
+doubles; no provider/account/model turn is used. A failed optional installed
+probe initially did not inject two ENOSPC faults: native ESM bypassed Vitest's
+fs mock. The same named fs-I/O double now reaches that test worker's native
+builtins, is restored afterwards, and all14 cases pass. Original failed log
+is preserved; no storage assertion was removed or filtered.
+
+Normal SIGUSR2 waited for the observed active delivery to end, then heartbeat
+at10:27:58Z proved PID933407/version310/source4613. No SIGTERM or agent restart.
+The scanner also found a zero-byte queue file unchanged since12October;
+the actual queue owner cannot select it, its kernel lease is free, and it
+predates this bridge. It remains untouched with historical outcome unknown,
+not retagged as a delivered/cancelled job or hidden as a global doctor PASS.
+Proofs: /home/adelost/lsrc/.artifacts/amux-delivery-quota-api3-20261021/,
+A64-PREPARED.json and the preserved per-source receipts. Startup-barrier
+observation and historical await attribution remain outside this proof;
+all leased unsent heads receive the new preparation guard.

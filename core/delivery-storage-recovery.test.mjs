@@ -1,5 +1,5 @@
 import { component, expect, feature } from "bdd-vitest";
-import { vi } from "vitest";
+import { vi, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { createTmuxAdapter as localTmux } from "./tmux.mjs";
 import { createState as localState } from "./state.mjs";
 import { pathToFileURL } from "node:url";
 import { isQuotaFloorHeldJob } from "./delivery-wake.mjs";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 
 // The same owner-level exercise can read the exact installed package after release.
 const packageRoot = process.env.AMUX_PREPARATION_PROOF_PACKAGE_ROOT;
@@ -18,23 +19,31 @@ const { createDeliveryBroker } = await load("core/delivery-broker.mjs", { create
 const { createTmuxAdapter } = await load("core/tmux.mjs", { createTmuxAdapter: localTmux });
 const { createState } = await load("core/state.mjs", { createState: localState });
 
-const faults = vi.hoisted(() => ({ receipt: false, paneLease: false }));
-vi.mock("node:fs", async importOriginal => {
-  const fs = await importOriginal();
-  return { ...fs, writeFileSync(path, data, ...args) {
-    if (faults.receipt && String(data).includes('"status": "acknowledged"')) {
-      faults.receipt = false;
-      throw Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
-    }
-    return fs.writeFileSync(path, data, ...args);
-  }, writeSync(fd, ...args) {
-    if (faults.paneLease && fs.readlinkSync(`/proc/self/fd/${fd}`).endsWith(".consumer.lock")) {
-      faults.paneLease = false;
-      throw Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
-    }
-    return fs.writeSync(fd, ...args);
-  } };
+const { faults, storageIO } = vi.hoisted(() => {
+  const faults = { receipt: false, paneLease: false };
+  const storageIO = fs => ({ ...fs, writeFileSync(path, data, ...args) {
+      if (faults.receipt && String(data).includes('"status": "acknowledged"')) {
+        faults.receipt = false;
+        throw Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
+      }
+      return fs.writeFileSync(path, data, ...args);
+    }, writeSync(fd, ...args) {
+      if (faults.paneLease && fs.readlinkSync(`/proc/self/fd/${fd}`).endsWith(".consumer.lock")) {
+        faults.paneLease = false;
+        throw Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
+      }
+      return fs.writeSync(fd, ...args);
+    } });
+  return { faults, storageIO };
 });
+vi.mock("node:fs", async importOriginal => storageIO(await importOriginal()));
+if (packageRoot) {
+  // Installed native ESM bypasses Vitest's module mock; apply the same named fs-I/O double in this test worker only.
+  const fs = createRequire(import.meta.url)("node:fs");
+  const original = { ...fs }, doubled = storageIO(original);
+  fs.writeFileSync = doubled.writeFileSync; fs.writeSync = doubled.writeSync; syncBuiltinESMExports();
+  afterAll(() => { fs.writeFileSync = original.writeFileSync; fs.writeSync = original.writeSync; syncBuiltinESMExports(); });
+}
 
 function fixture() {
   const rootDir = mkdtempSync(join(tmpdir(), "amux-storage-recovery-"));
