@@ -100,8 +100,9 @@ Read each view for what it is:
   different owners. Use the specific handover, not a blanket freeze.
 - Do not compact, respawn or switch models in the middle of a feature check.
   Compaction follows the amux layer's context rules. Before your own
-  `amux compact --self --continue-file HANDOFF` at a stage boundary, write
-  quotes, numbers and decisions to files. A refusal means: go on.
+  `amux compact --self --continue-file HANDOFF` at a stage boundary, preserve
+  task state and technical evidence in the handoff, with source pointers for
+  decisions. Do not copy quotations or write a day diary. A refusal means: go on.
 - Ordinary coordination adds no second test suite, reviewer, benchmark or
   approval hop. An old memory note is not a new approval gate.
 

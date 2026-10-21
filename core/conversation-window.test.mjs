@@ -3,7 +3,8 @@ import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
-import { readWindow } from "./ask-ledger.mjs";
+import { readWindow, appendAskLedger, appendPost } from "./ask-ledger.mjs";
+import { migrateDailyLedger } from "./ask-ledger-migrate.mjs";
 import { createConversationWindow } from "./conversation-window.mjs";
 import { daemonConversation, serveEmbedder } from "./search-embedder.mjs";
 import { searchConversationLog } from "./search-conversation.mjs";
@@ -19,6 +20,26 @@ const windowOf = async (log) => {
   return window;
 };
 const ids = (hits) => hits.map((hit) => hit.conversationId);
+
+feature("daily ledger index cutover", () => {
+  component("retains original human input when imported legacy inodes leave the file set", {
+    given: ["a warm index over the retained old log", async () => {
+      const root = mkdtempSync(join(tmpdir(), "window-daily-cutover-")), path = join(root, "ask-ledger");
+      const legacy = `${path}.jsonl`, ts = new Date(NOW_MS - 60000).toISOString();
+      appendAskLedger({ id: "cutover-human", agent: "ai", pane: 3, source: "discord", verbatim: "seamproof question", ts }, { path: legacy });
+      const reply = appendPost({ agent: "ai", pane: 3, channelId: "c", via: "bridge", kind: "reply", payload: "seamproof answer", ts }, { path: legacy });
+      const window = createConversationWindow({ path, now: () => NOW_MS });
+      await window.refresh();
+      return { root, path, window, reply };
+    }],
+    when: ["the importer publishes daily files and the existing index refreshes", async fx => {
+      await migrateDailyLedger(fx.path, { apply: true }); await fx.window.refresh();
+      return ids(fx.window.search("seamproof"));
+    }],
+    then: ["source replacement loses neither the original input nor its reply", (found, fx) => expect(found).toEqual(["cutover-human", fx.reply.id])],
+    cleanup: fx => rmSync(fx.root, { recursive: true, force: true }),
+  });
+});
 
 // 600 rows over 29 days: a small vocabulary where early words are common, 40 distinct instants so many rows tie on
 // time and day, and some asks repeated as the pane-hook copies the bridge records.

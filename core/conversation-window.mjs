@@ -107,7 +107,8 @@ export function createConversationWindow({ path = defaultAskLedgerPath(), now = 
       for (let done = false; !done;) {
         const tailed = tail(tailState, { path, sinceMs: now() - CONVERSATION_WINDOW_MS, maxBytes: sliceBytes });
         // A file that got smaller was rewritten: offsets held for it mean nothing, so everything is read again.
-        if (tailed.rewritten) { reset(); continue; }
+        const retired = Object.keys(tailState).some(key => !Object.hasOwn(tailed.state, key));
+        if (tailed.rewritten || retired) { reset(); continue; }
         tailState = tailed.state;
         files = new Map(Object.entries(tailState).map(([key, entry]) => [key, entry.path]));
         for (const entry of tailed.rows) addRow(entry);
