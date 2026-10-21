@@ -7,6 +7,7 @@ import { afterEach, vi } from "vitest";
 afterEach(() => vi.useRealTimers());
 import { execFileSync, exec } from "node:child_process";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import { createDeliveryBroker } from "../core/delivery-broker.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { createTmuxAdapter } from "../core/tmux.mjs";
@@ -80,12 +81,19 @@ feature("which account a pane's quota facts come from", () => {
 
 feature("delivery survives a stalled shared quota read", () => {
   component("the unavailable floor releases its kernel lease and a human reaches a real isolated test pane", {
-    given: ["a real temporary queue and tmux cat pane, with quota-reader and model-receipt I/O doubles", () => {
+    given: ["a real temporary queue and tmux cat pane, with quota-reader and model-receipt I/O doubles", async () => {
+      // The same exercise can verify installed bytes after the receipted release.
+      const owner = process.env.AMUX_QUOTA_PROOF_PACKAGE_ROOT;
+      const load = async (path, local) => owner ? import(pathToFileURL(join(owner, path)).href) : local;
+      const { createQuotaParkFacts: quotaFacts } = await load("channels/quota-park.mjs", { createQuotaParkFacts });
+      const { createDeliveryQueue: deliveryQueue } = await load("core/delivery-queue.mjs", { createDeliveryQueue });
+      const { createDeliveryBroker: deliveryBroker } = await load("core/delivery-broker.mjs", { createDeliveryBroker });
+      const { createTmuxAdapter: tmuxAdapter } = await load("core/tmux.mjs", { createTmuxAdapter });
       const root = mkdtempSync(join(tmpdir(), "amux-quota-delivery-")), socket = join(root, "tmux.sock");
-      const received = join(root, "received"), queue = createDeliveryQueue({ rootDir: join(root, "queue") });
+      const received = join(root, "received"), queue = deliveryQueue({ rootDir: join(root, "queue") });
       execFileSync("tmux", ["-S", socket, "new-session", "-d", "-s", "probe", `cat > '${received}'`]);
-      const tmux = createTmuxAdapter({ socket, exec: promisify(exec) });
-      const facts = createQuotaParkFacts({ read: () => new Promise(() => {}), readTimeoutMs: 30, log: () => {} });
+      const tmux = tmuxAdapter({ socket, exec: promisify(exec) });
+      const facts = quotaFacts({ read: () => new Promise(() => {}), readTimeoutMs: 30, log: () => {} });
       const marker = "quota-boundary-local-test";
       const agent = {
         paneProcessState: async () => ({ running: true }),
@@ -101,7 +109,7 @@ feature("delivery survives a stalled shared quota read", () => {
           return { submitted: true };
         },
       };
-      const broker = createDeliveryBroker({ agent, queue, quotaFloor: { percent: 3, windowsFor: facts }, log: () => {} });
+      const broker = deliveryBroker({ agent, queue, quotaFloor: { percent: 3, windowsFor: facts }, log: () => {} });
       const automatic = queue.enqueue({ agentName: "probe", pane: 0, text: "automatic", source: "drift-guard" });
       return { root, socket, received, queue, broker, automatic, marker };
     }],
