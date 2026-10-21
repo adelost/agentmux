@@ -3,7 +3,7 @@
 
 import { loadConfig } from "./config.mjs";
 import { eventsPath } from "../core/events.mjs";
-import { searchConversationLog, expandConversationHit } from "../core/search-conversation.mjs";
+import { searchConversationLog, expandConversationHit, originalsFirst } from "../core/search-conversation.mjs";
 import {
   loadSearchRoots,
   withEventLedgerRoot,
@@ -73,7 +73,7 @@ prompts of 40+ characters repeated 3 or more times are not his
 <name>", "hans ord", "<name>s beslut", "what did he say") lists his own
 messages first; notes and rows that quote him follow as context.
 The canonical conversation log (last 30 days) is searched by the warm daemon
-from memory. A cold answer leaves the agents' rows out and says so.
+from memory. A cold answer scans the log and says so.
 Use --source conversation to scan the log itself for exact posted words;
 --show expands the immutable row id. Lexical search also covers the
 durable AMUX delivery ledger. --deep adds large raw session archives.
@@ -122,12 +122,12 @@ export const SEMANTIC_LAYER = Object.freeze({ query: semanticQuery, passages: da
   conversation: daemonConversation, start: startEmbedder });
 
 // It says only that the daemon is not up: a start refused for lack of memory made "it is starting" false (design §2).
-const COLD_CONVERSATION_WARNING = "ℹ conversation log is searched by the warm search daemon, which is not up; this answer leaves it out";
+const COLD_CONVERSATION_WARNING = "ℹ search daemon is not up; reading the conversation log directly";
 const CONVERSATION_MAX = 12;
 
 /**
- * WHAT: Returns the conversation log's hits for one question: the warm daemon's, else a scan when the reader named the log, else none and a warning.
- * WHY: Keeps a question from scanning 238 MB of log. A cold answer says what it left out, and the CLI brings his day files up to date itself.
+ * WHAT: Returns conversation hits from the warm daemon or a direct scan.
+ * WHY: Prevents a cold daemon from omitting the original words and posted answers.
  */
 async function conversationStep(content, flags, { semantic, warn, humanName }) {
   if (flags.source && !"conversation".includes(flags.source)) return { hits: [], answered: false, cold: false };
@@ -138,7 +138,7 @@ async function conversationStep(content, flags, { semantic, warn, humanName }) {
   }
   if (flags.source) return { hits: searchConversationLog(content), answered: false, cold: false };
   warn(COLD_CONVERSATION_WARNING);
-  return { hits: [], answered: false, cold: true };
+  return { hits: searchConversationLog(content), answered: false, cold: true };
 }
 
 /**
@@ -299,7 +299,8 @@ export async function collectSearchHits(query, allRoots, workspace, flags = {}, 
   hits = preferDates(hits, dates);
   // After the merge, so his units also lead the conversation and ledger rows that quote him; those stay below.
   if (forHisWords) hits = hisWordsFirst(hits, humanRoot?.path);
-  let top = topicsRanked ? hits.slice(0, flags.max ?? 12) : mergeTopicHits(hits, topicHits, flags.max ?? 12);
+  let top = originalsFirst(topicsRanked ? hits : mergeTopicHits(hits, topicHits, hits.length + topicHits.length))
+    .slice(0, flags.max ?? 12);
   // The unranked merge leads with up to two topic pages, which are derived; his own words still lead (design v9, I-5).
   if (forHisWords) top = hisWordsFirst(top, humanRoot?.path);
   lap("merge");

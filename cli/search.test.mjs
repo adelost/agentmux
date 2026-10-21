@@ -234,7 +234,7 @@ feature("search CLI contract", () => {
 
 // The conversation log is searched by the warm daemon; a cold answer leaves it out (docs/DESIGN-search-daemon.md, chapter 2).
 // It does not say the daemon is starting: a start refused for lack of memory made that false.
-const COLD_WARNING = "ℹ conversation log is searched by the warm search daemon, which is not up; this answer leaves it out";
+const COLD_WARNING = "ℹ search daemon is not up; reading the conversation log directly";
 
 // The root of his day files, as the design shapes it; cmdSearch adds it by itself (last test below).
 const humanRootOf = (path) => ({ name: "human", path, glob: "*.md", exclude: [], semanticExclude: [], weight: 3, semantic: true, kind: "human-words" });
@@ -278,7 +278,7 @@ feature("the conversation log in the search CLI", () => {
     }],
   });
 
-  component("leaves the scan out when cold unless --source conversation", {
+  component("searches the log first when cold while respecting explicit source filters", {
     given: ["the three-file log and no warm daemon", async () => {
       const world = await conversationWorld();
       return { ...world, semantic: { ...noSemantic, conversation: async () => null } };
@@ -288,10 +288,10 @@ feature("the conversation log in the search CLI", () => {
       named: await ask(world, "Sonnet genomförandet enligt planen", { source: "conversation" }, world.semantic),
       human: await ask(world, "Sonnet genomförandet enligt planen", { source: "human" }, world.semantic),
     })],
-    then: ["the cold answer warns in the exact words, has none of the agents' rows and still finds his message; naming the log scans it", ({ cold, named, human }, world) => {
+    then: ["the cold answer includes original posted answers; a human-only filter still excludes other rows", ({ cold, named, human }, world) => {
       try {
         expect(cold.warned).toContain(COLD_WARNING);
-        expect(cold.top.some((hit) => hit.conversationId)).toBe(false);
+        expect(cold.top.some((hit) => hit.conversationId)).toBe(true);
         expect(cold.top.some((hit) => hit.path.endsWith("2026-10-05.md"))).toBe(true);
         expect(named.warned).not.toContain(COLD_WARNING);
         expect(named.top.some((hit) => hit.conversationId && hit.snippet.includes("enligt planen"))).toBe(true);

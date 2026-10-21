@@ -1,9 +1,31 @@
-import { component, expect, feature } from "bdd-vitest";
+import { component, expect, feature, unit } from "bdd-vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { appendPost } from "./ask-ledger.mjs";
 import { collectSearchHits } from "../cli/search.mjs";
+import { conversationHit, rankConversationHits } from "./search-conversation.mjs";
+import { formatHits } from "./search.mjs";
+
+feature("original words and posted answers lead search", () => {
+  unit("his older words and a real reply lead a newer tool mirror, with explicit authors", {
+    when: ["ranking and displaying three canonical rows with the same query", () => {
+      const nowMs = Date.parse("2026-10-21T12:00:00Z");
+      const rows = [
+        { id: "tool", event: "post", kind: "reply", text: "`Run datum`", ts: "2026-10-21T11:59:00Z" },
+        { id: "answer", event: "post", kind: "reply", text: "Datum är den 21 oktober.", ts: "2026-10-21T11:00:00Z" },
+        { id: "human", event: "ask", source: "discord", verbatim: "Vilket datum gäller?", ts: "2026-10-20T11:00:00Z" },
+      ].map(row => ({ ...row, agent: "ai", pane: 3, ledgerPath: "/log/ask-ledger.jsonl" }));
+      const hits = rankConversationHits(rows.map(row => conversationHit(row, { words: ["datum"], query: "datum", nowMs })), 12);
+      return { hits, text: formatHits(hits) };
+    }],
+    then: ["original sources lead without deleting the tool post", ({ hits, text }) => {
+      expect(hits.map(hit => hit.conversationId)).toEqual(["human", "answer", "tool"]);
+      expect(text).toContain("han");
+      expect(text).toContain("ai:3 svarade");
+    }],
+  });
+});
 
 feature("search includes exact posted conversation, not only the event ledger", () => {
   for (const raw of [true, false]) component(`a phrase posted only to Discord is source-bound without neural readers, raw=${raw}`, {

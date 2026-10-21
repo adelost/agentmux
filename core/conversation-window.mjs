@@ -200,7 +200,8 @@ export function createConversationWindow({ path = defaultAskLedgerPath(), now = 
       let linesRead = 0;
       try {
         for (const [date, numbers] of [...days].sort(([a], [b]) => bound(b) - bound(a) || b.localeCompare(a))) {
-          if (found.length >= max && found.map((item) => item.hit.score).sort((a, b) => b - a)[max - 1] > bound(date)) break;
+          const human = found.filter(item => item.hit.sourcePriority === 0);
+          if (human.length >= max && human.map(item => item.hit.score).sort((a, b) => b - a)[max - 1] > bound(date)) break;
           for (const number of numbers) {
             linesRead++;
             const row = reader.row(rows[number]);
