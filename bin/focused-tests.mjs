@@ -51,6 +51,7 @@ const TEST_ALIASES = {
   "cli/native-runtime-service.mjs": ["test/native-runtime-service.test.mjs"],
   "cli/runtime.mjs": ["cli.test/commands.test.mjs", "test/native-runtime-service.test.mjs"],
   "core/hints-tool-guide.mjs": ["cli/hints-sync.test.mjs"],
+  "core/state.mjs": ["core/state.test.mjs", "core/state-initial-read.test.mjs"],
   "core/heartbeat.mjs": ["core/doctor.test.mjs", "core/windows-wsl-probe.test.mjs"],
   "core/codex-jsonl-reader.mjs": ["test/codex-jsonl-reader.test.mjs"],
   "core/jsonl-reader.mjs": ["core/dream-summarizer.test.mjs", "test/jsonl-reader.test.mjs"],

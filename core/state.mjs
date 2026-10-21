@@ -132,8 +132,9 @@ export const createState = (path, {
 } = {}) => {
   const readOptions = { readAttempts, readRetryMs, sleep };
   const lockOptions = { lockStaleMs, lockTimeoutMs, sleep, now };
-  let data = loadState(path, readOptions);
+  // A writer between the stamp and read must remain detectable by the next locked update.
   let lastStamp = fileStamp(path);
+  let data = loadState(path, readOptions);
 
   // If the file was replaced or edited externally since our last read or
   // write, refresh the in-memory copy. This is what lets `amux tts` flip a

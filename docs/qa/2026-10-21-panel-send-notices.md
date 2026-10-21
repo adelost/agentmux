@@ -21,6 +21,10 @@ Test plan, focused and offline:
 - Existing auto-compact core/controller, sender/flags, CLI dispatch/help and focused selector checks retained.
   Two raw-archive CLI fixtures failed identically on unchanged12c7d8bd because they omitted `--raw` afterf568d7c0
   moved the default to posted conversations. The fixtures now select their documented legacy port; assertions retained.
+- The real two-process admission test exposed an existing State constructor race: it read old content, then
+  could stamp a newer atomic writer's inode as already read. The deterministic file-I/O boundary case fails on
+  that lost update. Reading the initial stamp before content lets the existing locked mutation reload the new file.
+  State's API, lock and write path stay unchanged; its existing component and new boundary case run together.
 
 Original red receipts: fifth recipient created5jobs, same interrupted cause posted3notices, overlapping polls2,
 and an unknown context reading rearmed an unchanged cause. Targeted tests and strict changed-file lint qualify
