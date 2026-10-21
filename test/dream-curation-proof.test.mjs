@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readDreamCurationProof } from "../core/dream-curation-proof.mjs";
@@ -30,6 +30,16 @@ function fixture({ writeMemory = false, receipt = true, laterWrite = false } = {
 }
 
 describe("original native Dream proof", () => {
+  it("ignores request snapshots as inputs or terminal evidence", () => {
+    const fx = fixture();
+    const events = readFileSync(fx.path, "utf8").trim().split("\n").map(JSON.parse);
+    events.splice(1, 0, { type: "api-request-blob", message: { role: "user", content: "A cached request, not a new user turn." } });
+    writeFileSync(fx.path, events.map(JSON.stringify).join("\n") + "\n");
+    expect(readDreamCurationProof(fx).terminal.line).toBe(5);
+    events[4].type = "api-request-blob";
+    writeFileSync(fx.path, events.map(JSON.stringify).join("\n") + "\n");
+    expect(() => readDreamCurationProof(fx)).toThrow("terminal-receipt-unverified");
+  });
   it("binds Codex context written before its user prompt to that same native turn", () => {
     const fx = fixture(), turnId = "native-dream-turn";
     const events = [

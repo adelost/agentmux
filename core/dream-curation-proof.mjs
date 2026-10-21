@@ -30,7 +30,8 @@ export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runI
       if (started && !terminal) throw new Error("dream-curator-journal-incomplete");
       continue;
     }
-    if (event.isSidechain) continue;
+    // Provider request snapshots repeat messages; they are neither an authored turn nor its terminal receipt.
+    if (event.isSidechain || event.type === "api-request-blob") continue;
     const observation = owner.engine === "codex" && observationFromCodexEntry(event);
     const startsCodexTurn = owner.engine === "codex" && event.type === "event_msg" && event.payload?.type === "task_started";
     const item = describeSearchEvent(event);
