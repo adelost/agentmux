@@ -1,8 +1,9 @@
-import { expect, feature, unit } from "bdd-vitest";
+import { expect, feature, unit, component } from "bdd-vitest";
 import { afterEach, vi } from "vitest";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { rotateClaudeFleet } from "./account-rotation.mjs";
 import {
   beginRuntimeProfileTransition,
@@ -61,6 +62,7 @@ function fixture({ busy = false, restart = async () => ({ ok: true }) } = {}) {
   const deps = {
     agents,
     catalog,
+    leaseWaitMs: 0,
     authenticated: () => true,
     prepare: vi.fn(),
     access: vi.fn(async () => ({ ok: true })),
@@ -78,6 +80,24 @@ function fixture({ busy = false, restart = async () => ({ ok: true }) } = {}) {
 }
 
 feature("Claude fleet account rotation", () => {
+  component("an idle pane moves while a sibling compact retains its real kernel fence", {
+    given: ["lsrc:1 keeps its fence but releases the session, and only lsrc:0 is selected to move", () => {
+      const fx = fixture(), root = mkdtempSync(join(tmpdir(), "amux-move-fence-")); roots.push(root);
+      const queue = createDeliveryQueue({ rootDir: root });
+      fx.compacting = queue.acquireSessionLease("lsrc", 1); fx.compacting.releaseSession();
+      fx.ctx.deliveryQueue = queue;
+      return fx;
+    }],
+    when: ["the existing rotation moves the idle sibling", async fx => {
+      try { return await rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps); }
+      finally { fx.compacting.release(); }
+    }],
+    then: ["the exact session moves, with no source compact and no profile write to its sibling", (result, fx) => {
+      expect(result.rows[0].status).toBe("switched");
+      expect(fx.state.get("account_profile_by_pane_v1")).toEqual({ "lsrc:0": "2" });
+      expect(fx.deps.compactPane).not.toHaveBeenCalled();
+    }],
+  });
   unit("a locked project does not prevent another empty sleeping project from rotating", {
     given: ["Skydive owns its delivery lease while lsrc is an empty shell", () => {
       const fx = fixture();
@@ -95,7 +115,7 @@ feature("Claude fleet account rotation", () => {
     then: ["only lsrc changes and the blocked lease remains untouched", (result, fx) => {
       expect(result.status).toBe("PARTIAL");
       expect(result.rows.map((row) => [row.key, row.status, row.reason])).toEqual(expect.arrayContaining([
-        ["skydive:0", "blocked", "delivery-lease-busy:skydive"],
+        ["skydive:0", "blocked", "delivery-lease-busy:skydive:session"],
         ["lsrc:0", "selected-for-next-wake", null],
       ]));
       expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:0": "2" });
@@ -239,7 +259,7 @@ feature("Claude fleet account rotation", () => {
           catalog,
         }).id).toBe("2");
       }
-      expect(ctx.releases).toEqual(["released"]);
+      expect(ctx.releases).toEqual(["released", "released"]);
     }],
   });
 
@@ -453,7 +473,7 @@ feature("Claude fleet account rotation", () => {
     when: ["rotating", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
     then: ["the compact runs outside the project lease and only then the pane moves", (result, fx) => {
       expect(result.status).toBe("RECOVERED");
-      expect(fx.order).toEqual(["lease", "release", "compact", "lease", "restart", "release"]);
+      expect(fx.order).toEqual(["lease", "release", "compact", "lease", "restart", "release", "lease", "release"]);
       expect(result.rows.find((row) => row.key === "lsrc:0").status).toBe("switched");
     }],
   });

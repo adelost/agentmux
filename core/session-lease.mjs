@@ -11,9 +11,9 @@
  * WHAT: Builds one session write lease that also fences one pane or every pane.
  * WHY: Keeps a long engine-side wait from blocking sibling panes of the session.
  */
-export function acquireSessionWriteLease({ session, paneFence, fencedPanes }, pane = null) {
+export function acquireSessionWriteLease({ session, paneFence, fencedPanes, onBusy = () => {} }, pane = null) {
   const sessionLease = session();
-  if (!sessionLease) return null;
+  if (!sessionLease) { onBusy({ kind: "session" }); return null; }
   // Without a pane the caller acts on the whole session (sleep, rotation,
   // model change) and must wait for every fenced pane, as it did before.
   const fences = [];
@@ -21,7 +21,7 @@ export function acquireSessionWriteLease({ session, paneFence, fencedPanes }, pa
   try {
     for (const target of pane == null ? fencedPanes() : [pane]) {
       const fence = paneFence(target);
-      if (!fence) return null;
+      if (!fence) { onBusy({ kind: "pane", pane: target }); return null; }
       fences.push(fence);
     }
     transferred = true;
@@ -74,5 +74,23 @@ export async function regainSessionLease(lease, {
     if (lease.restoreSession()) return true;
     if (waited >= timeoutMs) return false;
     await sleep(pollMs);
+  }
+}
+
+/** WHAT: Returns a candidate pane's session lease within a monotonic bound. WHY: Keeps sibling fences and transient contention from blocking a safe account move indefinitely. */
+export async function waitForSessionLease(queue, agentName, pane, {
+  timeoutMs = 30_000, pollMs = 250, now = () => performance.now(),
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+} = {}) {
+  const deadline = now() + timeoutMs;
+  let busy = "session";
+  for (;;) {
+    const lease = queue.acquireSessionLease?.(agentName, pane, {
+      onBusy: lock => { busy = lock.kind === "pane" ? `pane${lock.pane}` : "session"; },
+    });
+    if (lease) return { lease, reason: null };
+    const left = deadline - now();
+    if (left <= 0) return { lease: null, reason: `delivery-lease-busy:${agentName}:${busy}` };
+    await sleep(Math.min(pollMs, left));
   }
 }

@@ -412,7 +412,7 @@ export function createDeliveryQueue({
   }
 
   // Single writer per tmux session, narrowing to one pane fence (session-lease.mjs).
-  const acquireSessionLease = (agentName, pane = null) => acquireSessionWriteLease({
+  const acquireSessionLease = (agentName, pane = null, { onBusy } = {}) => acquireSessionWriteLease({ onBusy,
     session: () => acquireFileLease(join(rootDir, `.session-${encodeURIComponent(agentName)}.lock`)),
     paneFence: target => acquireTargetLease(agentName, target),
     fencedPanes: () => allTargets().filter(target => target.agentName === agentName).map(target => target.pane),

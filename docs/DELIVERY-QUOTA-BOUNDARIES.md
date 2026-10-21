@@ -60,3 +60,11 @@ message bodies never reach logs or notifications; jobs and fences are read-only.
 Recent actual attempts and an empty queue clear the episode. Notification failure
 retries at the next existing minute sweep. The watchdog-OFF switch still applies.
 Tests: channels/quota-park.test.mjs; test/bridge-watchdog-tmux.test.mjs (<=60s each).
+
+B proof selection: the real sibling fence reproduces the project-wide refusal.
+SPLIT the existing rotateProject's candidate operation so each candidate fences
+only itself. Keep observation, continuity, target-dialog and compact rechecks in
+the existing owners. A project's acquisition waits share one30s monotonic budget;
+remaining candidates still get an immediate try after it. Dry reads never wait.
+The existing session-lease owner reports session vs paneN and supplies the bounded
+asynchronous wait, using the same250ms polling boundary as regainSessionLease.

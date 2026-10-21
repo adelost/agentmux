@@ -31,6 +31,7 @@ import { activeClaudeLimitForTarget } from "../core/claude-quota-target.mjs";
 import { assertRotationContinuity, readRotationContinuity } from "../core/rotation-continuity.mjs";
 import { accountSwitchPlan } from "../policies/account-switch-cost.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
+import { waitForSessionLease } from "../core/session-lease.mjs";
 import { compactBeforeSwitch, observeSwitchContext } from "./account-switch-compact.mjs";
 
 const paneKey = (agentName, pane) => `${agentName}:${pane}`;
@@ -300,7 +301,7 @@ async function restartOnTarget(ctx, pane, target, deps) {
 }
 
 // lsrc:0 for Mattias 2026-10-21: a busy pane blocked its idle siblings (lsrc:1/2 behind lsrc:0, api:1/2 behind api:0).
-// Each pane now stands alone; the project's lease still covers every mutation.
+// Each candidate holds the session writer and its own pane fence through every mutation.
 /** WHAT: Observes a project's panes and reports each one that cannot move. WHY: Keeps a busy pane from holding its siblings on a spent account. */
 async function observeProject(ctx, panes, target, deps, rows) {
   const observed = [];
@@ -314,9 +315,20 @@ async function observeProject(ctx, panes, target, deps, rows) {
  * WHY: Keeps a switch from paying a full-context cache miss where a compact on the source is cheaper.
  */
 async function rotateProject(ctx, agentName, panes, target, deps, { dry, rows, prepareOnce }) {
-  let lease = ctx.deliveryQueue.acquireSessionLease?.(agentName);
+  const deadline = performance.now() + (dry ? 0 : deps.leaseWaitMs);
+  for (const candidate of panes) {
+    await rotateCandidate(ctx, agentName, [candidate], target, deps, {
+      dry, rows, prepareOnce, waitMs: () => Math.max(0, deadline - performance.now()),
+    });
+  }
+}
+
+async function rotateCandidate(ctx, agentName, panes, target, deps, { dry, rows, prepareOnce, waitMs }) {
+  const acquire = () => waitForSessionLease(ctx.deliveryQueue, agentName, panes[0].pane,
+    { timeoutMs: waitMs(), ...(deps.leaseSleep ? { sleep: deps.leaseSleep } : {}) });
+  let acquired = await acquire(), lease = acquired.lease;
   if (!lease) {
-    rows.push(...blockedProjectRows(panes, `delivery-lease-busy:${agentName}`));
+    rows.push(...blockedProjectRows(panes, acquired.reason));
     return;
   }
   try {
@@ -334,9 +346,9 @@ async function rotateProject(ctx, agentName, panes, target, deps, { dry, rows, p
       lease = null;
       const compacted = await compactMovers(ctx, movers, deps, rows);
       movers = movers.filter((pane) => pane.plan.action !== "COMPACT_THEN_RESTART" || compacted.has(pane.key));
-      lease = ctx.deliveryQueue.acquireSessionLease?.(agentName);
+      acquired = await acquire(); lease = acquired.lease;
       if (!lease) {
-        rows.push(...blockedProjectRows(movers, `delivery-lease-busy-after-compact:${agentName}`));
+        rows.push(...blockedProjectRows(movers, acquired.reason.replace("delivery-lease-busy:", "delivery-lease-busy-after-compact:")));
         return;
       }
       observed = await observeProject(ctx, movers, target, deps, rows);
@@ -362,6 +374,8 @@ export async function rotateClaudeFleet(ctx, requested, {
 } = {}, dependencies = {}) {
   const deps = {
     agents: dependencies.agents || listAgents(ctx.configPath),
+    leaseWaitMs: dependencies.leaseWaitMs ?? 30_000,
+    leaseSleep: dependencies.leaseSleep,
     catalog: dependencies.catalog || runtimeProfileCatalog("claude"),
     latestIdentity: dependencies.latestIdentity || latestClaudeSessionIdentity,
     authenticated: dependencies.authenticated || runtimeProfileAuthenticated,

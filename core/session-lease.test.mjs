@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
-import { acquireSessionWriteLease, regainSessionLease } from "./session-lease.mjs";
+import { acquireSessionWriteLease, regainSessionLease, waitForSessionLease } from "./session-lease.mjs";
 
 const twoBridges = () => {
   const rootDir = mkdtempSync(join(tmpdir(), "amux-session-lease-"));
@@ -107,5 +107,35 @@ feature("regaining a session lease is bounded", () => {
   unit("a lease that never narrows needs no regain", {
     when: ["regaining a plain lease", () => regainSessionLease({ release() {} })],
     then: ["it is still the session writer", (regained) => expect(regained).toBe(true)],
+  });
+});
+
+feature("account mover lease contention", () => {
+  component("waits asynchronously for the session and names a held pane fence at the bound", {
+    given: ["two real kernel queue owners and a session writer", () => {
+      const ctx = twoBridges(); ctx.writer = ctx.first.acquireSessionLease("lsrc", 3);
+      return ctx;
+    }],
+    when: ["the session frees after two polls, but a later pane fence remains held", async ctx => {
+      let clock = 0;
+      const acquired = await waitForSessionLease(ctx.second, "lsrc", 2, { now: () => clock, timeoutMs: 1000,
+        sleep: async ms => { clock += ms; if (clock === 500) ctx.writer.release(); } });
+      acquired.lease?.release(); const waited = clock;
+      ctx.fence = ctx.first.acquireSessionLease("lsrc", 3); ctx.fence.releaseSession();
+      const refused = await waitForSessionLease(ctx.second, "lsrc", 3, { now: () => clock, timeoutMs: 1000,
+        sleep: async ms => { clock += ms; } });
+      let sessionReason;
+      const session = ctx.second.acquireSessionLease("lsrc", 2);
+      ctx.first.acquireSessionLease("lsrc", 0, { onBusy: value => { sessionReason = value; } });
+      session?.release();
+      return { acquired, refused, waited, clock, sessionReason };
+    }],
+    then: ["the mover gets its target only after release and reports the exact busy lock without stranding a descriptor", (result, ctx) => {
+      try {
+        expect(result.acquired.lease).toBeTruthy(); expect(result.waited).toBe(500);
+        expect(result.refused).toEqual({ lease: null, reason: "delivery-lease-busy:lsrc:pane3" });
+        expect(result.clock).toBe(1500); expect(result.sessionReason).toEqual({ kind: "session" });
+      } finally { ctx.writer.release(); ctx.fence?.release(); rmSync(ctx.rootDir, { recursive: true, force: true }); }
+    }],
   });
 });
