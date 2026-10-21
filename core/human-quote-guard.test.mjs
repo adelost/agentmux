@@ -24,7 +24,8 @@ feature("refusing a send that pastes his words", () => {
       expect(refusal).toContain("amux: refused. This message pastes Mattias's own words:");
       expect(refusal).toContain("\"jag tycker att ni ska bestämma åt mig så får jag rätta till det efteråt\" (15 words, his message to lsrc:0, 2026-10-19 04:00Z)");
       expect(refusal).toContain("\"kör det ni rekommenderar och motivera varför ni väljer\" (9 words, his message to lsrc:0, 2026-10-19 05:00Z)");
-      expect(refusal).toContain("His exact words belong in the decision log (the day file or PRIORITIES.md), never in a send.");
+      expect(refusal).toContain("point to the original conversation through amux search.");
+      expect(refusal).toContain("Do not copy his words into another log, plan or send.");
     }],
   });
 

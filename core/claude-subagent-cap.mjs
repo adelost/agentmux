@@ -9,7 +9,7 @@ import { parseRuntimeEnv } from "./runtime-env.mjs";
 import { extractPromptFromEvent } from "./claude-prompt-text.mjs";
 
 /** WHAT: Returns the requested refusal text. WHY: Keeps every refused spawn on the same implementation handoff policy. */
-export const SUBAGENT_REFUSAL = "One subagent at a time. Hand mechanical work to a free Codex pane with a brief (policy: Opus designs; Codex implements).";
+export const SUBAGENT_REFUSAL = "One subagent at a time. Follow the amux handoff policy for an available authorized builder; keep visual and gameplay judgment with its owner.";
 const tools = new Set(["Agent", "Task"]);
 // Claude Code sends no SubagentStop for an agent TaskStop ends (sandman:0's floor agent, 2026-10-19 21:23Z).
 const STOP_TOOL = "TaskStop";

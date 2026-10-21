@@ -16,7 +16,7 @@ Never skip a failing test or bypass a hook with \`--no-verify\`.
 2. **Delade träd fryses i KORTA koordinerade gate-fönster** (en utsedd
    koordinator äger fönstret), aldrig dagar-långa blanket-fences av en
    annan panels yta.
-3. No skill names or bracketed labels in replies. Comments explain intent, risks or constraints, not a work diary. Preserve exact requirements and quotes.
+3. No skill names or bracketed labels in replies. Comments explain intent, risks or constraints, not a work diary. Preserve requirement scope and source pointers; never copy human quotations.
 
 ## Staffing and review economics
 
@@ -36,7 +36,7 @@ Never skip a failing test or bypass a hook with \`--no-verify\`.
 - Before a merge or release: read [merge-release.md](${fleetPolicyFile("merge-release.md")}).
 - Before a compact or a long-running check loop: read [context.md](${fleetPolicyFile("context.md")}).
 - Before changing a hot function: read [hotspots.md](${fleetPolicyFile("hotspots.md")}).
-- Writing the day file: read [memory.md](${fleetPolicyFile("memory.md")}).
+- Memory or day digests: read [memory.md](${fleetPolicyFile("memory.md")}); AMUX logs, Dream digests, workers keep no manual diary.
 - Before health, quota or lifecycle maintenance: read [maintenance.md](${fleetPolicyFile("maintenance.md")}).
 - Delivering images or speech, choosing a browser, or sending a notification: read [evidence.md](${fleetPolicyFile("evidence.md")}).
 `;

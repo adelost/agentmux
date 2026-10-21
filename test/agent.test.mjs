@@ -437,7 +437,7 @@ feature("generated agent policy", () => {
     }],
   });
 
-  unit("preserves Unicode in Swedish user-visible text and human quotes", {
+  unit("preserves Unicode in the source conversation without a manual diary", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -447,13 +447,11 @@ feature("generated agent policy", () => {
     }],
     then: ["the policy forbids lossy transliteration instead of blaming storage", (content) => {
       expect(content).toMatch(/Human language stays UTF-8\s+end to end/u);
-      expect(content).toContain("literal `åäö`");
-      expect(content).toContain("byte-for-byte");
-      expect(content).toContain("`amux-suggest`");
-      expect(content).toContain("`--expect-file`");
+      expect(content).toContain("Preserve the original conversation");
+      expect(content).toContain("never manually copy his words");
       expect(content).toContain("Kommunikationsdisciplin");
-      expect(content).toContain("Dagfilssektioner");
-      expect(content).toContain("Skriv allt viktigt");
+      expect(content).toContain("Dream reads that log and writes the day digest");
+      expect(content).toContain("Workers do not keep a manual");
     }],
   });
 
@@ -528,7 +526,7 @@ feature("generated agent policy", () => {
     }],
   });
 
-  unit("staffs design on Opus and implementation of a finished design on Codex", {
+  unit("keeps aesthetic implementation with Opus and mechanical work with authorized builders", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -536,9 +534,10 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["design is Opus work and implementing it is Codex work", (content) => {
-      expect(content).toMatch(/Opus designs; Codex implements/u);
-      expect(content).toMatch(/never Claude\s+subagents/u);
+    then: ["model roles follow the updated handoff policy without a second merge owner", (content) => {
+      expect(content).toMatch(/Opus designs and also implements/u);
+      expect(content).toMatch(/Codex and Sonnet 5\.5\s+handle mechanical implementation/u);
+      expect(content).toMatch(/Do not route mechanical builds to Claude subagents/u);
       expect(content).toMatch(/reached weekly limit or a verified wind-down compact/u);
     }],
   });

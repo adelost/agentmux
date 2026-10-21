@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { claudeProcessStartMs, claudeSubagentHook } from "../core/claude-subagent-cap.mjs";
 
-const refusal = "One subagent at a time. Hand mechanical work to a free Codex pane with a brief (policy: Opus designs; Codex implements).";
+const refusal = "One subagent at a time. Follow the amux handoff policy for an available authorized builder; keep visual and gameplay judgment with its owner.";
 const homes = [];
 afterEach(() => { for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true }); });
 const fixture = (cap) => {

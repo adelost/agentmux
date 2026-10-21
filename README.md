@@ -779,7 +779,8 @@ An agent's send (`[from project:N]`) that pastes 8 or more consecutive words
 from one of the operator's Discord messages of the last 14 days is refused
 before the queue, and the refusal lists every quoted run. Case and punctuation
 are ignored; the bridge's own tags, links, paths and ids are not counted. His
-exact words belong in the decision log, which is not a send. The operator's
+original words remain in the automatically recorded conversation; use source
+pointers under [the authority policy](docs/fleet/authority.md), not manual quotation logs. The operator's
 own messages are never checked. `AMUX_QUOTE_GUARD_ENABLED=false` turns it off.
 
 ## Configuration

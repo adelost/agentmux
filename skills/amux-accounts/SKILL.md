@@ -85,10 +85,11 @@ of its engine has room. It never wakes or moves anything itself.
   (2026-10-18: six panes waited 5.8 h on a spent account for that question).
 - Make an account decision about a pane on the `amux quota` "i bruk" line,
   never on a note or an earlier reading.
-- Show the plan first: `amux accounts rotate claude:<login|email> --dry`,
-  or have him write `/byt <login>` in Discord. Nothing changes.
-- He confirms with `/byt <login> ok` within 10 minutes, or tells you to run
-  the same command without `--dry`. A changed plan is shown again.
+- Preview the exact target with `amux accounts rotate claude:<login|email> --dry`.
+  For an already instructed switch or authorized automatic quota recovery,
+  execute the matching safe plan without a second yes. A changed target or
+  effect outside that authorization needs a new decision. For a switch not yet
+  authorized, show the plan; `/byt <login> ok` confirms it within 10 minutes.
 - What the verdicts cost:
   - `would-dormant` / `would-already-selected`: new account at the next start, free.
   - `would-running`: restart now, cold cache or small context, so the miss is small.

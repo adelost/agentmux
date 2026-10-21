@@ -1,8 +1,8 @@
 // Refuses an agent-to-agent send that pastes Mattias's own words.
 // He told the fleet many times since 17 Oct never to quote him in briefs, and on
 // 19 Oct a lead still pasted him into 17 of them; a memory rule alone failed.
-// His exact words with provenance belong in the decision log (the day file or
-// PRIORITIES.md). Those files are not sends and stay free to hold them.
+// AMUX already records his original words. Briefs and the current-decision index
+// use our own wording with a pointer to that source, never another quotation log.
 
 import { dirname, join } from "node:path";
 import { defaultAskLedgerPath } from "./ask-ledger.mjs";
@@ -113,13 +113,13 @@ export function readRecentHumanMessages({
 
 const clock = (ms) => new Date(ms).toISOString().slice(0, 16).replace("T", " ");
 
-/** WHAT: Words the refusal for a send that quotes him. WHY: Names every run to rewrite and where his exact words go instead. */
+/** WHAT: Formats the refusal for a send that quotes him. WHY: Keeps copied source words from becoming another brief or manual log. */
 export function humanQuoteRefusal(matches) {
   const runs = matches.map((match) => `- "${match.words.join(" ")}" (${match.words.length} words, his message to`
     + ` ${match.message.to}, ${clock(match.message.ts)}Z)`);
   return ["amux: refused. This message pastes Mattias's own words:", ...runs,
-    "Rewrite them as instructions in your own words and point to the decision log entry. His exact words belong"
-      + " in the decision log (the day file or PRIORITIES.md), never in a send."].join("\n");
+    "Rewrite them as instructions in your own words and point to the original conversation through amux search."
+      + " Do not copy his words into another log, plan or send."].join("\n");
 }
 
 /**

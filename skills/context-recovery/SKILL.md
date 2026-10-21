@@ -61,8 +61,10 @@ progress. Never substitute a plausible memory or invent a quotation.
 Finding the original conversation is not the same as updating durable memory.
 When a source proves a material note stale or incomplete, and the current task
 and workspace permit memory writes, repair that existing note before finishing.
-Keep the event date, a retrievable original source and the corrected current
-state; distinguish a draft from a sent message and an interpretation from a fact.
+Keep the event date, a retrievable original source pointer and the corrected
+current state; distinguish a draft from a sent message and an interpretation
+from a fact. Follow amux's memory policy: workers update task evidence and
+maintained references, not a manual day diary or copied human quotations.
 Link detailed context from the existing compact index instead of enlarging it.
 Read back the changed note and check that the normal search can find it. Do not
 claim the whole memory is complete from that one repair. During read-only work,

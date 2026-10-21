@@ -32,9 +32,13 @@
    Hand a lead role only to a running pane that acknowledged it; until
    then the sender keeps it.
 
-   Opus designs; Codex implements (Mattias, 2026-10-17): Opus owns
-   architecture, gameplay, UX, reviews and merges; free Codex builds finished
-   designs from briefs, never Claude subagents.
+   Staffing (updated 2026-10-21): Opus designs and also implements work whose
+   quality depends on visual, UX or gameplay judgment. Codex and Sonnet 5.5
+   handle mechanical implementation, tests, data and infrastructure. Sonnet may
+   design as a fallback. Finish already assigned work before reallocating it.
+   Do not route mechanical builds to Claude subagents instead of available
+   authorized builders. A model role creates no separate merge owner: the
+   feature owner keeps delivery under the repo's required proof.
    Codex models (Mattias, 2026-09-20, 2026-10-11): default `gpt-6.1-sol`,
    never Astra; Claude and Kimi keep theirs; a pane's choice survives restart.
    Change models only via Discord `/model sol` or `amux model PROJECT -p N

@@ -45,14 +45,11 @@ Read each view for what it is:
 - Numbered steps a worker can run without reading the human's message.
 - Each step: input, exact output (path, name), constraint, where to report.
 - Never paste the human's text into a brief, not even for a GO, a price or
-  a name. State the decision in your own words and point to its entry in the
-  decision log (who, when, where). His exact words live only in that log.
-  amux refuses a send with 8 or more of his consecutive words and names them.
-- Bad brief: "Mattias, verbatim: 'men förstå ni? ska ju helst vara
-  generistk...' Fix the rig." Good brief: "1. Use Haunt's rig format
-  (rig.js) as the shared rig. 2. Place the joints from the doll's own
-  proportions. 3. Report to claw:0." His full words go to the decision
-  log, never into the brief.
+  a name. Follow the amux layer's authority.md: use your own words and a
+  source time/pointer to the automatically recorded conversation. No manual
+  quotation log or day diary. The send guard also refuses copied passages.
+- A runnable brief names the existing owner and concrete output, for example
+  the shared rig format, the doll's own joint proportions and the reporting pane.
 - Also name the new evidence, the bounded outcome, what is already done and
   the boundary that must stay untouched.
 - As the human's contact point, relay and delegate; do not author. The brief
@@ -68,13 +65,9 @@ Read each view for what it is:
 
 ## 3. Staff by engine and quota
 
-- Creative work and anything that must look good goes to Claude Opus while
-  its quota allows: visual and UX design, copy, game feel, judging
-  screenshots. Technical work goes to Codex: builds, tests, data, releases,
-  infrastructure and fixes with a defined proof.
-- Opus designs; Codex implements. Opus keeps the judgment (the design
-  choice, the visual review, the merge). Building a finished design goes to
-  free Codex panes with a brief, never to Claude subagents.
+- Follow the amux layer's handoff.md for current model roles, availability and
+  end-to-end ownership. Do not keep a second staffing policy in this skill or
+  reserve another agent's merge. Match the work's actual judgment needs.
 - Read `amux quota` before staffing a long run. Spread the load so every paid
   account is in use instead of draining one; unused weekly quota does not
   carry over. Start fresh sessions on the account with the most room.
@@ -186,7 +179,9 @@ addressed engine. Journals are receipts, not the transport.
 
 - When the request asked for speech, answer with `amux say` as the amux layer
   describes.
-- Report in four buckets: available, banked, in progress, blocked.
+- Use the current report format. A requested fleet overview can separate
+  available, banked, in-progress and blocked work; ordinary delivery needs no
+  second mandatory report template.
 - Link the owner's proof; do not copy logs. State only interventions actually
   made and the real remaining limits. A bounded visual check certifies
   nothing more than what it showed.
@@ -215,8 +210,9 @@ every wake.
   Codex under 25 minutes; never an hourly cron. Its prompt says: run the
   script; no deviation, reply in one line; a deviation, read only what the
   line points at, act by the written rule and tell the human in one line.
-- In a run to stop conditions (section 10) a round fires about every 30
-  minutes, and its prompt opens with section 10's reminders.
+- A run to stop conditions (section 10) uses the same engine-specific pacing;
+  a plan's round interval never overrides the amux context rule. Its prompt
+  opens with section 10's reminders.
 - The script prints DRAINED when every lane is empty, and the wake ends its
   own loop on that word. A watch that outlives its work is a cost and a false
   signal.
@@ -225,16 +221,12 @@ every wake.
 
 ## 9. Keep one ledger, close rows one by one
 
-Sections 1 and 8 speak of rows and the ledger. Use one whenever work spans
-more than one reply or more than one agent. A project with a configured work
-board uses the board instead of a second list.
+Sections 1 and 8 use the existing ledger. The amux layer's work-ledger.md
+owns claim, state, blockers and completion; the configured board owns its
+wire/schema details. Do not start a second tracker.
 
-- One file in the repo the work belongs to: `TASKS.md` or `docs/TASKS.md`,
-  holding one table. Columns: row number, what (one outcome), owner, done when
-  (the proof, as something that can be run or looked at), state, closed on (a
-  commit or release plus the numbers the proof gave).
-- Numbers are never reused. A finding made while working a row becomes a new
-  row; it does not grow the old one.
+- Use that ledger's established fields and stable row ids. A separate outcome
+  becomes a separate row, rather than silently widening the current work.
 - At task creation/update, use a Markdown link in Spec or Design to the current
   canonical document, with version and verification/approval scope in that
   document. Stats opens the latest host reading through its existing sign-in.
@@ -242,18 +234,14 @@ board uses the board instead of a second list.
   are also read). Optional artifact/sketch links carry their own date/version;
   they stay secondary. Source selection and payload bounds belong to
   v1d-stats's README, not another tracker or a copy of the design here.
-- One "done for every row" block above the table: release or merge, a picture
-  for anything visible, the test that fails before and passes after, nothing
-  silent. A row's own line adds to it and never replaces it.
-- The orchestrator closes a row only after checking the proof. A worker's
-  "done" moves the row to review, not to closed.
+- The feature owner closes its row with the repo-required proof. A separately
+  requested review stays required; ordinary closure needs no orchestrator hop.
 - Closing without a code change is valid when a measurement shows none is
   needed. The closing note says what was measured.
 - A row the human must act on is a row too (owner: the human), so waiting on
   the human is visible and everything else keeps moving.
-- The human's words live verbatim in their own file next to the ledger (for
-  example `PLAN-*.md`), with your reading of each marked as yours. The ledger
-  holds outcomes, not quotes.
+- Decision provenance follows the amux layer's authority.md and memory.md.
+  The ledger holds outcomes and source pointers, not copied conversation.
 - The table is at the top of the file. History is `git log` and the closing
   notes; when the header grows into paragraphs, move them to an archive file
   in the same format, with numbers unique across both.
@@ -267,8 +255,8 @@ For an outcome with stop conditions that the human wants carried on until
 done. The ledger (section 9) holds the rows, the round (section 8) moves them,
 and the review (section 5) corrects the plan.
 
-- Before the run, a plan that changes architecture goes back and forth with
-  one peer until both rate it at least 9/10, with criteria and evidence named.
+- Before the run, apply the feature's existing design protocol and its required
+  fresh read, with criteria and evidence. Do not add a second review loop here.
   Label a hand-made diagram as an illustration; it becomes a source only when
   it is generated from the declarations the code reads. A parked plan carries
   a measured trigger, never a date.
@@ -285,7 +273,8 @@ and the review (section 5) corrects the plan.
   survives a reboot: a systemd user timer from real unit files in
   `~/.config/systemd/user` (enabled, `Persistent=true`, lingering on), never a
   `systemd-run` transient, which a reboot removes. Money guards likewise.
-- On every session start or resume:
+- On start/resume of this still-authorized unfinished plan only (never merely
+  because historical open rows exist):
   1. Start the round's loop again if it is gone.
   2. Compare `uptime -s` with the last round.
   3. After a reboot: `amux revive --dry`, then `amux revive`.
