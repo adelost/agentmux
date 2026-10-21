@@ -19,9 +19,8 @@ export const TOOL_GUIDE_HINTS = `# agentmux
   or use \`--semantic\`/\`--deep\`; report remaining gaps instead of guessing.
 - Current implementation: \`rg\` and Git in the repository, then read the source.
   Memory hits are not proof of current code.
-- Re-read this section on a
-\`[drift-guard]\` reminder. Manual refresh: \`amux remind <agent> -p <pane>\`
-(\`--all\` / \`--stale\` still require the staffing policy's scope).
+- On a \`[drift-guard]\` reminder, re-read the section it names. Manual refresh:
+  \`amux remind <agent> -p <pane>\` (\`--all\` / \`--stale\` still require the staffing policy's scope).
 
 ## Send exactly once, uncorrupted
 
