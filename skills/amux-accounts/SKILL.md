@@ -50,6 +50,8 @@ Mattias 2026-10-21 (day file 03:49Z): when the quota park or floor holds
 panes because their account's week is spent and another logged-in account
 has room, move them there at once without asking, then report it. Paid
 credits still need his yes.
+His instruction to switch later (at a reset, overnight) is itself the go;
+carry it out then, never wait for a second yes.
 Mattias authorized quota wind-down on 2026-10-20: the nearer week or session
 window warns at 5 % left and nudges once at 3 %. A move requires a VERIFIED
 compact of this session in this episode, an idle pane, an empty composer, no
