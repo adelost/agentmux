@@ -68,3 +68,13 @@ the existing owners. A project's acquisition waits share one30s monotonic budget
 remaining candidates still get an immediate try after it. Dry reads never wait.
 The existing session-lease owner reports session vs paneN and supplies the bounded
 asynchronous wait, using the same250ms polling boundary as regainSessionLease.
+
+B/C completion scope: B's real kernel-fence component is green, and actual
+session/pane contention is bounded with a named monotonic clock double. The
+Codex exact-session operator component now carries the same real queued job
+through the unchanged broker after the source5h move, once on the target. Native
+account/CLI and model receipts are explicit I/O doubles; no account is actually
+moved as a test and no model/provider turn is spent. Pasting, drafted, submitting
+and submitted jobs still hold the switch. Automatic banner recovery remains
+weekly-only. ai:3 integrated C's exact net as aaa8735c and preserved its rule in
+the demand-read fleet card; no second C cherry-pick is applied.

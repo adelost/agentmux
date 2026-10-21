@@ -3,6 +3,8 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { switchCodexAccounts, codexAccountRequest, runRequestedCodexSwitch } from "./codex-account-switch.mjs";
+import { createDeliveryQueue } from "../core/delivery-queue.mjs";
+import { createDeliveryBroker } from "../core/delivery-broker.mjs";
 import { rememberContextCompact } from "../core/context-maintenance.mjs";
 
 describe("Codex quota wind-down (component)", () => {
@@ -244,6 +246,36 @@ describe("Codex operator account switches", () => {
       expect(held.status).toBe("pending");
     } finally { fx.clean(); }
   });
+  it("delivers the same floor-held job on the roomy target after the explicit spent-5h move", async () => {
+    const fx = fixture(), queue = createDeliveryQueue({ rootDir: join(fx.ctx.deliveryQueue.rootDir, "queue") });
+    const queued = queue.enqueue({ agentName: "claw", pane: 0, text: "local-switch-probe", source: "quota-recovery" });
+    queue.update(queued, { costHold: true, lastReason: "wake-refused:quota-floor: spent 5h" });
+    fx.ctx.deliveryQueue = queue;
+    fx.options.quota = async profile => ({ ok: true, account: { email: "second@example.com" },
+      limits: [{ limitId: "codex", windows: [{ windowMinutes: 300, usedPercent: profile.id === "1" ? 100 : 4 },
+        { windowMinutes: 10080, usedPercent: 40 }] }] });
+    fx.options.compact = async () => { throw new Error("must not compact on a spent source"); };
+    const receipts = [], deliveredTo = [];
+    const agent = { ...fx.ctx.agent, capturePromptEchoCursor: async () => ({ positions: {} }), dismissBlockingPrompt: async () => {},
+      waitForPromptEcho: async (_name, _pane, text) => receipts.includes(text),
+      sendOnly: async (_name, text, _pane, options) => {
+        // Named native/CLI and model-receipt I/O doubles; real kernel queue and broker.
+        deliveredTo.push((await fx.options.live())[0].home);
+        await options.onPasteStarted(); await options.onDrafted(); await options.onSubmitting();
+        await options.onSubmitted(); receipts.push(text); return { submitted: true };
+      } };
+    const broker = createDeliveryBroker({ agent, queue, log: () => {} });
+    try {
+      const result = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(result.rows[0].status).toBe("switched");
+      expect(queue.read("claw", 0, queued.id).status).toBe("pending");
+      await broker.kickTarget("claw", 0);
+      expect(queue.read("claw", 0, queued.id).status).toBe("acknowledged");
+      expect(deliveredTo).toEqual(["/two"]); expect(receipts).toHaveLength(1);
+      expect(fx.calls.filter(call => call.step === "compact")).toHaveLength(0);
+      expect(fx.calls.at(-1).resumeSessionId).toBe("exact-session");
+    } finally { fx.clean(); }
+  });
   it("keeps an idle-to-working race pending instead of permanently blocking migration", async () => {
     const fx = fixture();
     fx.options.compact = async () => ({ ok: false, reason: "compact-skipped:not-idle:working" });
@@ -310,9 +342,9 @@ describe("Codex operator account switches", () => {
       expect(fx.calls.map(call => call.step)).toEqual(["prepare", "compact", "transfer", "restart"]);
     } finally { fx.clean(); }
   });
-  it("leaves a pane pending while a delivery is being written to it", async () => {
+  it.each(["pasting", "drafted", "submitting", "submitted"])("leaves a pane pending while its delivery is %s", async status => {
     const fx = fixture();
-    fx.ctx.deliveryQueue.list = () => [{ id: "typing", status: "pasting" }];
+    fx.ctx.deliveryQueue.list = () => [{ id: "typing", status }];
     try {
       const r = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
       expect(r.rows[0]).toMatchObject({ status: "pending", reason: "delivery-in-flight" });
