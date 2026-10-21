@@ -33,12 +33,14 @@ export function createQuotaParkFacts({
   return async (paneKey, { fresh: freshPanes = false } = {}) => {
     let current = await fresh();
     if (freshPanes && current) current = withPanesInUse(current, await readPanes(), profiles());
-    const account = current?.accounts?.find((candidate) => candidate.ok && candidate.inUse?.includes(paneKey));
+    if (!current) return { unavailable: true };
+    const account = current.accounts?.find((candidate) => candidate.inUse?.includes(paneKey));
     return account
       ? { account: { name: account.name || account.profile?.key || null, key: account.profile?.key || null,
         provider: account.provider || null,
         ...(account.account?.email ? { email: account.account.email } : {}) }, windows: accountWindows(account),
-      observedAt: quotaObservedAt(account), accounts: current.accounts }
+      observedAt: quotaObservedAt(account), accounts: current.accounts,
+      ...(account.ok ? {} : { unavailable: true }) }
       : null;
   };
 }

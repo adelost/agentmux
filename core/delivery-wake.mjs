@@ -44,17 +44,19 @@ export async function wakeDeliveryTarget({
 
   // lsrc:0 2026-10-19: at the floor an account's last few percent are for clean stops, compacts and handovers, so
   // automatic work waits; a person's own message still goes through (context-maintenance.mjs, 2026-09-26).
-  // An unreadable quota never holds work; the facts reader logs its own read failures. A Codex account past a spent
-  // window works on paid credits, so it holds until the reset unless credits are allowed (lsrc:0 2026-10-20).
+  // A failed reading cannot prove room or lift an existing hold. A spent Codex window holds paid-credit turns too.
   const holdOf = (facts) => quotaFloorHold({ windows: facts?.windows, floorPercent: quotaFloor.percent, now: now(),
     provider: facts?.account?.provider, creditsAllowed: quotaFloor.creditsAllowed === true });
   const floorReason = async () => {
     if (!quotaFloor || isOwnerChannelJob(job)) return null;
     const paneKey = `${job.agentName}:${job.pane}`;
-    const cached = await quotaFloor.windowsFor(paneKey).catch(() => null);
-    if (!holdOf(cached)) return null;
+    const cached = await quotaFloor.windowsFor(paneKey).catch(() => ({ unavailable: true }));
+    if (cached?.unavailable) return "quota-floor: account reading unavailable; automatic work waits for verified room";
+    if (!holdOf(cached)) return !cached && job.costHold
+      ? "quota-floor: account reading unavailable; existing hold remains" : null;
     // A pane quota recovery just moved may still be listed on its old account; re-read where it runs now.
     const fresh = await quotaFloor.windowsFor(paneKey, { fresh: true }).catch(() => null);
+    if (!fresh || fresh.unavailable) return "quota-floor: fresh account reading unavailable; existing hold remains";
     const hold = holdOf(fresh);
     // A clean-stop nudge may use the weekly reserve, never paid Codex credits.
     if (!hold || (job.source === QUOTA_WIND_DOWN_ORIGIN && !hold.credits)) return null;
