@@ -26,8 +26,10 @@ import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 export const ASK_DELIVERY_BACKFILL_VERSION = 1;
 
+// WHAT: Returns the existing backfill marker path across daily-ledger cutover. WHY: Prevents a storage-layout change from replaying the delivery spool.
 export function defaultAskBackfillMarkerPath(ledgerPath = defaultAskLedgerPath()) {
-  return `${ledgerPath}.delivery-backfill-v${ASK_DELIVERY_BACKFILL_VERSION}.json`;
+  const legacy = ledgerPath.endsWith(".jsonl") ? ledgerPath : `${ledgerPath}.jsonl`;
+  return `${legacy}.delivery-backfill-v${ASK_DELIVERY_BACKFILL_VERSION}.json`;
 }
 
 function queueJobFiles(rootDir) {

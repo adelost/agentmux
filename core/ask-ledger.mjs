@@ -2,8 +2,8 @@
 //
 // Session JSONL is an execution log, not an archive: providers rotate it and
 // agentmux deliberately reaps expired files. Every inbound prompt is therefore
-// captured here before transport/classification. The current file may rotate,
-// but rotations are renamed beside it and readers include every archive.
+// captured here before transport/classification. Canonical files use UTC days;
+// explicit legacy paths may rotate, and readers retain archives until import.
 
 import {
   appendFileSync,
@@ -13,7 +13,6 @@ import {
   openSync,
   readFileSync,
   readSync,
-  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -23,6 +22,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseJsonlText } from "./jsonl-reader.mjs";
 import { authoredPromptText } from "./system-noise.mjs";
+import { askLedgerFiles, dailyLedgerSpan, isDailyLedger, ledgerWritePath } from "./ask-ledger-paths.mjs";
 
 /** WHAT: Defines the on-disk ask row schema. WHY: Keeps future readers from guessing incompatible records. */
 export const ASK_LEDGER_VERSION = 1;
@@ -32,7 +32,7 @@ const ROTATION_LOCK_SUFFIX = ".rotate.lock";
 
 /** WHAT: Resolves the durable ask journal. WHY: Keeps every producer on one user-scoped archive. */
 export function defaultAskLedgerPath(home = homedir()) {
-  return process.env.AMUX_ASK_LEDGER_PATH || join(home, ".agentmux", "ask-ledger.jsonl");
+  return process.env.AMUX_ASK_LEDGER_PATH || join(home, ".agentmux", "ask-ledger");
 }
 
 const iso = (value) => {
@@ -78,8 +78,10 @@ function rotateBeforeAppend(path, { nowMs, maxBytes }) {
 }
 
 function appendLedgerRow(row, { path, nowMs, maxBytes }) {
+  const daily = isDailyLedger(path);
+  path = ledgerWritePath(path, row.ts);
   ensurePrivateDirectory(dirname(path));
-  rotateBeforeAppend(path, { nowMs, maxBytes });
+  if (!daily) rotateBeforeAppend(path, { nowMs, maxBytes });
   appendFileSync(path, `${JSON.stringify(row)}\n`, { encoding: "utf8", mode: 0o600 });
   try { chmodSync(path, 0o600); } catch {}
 }
@@ -127,7 +129,7 @@ export function appendAskLedger(entry, {
   };
   normalized.id = String(entry.id || entryId(normalized));
   appendLedgerRow(normalized, { path, nowMs, maxBytes });
-  return { ...normalized, ledgerPath: path };
+  return { ...normalized, ledgerPath: ledgerWritePath(path, normalized.ts) };
 }
 
 /** WHAT: Names what one Discord post was. WHY: Keeps notices and mirrored prompts from reading as an agent's answer. */
@@ -197,6 +199,7 @@ export function appendPost(entry, {
 
 /** WHAT: Builds a canonical archive path for verified historical post observations. WHY: Keeps recovery append-only and chronological without editing the live log or old archives. */
 export function postRecoveryArchivePath(path = defaultAskLedgerPath(), nowMs = Date.now()) {
+  if (isDailyLedger(path)) return path;
   const stamp = new Date(nowMs).toISOString().replace(/[:.]/gu, "-");
   return join(dirname(path), `${basename(path, ".jsonl")}.${stamp}.recovered.${randomUUID()}.jsonl`);
 }
@@ -235,19 +238,6 @@ export function captureDeliveryAsk({
     repo: metadata?.repo || agentName,
     deliveryId: id,
   }, { path, now });
-}
-
-/** WHAT: Resolves current and renamed ask journals. WHY: Keeps rotation from hiding old directives. */
-function askLedgerFiles(path = defaultAskLedgerPath()) {
-  const dir = dirname(path);
-  const current = basename(path);
-  const prefix = `${basename(path, ".jsonl")}.`;
-  let names = [];
-  try { names = readdirSync(dir); } catch { return []; }
-  return names
-    .filter((name) => name === current || (name.startsWith(prefix) && name.endsWith(".jsonl")))
-    .sort((left, right) => (left === current ? 1 : right === current ? -1 : left.localeCompare(right)))
-    .map((name) => join(dir, name));
 }
 
 /** WHAT: Reads current and archived ask rows. WHY: Keeps one torn line from hiding healthy history. */
@@ -301,6 +291,8 @@ function rowTimes(text, { skipFirst }) {
 export function ledgerSpans(path) {
   const current = resolve(path);
   return askLedgerFiles(path).map((file) => {
+    const daily = isDailyLedger(path) ? dailyLedgerSpan(file) : null;
+    if (daily) return daily;
     const head = readSlice(file, false);
     const tail = readSlice(file, true);
     const firstMs = rowTimes(head.text, { skipFirst: false })[0] ?? -Infinity;
@@ -313,7 +305,7 @@ export function ledgerSpans(path) {
 
 /** WHAT: Reports the size of the current file and each archive. WHY: Shows how fast the log grows without handing out its files. */
 export function ledgerFileSizes(path = defaultAskLedgerPath()) {
-  const current = resolve(path);
+  const current = resolve(ledgerWritePath(path));
   return askLedgerFiles(path).map((file) => {
     let bytes = 0;
     try { bytes = statSync(file).size; } catch {}

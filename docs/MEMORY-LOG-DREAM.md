@@ -21,5 +21,8 @@ Test map (shared focused run plus smoke <=300 s; existing component cases remain
 - core/dream-owner.test.mjs -> new prompt reads the log packet, no diary instructions; legacy prompt remains reproducible for recovery: unit, update 3 min, run 1 s.
 - core/dream-schedule.test.mjs, test/dream-recovery.test.mjs, test/dream-terminal-receipt.test.mjs -> late original product recovered once, no dispatch, no compact, no invented completion: component, update 10 min, run 4 s.
 - Hook/text seam tests selected from lsrc:5's actual diff; no duplicate reimplementation.
+- core/ask-ledger-daily.test.mjs -> UTC midnight routes input, files and tool mirrors to separate files: component, update 5 min, run 1 s; red before the writer change.
+- test/ask-ledger-migrate.test.mjs -> raw-byte and multiplicity preservation, native appends, interrupted/resumed copy, malformed retained bytes, exclusive importer: component, update 10 min, run 1 s. All original files remain untouched; an unparseable row goes to explicit legacy-unassigned.jsonl rather than an invented day.
+- core/ask-ledger.test.mjs, core/ask-ledger-backfill.test.mjs, core/ledger-tail.test.mjs -> retained producer/read/backfill and live-tail contracts: existing component, update 0 min, run 3 s.
 
 Red first on the missing search preference/cold-log behavior and late-recovery path. No test or production threshold is raised. Runtime log and handwritten diary originals stay recoverable. Byte counts distinguish unchanged log, bounded input packet and generated digest; no deleted log bytes count as a saving.
