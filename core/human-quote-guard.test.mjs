@@ -1,5 +1,5 @@
 import { feature, unit, component, expect } from "bdd-vitest";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findHumanQuotes, readRecentHumanMessages, refuseHumanQuote } from "./human-quote-guard.mjs";
@@ -51,6 +51,31 @@ feature("refusing a send that pastes his words", () => {
 feature("his recent messages from the ask ledgers", () => {
   const ask = (ts, source, text, agent = "lsrc") => `${JSON.stringify({ version: 1, event: "ask", ts: new Date(ts).toISOString(),
     agent, pane: 0, source, verbatim: text })}\n`;
+
+  component("keeps quote checks on UTC day files while they append", {
+    given: ["a daily log with yesterday's human input and today's agent input", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-daily-quote-")), ledgerPath = join(dir, "ask-ledger");
+      mkdirSync(ledgerPath);
+      writeFileSync(join(ledgerPath, "2026-10-18.jsonl"), ask(NOW - 20 * 3_600_000, "discord", delegation.text));
+      const today = join(ledgerPath, "2026-10-19.jsonl");
+      writeFileSync(today, ask(NOW - 60_000, "cli", "[from ai:3] a safe report"));
+      return { dir, ledgerPath, today };
+    }],
+    when: ["a second human input arrives before the next agent send", ({ dir, ledgerPath, today }) => {
+      try {
+        readRecentHumanMessages({ ledgerPath, now: NOW });
+        appendFileSync(today, ask(NOW - 30_000, "discord", order.text));
+        const recent = readRecentHumanMessages({ ledgerPath, now: NOW });
+        return { quoted: refuseHumanQuote(pasted, { enabled: true, messages: () => recent }),
+          safe: refuseHumanQuote(rewritten, { enabled: true, messages: () => recent }) };
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }],
+    then: ["both copied messages remain refused and a report in the agent's own words passes", ({ quoted, safe }) => {
+      expect(quoted).toContain("(15 words, his message to lsrc:0");
+      expect(quoted).toContain("(9 words, his message to lsrc:0");
+      expect(safe).toBeNull();
+    }],
+  });
 
   component("live and rotated ledgers give his Discord messages of two weeks, and an append is read on the next send", {
     given: ["a live ledger, a rotated one, an old message, an agent send and a post", () => {

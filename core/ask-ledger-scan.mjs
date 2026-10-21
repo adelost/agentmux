@@ -1,18 +1,16 @@
 // Reads the ask ledgers a little at a time, for guards that run on every agent send.
-// The live ledger and the archives renamed beside it: ask-ledger.jsonl, ask-ledger.<when>.<id>.jsonl.
+// Canonical day files and retained legacy archives use the same discovery as normal log readers.
 
 import {
-  closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync,
+  closeSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname } from "node:path";
+import { askLedgerFiles } from "./ask-ledger-paths.mjs";
 
 /** WHAT: Returns the live ask ledger and its archives with size, inode and time. WHY: Keeps a renamed archive recognised by its inode. */
 export function ledgerFiles(ledgerPath) {
-  const dir = dirname(ledgerPath), live = basename(ledgerPath), stem = live.replace(/\.jsonl$/u, "");
   try {
-    return readdirSync(dir).filter((name) => name === live
-      || (name.startsWith(`${stem}.`) && name.endsWith(".jsonl"))).map((name) => {
-      const path = join(dir, name);
+    return askLedgerFiles(ledgerPath).map((path) => {
       const stat = statSync(path);
       return { path, size: stat.size, ino: stat.ino, mtimeMs: stat.mtimeMs };
     });
