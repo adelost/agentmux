@@ -44,15 +44,17 @@ feature("Claude rotation leaves active KEEP panes untouched", () => {
       expect(selected).toEqual({ "demo:0": "2", "demo:1": "2" });
     }],
   });
-  component("a busy neighbor that needs to move still blocks the project", {
+  // lsrc:0 for Mattias 2026-10-21 (quota brief case 5): lsrc:1/2 and api:1/2 stayed on the spent Claude S behind
+  // lsrc:0's and api:0's turns. A busy pane now blocks only itself.
+  component("a busy neighbor that needs to move blocks only itself", {
     given: ["an active old-account pane and an idle old-account neighbor", () => false],
     when: ["requesting the same account rotation", rotateWithActiveNeighbor],
-    then: ["the original busy-turn guards refuse all process and account changes", ({ result, restarts, compacts, selected }) => {
-      expect(result.status).toBe("BLOCKED");
-      expect(result.rows[0].reason).toBe("active-or-unknown-turn");
-      expect(restarts).toEqual([]);
-      expect(compacts).toEqual([]);
-      expect(selected).toEqual({ "demo:0": "1" });
+    then: ["the busy pane keeps its account; its idle neighbor is compacted and restarted", ({ result, restarts, compacts, selected }) => {
+      expect(result.status).toBe("PARTIAL");
+      expect(result.rows.find(row => row.key === "demo:0")).toMatchObject({ status: "blocked", reason: "active-or-unknown-turn" });
+      expect(restarts.map(item => item.pane)).toEqual([1]);
+      expect(compacts).toHaveLength(1);
+      expect(selected).toEqual({ "demo:0": "1", "demo:1": "2" });
     }],
   });
 });

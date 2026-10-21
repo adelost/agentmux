@@ -1,12 +1,15 @@
 // Safe fleet-wide coding-account rotation.
 
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { listAgents } from "./config.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
 import {
   accountRotationOutcome,
+  claudeStartDialog,
   classifyClaudeRotationPane,
 } from "../core/account-rotation.mjs";
+import { isQuotaFloorHeldJob } from "../core/delivery-wake.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import {
   accountEngineForCommand,
@@ -41,11 +44,13 @@ function configuredClaudePanes(agents) {
 }
 
 // A job parked by the pane's own limit waits for its exact-session restart; it is not live delivery
-// (2026-10-18 22:33Z: parked messages blocked skyvw, skybar and sandman from Claude S for 5.8 h).
+// (2026-10-18 22:33Z: parked messages blocked skyvw, skybar and sandman from Claude S for 5.8 h). Nor is a
+// prompt the quota floor holds unsent: it follows the pane and is delivered on the account with room.
 function liveDeliveryCount(queue, agentName, pane, { quotaStopped = false } = {}) {
   try {
     return queue.list(agentName, pane)
-      .filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status) && !(quotaStopped && isQuotaParkedJob(job))).length;
+      .filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status) && !(quotaStopped && isQuotaParkedJob(job))
+        && !isQuotaFloorHeldJob(job)).length;
   } catch {
     return NaN;
   }
@@ -110,6 +115,8 @@ async function observePane(ctx, entry, catalog, target, deps) {
   if (verdict.allow && !SELECT_ONLY.has(verdict.mode) && !continuity) {
     verdict = { allow: false, mode: "blocked", reason: continuityError || "rotation-session-unproven" };
   }
+  const dialog = verdict.allow ? deps.startDialog(currentProfile, target, paneDir) : null;
+  if (dialog) verdict = { allow: false, mode: "blocked", reason: `target-start-dialog:${dialog}` };
   return {
     ...entry,
     key: paneKey(agentName, pane),
@@ -132,13 +139,20 @@ function projectsFor(panes) {
   return [...projects].sort(([left], [right]) => left.localeCompare(right));
 }
 
-function blockedProjectRows(panes, reason, culprit = null) {
-  return panes.map((pane) => ({
-    ...pane,
-    key: pane.key || paneKey(pane.agentName, pane.pane),
-    status: "blocked",
-    reason: culprit && pane.key !== culprit.key ? `project-preflight-failed:${culprit.key}` : reason,
-  }));
+function blockedProjectRows(panes, reason) {
+  return panes.map((pane) => ({ ...pane, key: pane.key || paneKey(pane.agentName, pane.pane), status: "blocked", reason }));
+}
+
+/** WHAT: Reads a JSON file once per rotation. WHY: Keeps a profile's large state file from being parsed once per pane. */
+function cachedJsonReader() {
+  const cache = new Map();
+  return (path) => {
+    if (!path) return null;
+    if (!cache.has(path)) {
+      try { cache.set(path, JSON.parse(readFileSync(path, "utf8"))); } catch { cache.set(path, null); }
+    }
+    return cache.get(path);
+  };
 }
 
 function paneChangeReason(before, after, deps) {
@@ -216,15 +230,12 @@ async function switchPanes(ctx, observed, target, deps, rows, prepareOnce) {
   prepareOnce();
   const recheckedProject = [];
   for (const pane of observed) recheckedProject.push(await observePane(ctx, pane, deps.catalog, target, deps));
-  const changed = recheckedProject.map((pane, index) => ({
-    pane,
-    reason: paneChangeReason(observed[index], pane, deps),
-  })).find((entry) => entry.reason);
-  if (changed) {
-    rows.push(...blockedProjectRows(observed, changed.reason, changed.pane));
-    return;
-  }
-  for (const pane of observed) {
+  const unchanged = observed.filter((pane, index) => {
+    const reason = paneChangeReason(pane, recheckedProject[index], deps);
+    if (reason) rows.push({ ...pane, status: "blocked", reason });
+    return !reason;
+  });
+  for (const pane of unchanged) {
     // A later pane can change while earlier panes restart under this lease.
     const rechecked = await observePane(ctx, pane, deps.catalog, target, deps);
     const reason = paneChangeReason(pane, rechecked, deps);
@@ -283,10 +294,14 @@ async function restartOnTarget(ctx, pane, target, deps) {
   }
 }
 
-async function observeProject(ctx, panes, target, deps) {
+// lsrc:0 for Mattias 2026-10-21: a busy pane blocked its idle siblings (lsrc:1/2 behind lsrc:0, api:1/2 behind api:0).
+// Each pane now stands alone; the project's lease still covers every mutation.
+/** WHAT: Observes a project's panes and reports each one that cannot move. WHY: Keeps a busy pane from holding its siblings on a spent account. */
+async function observeProject(ctx, panes, target, deps, rows) {
   const observed = [];
   for (const pane of panes) observed.push(await observePane(ctx, pane, deps.catalog, target, deps));
-  return { observed, blocked: observed.find((pane) => !pane.allow) };
+  rows.push(...observed.filter((pane) => !pane.allow).map((pane) => ({ ...pane, status: "blocked" })));
+  return observed.filter((pane) => pane.allow);
 }
 
 /**
@@ -300,11 +315,8 @@ async function rotateProject(ctx, agentName, panes, target, deps, { dry, rows, p
     return;
   }
   try {
-    let { observed, blocked } = await observeProject(ctx, panes, target, deps);
-    if (blocked) {
-      rows.push(...blockedProjectRows(observed, blocked.reason, blocked));
-      return;
-    }
+    let observed = await observeProject(ctx, panes, target, deps, rows);
+    if (!observed.length) return;
     let planned = await planPanes(ctx, observed, target, deps);
     if (dry) {
       rows.push(...planned.map((pane) => dryRow(pane, target)));
@@ -322,11 +334,8 @@ async function rotateProject(ctx, agentName, panes, target, deps, { dry, rows, p
         rows.push(...blockedProjectRows(movers, `delivery-lease-busy-after-compact:${agentName}`));
         return;
       }
-      ({ observed, blocked } = await observeProject(ctx, movers, target, deps));
-      if (blocked) {
-        rows.push(...blockedProjectRows(observed, blocked.reason, blocked));
-        return;
-      }
+      observed = await observeProject(ctx, movers, target, deps, rows);
+      if (!observed.length) return;
       // New work between the compact and this lease can make a context large again; it is not compacted twice.
       planned = await planPanes(ctx, observed, target, deps, compacted);
       const grown = planned.filter((pane) => pane.plan.action === "COMPACT_THEN_RESTART" || pane.plan.action === "HOLD");
@@ -357,6 +366,8 @@ export async function rotateClaudeFleet(ctx, requested, {
     observeContext: dependencies.observeContext || ((context, pane) => observeSwitchContext(context, pane)),
     compactPane: dependencies.compactPane || ((context, compactTarget) => compactBeforeSwitch(context, compactTarget)),
     identityOf: dependencies.identityOf || readClaudeProfileIdentity,
+    startDialog: dependencies.startDialog || ((readJson) => (source, target, cwd) =>
+      claudeStartDialog({ source, target, cwd, readJson }))(cachedJsonReader()),
     limitReceipt: dependencies.limitReceipt || ((agentName, pane) => (ctx.configPath
       ? activeClaudeLimitForTarget(agentName, pane, { configPath: ctx.configPath }) : null)),
     output: dependencies.output || console.log,

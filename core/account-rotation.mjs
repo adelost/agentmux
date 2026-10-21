@@ -52,3 +52,13 @@ export function accountRotationOutcome(rows = []) {
   }
   return { status: "RECOVERED", failed, rolledBack };
 }
+
+// 2026-10-21 03:52Z: four panes moved to Claude A waited 120 s each on "Allow external CLAUDE.md file imports?" and
+// were rolled back. Claude Code asks once per profile and directory; the source profile's answer does not carry over.
+/** WHAT: Names a start dialog the target profile would show in a directory the source profile already settled. WHY: Keeps a move from restarting a pane into a dialog nobody answers. */
+export function claudeStartDialog({ source, target, cwd, readJson }) {
+  const project = profile => readJson(profile?.identityPath)?.projects?.[cwd] || {};
+  const before = project(source), after = project(target);
+  return before.hasClaudeMdExternalIncludesApproved === true && after.hasClaudeMdExternalIncludesApproved !== true
+    && after.hasClaudeMdExternalIncludesWarningShown !== true ? "external-claude-md-imports" : null;
+}

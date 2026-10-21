@@ -111,6 +111,11 @@ export async function wakeDeliveryTarget({
 
 const heldForCost = job => job?.costHold === true && job.status === "pending" && !job.draftOwned;
 
+// lsrc:0 2026-10-21: the night's rotation refused skyvw:0, lsrc:0 and api:0 as live delivery for prompts the floor held.
+/** WHAT: Checks whether only the quota floor holds an unsent prompt. WHY: Lets an account move take the prompt along instead of waiting on it. */
+export const isQuotaFloorHeldJob = job => heldForCost(job) && !job.submittedAt && !job.submitFenceAt
+  && String(job.lastReason || "").startsWith("wake-refused:quota-floor:");
+
 /** WHAT: Returns the job the broker serves next for one pane. WHY: Lets the owner's message pass work held for a compact, without moving, cancelling or resending it. */
 export function deliveryHead(jobs) {
   const open = jobs.filter(job => !TERMINAL_DELIVERY_STATES.has(job.status));

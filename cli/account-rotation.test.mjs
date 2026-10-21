@@ -104,7 +104,8 @@ feature("Claude fleet account rotation", () => {
     }],
   });
 
-  unit("a submitted job blocks its project without blocking a separate idle project", {
+  // lsrc:0 for Mattias 2026-10-21 (quota brief case 5): a pane with live delivery blocks itself, not its siblings.
+  unit("a submitted job blocks its own pane without blocking its sibling or a separate idle project", {
     given: ["one Skydive delivery is submitted and lsrc is an empty shell", () => {
       const fx = fixture();
       fx.deps.agents = [
@@ -127,10 +128,8 @@ feature("Claude fleet account rotation", () => {
       expect(result.rows.find((row) => row.key === "skydive:0")).toMatchObject({
         status: "blocked", reason: "live-or-unknown-delivery",
       });
-      expect(result.rows.find((row) => row.key === "skydive:1")).toMatchObject({
-        status: "blocked", reason: "project-preflight-failed:skydive:0",
-      });
-      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:0": "2" });
+      expect(result.rows.find((row) => row.key === "skydive:1")).toMatchObject({ status: "selected-for-next-wake" });
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "skydive:1": "2", "lsrc:0": "2" });
       expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
     }],
   });
@@ -244,16 +243,16 @@ feature("Claude fleet account rotation", () => {
     }],
   });
 
-  unit("an active pane blocks before compact or profile writes", {
-    given: ["a pane with an active turn", () => fixture({ busy: true })],
+  // lsrc:0 for Mattias 2026-10-21 (quota brief case 5): the busy pane blocks itself, not its dormant sibling.
+  unit("an active pane blocks its own compact and profile write, not its sleeping sibling's", {
+    given: ["a pane with an active turn and a sleeping sibling", () => fixture({ busy: true })],
     when: ["requesting rotation", (ctx) =>
       rotateClaudeFleet(ctx.ctx, "2", {}, ctx.deps)],
-    then: ["the fleet stays untouched", (result, ctx) => {
-      expect(result.status).toBe("BLOCKED");
-      expect(result.reason).toBe("preflight-failed");
+    then: ["only the sleeping sibling is selected for its next wake", (result, ctx) => {
+      expect(result.status).toBe("PARTIAL");
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({ status: "blocked", reason: "active-or-unknown-turn" });
       expect(ctx.compact).not.toHaveBeenCalled();
-      expect(ctx.deps.prepare).not.toHaveBeenCalled();
-      expect(ctx.state.get("account_profile_by_pane_v1", {})).toEqual({});
+      expect(ctx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:1": "2" });
     }],
   });
 
@@ -303,10 +302,12 @@ feature("Claude fleet account rotation", () => {
       fx.ctx.agent.restartClaudeAccount = vi.fn(); return fx;
     }],
     when: ["requesting rotation", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    // Quota brief case 5 (lsrc:0 for Mattias 2026-10-21): the changed pane stays; its sleeping sibling still moves.
     then: ["the changed session is not killed", (result, fx) => {
-      expect(result.status).toBe("BLOCKED"); expect(result.rows[0].reason).toBe("rotation-session-changed");
+      expect(result.status).toBe("PARTIAL");
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({ status: "blocked", reason: "rotation-session-changed" });
       expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
-      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({});
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:1": "2" });
     }],
   });
 
@@ -318,11 +319,12 @@ feature("Claude fleet account rotation", () => {
       return fx;
     }],
     when: ["requesting rotation from the old observation", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    // Quota brief case 5 (lsrc:0 for Mattias 2026-10-21): the changed pane stays; its sleeping sibling still moves.
     then: ["the changed profile is not restarted or overwritten", (result, fx) => {
-      expect(result.status).toBe("BLOCKED");
-      expect(result.rows[0].reason).toBe("rotation-profile-changed");
+      expect(result.status).toBe("PARTIAL");
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({ status: "blocked", reason: "rotation-profile-changed" });
       expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
-      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:0": "2" });
+      expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({ "lsrc:0": "2", "lsrc:1": "2" });
     }],
   });
 
@@ -575,6 +577,73 @@ feature("Claude fleet account rotation", () => {
       expect(fx.deps.compactPane).not.toHaveBeenCalled();
       expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
       expect(fx.state.get("account_profile_by_pane_v1", {})).toEqual({});
+    }],
+  });
+});
+
+// lsrc:0 for Mattias 2026-10-21 (day file 04:14Z): the night's rotation to Claude A stopped on three blocks.
+feature("the quota night of 20 to 21 October", () => {
+  const rotate = fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps);
+  const running = fx => {
+    fx.ctx.agent.paneProcessState = async (_name, pane) => (pane < 2
+      ? { command: "claude", running: true, shell: false, dead: false } : { command: "bash", running: false, shell: true, dead: false });
+    fx.ctx.agent.restartClaudeAccount = vi.fn(async () => ({ ok: true }));
+    return fx;
+  };
+
+  // Case 4. 03:52 to 04:07Z skyvw:0, lsrc:0 and api:0 stayed as live-or-unknown-delivery: the floor held a prompt to each.
+  unit("a pane whose prompt the quota floor holds moves, and the prompt stays queued for the new account", {
+    given: ["lsrc:0 idle at an empty composer with a prompt the floor refused 7 times", () => {
+      const fx = running(fixture());
+      fx.held = { id: "held", status: "pending", costHold: true, attempts: 7, submittedAt: null, submitFenceAt: null,
+        lastReason: "wake-refused:quota-floor: Claude S has 0 % of its week left (floor 3 %) until 2026-10-27T03:59:59.963Z" };
+      fx.ctx.deliveryQueue.list = (_name, pane) => (pane === 0 ? [fx.held] : []);
+      return fx;
+    }],
+    when: ["rotating to Claude A", rotate],
+    then: ["lsrc:0 restarts on Claude A and its held prompt waits there, untouched", (result, fx) => {
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({ status: "switched" });
+      expect(fx.ctx.agent.restartClaudeAccount).toHaveBeenCalledWith("lsrc", 0, expect.objectContaining({ profile: expect.objectContaining({ id: "2" }) }));
+      expect(fx.held).toMatchObject({ status: "pending", costHold: true, submittedAt: null });
+    }],
+  });
+
+  // Case 5. 03:52 to 04:07Z lsrc:1/2 and api:1/2 stayed as project-preflight-failed behind lsrc:0's and api:0's turns.
+  unit("an idle pane moves while a sibling in its project has a turn running", {
+    given: ["lsrc:0 mid-turn, lsrc:1 idle at an empty composer", () => {
+      const fx = running(fixture());
+      fx.ctx.agent.isBusy = async (_name, pane) => pane === 0;
+      fx.ctx.agent.promptTransportState = async (_name, pane) => ({ state: "empty-idle", busy: pane === 0 });
+      return fx;
+    }],
+    when: ["rotating to Claude A", rotate],
+    then: ["lsrc:1 restarts on Claude A; lsrc:0 waits for its turn to end", (result, fx) => {
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({ status: "blocked", reason: "active-or-unknown-turn" });
+      expect(result.rows.find((row) => row.key === "lsrc:1")).toMatchObject({ status: "switched" });
+      expect(fx.ctx.agent.restartClaudeAccount.mock.calls.map(([, pane]) => pane)).toEqual([1]);
+    }],
+  });
+
+  // Case 6. 03:52Z ai:1, ai:2, skybar:1 and skybar:2 waited 120 s each on "Allow external CLAUDE.md file imports?" in
+  // the Claude A profile and were rolled back; lsrc:0 approved the imports there at about 04:00Z.
+  unit("a target profile that would ask to allow external CLAUDE.md imports stops that pane before any restart", {
+    given: ["lsrc:0's directory has its imports approved on Claude S but never on Claude A", () => {
+      const fx = running(fixture());
+      const root = mkdtempSync(join(tmpdir(), "amux-rotation-dialog-"));
+      roots.push(root);
+      const source = join(root, "one.claude.json"), target = join(root, "two.claude.json");
+      writeFileSync(source, JSON.stringify({ projects: { "/work/.agents/0": {
+        hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true } } }));
+      writeFileSync(target, JSON.stringify({ projects: {} }));
+      fx.deps.catalog = [{ ...catalog[0], identityPath: source }, { ...catalog[1], identityPath: target }];
+      return fx;
+    }],
+    when: ["rotating to Claude A", rotate],
+    then: ["lsrc:0 is not restarted and names the dialog; lsrc:1, with nothing to approve, moves", (result, fx) => {
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({
+        status: "blocked", reason: "target-start-dialog:external-claude-md-imports" });
+      expect(result.rows.find((row) => row.key === "lsrc:1")).toMatchObject({ status: "switched" });
+      expect(fx.ctx.agent.restartClaudeAccount.mock.calls.map(([, pane]) => pane)).toEqual([1]);
     }],
   });
 });
