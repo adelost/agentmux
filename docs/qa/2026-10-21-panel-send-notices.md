@@ -30,4 +30,25 @@ Original red receipts: fifth recipient created5jobs, same interrupted cause post
 and an unknown context reading rearmed an unchanged cause. Targeted tests and strict changed-file lint qualify
 the source; no provider/model or active-fleet message is a test double.
 
-Release receipt: pending fresh-trunk selection, unique version, immutable install and actual bridge identity after USR2.
+Released source `cf1c3bab31ca4cb413c190108943b77a98ae3ff1`, version1.25.309, after rebase onto
+`c181526d`/1.25.308. Only conflict was the ledger row number: preserve ai:3's68 and assign this work69.
+
+Final proof:151 selected cases across11files in2.81s; strict changed-source lint0. No full repository run.
+Immutable install verified578files against that source. The actual installed `amux` executable, with temporary
+HOME/config/queue and no model process, admitted four recipients, refused the fifth, then admitted an explicitly
+reasoned override with five total jobs and the exact reason in the event ledger.
+
+USR2 was first held for two genuinely active deliveries; both later acknowledged. A fresh check found no physical
+write or ATTEMPTING compact. Only then was USR2 sent. Actual heartbeat at10:18:10Z:PID777177,
+version1.25.309, sourcecf1c3bab. No SIGTERM or agent/model restart. Runtime ownership released directly to api:3
+after the smoke, before this documentation-only closeout. Its later releases are separate.
+
+Private receipts: `~/.agentmux/artifacts/fanout-notices-ai4-20261021/`: `red-valid.log`,
+`overlap-red.log`, `unknown-red.log`, `state-race-red.log`, `state-fix-green.log`, `focused-final.log`,
+`lint-final-source.log`, `install.log`, `installed-verify.log`, `installed-cli-smoke.json`,
+`restart-preflight{,-final}.json`, `runtime-after.json`. Earlier fixture-port mistakes and the fail-closed incorrect
+SHA argument are retained in the tool journal; they were not product regressions or bypassed release checks.
+
+Limits: real CLI/State and controller behavior were exercised; Discord posting was replaced at its I/O boundary.
+No artificial compact, interrupted pane or provider/model turn was created in the live fleet to manufacture a notice.
+Confirmed held notices persist; a rejected Discord send stays eligible for retry. No historical notice replay was attempted.
