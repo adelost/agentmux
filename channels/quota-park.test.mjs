@@ -1,10 +1,16 @@
-import { feature, unit, expect } from "bdd-vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { feature, unit, component, expect } from "bdd-vitest";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createQuotaParkFacts } from "./quota-park.mjs";
 import { afterEach, vi } from "vitest";
 afterEach(() => vi.useRealTimers());
+import { execFileSync, exec } from "node:child_process";
+import { promisify } from "node:util";
+import { createDeliveryBroker } from "../core/delivery-broker.mjs";
+import { createDeliveryQueue } from "../core/delivery-queue.mjs";
+import { createTmuxAdapter } from "../core/tmux.mjs";
+
 
 // lsrc:0 2026-10-19: a pane quota recovery moved to an account with room keeps working under the floor,
 // even while the five-minute snapshot still lists it on the account it left.
@@ -68,6 +74,58 @@ feature("which account a pane's quota facts come from", () => {
         expect(fresh).toMatchObject({ account: { name: "Claude A", key: "claude:2", provider: "claude" },
           windows: [expect.objectContaining({ kind: "week", usedPercent: 40 })] });
       } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+  });
+});
+
+feature("delivery survives a stalled shared quota read", () => {
+  component("the unavailable floor releases its kernel lease and a human reaches a real isolated test pane", {
+    given: ["a real temporary queue and tmux cat pane, with quota-reader and model-receipt I/O doubles", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-quota-delivery-")), socket = join(root, "tmux.sock");
+      const received = join(root, "received"), queue = createDeliveryQueue({ rootDir: join(root, "queue") });
+      execFileSync("tmux", ["-S", socket, "new-session", "-d", "-s", "probe", `cat > '${received}'`]);
+      const tmux = createTmuxAdapter({ socket, exec: promisify(exec) });
+      const facts = createQuotaParkFacts({ read: () => new Promise(() => {}), readTimeoutMs: 30, log: () => {} });
+      const marker = "quota-boundary-local-test";
+      const agent = {
+        paneProcessState: async () => ({ running: true }),
+        capturePromptEchoCursor: async () => ({ positions: {} }), dismissBlockingPrompt: async () => {},
+        waitForPromptEcho: async () => { try { return readFileSync(received, "utf8").includes(marker); } catch { return false; } },
+        sendOnly: async (_name, text, _pane, options) => {
+          await options.onPasteStarted?.(); await tmux.sendLiteral("probe:.0", text); await options.onDrafted?.();
+          await options.onSubmitting?.(); await tmux.sendEnter("probe:.0"); await options.onSubmitted?.();
+          for (let i = 0; i < 20; i++) {
+            if (await agent.waitForPromptEcho()) break;
+            await new Promise(resolve => setTimeout(resolve, 5));
+          }
+          return { submitted: true };
+        },
+      };
+      const broker = createDeliveryBroker({ agent, queue, quotaFloor: { percent: 3, windowsFor: facts }, log: () => {} });
+      const automatic = queue.enqueue({ agentName: "probe", pane: 0, text: "automatic", source: "drift-guard" });
+      return { root, socket, received, queue, broker, automatic, marker };
+    }],
+    when: ["the stalled read times out, then the person's input uses the same session while raw quota I/O is still unresolved", async ctx => {
+      let completed = false;
+      const held = ctx.broker.kickTarget("probe", 0).then(() => { completed = true; });
+      await Promise.race([held, new Promise(resolve => setTimeout(resolve, 500))]);
+      if (!completed) return { completed };
+      const lease = ctx.queue.acquireSessionLease("probe", 0); lease?.release();
+      const person = ctx.queue.enqueue({ agentName: "probe", pane: 0, text: ctx.marker, source: "discord" });
+      await ctx.broker.kickTarget("probe", 0);
+      return { completed, lease: Boolean(lease), person: ctx.queue.read("probe", 0, person.id) };
+    }],
+    then: ["the automatic job remains held, the real pane receives one marker and its receipt passes without any model turn", (result, ctx) => {
+      try {
+        expect(result.completed).toBe(true); expect(result.lease).toBe(true);
+        expect(ctx.queue.read("probe", 0, ctx.automatic.id)).toMatchObject({ status: "pending", costHold: true,
+          lastReason: "wake-refused:quota-floor: fresh account reading unavailable; existing hold remains" });
+        expect(result.person.status).toBe("acknowledged");
+        expect(readFileSync(ctx.received, "utf8")).toBe(ctx.marker + "\n");
+      } finally {
+        execFileSync("tmux", ["-S", ctx.socket, "kill-server"]);
+        rmSync(ctx.root, { recursive: true, force: true });
+      }
     }],
   });
 });

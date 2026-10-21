@@ -42,3 +42,21 @@ Release: fresh trunk/rebase proof, strict changed lint, churn/diff, unique305 if
 still free, inspect commit contents, install exact fullSHA. A bridge restart is
 authorised only through normal amux restart after physical deliveries/maintenance
 are clear; verify new pid/version heartbeat. No submitted job is replayed.
+
+## Urgent release subset, lsrc:0 21 October 09:2xZ
+
+The repeated 08:44–09:21 stall prioritises the shared-read bound now, independently
+of B/C and the remaining general pre-paste stage audit. No historical await was
+captured; the never-settling shared-promise mechanism is reproduced, not an
+invented historical attribution. The real isolated tmux cat pane and kernel queue
+prove that the unavailable floor releases its lease, keeps automatic input held,
+and lets a person's input through while the raw quota promise remains unresolved.
+Named quota-reader/model-receipt doubles produce no model/provider turn.
+
+The existing external minute bridge watchdog also calls delivery-stall-watch:
+a pending/delivering queue with no actual attempt for ten minutes alerts through
+notifyuser once per progress interval, after a successful send. Queue/event
+message bodies never reach logs or notifications; jobs and fences are read-only.
+Recent actual attempts and an empty queue clear the episode. Notification failure
+retries at the next existing minute sweep. The watchdog-OFF switch still applies.
+Tests: channels/quota-park.test.mjs; test/bridge-watchdog-tmux.test.mjs (<=60s each).

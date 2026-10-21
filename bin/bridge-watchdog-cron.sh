@@ -37,6 +37,9 @@ log() { echo "[$(date '+%F %T')] $*" >> "$LOG"; }
 
 [ -f "$STATE_DIR/watchdog-OFF" ] && exit 0
 
+# Delivery can stall while the event loop keeps heartbeating. Observe it outside the bridge.
+"${NODE_BIN:-node}" "$DIR/bin/delivery-stall-watch.mjs" || log "delivery attempt watch failed; retry next minute"
+
 # Identity follows core/bridge-identity.mjs, never a working directory: the
 # bridge moves to the home directory when it starts, and `npm install --global`
 # renames the package directory start.sh stands in to .agentmux-XXXX and
