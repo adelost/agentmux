@@ -224,6 +224,26 @@ describe("Codex operator account switches", () => {
       expect(fx.calls.at(-1).resumeSessionId).toBe("exact-session");
     } finally { fx.clean(); }
   });
+  it("moves a spent 5h source with a floor-held prompt without a source compact", async () => {
+    const fx = fixture();
+    const held = { id: "floor-held", status: "pending", costHold: true,
+      lastReason: "wake-refused:quota-floor: spent 5h" };
+    fx.ctx.deliveryQueue.list = () => [held];
+    fx.options.quota = async profile => ({ ok: true, account: { email: "second@example.com" },
+      limits: [{ limitId: "codex", windows: [{ windowMinutes: 300, usedPercent: profile.id === "1" ? 100 : 4 },
+        { windowMinutes: 10080, usedPercent: 40 }] }] });
+    fx.options.compact = async () => { throw new Error("must not spend source credits"); };
+    try {
+      const dry = await switchCodexAccounts(fx.ctx, ["codex:2", "claw", "--dry"], fx.options);
+      expect(dry.rows[0].status).toBe("would-resume-after-session-limit");
+      const result = await switchCodexAccounts(fx.ctx, ["codex:2", "claw"], fx.options);
+      expect(result.rows[0].status).toBe("switched");
+      expect(fx.calls.map(call => call.step)).toEqual(["prepare", "transfer", "restart"]);
+      expect(fx.calls.at(-1).resumeSessionId).toBe("exact-session");
+      expect((await fx.options.live())[0].home).toBe("/two");
+      expect(held.status).toBe("pending");
+    } finally { fx.clean(); }
+  });
   it("keeps an idle-to-working race pending instead of permanently blocking migration", async () => {
     const fx = fixture();
     fx.options.compact = async () => ({ ok: false, reason: "compact-skipped:not-idle:working" });

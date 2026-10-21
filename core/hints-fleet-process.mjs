@@ -136,7 +136,9 @@ from its own branching or state; a small split goes in the same change.
    sol\` (raw \`/model\` refused); dormant panes switch at their next work
    prompt, never by a fleet wake-up. Read model and tokens from the exact
    pane; quota is paid capacity. Account moves require a reached weekly limit or a verified wind-down compact,
-   verified room and the exact session. Forecasts alone never switch.
+   verified room and the exact session. An operator-requested Codex switch also skips
+   source compact at a provider-confirmed spent 5h window; pending floor-held prompts
+   follow, but delivery in flight still holds the switch. Forecasts alone never switch.
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, in a modal, or between tool calls.
    A blocked task does not reserve its pane indefinitely:

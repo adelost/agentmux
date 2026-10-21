@@ -100,7 +100,11 @@ of its engine has room. It never wakes or moves anything itself.
 - Codex: `amux accounts switch codex:2 PROJECT -p N --dry`, then the same
   command without `--dry` after the operator's instruction. Omit `-p N` for
   the project, or use `--all` instead of PROJECT for the configured Codex fleet.
-  Running panes compact on the source first, then keep model/effort and their
+  Running panes compact on the source first, except an explicitly requested switch
+  from a provider-confirmed spent 5h or week window skips that source compact.
+  A pending floor-held prompt follows the exact session; real delivery in flight
+  still holds the switch. The target must have verified room in both windows.
+  They keep model/effort and their
   exact portable session. Otherwise a saved, labeled fresh-session handover
   uses the same rollback/model checks. Busy panes keep a durable request for
   the existing journal watcher; dormant selections never wake an engine.

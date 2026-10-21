@@ -29,6 +29,11 @@ import { accountWindows, codexCreditHold, codexCreditsAllowed } from "../core/qu
 export const CODEX_ACCOUNT_REQUESTS = "codex_account_requests_v1";
 const running = new Set();
 const keyOf = (name, pane) => `${name}:${pane}`;
+// Only explicit operator requests may skip a compact on a confirmed spent session window.
+const operatorSourceLimit = quota => codexWeeklyLimitReached(quota) ? "weekly"
+  : quota?.ok && quota.limits?.find(limit => limit.limitId === "codex")?.windows
+    ?.some(window => window.windowMinutes === 300 && window.usedPercent >= 100) ? "session" : null;
+
 // A queued job waits for the move and lands after it, in order; only a delivery in flight holds a switch.
 const deliveryInFlight = (ctx, name, pane) => ctx.deliveryQueue.list(name, pane).some(isDeliveryInFlight);
 const requestOf = (ctx, key) => ctx.state.get(`${CODEX_ACCOUNT_REQUESTS}:${key}`, null);
@@ -206,7 +211,7 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
     if (request.windDown && !windDownProof(ctx, name, pane, request.windDown, before, deps.now())) return pending("wind-down-compact-unverified");
     const prior = contextMaintenanceAttempt(ctx.state, name, pane, before);
     if (prior?.status === "ATTEMPTING") return pending("compact-already-in-flight");
-    const exhausted = codexWeeklyLimitReached(await deps.quota(current));
+    const exhausted = operatorSourceLimit(await deps.quota(current));
     const targetPane = { agent: cfg, pane: { index: pane }, engine: "codex", paneDir: dir, sourceHome: current.home, sessionId: before.sessionId };
     const compacted = isCompactedCodexSession(before);
     const compact = exhausted || compacted || prior?.status === "VERIFIED" ? { ok: true } : await deps.compact(ctx, targetPane, { force: true });
@@ -311,9 +316,9 @@ export async function switchCodexAccounts(ctx, args, options = {}) {
       if (entry.agent.backend === "native") { rows.push({ key, status: "blocked", reason: "native-account-switch-unsupported" }); continue; }
       const observed = await observe(ctx, entry.agent.name, entry.pane, deps);
       const selected = observed.current || selectedCodexProfile(ctx.state, entry.agent.name, entry.pane, deps.profiles());
-      const exhausted = !observed.blocked && !observed.dormant && selected.id !== profileId && codexWeeklyLimitReached(await deps.quota(selected));
+      const exhausted = !observed.blocked && !observed.dormant && selected.id !== profileId && operatorSourceLimit(await deps.quota(selected));
       rows.push({ key, status: observed.blocked ? "would-defer" : selected.id === profileId ? "would-already-selected"
-        : observed.dormant ? "would-select-next-start" : exhausted ? "would-resume-after-weekly-limit" : "would-compact-then-switch",
+        : observed.dormant ? "would-select-next-start" : exhausted ? `would-resume-after-${exhausted}-limit` : "would-compact-then-switch",
         reason: observed.blocked || null });
       continue;
     }
