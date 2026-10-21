@@ -74,6 +74,10 @@ export function predictedStopAt(window, now, policy = QUOTA_PARK_POLICY) {
   return stopAt < resetsAt ? stopAt : Infinity;
 }
 
+/** WHAT: Checks whether a window is at the floor or runs out within the lead. WHY: Keeps the park and the stop mover on one meaning of near. */
+export const nearLimit = (window, now, policy = QUOTA_PARK_POLICY) =>
+  100 - window.usedPercent <= policy.leftPercent || predictedStopAt(window, now, policy) - now <= policy.leadMs;
+
 /** WHAT: Checks whether a window reset after a moment. WHY: Keeps a note read before a reset from describing the new window. */
 function resetSince(window, at, now, policy) {
   // A window in use has a reset; Claude names none for one unused since it reset (Claude S read at 16:10:01Z on 2026-10-20).
@@ -100,7 +104,7 @@ export function quotaParkDecision({ engine, windows = [], graceNote = false, gra
   // A spent window has stopped the pane already and its account refuses the compact; within Claude's grace it still runs.
   if (!note && spent) return { park: false, cell: "already-stopped" };
   const atFloor = (window) => 100 - window.usedPercent <= policy.leftPercent;
-  const near = live.filter((window) => atFloor(window) || predictedStopAt(window, now, policy) - now <= policy.leadMs);
+  const near = live.filter((window) => nearLimit(window, now, policy));
   // At the grace note a fresh reading may not show the window full yet; the fullest one is stopping the pane.
   const stopping = near.length ? near : note ? live.toSorted((left, right) => right.usedPercent - left.usedPercent).slice(0, 1) : [];
   if (!stopping.length) return { park: false, cell: note ? "reset-unknown" : "room" };

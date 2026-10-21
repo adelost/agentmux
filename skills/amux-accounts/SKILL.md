@@ -34,7 +34,7 @@ activates an account and says it should be used, that word covers every pane.
 When Mattias writes in a pane channel, amux answers there for each account
 panes run on at `AMUX_QUOTA_WARN_PERCENT` (default 80 % weekly used) or more:
 at most every 6 h below 90 %, every 3 h from 90 %. Warnings and forecasts alone
-never switch; the verified wind-down compact below is the exception.
+never switch; the verified wind-down compact and the stop mover below are the exceptions.
 Mattias authorized Codex automatic recovery on 2026-10-12: an actual usage
 refusal plus reached weekly quota and verified spare capacity may switch that
 one pane. Transfer its exact session, or save its task and replies before a
@@ -44,12 +44,18 @@ Mattias authorized Claude automatic recovery on 2026-10-19: an actual limit
 banner plus a reading after it that shows the pane's own week spent moves that
 one pane to the logged-in Claude account with the most weekly room below
 `AMUX_QUOTA_RESERVE_PERCENT`, in its exact session; its parked messages follow.
-A session window moves a pane only after a verified wind-down compact. `AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false`
+A session window moves a pane only after a verified wind-down compact or through the stop mover. `AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false`
 disables banner recovery. Other rotations still require his instruction.
 Mattias 2026-10-21 (day file 03:49Z): when the quota park or floor holds
 panes because their account's week is spent and another logged-in account
 has room, move them there at once without asking, then report it. Paid
 credits still need his yes.
+The bridge's stop mover does this each minute through the rotation
+(`AMUX_QUOTA_STOP_MOVE=on|dry|off`, default on). lsrc:0 2026-10-21 07:0xZ
+(case 11): a Claude session at 3 % left, or forecast to run out within 20
+minutes, moves its panes the same way when its reset is more than 50 minutes
+away; a sooner reset keeps them waiting on their warm cache. The rotation
+compacts a warm context over 80k on the source first.
 His instruction to switch later (at a reset, overnight) is itself the go;
 carry it out then, never wait for a second yes.
 Mattias authorized quota wind-down on 2026-10-20: the nearer week or session

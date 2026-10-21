@@ -12,6 +12,16 @@ const claudeA = (usedPercent, fetchedAt, weekResetsAt) => ({ ok: true, provider:
   profile: { key: "claude:2", id: "2" }, account: { email: "a@example.com" }, inUse: [],
   limits: [{ kind: "session", usedPercent: 0, resetsAt: null }, { kind: "weekly_all", usedPercent, resetsAt: weekResetsAt }] });
 
+// Case 11, lsrc:0 2026-10-21 07:0xZ: Claude A's session read 75 % at 07:00Z with 21 panes and resets at 08:50Z, so it runs
+// out first, while Claude W's week renewed at 07:00Z.
+const claudeASession = (usedPercent, fetchedAt) => ({ ...claudeA(20, fetchedAt, "2026-10-28T00:00:00Z"), inUse: ["claw:2", "lsrc:0"],
+  limits: [{ kind: "session", usedPercent, resetsAt: "2026-10-21T08:50:00Z" },
+    { kind: "weekly_all", usedPercent: 20, resetsAt: "2026-10-28T00:00:00Z" }] });
+const claudeW = (sessionPercent, fetchedAt) => ({ ok: true, provider: "claude", name: "Claude W", fetchedAt,
+  profile: { key: "claude:3", id: "3" }, account: { email: "w@example.com" }, inUse: [],
+  limits: [{ kind: "session", usedPercent: sessionPercent, resetsAt: sessionPercent ? "2026-10-21T11:00:00Z" : null },
+    { kind: "weekly_all", usedPercent: 0, resetsAt: "2026-10-28T07:00:00Z" }] });
+
 const mover = (accounts, at) => {
   const rotations = [], lines = [];
   const stopMover = createQuotaStopMover({ runtime: () => ({ deliveryQueue: {} }), readSnapshot: async () => ({ accounts }),
@@ -42,6 +52,31 @@ feature("an account's stop moves its panes to an account with room", () => {
     given: ["Claude A read at 0 % fifteen minutes ago", () => ({
       accounts: [claudeS(97, "2026-10-21T00:15:10Z"), claudeA(0, "2026-10-21T00:00:05Z", "2026-10-28T00:00:00Z")],
       now: Date.parse("2026-10-21T00:15:30Z") })],
+    when: ["deciding the moves", ({ accounts, now }) => quotaStopMoves({ accounts, floorPercent: 3, now })],
+    then: ["none", moves => expect(moves).toEqual([])],
+  });
+});
+
+feature("a session about to run out moves its panes when its reset lies beyond the cache's life", () => {
+  // At its pace since 03:50Z, 92 % at 07:36Z runs out at about 07:56Z, 54 minutes before the reset.
+  component("Claude A's panes move to Claude W while Claude A's session would stop them until 08:50Z", {
+    given: ["Claude A's session at 92 % at 07:36Z, Claude W unused and read at 07:35:30Z", () =>
+      mover([claudeASession(92, "2026-10-21T07:35:40Z"), claudeW(0, "2026-10-21T07:35:30Z")], "2026-10-21T07:36:00Z")],
+    when: ["the mover ticks", ctx => ctx.tick()],
+    then: ["a rotation of exactly Claude A's panes to Claude W, logged with the session as the cause", (_result, ctx) => {
+      expect(ctx.rotations).toEqual([{ target: "3", only: ["claw:2", "lsrc:0"] }]);
+      expect(ctx.lines).toEqual([expect.objectContaining({ cell: "quota-stop-move", from: "Claude A", to: "Claude W", window: "session" })]);
+    }],
+  });
+  unit("a session at its limit that resets within the cache's life keeps its panes waiting", {
+    given: ["Claude A's session at 97 % at 08:10Z, 40 minutes before its reset", () => ({
+      accounts: [claudeASession(97, "2026-10-21T08:09:40Z"), claudeW(0, "2026-10-21T08:09:30Z")], now: Date.parse("2026-10-21T08:10:00Z") })],
+    when: ["deciding the moves", ({ accounts, now }) => quotaStopMoves({ accounts, floorPercent: 3, now })],
+    then: ["none", moves => expect(moves).toEqual([])],
+  });
+  unit("an account without room in its session is no target", {
+    given: ["Claude A's session at 92 % at 07:36Z, Claude W's session at 85 %", () => ({
+      accounts: [claudeASession(92, "2026-10-21T07:35:40Z"), claudeW(85, "2026-10-21T07:35:30Z")], now: Date.parse("2026-10-21T07:36:00Z") })],
     when: ["deciding the moves", ({ accounts, now }) => quotaStopMoves({ accounts, floorPercent: 3, now })],
     then: ["none", moves => expect(moves).toEqual([])],
   });
