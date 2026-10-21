@@ -104,7 +104,8 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     // The compact pays only while the cache is warm; past its life it would read the whole context cold once more.
     if (!(quietMs < (engine === "codex" ? policy.codexIdleMs : cacheLifeMs))) return false;
     const facts = await parkFor(paneKey);
-    const windows = facts?.windows;
+    // A failed reading parks no pane: the floor holds its work until a reading shows where the account stands.
+    const windows = facts?.stale ? null : facts?.windows;
     if (!windows?.length) return false;
     const receipt = limitReceiptFor(engine, paneDir);
     if (receipt && receipt.stop !== "grace-note") return false;
@@ -137,7 +138,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   // Codex works on past a spent window on credits, so its compact waits for the reset like any automatic turn.
   async function creditHeld(paneKey, base) {
     const facts = await parkFor(paneKey).catch(() => null);
-    if (!creditsAllowed && (!facts || facts.unavailable)) {
+    if (!creditsAllowed && (!facts || facts.unavailable || facts.stale)) {
       report(paneKey, "unavailable", { ...base, cell: "credit-hold", outcome: "held", detail: "account reading unavailable; paid-credit permission unverified" });
       return true;
     }
@@ -150,7 +151,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
 
   async function windDownStep({ name, pane, paneKey, engine, paneDir, tokens, lastActivityMs, status, base }) {
     if (windDownMode === "off" || !parkFor || !["claude", "codex"].includes(engine)) return false;
-    const facts = await parkFor(paneKey), stage = windDownStage({ ...facts, now: now() });
+    const facts = await parkFor(paneKey), stage = facts?.stale ? null : windDownStage({ ...facts, now: now() });
     if (!stage) return false;
     const episodeKey = `${paneKey}|${quotaStopEpisode(stage.window, stage.resetAt)}`;
     if (windDownEpisodes.get(paneKey)?.key !== episodeKey) {

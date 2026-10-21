@@ -8,16 +8,17 @@ import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { quotaParkContinuation } from "./quota-park.mjs";
 import { composerAgent } from "../test/fixtures/composer-agent.mjs";
 
-function world({ inUse = ["claw:2"] } = {}) {
+function world({ inUse = ["claw:2"], usedPercent = 98 } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-floor-failure-"));
   let now = Date.parse("2026-10-21T01:15:00Z"), failed = false, moved = false, listed = true, contextReady = true;
   const account = { ok: true, provider: "claude", name: "Claude S", profile: { key: "claude:1" },
-    inUse, limits: [{ kind: "weekly_all", usedPercent: 98, resetsAt: "2026-10-27T04:00:00Z" }] };
+    inUse, limits: [{ kind: "weekly_all", usedPercent, resetsAt: "2026-10-27T04:00:00Z" }] };
   const profiles = [{ key: "claude:1", provider: "claude", home: join(root, "s") },
     { key: "claude:2", provider: "claude", home: join(root, "a") }];
   const facts = createQuotaParkFacts({ now: () => now, profiles: () => profiles,
     readPanes: async () => moved ? [{ key: "claw:2", engine: "claude", home: profiles[1].home }] : null,
-    read: async () => ({ accounts: [failed ? { ...account, ok: false, limits: [], error: "network_error" } : account,
+    read: async () => ({ accounts: [failed ? { ...account, ok: false, limits: [], error: "network_error" }
+      : { ...account, fetchedAt: new Date(now).toISOString() },
       { ...account, name: "Claude A", profile: profiles[1], inUse: [], limits: [{ ...account.limits[0], usedPercent: 40 }] }]
       .map(({ inUse: panes, ...rest }) => listed ? { ...rest, inUse: panes } : rest) }) });
   const queue = createDeliveryQueue({ rootDir: join(root, "queue"), now: () => now });
@@ -25,13 +26,39 @@ function world({ inUse = ["claw:2"] } = {}) {
   const broker = createDeliveryBroker({ agent, queue, now: () => now, notify: async () => {},
     costAdmission: async () => contextReady ? { ok: true } : { ok: false, held: true, reason: "compact unverified" },
     quotaFloor: { percent: 3, windowsFor: facts } });
-  return { facts, queue, broker, pane, fail: () => { failed = true; now += 6 * 60_000; }, move: () => { moved = true; },
+  return { facts, queue, broker, pane, fail: () => { failed = true; now += 6 * 60_000; }, later: (ms) => { now += ms; },
+    move: () => { moved = true; },
     unlist: () => { listed = false; now += 6 * 60_000; }, holdContext: () => { contextReady = false; },
     readyContext: () => { contextReady = true; now += 6 * 60_000; },
     cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 feature("quota floor read failures (component)", () => {
+  // lsrc:0 2026-10-21: from 04:23 to 04:30Z one network_error held every Claude pane's automatic work, while another
+  // reader saw Claude A at 2 % of its week.
+  component("a failed reading of an account last read with room does not hold its panes", {
+    given: ["claw:2's account read at 2 % of its week, then its reading fails", async () => {
+      const ctx = world({ usedPercent: 2 }); await ctx.facts("claw:2"); ctx.fail();
+      ctx.queue.enqueue({ agentName: "claw", pane: 2, text: "synthetic task", source: "cli" }); return ctx;
+    }],
+    when: ["the broker delivers the automatic prompt", ctx => ctx.broker.kickTarget("claw", 2)],
+    then: ["the turn starts, since the last good reading leaves the floor far away", (_result, ctx) => {
+      try { expect(ctx.pane.submitted).toEqual(["synthetic task"]); } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a failed reading whose last good one is over 30 minutes old holds the panes", {
+    given: ["claw:2's account read at 2 % of its week, then 36 minutes of failed readings", async () => {
+      const ctx = world({ usedPercent: 2 }); await ctx.facts("claw:2"); ctx.later(30 * 60_000); ctx.fail();
+      ctx.job = ctx.queue.enqueue({ agentName: "claw", pane: 2, text: "synthetic task", source: "cli" }); return ctx;
+    }],
+    when: ["the broker delivers the automatic prompt", ctx => ctx.broker.kickTarget("claw", 2)],
+    then: ["no turn starts until a reading shows room", (_result, ctx) => {
+      try {
+        expect(ctx.pane.submitted).toEqual([]);
+        expect(ctx.queue.read("claw", 2, ctx.job.id)).toMatchObject({ status: "pending", costHold: true });
+      } finally { ctx.cleanup(); }
+    }],
+  });
   // api:0 2026-10-21: a context hold also sets costHold, and a pane on no quota account has no floor to keep.
   component("a context hold on a pane outside every quota account clears once its compact is verified", {
     given: ["claw:2 runs on no quota account, and its prompt waited for an unverified compact", async () => {

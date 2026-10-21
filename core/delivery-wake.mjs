@@ -4,7 +4,7 @@
 import { paneNeedsWake } from "./wake-admission.mjs";
 import { isOwnerChannelJob } from "./ask-origin.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
-import { quotaFloorHold } from "./quota-park.mjs";
+import { quotaFloorHold, staleWindows } from "./quota-park.mjs";
 import { QUOTA_WIND_DOWN_ORIGIN } from "./quota-wind-down.mjs";
 
 const pendingState = (drafted, ownsPaneDraft) =>
@@ -44,8 +44,10 @@ export async function wakeDeliveryTarget({
 
   // lsrc:0 2026-10-19: at the floor an account's last few percent are for clean stops, compacts and handovers, so
   // automatic work waits; a person's own message still goes through (context-maintenance.mjs, 2026-09-26).
-  // A failed reading cannot prove room or lift an existing hold. A spent Codex window holds paid-credit turns too.
-  const holdOf = (facts) => quotaFloorHold({ windows: facts?.windows, floorPercent: quotaFloor.percent, now: now(),
+  // A failed reading cannot prove room or lift an existing hold: it holds unless the account's last good reading, as
+  // used as it can be by now, still leaves room. A spent Codex window holds paid-credit turns too.
+  const holdOf = (facts) => quotaFloorHold({ windows: facts?.stale ? staleWindows(facts.windows, facts.observedAt, now())
+    : facts?.windows, floorPercent: quotaFloor.percent, now: now(),
     provider: facts?.account?.provider, creditsAllowed: quotaFloor.creditsAllowed === true });
   const floorReason = async () => {
     if (!quotaFloor || isOwnerChannelJob(job)) return null;
@@ -58,7 +60,7 @@ export async function wakeDeliveryTarget({
     const hold = holdOf(fresh);
     // A clean-stop nudge may use the weekly reserve, never paid Codex credits.
     if (!hold || (job.source === QUOTA_WIND_DOWN_ORIGIN && !hold.credits)) return null;
-    const name = fresh.account?.name || "its account";
+    const name = `${fresh.account?.name || "its account"}${fresh.stale ? ` (reading failed; last good ${new Date(fresh.observedAt).toISOString()})` : ""}`;
     return hold.credits
       ? `quota-floor: ${name} has spent its ${hold.window === "session" ? "5h" : hold.window} window until ${hold.resetsAt};`
         + " a turn now draws paid credits"

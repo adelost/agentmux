@@ -160,6 +160,21 @@ export function quotaFloorHold({ windows = [], floorPercent = QUOTA_FLOOR_DEFAUL
   return { leftPercent: Math.max(0, 100 - week.usedPercent), resetsAt: week.resetsAt };
 }
 
+// lsrc:0 2026-10-21: from 04:23 to 04:30Z one network_error held every Claude pane's automatic work, while another
+// reader saw Claude A at 2 % of its week. A failed reading stands on the account's last good one for half an hour,
+// taken as used as it can be by now: its own pace since the reading, plus a margin.
+/** WHAT: Defines how old a last good reading may be and the margin it carries. WHY: Keeps a failed reading of an account with room from holding its panes. */
+export const STALE_READING_POLICY = Object.freeze({ maxAgeMs: 30 * 60_000, marginPercent: 5 });
+
+/** WHAT: Returns a last good reading's windows as used as they can be by now. WHY: Keeps a failed reading from releasing an account near its floor. */
+export function staleWindows(windows, observedAt, now, policy = QUOTA_PARK_POLICY, stale = STALE_READING_POLICY) {
+  return windows.map((window) => {
+    const elapsed = observedAt - (Date.parse(window.resetsAt) - policy.windowMs[window.kind]);
+    const pace = elapsed > 0 && window.usedPercent > 0 ? window.usedPercent / elapsed : 0;
+    return { ...window, usedPercent: Math.min(100, window.usedPercent + pace * Math.max(0, now - observedAt) + stale.marginPercent) };
+  });
+}
+
 /** WHAT: Checks whether a pane's pending self-request is a park young enough to hold a move. WHY: Keeps a compact that cannot run from holding a stopped pane. */
 export const parkHoldsMove = (request, now, policy = QUOTA_PARK_POLICY) =>
   request?.origin === QUOTA_PARK_ORIGIN && now - Date.parse(request.requestedAt) < policy.moveWaitMs;
