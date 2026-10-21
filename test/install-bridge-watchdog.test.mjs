@@ -3,7 +3,7 @@ import {
   chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { expect, feature, integration } from "bdd-vitest";
 
 feature("bridge watchdog cron installer", () => {
@@ -28,14 +28,14 @@ cat > "$FAKE_CRONTAB"
       return { root, fakeBin, installed, crontab };
     }],
     when: ["running the installer twice", (ctx) => {
-      const env = { ...process.env, FAKE_CRONTAB: ctx.crontab, PATH: `${ctx.fakeBin}:${process.env.PATH}` };
+      const env = { ...process.env, NODE_BIN: process.execPath, AMUX: join(ctx.fakeBin, "amux"), FAKE_CRONTAB: ctx.crontab, PATH: `${ctx.fakeBin}:${process.env.PATH}` };
       execFileSync("bash", [resolve("bin/install-bridge-watchdog.sh")], { env });
       const first = readFileSync(ctx.crontab, "utf8");
       execFileSync("bash", [resolve("bin/install-bridge-watchdog.sh")], { env });
       return { ...ctx, first, second: readFileSync(ctx.crontab, "utf8") };
     }],
     then: ["one stable release-pinned row survives beside unrelated cron work", (ctx) => {
-      const expected = `* * * * * bash ${ctx.installed}/bin/bridge-watchdog-cron.sh`;
+      const expected = `* * * * * PATH=${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin NODE_BIN=${process.execPath} AMUX=${ctx.fakeBin}/amux bash ${ctx.installed}/bin/bridge-watchdog-cron.sh`;
       expect(ctx.first).toBe(ctx.second);
       expect(ctx.second).toContain("11 * * * * keep-me");
       expect(ctx.second).toContain(expected);
