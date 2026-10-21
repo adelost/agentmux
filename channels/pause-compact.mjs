@@ -13,10 +13,9 @@ import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, oversizeN
   pauseCompactLimit, sessionBackgroundActivity } from "../core/pause-compact.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice } from "../core/self-compact.mjs";
-import { QUOTA_FLOOR_DEFAULT_PERCENT, QUOTA_PARK_ORIGIN, QUOTA_PARK_POLICY, codexCreditHold, quotaParkContinuation,
+import { QUOTA_FLOOR_DEFAULT_PERCENT, QUOTA_PARK_ORIGIN, QUOTA_PARK_POLICY, codexCreditHold,
   quotaParkDecision, quotaStopEpisode } from "../core/quota-park.mjs";
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
-import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 import { isLiveStatus } from "../core/pane-status.mjs";
 import { compactPays, moveTarget, QUOTA_WIND_DOWN_ORIGIN, readWindDownMode, windDownNotice, windDownStage } from "../core/quota-wind-down.mjs";
 export { createQuotaParkFacts } from "./quota-park.mjs";
@@ -32,6 +31,9 @@ const appendJsonLine = (path, record) => {
   appendFileSync(path, `${JSON.stringify(record)}\n`);
 };
 
+/** WHAT: Stores one line in the park and compact log. WHY: Keeps the stop mover's lines beside the parks they replace. */
+export const recordPauseCompactLine = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line);
+
 /** WHAT: Builds the pause-compaction step of the auto-compact poll. WHY: Keeps the new rule beside the 50-minute rule without changing it. */
 export function createPauseCompact({ contextMaintenance, state, modes, policy = PAUSE_COMPACT_POLICY, now = Date.now,
   log = () => {}, record = (line) => appendJsonLine(PAUSE_COMPACT_LOG, line),
@@ -40,8 +42,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   parkFor = null, parkStore = null, floorPercent = QUOTA_FLOOR_DEFAULT_PERCENT, creditsAllowed = false,
   limitReceiptFor = (engine, paneDir) => (engine === "claude" ? activeClaudeLimitReceipt(paneDir) : null),
   windDownMode = readWindDownMode(), windDownMove = process.env.AMUX_QUOTA_WIND_DOWN_MOVE !== "false",
-  moveAfterWindDown = null, compactReceiptFor = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity, now()),
-  cursorFor = path => captureJsonlAppendCursor("self-compact-request-v1", [path]) }) {
+  moveAfterWindDown = null, compactReceiptFor = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity, now()) }) {
   if (!["off", "dry", "on"].includes(windDownMode)) throw new Error("AMUX_QUOTA_WIND_DOWN must be off, dry or on");
   const lastLogged = new Map();
   // The episode each working pane was asked about, so it hears once until it compacts.
@@ -119,18 +120,20 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       detail: `${decision.cell}: ${decision.window} window stops it until ${new Date(decision.resetAt).toISOString()}` };
     if (base.mode !== "on") { report(paneKey, episode, { ...line, outcome: "would-park" }); return false; }
     const identity = receipt ? null : identityFor(engine, paneDir);
-    const cursor = identity?.path ? cursorFor(identity.path) : null;
-    const result = selfRequests.request({ agent: name, pane, tokens, origin: QUOTA_PARK_ORIGIN,
-      lastCompactAt: lastCompactAt(name, pane, paneKey, identity?.path),
-      ...(identity?.path ? { continuation: quotaParkContinuation(decision), identity: { ...identity, engine, dir: paneDir },
-        cursor } : {}) });
-    // Quota recovery resumes a Claude pane told to stop here as soon as this account has room again.
-    if (result.ok && engine === "claude" && identity?.path) {
+    // lsrc:0 for Mattias 2026-10-21 (quota brief cases 2 and 9): 42 park prompts started turns on Claude S overnight,
+    // and ai:0 was compacted twice for one stop across a bridge restart. A park saves no prompt: quota recovery gives
+    // the pane its work back when an account has room. It compacts once per stop, from 80k on a warm cache.
+    const prior = parkStore?.read(name, pane);
+    const compactedAt = prior?.compactedAt && quotaStopEpisode(prior.window, prior.resetAt) === episode ? prior.compactedAt : null;
+    const result = compactedAt ? { ok: false, detail: `compacted for this stop at ${compactedAt}` }
+      : selfRequests.request({ agent: name, pane, tokens, origin: QUOTA_PARK_ORIGIN, lastCompactAt: lastCompactAt(name, pane, paneKey, identity?.path) });
+    // Quota recovery resumes or moves a Claude pane parked here as soon as an account has room again.
+    if (engine === "claude" && identity?.path) {
       parkStore?.record({ agentName: name, pane, account: facts.account || null, window: decision.window, resetAt: decision.resetAt,
-        leftPercent: decision.leftPercent, parkedAt: result.request.requestedAt,
-        identity: { engine, dir: paneDir, sessionId: identity.sessionId, path: identity.path }, cursor });
+        leftPercent: decision.leftPercent, parkedAt: new Date(now()).toISOString(), silent: true, ...(compactedAt ? { compactedAt } : {}),
+        identity: { engine, dir: paneDir, sessionId: identity.sessionId, path: identity.path } });
     }
-    report(paneKey, episode, result.ok ? { ...line, outcome: "parked" } : { ...line, outcome: "not-parked", detail: result.detail });
+    report(paneKey, episode, result.ok ? { ...line, outcome: "parked" } : { ...line, outcome: "parked", detail: `${line.detail}; no compact: ${result.detail}` });
     return result.ok;
   }
 
@@ -286,6 +289,11 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       return false;
     }
     const outcome = result.compacted ? "compacted" : result.attempted ? "failed" : result.ok ? "skipped" : "refused";
+    // A park's compact, run or failed, is the one this stop gets (quota brief case 9).
+    if (request?.origin === QUOTA_PARK_ORIGIN && (result.compacted || result.attempted)) {
+      const park = parkStore?.read(name, pane);
+      if (park?.state === "parked") parkStore.update(park, { compactedAt: new Date(facts.now).toISOString() });
+    }
     const ended = { ...line, outcome, cell: request ? "self-request" : result.cell || line.cell, detail: result.reason || line.detail };
     // A refused request (a delivery waiting, the lease busy) stays for the delivery path or the next pause.
     if (request && (result.compacted || result.attempted)) endRequest(paneKey, request, ended);

@@ -81,7 +81,8 @@ export async function resumeParkedPanes({
     // A pane its account stopped at the banner belongs to limit recovery, which restarts it in its session.
     if (activeReceipt(agentName, pane)) return waiting("limit recovery owns its stop");
     let unsentNotice = null;
-    if (!park.noticeJobId) {
+    // A silent park (lsrc:0 for Mattias 2026-10-21) saves no notice; the recovery prompt below is its only one.
+    if (!park.silent && !park.noticeJobId) {
       const notice = parkNotice(park, queue.list(agentName, pane), now());
       if (notice.state === "lost") return settle(park, { state: "dropped", reason: notice.reason }, "drop");
       if (notice.state === "waiting") return waiting(notice.reason);

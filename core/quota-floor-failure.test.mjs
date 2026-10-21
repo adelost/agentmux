@@ -116,3 +116,40 @@ feature("quota floor read failures (component)", () => {
     });
   }
 });
+
+// lsrc:0 for Mattias 2026-10-21 (quota brief case 8): Codex A's credits fell from 56 881 to 56 765 overnight while its
+// 5 h window was spent; until 1.25.298 a failed reading of a spent window let automatic turns through.
+function codexWorld() {
+  const root = mkdtempSync(join(tmpdir(), "amux-floor-codex-"));
+  let now = Date.parse("2026-10-21T03:50:00Z"), failed = false;
+  const account = { ok: true, provider: "codex", name: "Codex A", profile: { key: "codex:1", id: "1" }, inUse: ["api:6"],
+    limits: [{ limitId: "codex", windows: [{ windowMinutes: 300, usedPercent: 100, resetsAt: "2026-10-21T08:16:16Z" },
+      { windowMinutes: 10080, usedPercent: 77, resetsAt: "2026-10-27T14:22:00Z" }] }] };
+  const facts = createQuotaParkFacts({ now: () => now, profiles: () => [], readPanes: async () => null,
+    read: async () => ({ accounts: [failed ? { ...account, ok: false, limits: [], error: "network_error" }
+      : { ...account, fetchedAt: new Date(now).toISOString() }] }) });
+  const queue = createDeliveryQueue({ rootDir: join(root, "queue"), now: () => now });
+  const { agent, pane } = composerAgent({ dialect: "codex" });
+  const broker = createDeliveryBroker({ agent, queue, now: () => now, notify: async () => {},
+    quotaFloor: { percent: 3, windowsFor: facts, creditsAllowed: false } });
+  return { facts, queue, broker, pane, fail: () => { failed = true; now += 6 * 60_000; },
+    cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+feature("a Codex pane at a spent 5 h window (component)", () => {
+  component("starts no automatic turn while credits are held, also when its reading fails, and his own message goes through", {
+    given: ["api:6 on Codex A with its 5 h window spent until 08:16Z, then a failed reading", async () => {
+      const ctx = codexWorld(); await ctx.facts("api:6"); ctx.fail();
+      ctx.job = ctx.queue.enqueue({ agentName: "api", pane: 6, text: "[from lsrc:0] synthetic brief", source: "cli" });
+      ctx.queue.enqueue({ agentName: "api", pane: 6, text: "Hur går det?", source: "discord" });
+      return ctx;
+    }],
+    when: ["the broker serves api:6 twice", async ctx => { await ctx.broker.kickTarget("api", 6); await ctx.broker.kickTarget("api", 6); }],
+    then: ["only his message is typed; the brief waits for the reset", (_result, ctx) => {
+      try {
+        expect(ctx.pane.submitted).toEqual(["Hur går det?"]);
+        expect(ctx.queue.read("api", 6, ctx.job.id)).toMatchObject({ status: "pending", costHold: true });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+});

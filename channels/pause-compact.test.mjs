@@ -490,3 +490,70 @@ feature("a Codex pane whose account has spent a window", () => {
     }],
   });
 });
+
+// lsrc:0 for Mattias 2026-10-21 (day file 04:14Z): Claude S reached its weekly floor at 23:39Z and 21 panes were parked.
+// Each park saved a "continue the task" prompt, and 42 of them started turns on Claude S before 03:46Z (sandman:0).
+feature("a pane parked at its account's weekly floor, the night of 20 to 21 October", () => {
+  const atFloor = () => {
+    let now = Date.parse("2026-10-20T23:39:00Z");
+    const dir = mkdtempSync(join(tmpdir(), "amux-quota-night-"));
+    const session = join(dir, "s1.jsonl");
+    writeFileSync(session, "{}\n");
+    const requests = createSelfCompactStore({ dir, now: () => now });
+    const parks = createQuotaParkStore({ dir: join(dir, "parks") });
+    const runs = [], finished = [];
+    const bridge = () => createPauseCompact({ modes: { claude: "on", codex: "on" }, now: () => now, state: { get: () => ({}) },
+      contextMaintenance: { run: async (name, pane, options) => { runs.push({ pane: `${name}:${pane}`, ...options }); return { ok: true, compacted: true }; },
+        selfRequestSuperseded: () => false,
+        finishSelfRequest: (request, line) => { finished.push(request); requests.clear(request.agent, request.pane); return line; } },
+      record: () => {}, identityFor: () => ({ path: session, sessionId: "s1" }),
+      backgroundFor: { claude: () => null, codex: () => null }, journalCompactFor: () => null, selfRequests: requests,
+      parkFor: async () => ({ account: { name: "Claude S", key: "claude:1" },
+        windows: [{ kind: "week", usedPercent: 97, resetsAt: "2026-10-27T03:59:59.963Z" }] }),
+      parkStore: parks, limitReceiptFor: () => null });
+    let pause = bridge();
+    const poll = facts => pause.consider({ agentConfig: lsrc, pane: 2, engine: "claude", paneDir: "/lsrc/.agents/2",
+      status: "idle", inCopyMode: false, contextTokens: 150_000, ...facts });
+    return { runs, finished, parks,
+      turnEndsThenWait: async (contextTokens = 150_000) => { const ended = now; now += 61_000; return poll({ lastActivityMs: ended, contextTokens }); },
+      restartBridge: () => { pause = bridge(); }, later: ms => { now += ms; },
+      cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+
+  // Case 2. The park's prompt is what started those turns; a parked pane gets none for its stop.
+  component("its park compacts at its turn end and saves no prompt to start a turn", {
+    given: ["lsrc:2 at 150k when Claude S reaches its floor until 27 Oct", () => atFloor()],
+    when: ["polling a minute after its turn ended", ctx => ctx.turnEndsThenWait()],
+    then: ["one compact, no continuation, and a record that resumes it when room returns", (_sent, ctx) => {
+      try {
+        expect(ctx.runs).toHaveLength(1);
+        expect(ctx.finished).toEqual([expect.not.objectContaining({ continuation: expect.anything() })]);
+        expect(ctx.parks.read("lsrc", 2)).toMatchObject({ state: "parked", window: "week", silent: true });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  // Case 9. ai:0 was compacted for this stop at 00:27:59Z and again at 01:45:11Z, after the 01:44Z bridge restart.
+  component("a park stop compacts a pane at most once, also across a bridge restart", {
+    given: ["lsrc:2 parked and compacted, then the bridge restarts and the pane works again", async () => {
+      const ctx = atFloor(); await ctx.turnEndsThenWait(); ctx.restartBridge(); ctx.later(40 * 60_000); return ctx;
+    }],
+    when: ["its next turn in the same stop ends at 150k", ctx => ctx.turnEndsThenWait()],
+    then: ["no second compact; the pane stays parked", (_sent, ctx) => {
+      try {
+        expect(ctx.runs).toHaveLength(1);
+        expect(ctx.parks.read("lsrc", 2)).toMatchObject({ state: "parked", compactedAt: expect.any(String) });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a pane under 80k is parked without a compact, so it still resumes when room returns", {
+    given: ["lsrc:2 at 60k when Claude S reaches its floor", () => atFloor()],
+    when: ["polling a minute after its turn ended", ctx => ctx.turnEndsThenWait(60_000)],
+    then: ["no compact, and a park record", (_sent, ctx) => {
+      try {
+        expect(ctx.runs).toEqual([]);
+        expect(ctx.parks.read("lsrc", 2)).toMatchObject({ state: "parked", window: "week", silent: true });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+});

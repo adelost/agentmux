@@ -1,4 +1,5 @@
 import { contextCostDecision, readContextCostPolicy, workAdmission } from "../policies/context-cost.mjs";
+import { recordCompactCall } from "./compact-log.mjs";
 import { isOwnerChannelJob } from "./ask-origin.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice, selfCompactAdmission } from "./self-compact.mjs";
 import { latestConversationActivityMs } from "./pane-activity.mjs";
@@ -92,6 +93,7 @@ export function beginContextCompact(state, name, pane, identity) {
 
 /** WHAT: Builds shared warm and cold context protection. WHY: Keeps paid compact attempts durable, serialized and bound to exact session evidence. */
 export function createContextMaintenance({ agent, state, queue, resolveTarget, now = Date.now, log = () => {}, policy = readContextCostPolicy(),
+  recordCompact = recordCompactCall, accountOf = async () => null,
   identityFor = latestPaneSessionIdentity, activityFor = latestConversationActivityMs, journalFor = getContextPercent,
   compactFor = engine => engine === "codex" ? verifiedCodexCompact : verifiedClaudeCompact, coldBeforeDelivery = null,
   selfRequests = null, notify = async () => {}, quotaRecoveryFor = () => ({ options: { queue } }), writerAlive = processAlive }) {
@@ -253,6 +255,10 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       write(state, paneKey(name, pane), { ...record, status: result.ok ? "VERIFIED" : "FAILED", reason: result.reason || null, finishedAt: now(),
         ...(retryAt ? { retryAt } : {}) });
       log(`${name}:${pane} ${decision.cell}: ${result.ok ? "compact verified" : result.reason}`);
+      const after = result.ok ? await Promise.resolve(agent.getContext?.(name, pane)).catch(() => null) : null;
+      recordCompact({ at: new Date(now()).toISOString(), pane: paneKey(name, pane), engine: target.engine, source: "bridge", cell: decision.cell,
+        outcome: result.ok ? "compacted" : "failed", reason: result.reason || null, beforeTokens: context?.tokens ?? null,
+        afterTokens: Number.isFinite(after?.tokens) ? after.tokens : null, account: await accountOf(name, pane).catch(() => null) });
       return result.ok ? { ok: true, compacted: true, receipt: result }
         : { ok: false, attempted: true, reason: `context-cost:${result.reason}`, detail: result.detail || null, ...(retryAt ? { retryAt } : {}) };
     } catch (error) {

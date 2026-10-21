@@ -929,3 +929,25 @@ feature("a compact its writer never finished", () => {
     }],
   });
 });
+
+// lsrc:0 for Mattias 2026-10-21: sandman:0 could not count the night's compacts; each one now leaves a line.
+feature("every compact the bridge runs is logged", () => {
+  component("a compact logs its time, pane, tokens before and after, and account", {
+    given: ["claw:2 at 473k on Claude S, 31k after its compact", () => {
+      const ctx = fixture(), lines = [];
+      let tokens = 473_000;
+      ctx.agent.getContext = async () => ({ tokens });
+      const compact = ctx.compactFor();
+      ctx.compactFor = () => async (...args) => { const result = await compact(...args); tokens = 31_000; return result; };
+      ctx.recordCompact = line => lines.push(line);
+      ctx.accountOf = async () => "Claude S";
+      ctx.lines = lines;
+      return ctx;
+    }],
+    when: ["running a required compact", ctx => createContextMaintenance(ctx).run("claw", 2, { required: true })],
+    then: ["one line with both sizes and the account", (_result, ctx) => {
+      expect(ctx.lines).toEqual([expect.objectContaining({ at: new Date(100_000_000).toISOString(), pane: "claw:2", source: "bridge",
+        outcome: "compacted", beforeTokens: 473_000, afterTokens: 31_000, account: "Claude S" })]);
+    }], cleanup: ctx => ctx.cleanup(),
+  });
+});

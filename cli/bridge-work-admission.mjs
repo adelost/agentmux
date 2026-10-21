@@ -6,12 +6,14 @@ import { createColdDeliveryRule } from "../channels/pause-compact.mjs";
 import { readPauseCompactModes } from "../core/pause-compact.mjs";
 
 /** WHAT: Builds ordered account and context admission for queued work. WHY: Prevents compacting an exhausted account or delivering another refused prompt. */
-export function createBridgeWorkAdmission({ agent, state, queue, configPath, selfRequests, discord, log }) {
+export function createBridgeWorkAdmission({ agent, state, queue, configPath, selfRequests, discord, log, quotaFacts = null }) {
+  // The compact log names the account each compact ran on (core/compact-log.mjs).
+  const accountOf = quotaFacts && (async (name, pane) => (await quotaFacts(`${name}:${pane}`))?.account?.name || null);
   const notify = async (name, pane, text) => {
     const channelId = discord && findChannelForPane(configPath, name, pane);
     if (channelId) await discord.send(channelId, text, { kind: "notice" });
   };
-  const maintenance = createContextMaintenance({ agent, state, queue, selfRequests, log,
+  const maintenance = createContextMaintenance({ agent, state, queue, selfRequests, log, ...(accountOf ? { accountOf } : {}),
     resolveTarget: (name, pane) => {
       const config = loadConfig(configPath)[name], cmd = config?.panes?.[pane]?.cmd || "";
       return config ? { engine: /codex/.test(cmd) ? "codex" : /claude/.test(cmd) ? "claude" : "unsupported",

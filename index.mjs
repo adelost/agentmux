@@ -30,6 +30,7 @@ import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
 import { codexCreditsAllowed, createPauseCompact, createQuotaParkFacts, createQuotaParkStore, quotaFloorPercent } from "./channels/pause-compact.mjs";
+import { startQuotaStopMover } from "./channels/quota-stop-mover.mjs";
 import { createQuotaWindDownMover } from "./channels/quota-wind-down-move.mjs";
 import { readPauseCompactModes } from "./core/pause-compact.mjs";
 import { createLeaderReview, leaderFromConfig } from "./core/leader-review.mjs";
@@ -247,7 +248,7 @@ if (repairedSleeps.length) {
 // `amux compact --self` requests, run at the end of the pane's turn or before its next delivery.
 const selfCompactRequests = createSelfCompactStore(), quotaFacts = createQuotaParkFacts(), quotaFloor = { windowsFor: quotaFacts, percent: quotaFloorPercent(), creditsAllowed: codexCreditsAllowed() };
 const contextMaintenance = createBridgeWorkAdmission({
-  agent, state: appState, queue: deliveryQueue, configPath: AGENTS_YAML, discord, selfRequests: selfCompactRequests,
+  agent, state: appState, queue: deliveryQueue, configPath: AGENTS_YAML, discord, selfRequests: selfCompactRequests, quotaFacts,
   log: message => console.log(`context-cost | ${message}`),
 });
 const deliveryBroker = createDeliveryBroker({
@@ -343,6 +344,7 @@ const autoCompact = createAutoCompact({
     log: message => console.log(`pause-compact | ${message}`), selfRequests: selfCompactRequests, notify: contextMaintenance.notify }),
 });
 autoCompact.start();
+startQuotaStopMover({ agent, deliveryBroker, state: appState, configPath: AGENTS_YAML, floorPercent: quotaFloor.percent });
 
 // Drift-guard: periodic reminder to panes that have accumulated many turns
 // without a /compact or prior reminder. Counteracts attention-weight decay

@@ -624,6 +624,24 @@ feature("the quota night of 20 to 21 October", () => {
     }],
   });
 
+  // Addendum 2: sandman:0 could not count the night's compacts; a rotation's compact leaves a line too.
+  unit("a compact before the switch is logged with its sizes and source account", {
+    given: ["lsrc:0 warm at 120k, compacted to 30k before it moves", () => {
+      const fx = running(fixture());
+      fx.lines = [];
+      fx.deps.recordCompact = line => fx.lines.push(line);
+      fx.deps.observeContext = vi.fn(async () => ({ facts: { tokens: 120_000, idleMs: 60_000 }, compactRefusal: null,
+        compacted: false, target: { agent: { name: "lsrc" }, pane: { index: 0 } } }));
+      fx.deps.compactPane = vi.fn(async () => ({ ok: true, status: "within-budget", afterTokens: 30_000 }));
+      return fx;
+    }],
+    when: ["rotating to Claude A", rotate],
+    then: ["one line for lsrc:0", (_result, fx) => {
+      expect(fx.lines).toEqual(expect.arrayContaining([expect.objectContaining({ pane: "lsrc:0", source: "account-switch",
+        outcome: "within-budget", beforeTokens: 120_000, afterTokens: 30_000, account: expect.any(String) })]));
+    }],
+  });
+
   // Case 6. 03:52Z ai:1, ai:2, skybar:1 and skybar:2 waited 120 s each on "Allow external CLAUDE.md file imports?" in
   // the Claude A profile and were rolled back; lsrc:0 approved the imports there at about 04:00Z.
   unit("a target profile that would ask to allow external CLAUDE.md imports stops that pane before any restart", {

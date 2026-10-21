@@ -526,7 +526,7 @@ function memoryParkStore() {
 }
 
 /** claw:1 parked at 19:53Z on Claude S; the park notice reached it and it ended its turn. */
-function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z", noticeHeld = false, noticeTurnRunning = false } = {}) {
+function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z", noticeHeld = false, noticeTurnRunning = false, silent = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-park-resume-"));
   let clock = Date.parse("2026-10-19T19:53:00Z");
   const configPath = join(root, "agents.yaml");
@@ -539,14 +539,15 @@ function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z", noticeHeld = f
   const park = store.record({ agentName: "claw", pane: 1, account: { name: "Claude S", key: "claude:1" }, window: "week",
     resetAt: PARK_RESET_AT, parkedAt: new Date(clock).toISOString(),
     identity: { engine: "claude", dir: join(root, "claw", ".agents", "1"), sessionId: "s-claw-1", path: session },
-    cursor: captureJsonlAppendCursor("self-compact-request-v1", [session]) });
+    cursor: captureJsonlAppendCursor("self-compact-request-v1", [session]), ...(silent ? { silent: true } : {}) });
   // The compact ran at its turn end and the park notice reached the pane, which then ended its turn.
   appendFileSync(session, endedTurn("Retry built; tests next."));
   clock += 60_000;
   const noticeText = quotaParkContinuation({ window: "week", resetAt: PARK_RESET_AT });
-  const notice = queue.enqueue({ agentName: "claw", pane: 1, source: "self-compact", text: noticeText });
+  // A silent park (lsrc:0 for Mattias 2026-10-21) saves no notice at all.
+  const notice = silent ? null : queue.enqueue({ agentName: "claw", pane: 1, source: "self-compact", text: noticeText });
   // At the quota floor the notice is held in the queue; otherwise it reached the pane, which ended its turn.
-  if (!noticeHeld) {
+  if (notice && !noticeHeld) {
     queue.update(notice, { status: "acknowledged", acknowledgedAt: clock });
     // Claude Code 2.1.296+ records a pasted prompt inside its paste envelope, as lsrc:2's journal did at 19:46Z.
     const recorded = noticeTurnRunning ? `\n\n<pasted_content id="883e">\n${noticeText}\n</pasted_content id="883e">\n` : noticeText;
@@ -566,6 +567,20 @@ function parkedClaw({ readings = [], at = "2026-10-19T20:26:30Z", noticeHeld = f
 }
 
 feature("a pane the quota park stopped resumes when its account has room again", () => {
+  // lsrc:0 for Mattias 2026-10-21 (quota brief case 7): a park sends no prompt during the stop, and the pane resumes by
+  // itself once an account has room.
+  component("a silently parked pane, with no park notice, gets the recovery prompt once Claude S reads room", {
+    given: ["claw:1 parked silently at 19:53Z, and Claude S reads 0 % used at 20:26:28Z",
+      () => parkedClaw({ silent: true, readings: [claudeS(0, "2026-10-19T20:26:28.265Z")] })],
+    when: ["quota recovery ticks at 20:26:30Z", (ctx) => ctx.coordinator.tick()],
+    then: ["the recovery prompt is queued and the park is resumed", (_, ctx) => {
+      try {
+        expect(ctx.prompts()).toEqual([expect.objectContaining({ status: "pending", text: quotaRecoveryContinuation() })]);
+        expect(ctx.store.read("claw", 1)).toMatchObject({ state: "resumed", reason: "Claude S has 100 % of its week window left" });
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
   component("a parked pane with an empty queue gets the same-session recovery prompt once Claude S reads room", {
     given: ["claw:1 parked at 19:53Z, and Claude S reads 0 % used at 20:26:28Z after the free reset",
       () => parkedClaw({ readings: [claudeS(0, "2026-10-19T20:26:28.265Z")] })],

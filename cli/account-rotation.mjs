@@ -10,6 +10,7 @@ import {
   classifyClaudeRotationPane,
 } from "../core/account-rotation.mjs";
 import { isQuotaFloorHeldJob } from "../core/delivery-wake.mjs";
+import { recordCompactCall } from "../core/compact-log.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import {
   accountEngineForCommand,
@@ -209,7 +210,7 @@ async function planPanes(ctx, observed, target, deps, compactedKeys = new Set())
     const context = pane.mode === "running" && !alreadySelected ? await deps.observeContext(ctx, pane) : null;
     const plan = accountSwitchPlan({ mode: pane.mode, alreadySelected, facts: context?.facts,
       compactRefusal: context?.compactRefusal, compacted: context?.compacted || compactedKeys.has(pane.key) }, deps.policy);
-    planned.push({ ...pane, plan, compactTarget: context?.target || null });
+    planned.push({ ...pane, plan, compactTarget: context?.target || null, contextTokens: context?.facts?.tokens ?? null });
   }
   return planned;
 }
@@ -219,6 +220,10 @@ async function compactMovers(ctx, movers, deps, rows) {
   const compacted = new Set();
   for (const pane of movers.filter((candidate) => candidate.plan.action === "COMPACT_THEN_RESTART")) {
     const result = await deps.compactPane(ctx, pane.compactTarget).catch((error) => ({ ok: false, reason: error.message }));
+    deps.recordCompact({ at: new Date().toISOString(), pane: pane.key, engine: "claude", source: "account-switch",
+      outcome: result.ok ? result.status || "compacted" : "failed", reason: result.reason || null,
+      beforeTokens: pane.contextTokens, afterTokens: result.afterTokens ?? null,
+      account: pane.currentProfile?.label || pane.currentProfile?.key || null });
     if (result.ok) compacted.add(pane.key);
     else rows.push({ ...pane, status: "blocked", reason: result.reason });
   }
@@ -352,6 +357,8 @@ async function rotateProject(ctx, agentName, panes, target, deps, { dry, rows, p
 /** WHAT: Routes Claude account changes through exact persisted sessions. WHY: Prevents exhausted source quota from blocking rotation while preserving drafts, queues and continuity. */
 export async function rotateClaudeFleet(ctx, requested, {
   dry = false,
+  // The quota stop mover moves only the panes its stopped account holds.
+  only = null,
 } = {}, dependencies = {}) {
   const deps = {
     agents: dependencies.agents || listAgents(ctx.configPath),
@@ -366,6 +373,7 @@ export async function rotateClaudeFleet(ctx, requested, {
     observeContext: dependencies.observeContext || ((context, pane) => observeSwitchContext(context, pane)),
     compactPane: dependencies.compactPane || ((context, compactTarget) => compactBeforeSwitch(context, compactTarget)),
     identityOf: dependencies.identityOf || readClaudeProfileIdentity,
+    recordCompact: dependencies.recordCompact || recordCompactCall,
     startDialog: dependencies.startDialog || ((readJson) => (source, target, cwd) =>
       claudeStartDialog({ source, target, cwd, readJson }))(cachedJsonReader()),
     limitReceipt: dependencies.limitReceipt || ((agentName, pane) => (ctx.configPath
@@ -396,7 +404,8 @@ export async function rotateClaudeFleet(ctx, requested, {
     deps.prepare(target, deps.catalog);
     prepared = true;
   };
-  for (const [agentName, panes] of projectsFor(configuredClaudePanes(deps.agents))) {
+  const chosen = configuredClaudePanes(deps.agents).filter((pane) => !only || only.includes(paneKey(pane.agentName, pane.pane)));
+  for (const [agentName, panes] of projectsFor(chosen)) {
     await rotateProject(ctx, agentName, panes, target, deps, { dry, rows, prepareOnce });
   }
   const outcome = accountRotationOutcome(rows);
