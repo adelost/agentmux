@@ -8,6 +8,37 @@ import { assertClaudeQuotaAvailable } from "./claude-quota-target.mjs";
 import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
 
 feature("wind-down exact-session restart (component)", () => {
+  component("an exact session on the target profile qualifies for MOVED recovery", {
+    given: ["the live process and selected account both use profile 2", () => {
+      const ctx = fixture({ selectedProfile: "2", liveProfile: "2" });
+      writeFileSync(ctx.sessionPath, JSON.stringify({ type: "system", subtype: "compact_boundary" }) + "\n"); return ctx;
+    }],
+    when: ["checking the exact live target", ctx => ctx.lifecycle.recoveredSession("claw", 0, ctx.sessionId, "claude:2")],
+    then: ["the durable intent can be released without a restart", (result, ctx) => {
+      try { expect(result.ok).toBe(true); expect(ctx.commands.some(cmd => /respawn-pane|send-keys/u.test(cmd))).toBe(false); }
+      finally { ctx.cleanup(); }
+    }],
+  });
+  component("an expired move can identify the source behind a limit without an explicit resume flag", {
+    given: ["a source process started with continue, still at its usage limit", () => fixture({ liveContinue: true })],
+    when: ["checking only which account it runs on", async ctx => [await ctx.lifecycle.liveProfileIs("claw", 0, "claude:1"),
+      await ctx.lifecycle.liveProfileIs("claw", 0, "claude:2")]],
+    then: ["only the actual source is proved without starting a turn", (result, ctx) => {
+      try { expect(result).toEqual([true, false]); expect(ctx.commands.some(cmd => /respawn-pane|send-keys/u.test(cmd))).toBe(false); }
+      finally { ctx.cleanup(); }
+    }],
+  });
+  component("a selected target does not prove the live process uses that profile", {
+    given: ["the target is selected but the same session still runs on the source account", () => {
+      const ctx = fixture({ selectedProfile: "2" });
+      writeFileSync(ctx.sessionPath, JSON.stringify({ type: "system", subtype: "compact_boundary" }) + "\n");
+      return ctx;
+    }],
+    when: ["checking exact-session recovery on the selected target", ctx => ctx.lifecycle.recoveredSession("claw", 0, ctx.sessionId, "claude:2")],
+    then: ["the selection alone cannot release MOVED", (result, ctx) => {
+      try { expect(result.ok).toBe(false); } finally { ctx.cleanup(); }
+    }],
+  });
   for (const allowed of [true, false]) {
     component(`wind-down ${allowed ? "restarts the compacted session without a limit banner" : "refuses changed evidence before respawning"}`, {
       given: ["a compacted owned session, no active usage refusal", () => {
@@ -30,7 +61,7 @@ feature("wind-down exact-session restart (component)", () => {
 
 function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch = false,
   selected = null, configuredCmd = "claude", observed = null, selectedProfile = "1", liveSessionId = null,
-  sessionExists = true, afterLimitMenu = "❯  " } = {}) {
+  sessionExists = true, afterLimitMenu = "❯  ", liveProfile = "1", liveContinue = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-quota-lifecycle-"));
   const homeDir = join(root, "home");
   const repoDir = join(root, "repo");
@@ -134,7 +165,8 @@ function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch =
     readProc: path => {
       if (path === "/proc/100/cmdline") return "bash\0";
       if (path === "/proc/100/task/100/children") return "101";
-      if (path === "/proc/101/cmdline") return `claude\0--resume\0${liveSessionId || sessionId}\0`;
+      if (path === "/proc/101/cmdline") return liveContinue ? "claude\0--continue\0" : `claude\0--resume\0${liveSessionId || sessionId}\0`;
+      if (path === "/proc/101/environ") return `CLAUDE_CONFIG_DIR=${join(homeDir, liveProfile === "1" ? ".claude" : "account-2")}\0`;
       throw new Error("unknown process");
     },
   });

@@ -2,6 +2,7 @@
 
 import { appendEvent } from "./events.mjs";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { getAgent } from "../cli/config.mjs";
 import { buildClaudeLaunchCommand } from "./agent-launch-command.mjs";
 import { createTmuxAdapter } from "./tmux.mjs";
@@ -37,7 +38,7 @@ function hasExactResumeLaunch(screen, sessionId) {
     .test(String(screen || ""));
 }
 
-function processResumes(rootPid, sessionId, readProc) {
+function processMatches(rootPid, sessionId, readProc, profileHome = null, defaultHome = null) {
   const pending = [String(rootPid)];
   if (!/^\d+$/u.test(pending[0])) return false;
   for (let index = 0; index < pending.length && index < 64; index++) {
@@ -46,7 +47,14 @@ function processResumes(rootPid, sessionId, readProc) {
       const argv = readProc(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
       const claude = /(?:^|\/)claude$/u.test(argv[0] || "")
         || argv.some(arg => /\/claude-code\/cli\.(?:js|mjs)$/u.test(arg));
-      if (claude) return argv[argv.indexOf("--resume") + 1] === sessionId && argv.includes("--resume");
+      if (claude) {
+        if (sessionId && (argv[argv.indexOf("--resume") + 1] !== sessionId || !argv.includes("--resume"))) return false;
+        if (!profileHome) return true;
+        const env = readProc(`/proc/${pid}/environ`, "utf8").split("\0");
+        const liveHome = env.find(value => value.startsWith("CLAUDE_CONFIG_DIR="))?.slice("CLAUDE_CONFIG_DIR=".length)
+          || defaultHome;
+        return Boolean(liveHome) && resolve(liveHome) === resolve(profileHome);
+      }
       const children = readProc(`/proc/${pid}/task/${pid}/children`, "utf8").trim();
       if (children) pending.push(...children.split(/\s+/u));
     } catch { return false; }
@@ -109,7 +117,7 @@ export function createClaudeQuotaLifecycle({
   }
 
   /** WHAT: Verifies an already resumed exact session. WHY: A vanished banner alone cannot release another session's queue. */
-  async function recoveredSession(agentName, pane, expectedSessionId) {
+  async function recoveredSession(agentName, pane, expectedSessionId, expectedProfileKey = null) {
     const targetConfig = configuredClaudeTarget(agentName, pane, { configPath });
     if (!targetConfig) return { ok: false, reason: "not-a-tmux-claude-target" };
     if (activeReceipt(agentName, pane)) return { ok: false, reason: "limit-still-active" };
@@ -119,10 +127,21 @@ export function createClaudeQuotaLifecycle({
     const [command, screen] = await Promise.all([tmux.currentCommand(target).catch(() => ""), tmux.captureScreen(target).catch(() => "")]);
     if (!CLAUDE_PROCESS.test(command) || !hasEmptyClaudeComposer(screen)) return { ok: false, reason: "recovered-composer-not-ready" };
     const pid = await tmux.panePid(target).catch(() => "");
-    if (!processResumes(pid, expectedSessionId, readProc)) return { ok: false, reason: "live-session-unproven" };
+    const expectedHome = expectedProfileKey ? profiles().find(profile => profile.key === expectedProfileKey)?.home : null;
+    if ((expectedProfileKey && !expectedHome) || !processMatches(pid, expectedSessionId, readProc,
+      expectedHome, resolve(homeDir, ".claude"))) return { ok: false, reason: "live-session-unproven" };
     const current = latestClaudeSessionIdentity(targetConfig.cwd, { homeDir });
     if (activeReceipt(agentName, pane) || current?.sessionId !== expectedSessionId) return { ok: false, reason: "recovery-evidence-changed" };
     return { ok: true, sessionId: expectedSessionId };
+  }
+
+  /** WHAT: Checks the live pane's account even at a limit or mid-turn. WHY: Keeps expired-intent cancellation from waking or interrupting its source. */
+  async function liveProfileIs(agentName, pane, profileKey) {
+    const targetConfig = configuredClaudeTarget(agentName, pane, { configPath });
+    const profile = profiles().find(candidate => candidate.key === profileKey);
+    if (!targetConfig || !profile?.home) return false;
+    const pid = await tmux.panePid(`${agentName}:.${Number(pane) || 0}`).catch(() => "");
+    return processMatches(pid, null, readProc, profile.home, resolve(homeDir, ".claude"));
   }
 
   async function waitForShell(target) {
@@ -278,5 +297,5 @@ export function createClaudeQuotaLifecycle({
     if (typeof guard !== "function") return Promise.resolve({ ok: false, reason: "wind-down-admission-missing" });
     return restart(name, pane, { sessionId }, profileKey, guard);
   };
-  return { activeReceipt, profileFor, selectProfile, recoveredSession, restart, restartAfterWindDown };
+  return { activeReceipt, profileFor, selectProfile, recoveredSession, liveProfileIs, restart, restartAfterWindDown };
 }

@@ -1,8 +1,9 @@
 import { configuredClaudeTarget } from "./claude-quota-target.mjs";
 import { contextMaintenanceAttempt } from "./context-maintenance.mjs";
 import { classifyClaudeRotationPane } from "./account-rotation.mjs";
-import { isDeliveryInFlight } from "./delivery-queue-policy.mjs";
+import { isDeliveryInFlight, PAUSED_UNTIL_RECOVERY, TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { moveTarget, quotaObservedAt, windDownContinuation, windDownMovesEnabled } from "./quota-wind-down.mjs";
+import { cancelWindDownContinuation, releaseWindDownContinuation } from "./quota-wind-down-recovery.mjs";
 
 /** WHAT: Reads a verified compact within this episode and session. WHY: Prevents failed, old or superseded context from authorizing a move. */
 export function windDownCompactReceipt({ state, agentName, pane, identity, beganAt, now = Date.now() }) {
@@ -19,14 +20,23 @@ export function createClaudeWindDownMove({ queue, lifecycle, configPath, now, wi
     const refuse = reason => ({ moved: false, reason });
     if (!windDown || !windDownMovesEnabled()) return refuse("wind-down-not-configured");
     const configured = configuredClaudeTarget(agentName, pane, { configPath });
-    if (!configured || !episode?.startsWith(`${agentName}:${pane}|`)
-        || !(Number(episode.split("|").at(-1)) > now())) return refuse("wind-down-episode-ended");
+    if (!configured || !episode?.startsWith(`${agentName}:${pane}|`)) return refuse("wind-down-episode-invalid");
+    const resetAt = Number(episode.split("|").at(-1));
     const idempotencyKey = `quota-wind-down:moved:${agentName}:${pane}:${episode}`;
-    const existing = queue.list(agentName, pane).find(job => job.idempotencyKey === idempotencyKey);
-    if (existing) return { moved: true, replayed: true };
     const lease = queue.acquireSessionLease(agentName, pane);
     if (!lease) return refuse("delivery-session-busy");
     try {
+      let continuation = queue.list(agentName, pane).find(job => job.idempotencyKey === idempotencyKey);
+      if (continuation?.metadata?.windDownRestartedAt || (continuation && TERMINAL_DELIVERY_STATES.has(continuation.status))) {
+        return { moved: true, replayed: true };
+      }
+      if (continuation?.cancelRequestStatus) return refuse("wind-down-continuation-cancelled");
+      if (continuation && (await lifecycle.recoveredSession(agentName, pane,
+        continuation.metadata.windDownSessionId, continuation.metadata.windDownTargetProfileKey))?.ok) {
+        releaseWindDownContinuation(queue, continuation, now());
+        return { moved: true, replayed: true };
+      }
+      if (!(resetAt > now())) return refuse("wind-down-episode-ended");
       const identity = windDown.identityFor("claude", configured.cwd);
       const receiptFor = () => windDownCompactReceipt({ ...input, state: windDown.state,
         identity: windDown.identityFor("claude", configured.cwd), now: now() });
@@ -45,6 +55,9 @@ export function createClaudeWindDownMove({ queue, lifecycle, configPath, now, wi
       if (!await admission()) return refuse("wind-down-pane-not-idle");
       const profile = windDown.profiles().find(candidate => candidate.id === target.profileId);
       if (!profile || !target.profileKeys.includes(profile.key)) return refuse("wind-down-target-changed");
+      if (continuation && (continuation.metadata.windDownTargetProfileKey !== profile.key
+          || continuation.metadata.windDownSessionId !== identity.sessionId
+          || continuation.metadata.windDownSourceProfileKey !== from.key)) return refuse("wind-down-intent-changed");
       const current = lifecycle.profileFor(agentName, pane);
       if (current?.key !== from.key && current?.key !== profile.key) return refuse("wind-down-source-changed");
       const verifiedAt = receipt.finishedAt ?? receipt.at;
@@ -52,13 +65,23 @@ export function createClaudeWindDownMove({ queue, lifecycle, configPath, now, wi
       if (quotaObservedAt(quota) > now() || !moveTarget({ engine: "claude", accounts: [quota], from,
         readAfter: Math.max(verifiedAt, now() - 10 * 60_000) })) return refuse("wind-down-target-no-fresh-room");
       if (!await admission()) return refuse("wind-down-evidence-changed");
-      lifecycle.selectProfile(agentName, pane, profile);
+      continuation ||= queue.enqueue({ agentName, pane, source: "quota-wind-down",
+        text: windDownContinuation({ from: from.name, to: target.name }), idempotencyKey,
+        orderKey: `0000000000000000:${idempotencyKey}`, nextAttemptAt: PAUSED_UNTIL_RECOVERY,
+        metadata: { windDownSessionId: identity.sessionId, windDownTargetProfileKey: profile.key,
+          windDownSourceProfileKey: from.key, windDownResetAt: resetAt } });
+      try { lifecycle.selectProfile(agentName, pane, profile); }
+      catch (error) {
+        cancelWindDownContinuation(queue, continuation, `wind-down selection failed: ${error.message}`);
+        return refuse(`wind-down-select-failed:${error.message}`);
+      }
       const result = await lifecycle.restartAfterWindDown(agentName, pane,
         { sessionId: identity.sessionId, guard: admission }, profile.key);
-      if (!result.ok) return refuse(result.reason);
-      queue.enqueue({ agentName, pane, source: "quota-wind-down",
-        text: windDownContinuation({ from: from.name, to: target.name }), idempotencyKey,
-        metadata: { windDownSessionId: identity.sessionId, windDownRestartedAt: now() } });
+      if (!result.ok) {
+        cancelWindDownContinuation(queue, continuation, `wind-down restart failed: ${result.reason}`);
+        return refuse(result.reason);
+      }
+      releaseWindDownContinuation(queue, continuation, now());
       return { moved: true, sessionId: identity.sessionId };
     } catch (error) {
       return refuse(`wind-down-move-failed:${error.message}`);

@@ -3,6 +3,9 @@
 /** WHAT: Names an unacknowledged terminal delivery. WHY: Keeps every consumer on one persisted state token. */
 export const DELIVERED_UNVERIFIED_STATE = "delivered_unverified";
 
+/** WHAT: Defines the recovery pause timestamp. WHY: Prevents delivery from publishing an unfinished move. */
+export const PAUSED_UNTIL_RECOVERY = Number.MAX_SAFE_INTEGER;
+
 /** WHAT: Defines delivery states that no longer retry. WHY: Keeps queue readers from inventing divergent terminal sets. */
 export const TERMINAL_DELIVERY_STATES = new Set([
   "acknowledged", "cancelled", DELIVERED_UNVERIFIED_STATE,

@@ -8,7 +8,7 @@ import {
   isSlashReceiptInJsonl,
 } from "./jsonl-reader.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
-import { TERMINAL_DELIVERY_STATES } from "./delivery-queue.mjs";
+import { PAUSED_UNTIL_RECOVERY, TERMINAL_DELIVERY_STATES } from "./delivery-queue.mjs";
 import {
   claudeQuotaRecoveryReadiness,
   claudeWeekSpent,
@@ -17,8 +17,7 @@ import {
 } from "./claude-quota-recovery.mjs";
 import { resumeParkedPanes } from "./quota-park-resume.mjs";
 import { createClaudeWindDownMove } from "./quota-wind-down-move.mjs";
-
-const PAUSED_UNTIL_RECOVERY = Number.MAX_SAFE_INTEGER;
+import { reconcileWindDownContinuations } from "./quota-wind-down-recovery.mjs";
 
 /** WHAT: Recognises a job held by an active Claude limit. WHY: Lets rotation and alarms tell a quota fence from live delivery. */
 export function isQuotaParkedJob(job) {
@@ -288,16 +287,16 @@ export function createClaudeQuotaCoordinator({
       log(`config read failed: ${error.message}`);
       return [];
     }
-    const targets = [];
+    const targets = [], results = [];
     for (const entry of agents) {
       if (entry.backend === "native") continue;
       for (let pane = 0; pane < entry.panes.length; pane++) {
         if (!/claude/iu.test(String(entry.panes[pane]?.cmd || entry.panes[pane]?.name || ""))) continue;
+        results.push(...await reconcileWindDownContinuations({ queue, lifecycle, agentName: entry.name, pane, now }));
         const receipt = lifecycle.activeReceipt(entry.name, pane);
         if (receipt || jobsFor(entry.name, pane).some(isQuotaParked)) targets.push({ agentName: entry.name, pane, receipt });
       }
     }
-    const results = [];
     const quotas = new Map();
     for (const target of targets) {
       const entry = agents.find((agent) => agent.name === target.agentName);
