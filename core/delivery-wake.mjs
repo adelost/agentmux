@@ -51,8 +51,7 @@ export async function wakeDeliveryTarget({
     if (!quotaFloor || isOwnerChannelJob(job)) return null;
     const paneKey = `${job.agentName}:${job.pane}`;
     const cached = await quotaFloor.windowsFor(paneKey).catch(() => ({ unavailable: true }));
-    if (cached?.unavailable) return "quota-floor: account reading unavailable; automatic work waits for verified room";
-    if (!holdOf(cached)) return !cached && job.costHold
+    if (!cached?.unavailable && !holdOf(cached)) return !cached && job.costHold
       ? "quota-floor: account reading unavailable; existing hold remains" : null;
     // A pane quota recovery just moved may still be listed on its old account; re-read where it runs now.
     const fresh = await quotaFloor.windowsFor(paneKey, { fresh: true }).catch(() => null);
