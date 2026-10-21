@@ -17,6 +17,7 @@ import {
 } from "fs";
 import { basename, dirname, join } from "path";
 import { tryLockDir } from "./dir-lock.mjs";
+import { assertDeliveryPreparation } from "./delivery-preparation.mjs";
 
 const DEFAULT_MODE = 0o600;
 const LOCK_STALE_MS = 10_000;
@@ -147,13 +148,17 @@ export const createState = (path, {
     }
   };
 
-  const update = (change) => withStateLock(path, () => {
-    maybeReload(); // under the lock: the newest file, whoever wrote it
-    const result = change(data);
-    writeStateAtomic(path, data);
-    lastStamp = fileStamp(path);
-    return result;
-  }, lockOptions);
+  const update = (change) => {
+    assertDeliveryPreparation();
+    return withStateLock(path, () => {
+      assertDeliveryPreparation();
+      maybeReload(); // under the lock: the newest file, whoever wrote it
+      const result = change(data);
+      writeStateAtomic(path, data);
+      lastStamp = fileStamp(path);
+      return result;
+    }, lockOptions);
+  };
 
   const get = (key, fallback = undefined) => {
     maybeReload();

@@ -6,12 +6,14 @@
 // while that one pane stays exclusive.
 // On 2026-10-02 lsrc:3's compact held the whole lsrc session for 3.5 minutes,
 // so lsrc:2's warned compact was refused and ran cold 42 minutes later.
+import { assertDeliveryPreparation } from "./delivery-preparation.mjs";
 
 /**
  * WHAT: Builds one session write lease that also fences one pane or every pane.
  * WHY: Keeps a long engine-side wait from blocking sibling panes of the session.
  */
 export function acquireSessionWriteLease({ session, paneFence, fencedPanes, onBusy = () => {} }, pane = null) {
+  assertDeliveryPreparation();
   const sessionLease = session();
   if (!sessionLease) { onBusy({ kind: "session" }); return null; }
   // Without a pane the caller acts on the whole session (sleep, rotation,
@@ -40,6 +42,7 @@ export function acquireSessionWriteLease({ session, paneFence, fencedPanes, onBu
       previous?.release();
     },
     restoreSession() {
+      assertDeliveryPreparation();
       if (!held && !released) held = session();
       return held !== null;
     },

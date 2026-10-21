@@ -19,6 +19,7 @@ import { claudeRefusalResetAt } from "./claude-limit-evidence.mjs";
 import { QUOTA_PARK_ORIGIN } from "./quota-park.mjs";
 import { QUOTA_WIND_DOWN_ORIGIN } from "./quota-wind-down.mjs";
 import { withdrawDraft } from "./draft-withdrawal.mjs";
+import { assertDeliveryPreparation, onUnsentPreparationTimeout } from "./delivery-preparation.mjs";
 
 const STATE_KEY = "context_maintenance_by_pane_v1";
 const paneKey = (name, pane) => `${name}:${pane}`;
@@ -52,6 +53,7 @@ function hasWorkAfter(files, cursor) {
 }
 
 function write(state, key, record) {
+  assertDeliveryPreparation();
   state.set(STATE_KEY, { ...state.get(STATE_KEY, {}), [key]: record });
 }
 
@@ -235,13 +237,24 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
         pid: process.pid, command };
       intent = record;
       write(state, paneKey(name, pane), record);
+      onUnsentPreparationTimeout(error => {
+        const close = (records = {}) => {
+          const key = paneKey(name, pane), current = records[key];
+          return current?.status === "ATTEMPTING" && current.pid === record.pid && current.at === record.at && current.sessionId === record.sessionId
+            ? { ...records, [key]: { ...current, status: "NOT_SENT", reason: error.message, finishedAt: now() } } : records;
+        };
+        if (state.updateKey) state.updateKey(STATE_KEY, close);
+        else state.set(STATE_KEY, close(state.get(STATE_KEY, {})));
+      });
       const compact = compactFor(target.engine);
       const guardedAgent = { ...agent, sendOnly: async (agentName, text, index, options) => {
         const guard = async stage => {
+          assertDeliveryPreparation();
           const latest = identityFor(target.engine, target.dir);
           const input = await agent.promptTransportState(name, pane, stage === "submit" ? text : "");
           if (latest?.sessionId !== identity.sessionId || pending() || await agent.isBusy(name, pane)
               || input?.state !== (stage === "submit" ? "drafted" : "empty-idle")) throw new Error("context-cost:pre-submit-state-changed");
+          assertDeliveryPreparation();
         };
         await guard("paste");
         return agent.sendOnly(agentName, text, index, { ...options, existingOnly: true, maintenanceGuard: guard,

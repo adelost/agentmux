@@ -9,6 +9,7 @@ import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createSelfCompactStore } from "./self-compact.mjs";
 import { verifiedClaudeCompact } from "./verified-compact.mjs";
 import { composerAgent } from "../test/fixtures/composer-agent.mjs";
+import { withDeliveryPreparation } from "./delivery-preparation.mjs";
 
 function fixture({ fail = false, jobs = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-cost-test-")), path = join(root, "session.jsonl");
@@ -34,6 +35,38 @@ function fixture({ fail = false, jobs = [] } = {}) {
 }
 
 feature("warm and cold compaction share a durable one-attempt fence", () => {
+  component("a preparation timeout before compact input closes only its exact unsent intent", {
+    given: ["the real compact owner has recorded its intent but its final composer read is held", () => {
+      const ctx = fixture();
+      let release;
+      const held = new Promise(resolve => { release = resolve; });
+      ctx.agent.promptTransportState = () => ctx.state.get("context_maintenance_by_pane_v1", {})["claw:2"]?.status === "ATTEMPTING"
+        ? held : Promise.resolve({ state: "empty-idle" });
+      ctx.agent.sendOnly = async () => { ctx.calls.push("unexpected-input"); };
+      ctx.compactFor = () => async ({ agent }) => {
+        await agent.sendOnly("claw", "/compact", 2);
+        return { ok: true };
+      };
+      return { ...ctx, release };
+    }],
+    when: ["the unsent bound expires, then the old composer observation returns", async ctx => {
+      let run;
+      const timeout = await withDeliveryPreparation({ timeoutMs: 20, onTimeout: error => error.code }, () => {
+        run = createContextMaintenance(ctx).run("claw", 2, { required: true });
+        return run;
+      });
+      const atStop = ctx.state.get("context_maintenance_by_pane_v1")["claw:2"];
+      ctx.release({ state: "empty-idle" });
+      await run.catch(() => {});
+      return { timeout, atStop };
+    }],
+    then: ["no model input occurs and the exact pre-input intent is honestly not sent", ({ timeout, atStop }, ctx) => {
+      expect(timeout).toBe("AMUX_DELIVERY_PREPARATION_EXPIRED");
+      expect(atStop).toMatchObject({ status: "NOT_SENT", sessionId: "one", reason: expect.stringContaining("preparation-timeout:") });
+      expect(ctx.calls).toEqual([]);
+      expect(ctx.state.get("context_maintenance_by_pane_v1")["claw:2"]).toEqual(atStop);
+    }], cleanup: ctx => ctx.cleanup(),
+  });
   component("an explicit switch compact still runs for a small context, once per work generation", {
     given: ["a small idle session with an explicit compact requirement", () => {
       const ctx = fixture();

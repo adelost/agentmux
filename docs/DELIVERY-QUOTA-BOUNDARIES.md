@@ -78,3 +78,41 @@ moved as a test and no model/provider turn is spent. Pasting, drafted, submittin
 and submitted jobs still hold the switch. Automatic banner recovery remains
 weekly-only. ai:3 integrated C's exact net as aaa8735c and preserved its rule in
 the demand-read fleet card; no second C cherry-pick is applied.
+
+## A64 remaining preparation boundary
+
+Selection before code: extend the existing delivery-storage-recovery component,
+plus the actual tmux and context-maintenance components, each invocation <=60s.
+The representative red is an unresolved pane/cursor/cost read under the real
+queue/session writer: the sibling cannot run and the old continuation can write
+after a naive timeout. Green requires a named preparation timeout within60s,
+the same pending job deferred, the real kernel lease released, and both late
+physical input and stale queue/state writes refused. No historical await is
+attributed from this source reproduction.
+
+KEEP the transport, recovery policies and durable physical fences. SPLIT only
+the writer's preparation lifetime into a scoped guard: a monotonic deadline,
+current stage and closed continuation follow existing asynchronous calls.
+Check at the actual tmux input dispatch, queue update and state mutation, not
+only before calling sendOnly. The first real input ends this unsent preparation
+budget; an already-started compact/probe/native operation keeps its existing
+receipt/fence lifetime and is never abandoned as NOT SENT. Each next head gets
+its own preparation scope after the prior operation has finished. Native HTTP
+dispatch retains its existing idempotency/timeout owner rather than gaining an
+unsent tmux verdict. Startup reconciliation has no kernel writer lease and is
+outside this lease-bound claim. Unknown/submitted/draft fences are preserved.
+
+Focused red: two existing storage-recovery components fail on the unbounded
+writer, retaining the kernel lease and allowing a resumed admission to write.
+Green also checks the default60s monotonic bound despite a wall-clock jump,
+late cursor writes against pending/pasting/drafted/submitting/submitted jobs,
+the next head after real input, and a timed-out floor still recognised by the
+account mover while the owner's input passes. A compact intent recorded before
+input is closed as NOT_SENT only if it is still that exact ATTEMPTING record;
+the actual input-dispatch boundary cancels the unsent budget, so a legitimate
+compact/probe/native dispatch is never abandoned as an unsent message.
+KEEP state locking, physical tmux primitives and context policy: add the scoped
+checks at their existing write owners. The state initial-read/stamp correction
+and fanout atomic update from309 remain intact in the combined source. The
+per-head writer split lowers broker and queue caps instead of bypassing them.
+Named model/account/receipt/clock I/O doubles spend no provider turns.
