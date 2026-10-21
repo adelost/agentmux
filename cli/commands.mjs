@@ -5,7 +5,7 @@ import { dirname, resolve } from "path";
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, statSync } from "fs";
 import { join } from "path";
 import { createHash } from "crypto";
-import { loadConfig, listAgents, getAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane, validateAgentSender } from "./config.mjs";
+import { loadConfig, listAgents, getAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens } from "./format.mjs";
 import { paneRuntimeLabel } from "./pane-runtime-label.mjs";
 import { isDispatchHelp, parseFlags, flagShapedPromptTokens } from "./command-args.mjs";
@@ -35,7 +35,8 @@ import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "../core/kimi-jsonl-reader.mjs";
 import { dialectFor, inspectPane } from "./inspect-pane.mjs";
 import { readAlternateTurns } from "../core/alternate-session-reader.mjs";
-import { assertConfiguredSender, detectSenderFromEnv, outgoingPaneText } from "../core/sender-detect.mjs";
+import { detectSenderFromEnv } from "../core/sender-detect.mjs";
+import { cmdSend } from "./panel-send.mjs";
 import { appendEvent, readEvents } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
@@ -597,50 +598,6 @@ export async function cmdCutover(args, ctx) {
 
 async function cmdStopAll(ctx) {
   return runStopAll(ctx, (c) => bridgeLifecycle.stop(c));
-}
-
-async function cmdSend(name, prompt, flags, ctx) {
-  saveLast(ctx.lastFile, name);
-  const pane = flags.p || 0;
-
-  // Preserve sender provenance, except on slash commands that must reach the engine verbatim.
-  const exec = (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 });
-  const sender = detectSenderFromEnv(process.env, exec);
-  assertConfiguredSender(sender, (session, senderPane) => validateAgentSender(ctx.configPath, session, senderPane));
-  const finalPrompt = outgoingPaneText(prompt, sender);
-  const paneCmd = getAgent(ctx.configPath, name).panes?.[pane]?.cmd || "";
-  if (/^\/model(?:\s|$)/u.test(finalPrompt) && /\bclaude\b/u.test(paneCmd)) {
-    throw new Error(`Raw Claude /model bypasses compact: use amux model ${name} -p ${pane} MODEL`);
-  }
-  const idempotencyKey = flags["idempotency-key"];
-  if (idempotencyKey != null
-      && (typeof idempotencyKey !== "string" || Buffer.byteLength(idempotencyKey, "utf8") > 256
-        || !/^[a-zA-Z0-9:._/-]+$/u.test(idempotencyKey))) {
-    throw new Error("--idempotency-key must be 1-256 safe identity characters");
-  }
-  const waitMs = flags["wait-ms"];
-  if (waitMs != null && (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 12_000)) {
-    throw new Error("--wait-ms must be 0-12000");
-  }
-  const res = await sendToPane(ctx, name, pane, finalPrompt, {
-    force: !!flags.force,
-    idempotencyKey: idempotencyKey || null,
-    ...(waitMs != null ? { waitMs } : {}),
-  });
-  if (res?.blocked) {
-    process.exitCode = 1;
-    return;
-  }
-  if (res?.unverified) {
-    console.error(`Delivery unverified for '${name}' (pane ${pane}); AMUX will not resend automatically.`);
-    process.exitCode = 1;
-    return;
-  }
-  if (!res?.delivered) {
-    process.exitCode = 1;
-    return;
-  }
-  if (!flags.q) console.log(`${res.pending ? "Queued durably for" : "Sent to"} '${name}' (pane ${pane}): ${truncate(prompt)}`);
 }
 
 export async function readPromptFromStdin(maxBytes = 128 * 1024, stream = process.stdin) {
@@ -2712,7 +2669,7 @@ export function cmdScopedGate(args) {
 const FUNCTION_CHURN_ACTIONS = new Set(["functions", "check", "verdict"]);
 
 const FLAG_SPECS = {
-  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number" },
+  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number", fanout: "string" },
   runtime: { port: "number", "data-dir": "string", "state-dir": "string", "no-legacy-migration": "boolean", force: "boolean" },
   services: { force: "boolean" },
   cutover: {
@@ -2833,6 +2790,7 @@ async function dispatchAgentTarget(name, rest, ctx) {
   const resolved = resolveAgent(name, ctx.configPath);
   const { flags, positional } = parseFlags(rest, FLAG_SPECS.send);
 
+  if (Object.hasOwn(flags, "fanout") && !flags.stdin && !positional.length) throw new Error("--fanout requires a prompt or --stdin");
   if (flags.stdin && positional.length > 0) {
     throw new Error("--stdin cannot be combined with a positional prompt");
   }

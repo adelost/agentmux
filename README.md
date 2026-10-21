@@ -29,6 +29,20 @@ workspace.
 - Protect long-running sessions with loop detection, reminders, and
   auto-compact support.
 
+## Panel send limits
+
+A panel's ordinary `amux PROJECT -p N` sends may address four different recipients in a rolling15-minute window.
+The fifth new recipient is refused before enqueue. Repeated sends to a recipient share its slot. An explicit
+`--fanout "reason"` admits an exception and records its reason in the event ledger. The check counts admitted
+send attempts, not recipient execution. `--force` does not bypass it.
+
+Operator/Discord input, the internal stall watchdog, self-sends and the `lsrc:0` dispatcher do not consume those
+slots. Sender identity still comes from the existing configured-pane detection, not message text.
+
+Held auto-compact notices remember an accepted cause/session beside the generated agents configuration in
+`compact-held-notices.json`. Journal-age changes alone never rearm a notice, including after bridge reload.
+A changed cause or cleared episode can notify again; a failed Discord send remains retryable.
+
 ## Core Concepts
 
 | Concept | Purpose |

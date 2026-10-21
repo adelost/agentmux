@@ -72,6 +72,7 @@ const TEST_ALIASES = {
   "test/slash-prose-fixture.mjs": ["lib.test.mjs", "test/handlers.test.mjs"],
   "channels/drift-guard.mjs": ["core/reminder-state.test.mjs", "test/jsonl-reader.test.mjs"],
   "channels/auto-compact.mjs": ["channels/auto-compact.integration.test.mjs"],
+  "channels/compact-held-notice.mjs": ["channels/auto-compact-held.test.mjs", "channels/auto-compact.integration.test.mjs"],
   "core/codex-process-launch.mjs": ["core/agent-launch-command.test.mjs"],
   "cli/codex-account-compact.mjs": ["cli/codex-account-switch.test.mjs"],
   "channels/jsonl-watcher.mjs": ["test/jsonl-watcher.test.mjs"],

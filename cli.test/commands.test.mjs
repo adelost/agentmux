@@ -503,7 +503,8 @@ ai:
   });
 });
 
-feature("amux asks durable archive", () => {
+// Since f568d7c0 the default reads posted conversations; readAskLedger is the documented --raw legacy port.
+feature("amux asks raw durable archive", () => {
   unit("--all-repos --summary keeps a lost-session ask visibly unresolved", {
     given: ["an empty active fleet and one orphaned durable ask", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-asks-summary-"));
@@ -527,7 +528,7 @@ feature("amux asks durable archive", () => {
       const logs = [];
       const original = console.log;
       console.log = (...args) => logs.push(args.join(" "));
-      try { await dispatch(["asks", "--all-repos", "--summary", "--all"], ctx); }
+      try { await dispatch(["asks", "--raw", "--all-repos", "--summary", "--all"], ctx); }
       finally { console.log = original; }
       return { root, output: logs.join("\n") };
     }],
@@ -541,7 +542,7 @@ feature("amux asks durable archive", () => {
     }],
   });
 
-  unit("default output is human-only while --all-sources restores agent briefs", {
+  unit("raw output is human-only while --all-sources restores agent briefs", {
     given: ["one human ask and one inter-agent directive", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-asks-origin-"));
       const configPath = join(root, "agents.yaml");
@@ -570,8 +571,8 @@ feature("amux asks durable archive", () => {
       };
       return {
         root,
-        human: await capture(["asks", "--all-repos", "--all"]),
-        everySource: await capture(["asks", "--all-repos", "--all", "--all-sources"]),
+        human: await capture(["asks", "--raw", "--all-repos", "--all"]),
+        everySource: await capture(["asks", "--raw", "--all-repos", "--all", "--all-sources"]),
       };
     }],
     then: ["the simple command answers what the human asked", ({ root, human, everySource }) => {

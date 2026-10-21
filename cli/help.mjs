@@ -20,6 +20,7 @@ Usage:
     --                            Treat remaining arguments as literal prompt text
     --idempotency-key <key>       Reuse one durable queue identity on retry
     --wait-ms <0-12000>           Bound automation receipt wait (enqueue is already durable)
+    --fanout <reason>             Log an exception to 4 panel recipients per 15 min
   agent add <name> <dir>          Add new agent
   agent rm <name|:nr>             Remove agent
   agent stop <name|:nr>           Stop tmux session (keep config); first compacts large idle panes while warm

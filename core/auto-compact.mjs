@@ -139,6 +139,13 @@ const promptCacheExpired = (lastActivityMs, now, config) =>
 // run and nothing said so before the cache was cold. A held compact is reported once per quiet episode.
 const HELD_ALERT_LEAD_MS = 5 * 60_000;
 
+/** WHAT: Resolves the stable compact hold cause. WHY: Keeps changing journal ages and token readings out of notice identity. */
+export function compactHeldCause({ status, paneInMode }) {
+  if (isLiveStatus(status)) return 'running-turn';
+  if (paneInMode === '1' || paneInMode === 1) return 'copy-mode';
+  return isCompactUnsafe(status) ? `status:${status}` : null;
+}
+
 /**
  * WHAT: Names what holds an over-budget, quiet pane away from its compact, or returns null.
  * WHY: Keeps a do-not-touch status from ending a quiet episode in silence while the prompt cache goes cold.
@@ -148,9 +155,10 @@ export function compactHeldReason({ status, paneInMode, contextTokens, lastActiv
   if (!Number.isFinite(lastActivityMs) || now - lastActivityMs < config.minIdleMs) return null;
   if (status === "limited") return null; // the limited alert already names that stop
   const quietMinutes = Math.round((now - lastActivityMs) / 60_000);
-  if (isLiveStatus(status)) return `its screen shows a running turn, but its journal has been silent for ${quietMinutes} min`;
-  if (paneInMode === "1" || paneInMode === 1) return "it is in tmux copy-mode";
-  return isCompactUnsafe(status) ? `its status is ${status}` : null;
+  const cause = compactHeldCause({ status, paneInMode });
+  if (cause === 'running-turn') return `its screen shows a running turn, but its journal has been silent for ${quietMinutes} min`;
+  if (cause === 'copy-mode') return "it is in tmux copy-mode";
+  return cause ? `its status is ${status}` : null;
 }
 
 /**
