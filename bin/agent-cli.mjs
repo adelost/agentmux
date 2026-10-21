@@ -13,12 +13,14 @@ import { loadRuntimeEnv } from "../core/runtime-env.mjs";
 import { resolveConfigSources } from "../core/config-sources.mjs";
 import { ensureRuntimeConfig } from "../core/runtime-config.mjs";
 import { isDispatchHelp } from "../cli/command-args.mjs";
+import { applyNetworkDefaults } from "../core/network-defaults.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 // BRIDGE_DIR = agentmux package root. agentmux.yaml (the user-editable
 // source config) lives here. Tests may override via AGENTMUX_BRIDGE_DIR.
 const BRIDGE_DIR = process.env.AGENTMUX_BRIDGE_DIR || resolve(__dir, "..");
 loadRuntimeEnv({ packageRoot: BRIDGE_DIR });
+applyNetworkDefaults();
 
 const SOCKET = process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET;
 const configSources = resolveConfigSources({ packageDir: BRIDGE_DIR });
