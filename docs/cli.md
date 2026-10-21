@@ -253,7 +253,7 @@ counts. It first covers distinct panes, then fills remaining slots with the
 next newest asks. This is the fast orientation layer; no model summarizes it.
 
 Delivery and pane hooks first append the exact UTF-8 prompt to
-`~/.agentmux/ask-ledger.jsonl`; provider session history is then joined only
+`~/.agentmux/ask-ledger/YYYY-MM-DD.jsonl` by UTC day; provider session history is then joined only
 to enrich that durable identity with reply/status and line anchors. If a
 provider session was cleared, respawned, rotated, or reaped before completion
 was observed, the ask remains visible as `unverified` and is included by

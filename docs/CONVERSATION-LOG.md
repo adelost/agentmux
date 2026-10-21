@@ -3,8 +3,8 @@
 One compact, durable record of everything that passes through amux, the same
 for every engine: what was asked of a pane (`ask`) and what amux posted to
 Discord (`post`). It lives in the existing ask ledger,
-`~/.agentmux/ask-ledger.jsonl` (override: `AMUX_ASK_LEDGER_PATH`), mode 0600,
-rotated beside itself at 32 MiB. Archives are kept: they are the record of
+`~/.agentmux/ask-ledger/YYYY-MM-DD.jsonl`, one file per UTC day, mode 0600
+(directory override: `AMUX_ASK_LEDGER_PATH`). Old files are kept: they are the record of
 what was said. The log stays on this machine: it is raw conversation, so the
 nightly backup of distilled memory skips it (0600 files are not copied).
 
@@ -13,7 +13,7 @@ Three stores, one role each:
 | Store | Role | Retention |
 |---|---|---|
 | delivery queue (`~/.agentmux/delivery-queue/`) | transport state: pending, submitted, receipt, at-most-once fences | acknowledged jobs pruned after 7 days |
-| conversation log | what was said, in and out | never pruned, rotated at 32 MiB |
+| conversation log | what was said, in and out | never pruned, one file per UTC day |
 | event log (`~/.agentmux/events.jsonl`) | loss-tolerant hints: prompt/stop, permissions, session start | rotated at 8 MiB |
 
 A row points at a delivery by `deliveryId`; it never copies transport state.
@@ -94,7 +94,7 @@ writer now records accepted content rather than the pre-send payload.
 - `amux search "exact words"` includes canonical rows from the last 30 days.
   The warm search daemon answers from a word index it keeps in memory and
   follows the log by inode and byte offset, so a question never rescans the
-  log; a cold answer leaves these rows out and says so. His messages are also
+  log; a cold answer scans the log directly and says so. His messages are also
   copied word for word to `~/.agentmux/search-human/YYYY-MM-DD.md`, one unit
   per message with its time, `human.name` from the amux config and the pane in
   the header. A run of his messages to one pane, each within 2 minutes of the
