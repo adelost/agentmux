@@ -46,6 +46,10 @@ one pane to the logged-in Claude account with the most weekly room below
 `AMUX_QUOTA_RESERVE_PERCENT`, in its exact session; its parked messages follow.
 A session window moves a pane only after a verified wind-down compact. `AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false`
 disables banner recovery. Other rotations still require his instruction.
+Mattias 2026-10-21 (day file 03:49Z): when the quota park or floor holds
+panes because their account's week is spent and another logged-in account
+has room, move them there at once without asking, then report it. Paid
+credits still need his yes.
 Mattias authorized quota wind-down on 2026-10-20: the nearer week or session
 window warns at 5 % left and nudges once at 3 %. A move requires a VERIFIED
 compact of this session in this episode, an idle pane, an empty composer, no
