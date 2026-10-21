@@ -13,6 +13,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
+import { fleetPolicyFile } from "./fleet-policy-files.mjs";
 
 export const REMINDER_STATE_PATH =
   process.env.AMUX_REMINDER_STATE_PATH ||
@@ -123,7 +124,7 @@ export function recordReminderDelivery(paneState, { delivered, nowMs, reminderCo
  * `directive` must be self-contained: it travels inside the message, so
  * the core of the rule reaches the pane even if a heading is later
  * renamed. `section: null` means "re-read the whole file". `file: "global"`
- * names the engine's global instructions; other headings belong to AGENT_HINTS.
+ * names the engine's global instructions; absolute files name demand-read policy.
  *
  * Code standards also have event hooks (post-compact re-anchor,
  * first-edit-per-session) that fire at the sharp moments; the rotation
@@ -148,8 +149,8 @@ export const DRIFT_SECTIONS = [
       "No status pings, no acks, no politeness; commits + ledger ARE the status.",
   },
   {
-    file: ".agents/CLAUDE.md",
-    section: "Staffing and review economics",
+    file: fleetPolicyFile("merge-release.md"),
+    section: "Merge by fresh proof",
     label: "scoped verification (fast changed-unit tests, lint, local smoke)",
     directive: "verify fresh trunk with fast relevant unit tests, strict lint " +
       "and one local smoke within five minutes. No heavy CI or full-suite " +
@@ -182,8 +183,8 @@ export const DRIFT_SECTIONS = [
       "No --no-verify, no swallowed errors, no skipped tests.",
   },
   {
-    file: ".agents/CLAUDE.md",
-    section: "Staffing and review economics",
+    file: fleetPolicyFile("work-ledger.md"),
+    section: "A drained backlog is healthy idle",
     label: "healthy idle (no invented tasks or maintenance loops)",
     directive: "a drained backlog is healthy idle. On DONE or BLOCKED, re-read " +
       "the existing queue and completed prerequisites. Take the next authorised " +
@@ -250,7 +251,9 @@ export function formatReminderMessage(turnCount, reminderCount = 0, dialect = "c
   const rule = DRIFT_SECTIONS[idx];
   const file = rule.file === "global"
     ? dialect === "claude" ? "~/.claude/CLAUDE.md" : "~/.codex/AGENTS.md"
-    : join(rootDir, ".agents", dialect === "claude" ? "CLAUDE.md" : "AGENTS.md");
+    : rule.file === ".agents/CLAUDE.md"
+      ? join(rootDir, ".agents", dialect === "claude" ? "CLAUDE.md" : "AGENTS.md")
+      : rule.file;
   const where = rule.section
     ? `the "${rule.section}" section of ${file}`
     : file;

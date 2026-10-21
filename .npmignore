@@ -29,6 +29,7 @@ agents.yaml.example
 **/*.test.js
 **/*.test.ts
 docs/*
+!docs/fleet/
 !docs/reliability.md
 !docs/cli.md
 !docs/public-distribution.md

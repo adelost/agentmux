@@ -21,8 +21,9 @@ feature("bounded automatic instruction context", () => {
       expect(codex).toMatch(/people, projects and decisions[\s\S]*amux search[\s\S]*--show N/u);
       expect(codex).toMatch(/Current implementation[\s\S]*`rg` and Git[\s\S]*read the source/u);
       expect(codex).toContain("If hits do not answer the question, refine the terms");
-      expect(codex).toContain("amux compact --self --continue-file HANDOFF");
-      expect(codex).toContain("`--no-resume` means maintenance only.");
+      for (const trigger of ["Before a merge or release", "Before handing work on", "Before changing a hot function", "Before a compact", "Writing the day file", "Delivering images or speech"]) {
+        expect(codex).toContain(trigger);
+      }
       for (const heading of ["Always lead with a recommendation", "First line is the outcome", "Root cause > symptoms"]) {
         expect(codex).not.toContain(`## ${heading}`);
       }
@@ -31,7 +32,8 @@ feature("bounded automatic instruction context", () => {
       expect(codex).toContain("Never skip a failing test or bypass a hook with `--no-verify`.");
       expect(codex).toContain("On a `[drift-guard]` reminder, re-read the section it names.");
       // Byte budget, not a token estimate or a limit on user-owned operator tails.
-      expect(Buffer.byteLength(codex, "utf8")).toBeLessThanOrEqual(16 * 1024);
+      // 2026-10-21: lsrc:0's register brief moves the full rules behind read triggers.
+      expect(Buffer.byteLength(codex, "utf8")).toBeLessThanOrEqual(8 * 1024);
     }],
   });
 });

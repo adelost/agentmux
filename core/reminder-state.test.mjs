@@ -1,5 +1,6 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { unlinkSync } from "fs";
+import { unlinkSync, readFileSync } from "fs";
+import { FLEET_PROCESS_HINTS } from "./hints-fleet-process.mjs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -282,6 +283,19 @@ feature("formatReminderMessage", () => {
 });
 
 feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
+  unit("moved verification and idle rules target their demand-read documents", {
+    when: ["formatting both engines' moved rules", () => ["claude", "codex"].flatMap((engine) => [
+      formatReminderMessage(45, 2, engine, "/repo"),
+      formatReminderMessage(45, DRIFT_SECTIONS.length - 1, engine, "/repo"),
+    ])],
+    then: ["the real policy file and section replace the generated-file pointer", (messages) => {
+      for (let i = 0; i < messages.length; i++) {
+        expect(messages[i]).toMatch(i % 2 === 0
+          ? /the "Merge by fresh proof" section of .*\/docs\/fleet\/merge-release\.md/
+          : /the "A drained backlog is healthy idle" section of .*\/docs\/fleet\/work-ledger\.md/);
+      }
+    }],
+  });
   unit("first reminder targets self-directed fleet ownership", {
     given: ["reminderCount 0", () => ({ n: 45, count: 0 })],
     when: ["formatting", ({ n, count }) => formatReminderMessage(n, count)],
@@ -327,7 +341,7 @@ feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
   });
 
   unit("non-Claude panes reference the actual generated AGENTS file", {
-    given: ["a Codex pane", () => ({ n: 45, count: 2 })],
+    given: ["a Codex pane's core communication rule", () => ({ n: 45, count: 1 })],
     when: ["formatting", ({ n, count }) => formatReminderMessage(n, count, "codex", "/repo")],
     then: ["re-read targets the engine's authoritative file", (r) => {
       expect(r).toContain("/repo/.agents/AGENTS.md");
@@ -347,6 +361,10 @@ feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
         expect(msg).toMatch(/ONE sentence/);
         expect(msg).toMatch(/40/);
         expect(msg).toContain(rule.file === "global" ? "~/.claude/CLAUDE.md" : rule.file);
+        if (rule.file !== "global") {
+          const policy = rule.file === ".agents/CLAUDE.md" ? FLEET_PROCESS_HINTS : readFileSync(rule.file, "utf8");
+          expect(policy).toContain(`## ${rule.section}`);
+        }
         expect(msg).not.toMatch(/silently/i);
       }
     }],
