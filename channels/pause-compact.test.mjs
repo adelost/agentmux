@@ -112,6 +112,19 @@ feature("quota wind-down in the pause poll (component)", () => {
       } finally { ctx.cleanup(); }
     }],
   });
+  // claw:0 2026-10-21: Claude S's week reset read as 20 values within half a second of 04:00Z overnight.
+  component("a reset read that drifts by under a second is the same episode, so the pane hears once", {
+    given: ["a working pane at 5 % and its real durable broker", () => windDownFixture()],
+    when: ["polling as its reset reads 0.496 s late, then 0.437 s early", async ctx => {
+      await ctx.poll();
+      ctx.facts.windows = [{ ...ctx.facts.windows[0], resetsAt: "2026-10-20T11:10:00.496Z" }]; await ctx.poll();
+      ctx.facts.windows = [{ ...ctx.facts.windows[0], resetsAt: "2026-10-20T11:09:59.563Z" }]; await ctx.poll();
+      return ctx.queue.list("lsrc", 2);
+    }],
+    then: ["one notice", (jobs, ctx) => {
+      try { expect(jobs.map(job => job.text.split("]")[0])).toEqual(["[AMUX QUOTA WIND-DOWN · 5 %"]); } finally { ctx.cleanup(); }
+    }],
+  });
   component("a working pane requests a compact that runs only after its turn ends", {
     given: ["UC-1 with pause-size compaction off", () => windDownFixture()],
     when: ["polling while working, then at a clean turn end", async ctx => {
@@ -338,7 +351,7 @@ feature("a working pane far past its budget", () => {
 // compacts first, so the restart after the reset is not a cold read of a huge context.
 feature("a pane whose account is about to stop it", () => {
   const nearLimit = (resetInMs, { background = null } = {}) => {
-    let now = NOW, supersede = false;
+    let now = NOW, supersede = false, resetDriftMs = 0;
     const dir = mkdtempSync(join(tmpdir(), "amux-quota-park-"));
     const session = join(dir, "s1.jsonl");
     writeFileSync(session, "{}\n");
@@ -351,13 +364,14 @@ feature("a pane whose account is about to stop it", () => {
       record: line => lines.push(line), identityFor: () => ({ path: session, sessionId: "s1" }),
       backgroundFor: { claude: () => background, codex: () => null }, journalCompactFor: () => null, selfRequests: requests,
       parkFor: async () => ({ account: { name: "Claude S", key: "claude:1" },
-        windows: [{ kind: "session", usedPercent: 97, resetsAt: new Date(NOW + resetInMs).toISOString() }] }),
+        windows: [{ kind: "session", usedPercent: 97, resetsAt: new Date(NOW + resetInMs + resetDriftMs).toISOString() }] }),
       parkStore: parks, limitReceiptFor: () => null });
     const poll = facts => pause.consider({ agentConfig: lsrc, pane: 2, engine: "claude", paneDir: "/lsrc/.agents/2",
       status: "idle", inCopyMode: false, contextTokens: 150_000, ...facts });
     return { runs, lines, requests, parks, poll, turnEndsThenWait: async () => { const ended = now; now += 61_000; return poll({ lastActivityMs: ended }); },
       working: () => { now += 30_000; return poll({ status: "working", lastActivityMs: now }); },
       newInput: async () => { supersede = true; now += 30_000; const sent = await poll({ status: "working", lastActivityMs: now }); supersede = false; return sent; },
+      later: (waitMs, driftMs) => { now += waitMs; resetDriftMs = driftMs; },
       cleanup: () => rmSync(dir, { recursive: true, force: true }) };
   };
 
@@ -400,6 +414,24 @@ feature("a pane whose account is about to stop it", () => {
         expect(sent).toBe(true);
         expect(ctx.lines.map(line => `${line.outcome}:${line.cell}`))
           .toEqual(["parked:quota-park", "dropped:self-request", "parked:quota-park", "compacted:self-request"]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  // claw:0 2026-10-21: parked and compacted at 00:03:22Z, then parked and compacted again at 00:38:21Z, when Claude S's
+  // week reset read 04:00:00.365Z instead of 04:00:00.047Z.
+  component("a pane parked for a stop is not parked again when a later read of the reset drifts", {
+    given: ["builder lsrc:2, parked and compacted for its stop", async () => {
+      const ctx = nearLimit(4 * 3_600_000); await ctx.turnEndsThenWait(); return ctx;
+    }],
+    when: ["it works on, and 35 min later its turn ends with the reset read 318 ms later", async ctx => {
+      await ctx.working(); ctx.later(35 * 60_000, 318);
+      return ctx.turnEndsThenWait();
+    }],
+    then: ["one park and one compact for the stop", (sent, ctx) => {
+      try {
+        expect(sent).toBe(false);
+        expect(ctx.lines.map(line => `${line.outcome}:${line.cell}`)).toEqual(["parked:quota-park", "compacted:self-request"]);
+        expect(ctx.runs).toHaveLength(1);
       } finally { ctx.cleanup(); }
     }],
   });

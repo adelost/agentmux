@@ -14,7 +14,7 @@ import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, oversizeN
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice } from "../core/self-compact.mjs";
 import { QUOTA_FLOOR_DEFAULT_PERCENT, QUOTA_PARK_ORIGIN, QUOTA_PARK_POLICY, codexCreditHold, quotaParkContinuation,
-  quotaParkDecision } from "../core/quota-park.mjs";
+  quotaParkDecision, quotaStopEpisode } from "../core/quota-park.mjs";
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
 import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 import { isLiveStatus } from "../core/pane-status.mjs";
@@ -111,7 +111,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     // The park compacts at the floor, where new automatic work stops, or ahead of a window forecast to run out.
     const decision = quotaParkDecision({ engine, windows, graceNote: Boolean(receipt), graceNoteAt: receipt?.observedAt,
       working: isLiveStatus(status), lastActivityAt: now() - quietMs, now: now() }, { ...QUOTA_PARK_POLICY, leftPercent: floorPercent });
-    const episode = `${decision.window}:${decision.resetAt}`;
+    const episode = quotaStopEpisode(decision.window, decision.resetAt);
     if (!decision.park || parked.get(paneKey) === episode) return false;
     parked.set(paneKey, episode);
     const line = { ...base, cell: "quota-park",
@@ -148,7 +148,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     if (windDownMode === "off" || !parkFor || !["claude", "codex"].includes(engine)) return false;
     const facts = await parkFor(paneKey), stage = windDownStage({ ...facts, now: now() });
     if (!stage) return false;
-    const episodeKey = `${paneKey}|${stage.window}|${stage.resetAt}`;
+    const episodeKey = `${paneKey}|${quotaStopEpisode(stage.window, stage.resetAt)}`;
     if (windDownEpisodes.get(paneKey)?.key !== episodeKey) {
       const lastMoveAt = windDownEpisodes.get(paneKey)?.lastMoveAt;
       windDownEpisodes.set(paneKey, { key: episodeKey, beganAt: stage.noticeAt, lastMoveAt });

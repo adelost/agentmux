@@ -6,6 +6,7 @@
 // since a compaction would cost more than it saves and take the pane's memory.
 
 import { unwrapPastedContent } from "./claude-prompt-text.mjs";
+import { nearestMinute } from "./quota-format.mjs";
 
 /** WHAT: Names the request origin a parked pane's self-compact carries. WHY: Keeps quota recovery's move waiting for its compact. */
 export const QUOTA_PARK_ORIGIN = "quota-park";
@@ -113,6 +114,13 @@ export function quotaParkDecision({ engine, windows = [], graceNote = false, gra
   if (resetAt - cacheFrom <= outlastMs) return { park: false, cell: "cache-outlives-stop", window: last.kind, resetAt };
   return { park: true, cell: near.length ? "near-limit" : "grace-note", window: last.kind, resetAt, leftPercent: Math.max(0, 100 - last.usedPercent) };
 }
+
+// claw:0 2026-10-21: Claude's usage API read Claude S's week reset as 20 values within half a second of 04:00Z overnight,
+// and each new value parked panes that had compacted for that stop already. Claude's resets fall on whole minutes plus
+// that noise, Codex's on exact seconds, so the nearest minute names one stop for every read of it. The reset stays the
+// last field in milliseconds: the wind-down's moves read it there to refuse a stop that has ended.
+/** WHAT: Names the stop a window's reset ends, the same for every read of it. WHY: Keeps one park and one wind-down per stop. */
+export const quotaStopEpisode = (window, resetAt) => `${window}|${nearestMinute(resetAt).getTime()}`;
 
 /**
  * WHAT: Reads AMUX_CODEX_CREDITS: hold (default) keeps Codex work off paid credits; allow lets it draw them.

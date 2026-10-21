@@ -1,6 +1,6 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { accountWindows, codexCreditsAllowed, parkResumeDecision, quotaFloorHold, quotaFloorPercent, quotaParkContinuation,
-  quotaParkDecision } from "./quota-park.mjs";
+  quotaParkDecision, quotaStopEpisode } from "./quota-park.mjs";
 
 const NOW = Date.parse("2026-10-19T09:30:00Z");
 const week = (usedPercent, resetsAt = "2026-10-25T18:08:00Z") => ({ kind: "week", usedPercent, resetsAt });
@@ -203,6 +203,19 @@ feature("the quota floor", () => {
     then: ["held, held, allowed, held with a warning", ({ values, warnings }) => {
       expect(values).toEqual([false, false, true, false]);
       expect(warnings).toHaveLength(1);
+    }],
+  });
+});
+
+// claw:0 2026-10-21: Claude S's week reset read as 20 values within half a second of 04:00Z overnight.
+feature("the stop a window's reset ends", () => {
+  unit("reads that drift by under a second name one stop; another window or the next reset names another", {
+    when: ["naming Claude S's week read at 03:59:59.563Z and 04:00:00.496Z, its session, and next week's reset", () => ({
+      first: quotaStopEpisode("week", Date.parse("2026-10-27T03:59:59.563Z")), second: quotaStopEpisode("week", "2026-10-27T04:00:00.496Z"),
+      session: quotaStopEpisode("session", "2026-10-27T04:00:00.047Z"), next: quotaStopEpisode("week", "2026-11-03T04:00:00.322Z") })],
+    then: ["the two reads match and the others differ", ({ first, second, session, next }) => {
+      expect(second).toBe(first);
+      expect(new Set([first, session, next]).size).toBe(3);
     }],
   });
 });
