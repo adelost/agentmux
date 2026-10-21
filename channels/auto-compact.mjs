@@ -6,8 +6,8 @@
 
 import {
   compactHeldReason,
+  compactHeldCause,
   decideAutoCompactAction,
-  formatCompactHeldMessage,
   formatWarningMessage,
   refusalNeedsHeldNotice,
   formatCompactedMessage,
@@ -28,6 +28,7 @@ import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
 import { formatLimitedAlert } from "../core/quota-format.mjs";
 import { parseQuotaRecoveryConfig } from "./quota-recovery.mjs";
 import { enteredLimited, nextLimitedMemory, seedLimitedFromLedger } from "./limited-latch.mjs";
+import { createCompactHeldNotice } from './compact-held-notice.mjs';
 
 // Panes that have warnings pending (paneKey → { warned_at: ms }).
 // Panes currently mid-compact (paneKey string).
@@ -69,8 +70,8 @@ export function createAutoCompact({
   // decision/state machine still runs every tick (so warn→grace→compact is
   // unaffected); we only rate-limit the Discord POST. Naturally expires.
   const lastWarnPostAt = new Map();
-  // paneKey → lastActivityMs of the quiet episode already reported as held.
-  const heldNotices = new Map();
+  const heldNotices = createCompactHeldNotice({ agentsYamlPath, discord, config, log });
+  const postCompactHeld = heldNotices.post;
   let intervalId = null;
 
   // Panes shorter than config.minPaneHeight (rows) can't render a coherent
@@ -301,24 +302,6 @@ export function createAutoCompact({
   const postCompactFailed = (name, idx, key, reason, retryAt) =>
     postCompactNotice(name, idx, key, formatCompactFailedMessage(key, reason, retryAt), "compact-failed");
 
-  // lsrc:3 review 2026-10-10: only a notice Discord accepted counts; a rejected one is tried on the next poll.
-  async function postCompactHeld(agentName, paneIdx, paneKey, reason, { lastActivityMs, contextTokens }) {
-    if (heldNotices.get(paneKey) === lastActivityMs) return;
-    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
-    if (!channelId || !discord) {
-      heldNotices.set(paneKey, lastActivityMs);
-      log(`${paneKey}: compact held (${reason}); no Discord channel to tell`);
-      return;
-    }
-    try {
-      await discord.send(channelId, formatCompactHeldMessage(paneKey, reason, contextTokens, lastActivityMs + config.warmCacheMs));
-      heldNotices.set(paneKey, lastActivityMs);
-      log(`${paneKey}: compact held (${reason}); notice sent`);
-    } catch (err) {
-      log(`compact-held notice send failed for ${paneKey}: ${err.message}; retrying on the next poll`);
-    }
-  }
-
   const postCompactPostponed = (name, idx, key, reason) =>
     postCompactNotice(name, idx, key, formatCompactPostponedMessage(key, reason), "compact-postponed");
 
@@ -417,8 +400,11 @@ export function createAutoCompact({
           config,
           now,
         });
+        const cause = compactHeldCause({ status, paneInMode });
+        if ((Number.isFinite(contextTokens) && contextTokens <= config.maxTokens) || status === 'limited'
+            || (!cause && status === 'idle' && !warnings.get(paneKey)?.refusedReason)) heldNotices.clear(paneKey);
         const held = compactHeldReason({ status, paneInMode, contextTokens, lastActivityMs, config, now });
-        if (held) await postCompactHeld(a.name, i, paneKey, held, { lastActivityMs, contextTokens });
+        if (held) await postCompactHeld(a.name, i, paneKey, held, { lastActivityMs, contextTokens, cause, sessionId: contextSession });
 
         if (decision.action === "warn") {
           warnings.set(paneKey, { warned_at: now, sessionId: contextSession });
@@ -443,7 +429,7 @@ export function createAutoCompact({
           const refusal = await fireCompact(a.name, i, paneKey, contextPercent, paneDialect(a, i));
           if (refusal) keepWarningForRetry(paneKey, warning, refusal);
           if (refusal && refusalNeedsHeldNotice(lastActivityMs, now, config)) {
-            await postCompactHeld(a.name, i, paneKey, `the compact was refused: ${refusal}`, { lastActivityMs, contextTokens });
+            await postCompactHeld(a.name, i, paneKey, `the compact was refused: ${refusal}`, { lastActivityMs, contextTokens, sessionId: contextSession });
           }
         } else if (decision.action === "postpone") {
           warnings.delete(paneKey);
