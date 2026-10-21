@@ -41,6 +41,7 @@ feature("memory policy", () => {
     then: ["the override is applied without dropping defaults", (policy) => {
       expect(policy.maxCompactions).toBe(2);
       expect(policy.memoryMaxBytes).toBe(4096);
+      expect(policy.claudeMemoryIndexMaxChars).toBe(6000);
     }],
   });
 

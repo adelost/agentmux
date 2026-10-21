@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * WHAT: Claude PostToolUse hook. When a write grows a section of today's or yesterday's daily memory note past the
- * section rule, it tells the writer once per section and session, in Swedish, how to shorten it.
+ * section rule, or grows a project MEMORY.md past its size limit, it reminds once per section/file and session.
  * WHY: Mattias 2026-10-10, "blir du påmind om dem när de behövs": the rule reached writers only through a nightly
  * lint report, and 31 sections over 15 lines piled up in two days. It never blocks: the write already happened.
  */
@@ -42,10 +42,11 @@ try {
 }
 
 try {
-  const { reminderKey, sectionReminderText, touchedSections, writtenDailyNotes } = await import("../core/memory-section-reminder.mjs");
-  const { DEFAULT_MEMORY_POLICY, dateKeyDaysAgo, loadMemoryPolicy } = await import("../core/memory-policy.mjs");
+  const { reminderKey, sectionReminderText, touchedSections, writtenDailyNotes, writtenMemoryIndexes } = await import("../core/memory-section-reminder.mjs");
+  const { DEFAULT_MEMORY_POLICY, dateKeyDaysAgo, loadMemoryPolicy, localDateKey } = await import("../core/memory-policy.mjs");
   const notes = writtenDailyNotes(payload);
-  if (!notes.length) process.exit(0);
+  const indexes = writtenMemoryIndexes(payload);
+  if (!notes.length && !indexes.length) process.exit(0);
 
   const state = readState();
   if (!state.sessions || typeof state.sessions !== "object") state.sessions = {};
@@ -54,9 +55,25 @@ try {
     if (!(session?.day >= yesterday)) delete state.sessions[id];
   }
   const sessionId = String(payload.session_id || "no-session");
-  const session = state.sessions[sessionId] || { day: notes[0].dateKey, keys: [] };
+  const session = state.sessions[sessionId] || { day: localDateKey(), keys: [] };
 
   const messages = [];
+  for (const index of indexes) {
+    const key = `index:${index.path}`;
+    if (session.keys.includes(key)) continue;
+    let text;
+    try { text = readFileSync(index.path, "utf8"); } catch { continue; }
+    let maxChars = DEFAULT_MEMORY_POLICY.claudeMemoryIndexMaxChars;
+    try { maxChars = loadMemoryPolicy(dirname(dirname(index.path))).claudeMemoryIndexMaxChars; } catch {
+      // Lint owns invalid policies; the shared default still applies here.
+    }
+    const chars = [...text].length;
+    if (chars <= maxChars) continue;
+    session.keys.push(key);
+    session.day = localDateKey();
+    const limit = String(maxChars).replace(/\B(?=(\d{3})+(?!\d))/gu, " ");
+    messages.push(`MEMORY.md är ${chars} tecken, taket är ${limit}. Lägg minnet i rätt index-*.md och lämna högst ett krokord här.`);
+  }
   for (const note of notes) {
     let text;
     try { text = readFileSync(note.path, "utf8"); } catch { continue; }

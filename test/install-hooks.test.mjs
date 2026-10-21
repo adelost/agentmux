@@ -79,6 +79,7 @@ feature("agentmux hook installer", () => {
       ));
       expect(reminders).toHaveLength(1);
       expect(reminders[0].matcher).toBe("Write|Edit|MultiEdit|Bash");
+      expect(reminders[0].hooks[0].command).toContain("*memory/MEMORY.md*");
       const installed = join(home, ".agentmux", "bin", "amux-suggest.mjs");
       const linked = join(home, ".local", "bin", "amux-suggest");
       expect(existsSync(installed)).toBe(true);

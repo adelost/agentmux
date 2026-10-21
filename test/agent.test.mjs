@@ -555,7 +555,7 @@ feature("generated agent policy", () => {
       expect(content).toContain("Managers are sidecars, not gateways");
       expect(content).toMatch(/do not need a manager round-trip to claim, update or\s+finish their own work/u);
       expect(content).toContain("A drained backlog is healthy idle");
-      expect(content).toContain("Keep replies, docs and comments concise");
+      expect(content).toContain("No skill names or bracketed labels in replies.");
       expect(content).toMatch(/On DONE or BLOCKED, re-read the existing queue/u);
       expect(content).toMatch(/Re-evaluate conditional deferrals against completed prerequisites/u);
       expect(content).toMatch(/Stay idle only when no authorised runnable work remains/u);
@@ -594,7 +594,7 @@ feature("generated agent policy", () => {
       expect(content).toContain("Human-requested review is welcome");
       expect(content).not.toContain("the reviewer to read first");
       expect(content).toMatch(/merged-but-undeployed feature remains open when\s+deployment is part of the task/u);
-      expect(content).toMatch(/Irreversible or money-spending actions still\s+require human approval/u);
+      expect(content).not.toMatch(/Irreversible or money-spending actions still\s+require human approval/u);
     }],
   });
 

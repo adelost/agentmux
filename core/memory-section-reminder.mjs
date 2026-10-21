@@ -11,8 +11,8 @@ import { dailySections, sectionAtLine } from "./daily-sections.mjs";
 import { dateKeyDaysAgo, localDateKey } from "./memory-policy.mjs";
 
 const DAILY_NAME_RE = /^(\d{4}-\d{2}-\d{2})\.md$/u;
-// A path token in a shell command that names a daily note, e.g. `cat >> ~/ws/memory/2026-10-10.md`.
-const COMMAND_PATH_RE = /[^\s'"=(<>|;&`]*memory\/\d{4}-\d{2}-\d{2}\.md/gu;
+// A shell path naming a daily note or a Claude project memory index.
+const COMMAND_PATH_RE = /[^\s'"=(<>|;&`]*memory\/(?:\d{4}-\d{2}-\d{2}|MEMORY)\.md/gu;
 
 /** WHAT: Expands the home forms a shell command uses. WHY: Keeps `~/…` and `$HOME/…` from hiding the file the hook must read. */
 function expandHome(token, home) {
@@ -26,12 +26,8 @@ function dailyDateKey(path) {
   return match && basename(dirname(path)) === "memory" ? match[1] : null;
 }
 
-/**
- * WHAT: Extracts today's or yesterday's daily notes a tool call wrote, with the text it wrote.
- * WHY: Keeps older days out, because they belong to the nightly archive and nobody should edit them.
- */
-export function writtenDailyNotes(payload, { now = new Date(), home = process.env.HOME || "" } = {}) {
-  const recent = new Set([localDateKey(now), dateKeyDaysAgo(1, now)]);
+/** WHAT: Resolves written memory paths from supported tools. WHY: Daily notes and project indexes share path identity and home expansion. */
+function writtenMemoryFiles(payload, { home = process.env.HOME || "" } = {}) {
   const input = payload?.tool_input || {};
   const cwd = payload?.cwd || process.cwd();
   const notes = [];
@@ -39,9 +35,8 @@ export function writtenDailyNotes(payload, { now = new Date(), home = process.en
     if (!rawPath) return;
     const expanded = expandHome(String(rawPath), home);
     const path = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
-    const dateKey = dailyDateKey(path);
-    if (dateKey && recent.has(dateKey) && !notes.some((note) => note.path === path)) {
-      notes.push({ path, dateKey, newStrings });
+    if (basename(dirname(path)) === "memory" && !notes.some((note) => note.path === path)) {
+      notes.push({ path, newStrings });
     }
   };
   switch (payload?.tool_name) {
@@ -52,6 +47,19 @@ export function writtenDailyNotes(payload, { now = new Date(), home = process.en
     default: break;
   }
   return notes;
+}
+
+/** WHAT: Extracts writes to today's or yesterday's note. WHY: Keeps old daily notes out of write-time reminders. */
+export function writtenDailyNotes(payload, { now = new Date(), ...options } = {}) {
+  const recent = new Set([localDateKey(now), dateKeyDaysAgo(1, now)]);
+  return writtenMemoryFiles(payload, options)
+    .map((note) => ({ ...note, dateKey: dailyDateKey(note.path) }))
+    .filter((note) => recent.has(note.dateKey));
+}
+
+/** WHAT: Extracts writes to project memory indexes. WHY: Keeps size reminders bound to the file the tool wrote. */
+export function writtenMemoryIndexes(payload, options) {
+  return writtenMemoryFiles(payload, options).filter((note) => basename(note.path) === "MEMORY.md");
 }
 
 /**

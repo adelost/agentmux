@@ -39,8 +39,8 @@ import { assertConfiguredSender, detectSenderFromEnv, outgoingPaneText } from ".
 import { appendEvent, readEvents } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
-import { assessRunningBridgeHints, syncConfiguredAgentHints } from "../core/hints-sync.mjs";
-import { ensureAgentHints, HINTS_VERSION } from "../agent.mjs";
+import { assessRunningBridgeHints, hintsSizeWarning, syncConfiguredAgentHints } from "../core/hints-sync.mjs";
+import { AGENT_HINTS, ensureAgentHints, HINTS_VERSION } from "../agent.mjs";
 import { cmdHelp } from "./help.mjs";
 import { expandHome } from "../core/suggestions-comment-bridge.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
@@ -1934,15 +1934,12 @@ async function cmdPs(ctx, flags = {}) {
 
 
 /**
- * Manual drift-guard trigger. Sends a short "re-read your CLAUDE.md"
- * reminder to a pane (or all panes). Complements the bridge's auto poll.
- *
+ * Manual drift-guard trigger for generated or global instructions; complements the bridge poll.
  * Modes:
  *   amux remind <agent> -p N        — one pane, unconditional
  *   amux remind --all               — every live, recently used Claude pane
  *   amux remind --stale             — only panes past the turn threshold
  *   amux remind ... --section "Name" — pin a named section instead of rotating
- *
  */
 async function cmdRemind(ctx, flags = {}, positional = []) {
   const { loadReminderState, saveReminderState, parseReminderConfig, formatReminderMessage, cutoffFor, isReminderTargetActive, reminderSectionNames } =
@@ -1981,7 +1978,7 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
   amux remind <agent> -p <pane>    # one pane
   amux remind --all                # all live, recently used Claude panes
   amux remind --stale              # only panes past threshold (${threshold} turns)
-  amux remind <agent> -p <pane> --section "First line is the outcome"   # pin a named section`);
+  amux remind <agent> -p <pane> --section "Reply"   # pin a global section`);
       process.exit(1);
     }
     const name = resolveAgent(positional[0], ctx.configPath);
@@ -2227,7 +2224,10 @@ async function cmdSync(args) {
   console.log(`sync triggered on bridge (pid ${pid}). Tail bridge log for progress, or watch Discord channel deltas.`);
 }
 
+/** WHAT: Saves configured workspace hints. WHY: Keeps size and running-bridge warnings on the command's output path. */
 export function cmdHintsSync(ctx) {
+  const sizeWarning = hintsSizeWarning(AGENT_HINTS);
+  if (sizeWarning) console.warn(`WARNING: ${sizeWarning}`);
   const summary = syncConfiguredAgentHints(listAgents(ctx.configPath), {
     ensure: ensureAgentHints,
     version: HINTS_VERSION,

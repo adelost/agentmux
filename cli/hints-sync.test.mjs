@@ -60,6 +60,9 @@ feature("amux hints-sync", () => {
       }
       expect(fx.logs.mock.calls.flat().join(" ")).toContain("2 sessions / 2 workspaces");
       expect(fx.warnings.mock.calls.flat().join(" ")).toContain("bridge restart required");
+      const hintsBytes = Buffer.byteLength(readFileSync(join(fx.first, ".agents", "CLAUDE.md")));
+      expect(fx.warnings.mock.calls.flat().join(" "))
+        .toContain(`generated hints are ${hintsBytes} bytes; target is 9216 bytes`);
       fx.logs.mockRestore();
       fx.warnings.mockRestore();
       rmSync(fx.root, { recursive: true, force: true });

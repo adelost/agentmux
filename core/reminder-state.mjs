@@ -122,8 +122,8 @@ export function recordReminderDelivery(paneState, { delivered, nowMs, reminderCo
  *
  * `directive` must be self-contained: it travels inside the message, so
  * the core of the rule reaches the pane even if a heading is later
- * renamed. `section: null` means "re-read the whole file". CLAUDE.md
- * section names must match the AGENT_HINTS headings in agent.mjs.
+ * renamed. `section: null` means "re-read the whole file". `file: "global"`
+ * names the engine's global instructions; other headings belong to AGENT_HINTS.
  *
  * Code standards also have event hooks (post-compact re-anchor,
  * first-edit-per-session) that fire at the sharp moments; the rotation
@@ -157,15 +157,15 @@ export const DRIFT_SECTIONS = [
       "to make a gate green.",
   },
   {
-    file: ".agents/CLAUDE.md",
-    section: "Always lead with a recommendation",
+    file: "global",
+    section: "Reply",
     label: "lead with a recommendation (aldrig 'up to you')",
     directive: "when presenting options, lead with one concrete pick plus " +
       "a one-line why tied to the user's goals. Never 'up to you'.",
   },
   {
-    file: ".agents/CLAUDE.md",
-    section: "First line is the outcome",
+    file: "global",
+    section: "Reply",
     label: "first line is the outcome (SUMMARY rad 1, sedan GOAL, NOW, LEFT på egna rader under arbete)",
     directive: "line 1 is the outcome in one sentence, prefixed SUMMARY: during " +
       "multi-reply work. Then GOAL, NOW and LEFT, one per line in caps, and stop " +
@@ -175,8 +175,8 @@ export const DRIFT_SECTIONS = [
       "normal spacing and short paragraphs or bullets. Nothing before line 1.",
   },
   {
-    file: ".agents/CLAUDE.md",
-    section: "Root cause > symptoms",
+    file: "global",
+    section: "Work",
     label: "root cause > symptoms (aldrig --no-verify)",
     directive: "fix the cause, not the symptom. " +
       "No --no-verify, no swallowed errors, no skipped tests.",
@@ -248,7 +248,9 @@ export function formatReminderMessage(turnCount, reminderCount = 0, dialect = "c
     ? sectionIndexOrThrow(section)
     : reminderCount % DRIFT_SECTIONS.length;
   const rule = DRIFT_SECTIONS[idx];
-  const file = join(rootDir, ".agents", dialect === "claude" ? "CLAUDE.md" : "AGENTS.md");
+  const file = rule.file === "global"
+    ? dialect === "claude" ? "~/.claude/CLAUDE.md" : "~/.codex/AGENTS.md"
+    : join(rootDir, ".agents", dialect === "claude" ? "CLAUDE.md" : "AGENTS.md");
   const where = rule.section
     ? `the "${rule.section}" section of ${file}`
     : file;

@@ -23,6 +23,13 @@ feature("bounded automatic instruction context", () => {
       expect(codex).toContain("If hits do not answer the question, refine the terms");
       expect(codex).toContain("amux compact --self --continue-file HANDOFF");
       expect(codex).toContain("`--no-resume` means maintenance only.");
+      for (const heading of ["Always lead with a recommendation", "First line is the outcome", "Root cause > symptoms"]) {
+        expect(codex).not.toContain(`## ${heading}`);
+      }
+      expect(codex).toContain("No skill names or bracketed labels in replies.");
+      expect(codex).toContain("Comments explain intent, risks or constraints, not a work diary. Preserve exact requirements and quotes.");
+      expect(codex).toContain("Never skip a failing test or bypass a hook with `--no-verify`.");
+      expect(codex).toContain("Re-read this section on a\n`[drift-guard]` reminder. Manual refresh:");
       // Byte budget, not a token estimate or a limit on user-owned operator tails.
       expect(Buffer.byteLength(codex, "utf8")).toBeLessThanOrEqual(16 * 1024);
     }],

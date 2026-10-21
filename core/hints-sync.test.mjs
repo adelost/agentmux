@@ -10,7 +10,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { ensureAgentHints, HINTS_END_MARKER, HINTS_VERSION } from "../agent.mjs";
 import { readHeartbeat, writeHeartbeat } from "./heartbeat.mjs";
-import { assessRunningBridgeHints, syncConfiguredAgentHints } from "./hints-sync.mjs";
+import { assessRunningBridgeHints, hintsSizeWarning, syncConfiguredAgentHints } from "./hints-sync.mjs";
 
 function fleetFixture() {
   const root = mkdtempSync(join(tmpdir(), "amux-hints-sync-"));
@@ -48,6 +48,17 @@ function fleetFixture() {
 }
 
 feature("fleet hints synchronization", () => {
+  unit("hints over 9 KiB warn with UTF-8 bytes; the target itself and below stay silent", {
+    when: ["checking templates around the advisory byte boundary", () => [
+      hintsSizeWarning("a".repeat(9215)),
+      hintsSizeWarning("å".repeat(4608)),
+      hintsSizeWarning(`${"å".repeat(4608)}a`),
+    ]],
+    then: ["only the over-target template warns, without counting characters as bytes", (warnings) => {
+      expect(warnings).toEqual([null, null, "generated hints are 9217 bytes; target is 9216 bytes"]);
+    }],
+  });
+
   unit("bridge startup invokes the fleet sync before publishing template provenance", {
     when: ["reading the production startup seam", () => readFileSync(
       new URL("../index.mjs", import.meta.url), "utf8",

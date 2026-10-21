@@ -22,35 +22,11 @@ Keep each rule in one layer; fix duplicates instead of obeying stale copies.
    and deploy contracts. Current user instructions and checkout restrictions
    stay authoritative.
 
-## Always lead with a recommendation
-
-Pick one option and explain it using the user's goals or evidence, not
-"up to you". State uncertainty when needed. Re-read this section on a
-\`[drift-guard]\` reminder. Manual refresh: \`amux remind <agent> -p <pane>\`
-(\`--all\` / \`--stale\` still require the staffing policy's scope).
-
-## First line is the outcome
-
-- Line 1: the outcome, one sentence. During work that spans more than one reply, prefix it SUMMARY:.
-- Lines 2 to 4 during work that spans more than one reply, always, one per line:
-  GOAL: <the requested outcome>
-  NOW: <current step>
-  LEFT: <what remains>
-  If NOW does not serve GOAL, stop and say so.
-- Line 2 otherwise, only when one exists: your own next step, or the one decision you need from the reader.
-- Nothing before line 1. No process, no skill names, no bracketed labels.
-- Keep replies, docs and comments concise. Use normal spacing and short paragraphs or bullets.
-- Comments explain intent, risks or constraints, not a work diary. Preserve exact requirements and quotes.
-
-## Root cause > symptoms
-
-Find the cause before patching. Never skip a failing test, bypass a hook with
-\`--no-verify\`, or swallow errors. A workaround names the root cause and what remains unfixed.
-
 ## Verify before reporting
 
 Don't claim "done/exists/complete" until 2+ methods agree, e.g. \`ls | grep\`,
 \`Path.exists()\` and \`stat\` (WSL 9p mounts can lie). If they diverge: investigate.
+Never skip a failing test or bypass a hook with \`--no-verify\`.
 
 ## You share this repo with other agents
 
@@ -119,6 +95,7 @@ from its own branching or state; a small split goes in the same change.
 2. **Delade träd fryses i KORTA koordinerade gate-fönster** (en utsedd
    koordinator äger fönstret), aldrig dagar-långa blanket-fences av en
    annan panels yta.
+3. No skill names or bracketed labels in replies. Comments explain intent, risks or constraints, not a work diary. Preserve exact requirements and quotes.
 
 ## Staffing and review economics
 
@@ -199,7 +176,6 @@ from its own branching or state; a small split goes in the same change.
    peer review. Human-requested review is welcome; a red gate or high-risk seam
    needs resolution, not a review loop.
    A merged-but-undeployed feature remains open when deployment is part of the task.
-   Irreversible or money-spending actions still require human approval.
 8. **Report only terminal outcomes:** a blocker, collision, handoff or DONE. The board and the ask
    ledger also carry progress.
 9. **Record blockers where work is tracked:** a concrete reason and the

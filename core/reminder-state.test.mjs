@@ -305,9 +305,9 @@ feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
     then: ["comms, scoped verification, recommendation, first-line outcome, root-cause in order", ([r1, r2, r3, r4, r5]) => {
       expect(r1).toMatch(/Kommunikationsdisciplin/);
       expect(r2).toMatch(/fast relevant unit tests/);
-      expect(r3).toMatch(/Always lead with a recommendation/);
-      expect(r4).toMatch(/First line is the outcome/);
-      expect(r5).toMatch(/Root cause > symptoms/);
+      expect(r3).toContain('the "Reply" section of ~/.claude/CLAUDE.md');
+      expect(r4).toContain('the "Reply" section of ~/.claude/CLAUDE.md');
+      expect(r5).toContain('the "Work" section of ~/.claude/CLAUDE.md');
     }],
   });
 
@@ -346,7 +346,7 @@ feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
         expect(msg.startsWith("[drift-guard]")).toBe(true);
         expect(msg).toMatch(/ONE sentence/);
         expect(msg).toMatch(/40/);
-        expect(msg).toContain(rule.file);
+        expect(msg).toContain(rule.file === "global" ? "~/.claude/CLAUDE.md" : rule.file);
         expect(msg).not.toMatch(/silently/i);
       }
     }],
@@ -357,26 +357,26 @@ feature("formatReminderMessage --section override (1.25.53 behavior)", () => {
   unit("a named section is pinned regardless of reminderCount", {
     given: ["a count that would rotate elsewhere (0 → staffing)", () => ({ n: 40, count: 0 })],
     when: ["formatting with the section pinned", ({ n, count }) =>
-      formatReminderMessage(n, count, "claude", "", "First line is the outcome")],
-    then: ["the message targets First line is the outcome, not the rotation slot", (r) => {
-      expect(r).toMatch(/First line is the outcome/);
+      formatReminderMessage(n, count, "claude", "", "Reply")],
+    then: ["the message targets global Reply, not the rotation slot", (r) => {
+      expect(r).toContain('the "Reply" section of ~/.claude/CLAUDE.md');
       expect(r).not.toMatch(/Re-read the "Staffing and review economics"/);
     }],
   });
   unit("the outcome reminder asks for terse text that keeps every fact", {
-    given: ["the First line is the outcome section", () => ({ n: 40, count: 0 })],
+    given: ["the outcome slot now points to global Reply", () => ({ n: 40, count: 4 })],
     when: ["formatting its reminder", ({ n, count }) =>
-      formatReminderMessage(n, count, "claude", "", "First line is the outcome")],
+      formatReminderMessage(n, count)],
     then: ["it says to drop small words and filler and keep every fact, number, negation and condition", (r) => {
       expect(r).toMatch(/terse: drop small words and filler; keep every fact, number, negation and condition\./);
     }],
   });
 
   unit("the pinned message equals the rotation message at that section's index", {
-    given: ["First line is the outcome sits at rotation index 4", () => ({})],
+    given: ["Reply first occurs at rotation index 3", () => ({})],
     when: ["formatting pinned vs rotated", () => ({
-      pinned: formatReminderMessage(40, 0, "claude", "", "First line is the outcome"),
-      rotated: formatReminderMessage(40, 4),
+      pinned: formatReminderMessage(40, 0, "claude", "", "Reply"),
+      rotated: formatReminderMessage(40, 3),
     })],
     then: ["identical text (same directive body, same mention-all tail)", ({ pinned, rotated }) =>
       expect(pinned).toBe(rotated)],
@@ -387,7 +387,7 @@ feature("formatReminderMessage --section override (1.25.53 behavior)", () => {
     when: ["resolving it", () => () => formatReminderMessage(40, 0, "claude", "", "No Such Section")],
     then: ["it throws, lists a real section, and does not repeat a shared name", (call) => {
       expect(call).toThrow(/Unknown reminder section "No Such Section"/);
-      expect(call).toThrow(/First line is the outcome/);
+      expect(call).toThrow(/Reply/);
       const msg = (() => { try { call(); } catch (e) { return e.message; } })();
       expect((msg.match(/Staffing and review economics/g) || []).length).toBe(1);
     }],
@@ -398,8 +398,25 @@ feature("formatReminderMessage --section override (1.25.53 behavior)", () => {
     when: ["reading the valid names", () => reminderSectionNames()],
     then: ["deduped, first-seen order, covers the targetable sections", (names) => {
       expect(new Set(names).size).toBe(names.length);
-      expect(names).toContain("First line is the outcome");
+      expect(names).toContain("Reply");
+      expect(names).toContain("Work");
+      for (const removed of ["Always lead with a recommendation", "First line is the outcome", "Root cause > symptoms"]) {
+        expect(names).not.toContain(removed);
+        expect(() => formatReminderMessage(40, 0, "claude", "", removed)).toThrow(/Unknown reminder section/);
+      }
       expect(names[0]).toBe("Staffing and review economics");
+    }],
+  });
+
+  unit("global rules name the Codex global file, never a generated project section", {
+    when: ["targeting both global sections on Codex", () => ["Reply", "Work"].map((section) => ({
+      section, message: formatReminderMessage(40, 0, "codex", "/repo", section),
+    }))],
+    then: ["each targets its owning global section", (results) => {
+      for (const { section, message } of results) {
+        expect(message).toContain(`the "${section}" section of ~/.codex/AGENTS.md`);
+        expect(message).not.toContain("/repo/.agents");
+      }
     }],
   });
 });
@@ -414,8 +431,8 @@ feature("formatReminderMessage mention-all (1.20.90 behavior)", () => {
         expect(msg).toMatch(/Staffing and review economics|self-directed fleet/i);
         expect(msg).toMatch(/kommunikationsdisciplin|Kommunikationsdisciplin/);
         expect(msg).toMatch(/scoped verification|fast relevant unit tests/);
-        expect(msg).toMatch(/lead with a recommendation|Always lead with a recommendation/i);
-        expect(msg).toMatch(/root cause > symptoms/i);
+        expect(msg).toMatch(/lead with a recommendation|lead with one concrete pick/i);
+        expect(msg).toMatch(/root cause > symptoms|fix the cause, not the symptom/i);
       }
     }],
   });

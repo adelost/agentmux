@@ -6,6 +6,12 @@
 
 import { resolve } from "path";
 
+/** WHAT: Formats the generated-context size warning. WHY: Keeps growth visible without weakening the hard budget. */
+export function hintsSizeWarning(hints) {
+  const bytes = Buffer.byteLength(hints, "utf8");
+  return bytes > 9 * 1024 ? `generated hints are ${bytes} bytes; target is 9216 bytes` : null;
+}
+
 export function syncConfiguredAgentHints(agents, {
   ensure,
   version,

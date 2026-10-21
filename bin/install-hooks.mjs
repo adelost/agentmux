@@ -42,8 +42,8 @@ const FORK_GUARD_MATCHER = "Agent|Task";
 const FORK_GUARD_RECEIPT_MATCHER = "Agent|Task|TaskStop";
 const FORK_SWITCH = "CLAUDE_CODE_FORK_SUBAGENT";
 // WHAT: Defines the PostToolUse command for the daily memory section rule.
-// WHY: Keeps every other tool call free of a node start; only payloads naming a daily note reach it.
-export const MEMORY_SECTION_REMINDER_CMD = `p=$(cat); case "$p" in *memory/20*) printf '%s' "$p" | exec node "${join(__dir, "memory-section-reminder.mjs")}";; esac`;
+// WHY: Keeps unrelated tool calls from starting node; only daily notes and project indexes reach it.
+export const MEMORY_SECTION_REMINDER_CMD = `p=$(cat); case "$p" in *memory/20*|*memory/MEMORY.md*) printf '%s' "$p" | exec node "${join(__dir, "memory-section-reminder.mjs")}";; esac`;
 const MEMORY_SECTION_MATCHER = "Write|Edit|MultiEdit|Bash";
 const SETTINGS = join(homedir(), ".claude", "settings.json");
 
