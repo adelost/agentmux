@@ -13,6 +13,8 @@ export const TOOL_GUIDE_HINTS = `# agentmux
 - \`amux asks --open\`: candidate open requests; read the original instructions
   and later replies before reviving a waiter; unverified is not
   unfinished. \`amux ps\`: configured, historical and running model/context.
+- What the human said, latest or to another pane: \`amux asks --list --since 12h -n 100\`
+  (newest first, every pane) before \`amux search\`, which ranks by match, not time.
 - Earlier people, projects and decisions: \`amux search "specific terms"\`, then
   \`amux search --show N\`. Check original sources, dates and later corrections;
   ranking is not authority. If hits do not answer the question, refine the terms

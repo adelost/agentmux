@@ -21,6 +21,8 @@ feature("bounded automatic instruction context", () => {
       expect(codex).toMatch(/people, projects and decisions[\s\S]*amux search[\s\S]*--show N/u);
       expect(codex).toMatch(/Current implementation[\s\S]*`rg` and Git[\s\S]*read the source/u);
       expect(codex).toContain("If hits do not answer the question, refine the terms");
+      // Search ranks by match, so the human's latest words need the time-ordered ledger first (lsrc:0, 2026-10-22).
+      expect(codex).toMatch(/amux asks --list --since 12h -n 100`[\s\S]*before `amux search`/u);
       // Automatic log/Dream policy replaces the retired manual day-writing trigger (lsrc:0, 2026-10-21).
       for (const trigger of ["Before a merge or release", "Before handing work on", "Before changing a hot function", "Before a compact", "Memory or day digests", "Delivering images or speech"]) {
         expect(codex).toContain(trigger);
