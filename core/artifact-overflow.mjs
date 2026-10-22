@@ -31,6 +31,7 @@ export function planArtifactOverflow({ root = join(homedir(), "lsrc/.artifacts")
     if (!tree || tree.error) reasons.push(`unreadable folder: ${tree?.error ?? "not measured"}`);
     else if (nowMs - tree.newestModifiedMs < days * DAY) reasons.push(`modified within ${days} days`);
     if (tree?.browserProfile) reasons.push("holds a browser profile");
+    if (tree?.lockedFolders) reasons.push("holds folders this user cannot change");
     if (safety.errors.length) reasons.push("unreadable process evidence");
     if ((safety.holders?.[path] ?? []).length) reasons.push("process cwd, fd or mapping inside");
     if (reasons.length) skipped.push({ path, reasons }); else candidates.push({ path, ...tree });
@@ -71,7 +72,7 @@ export function moveArtifacts(plan, { nowMs = Date.now(), sampleDisk, references
     const fresh = measure([planned.path])[planned.path], holders = references([planned.path]);
     const entry = { at: new Date(nowMs).toISOString(), path: planned.path, bytes: fresh?.bytes, files: fresh?.files,
       destination: join(plan.destination, planned.path), mode: "skipped" };
-    if (!fresh || fresh.error || fresh.browserProfile || nowMs - fresh.newestModifiedMs < days * DAY || holders.errors.length
+    if (!fresh || fresh.error || fresh.browserProfile || fresh.lockedFolders || nowMs - fresh.newestModifiedMs < days * DAY || holders.errors.length
       || (holders.holders?.[planned.path] ?? []).length) { journal(entry); results.push(entry); continue; }
     entry.before = sampleDisk(); entry.mode = "attempting"; journal({ ...entry });
     try {

@@ -515,8 +515,9 @@ with idle I/O, acts in this order:
    `~/.cache/uv` in its maps, cwd or descriptors and no `uv sync`, `uv add`,
    `uv pip` or `pip install` runs. Otherwise uv is skipped: a forced prune on
    2026-10-22 removed an archive that running voice-mode processes mapped.
-5. Folders in `~/lsrc/.artifacts` unchanged for 14 days (mtime and ctime of
-   every entry) and open in no process move with `rsync -rlt
+5. Folders in `~/lsrc/.artifacts` unmodified for 14 days (newest mtime of
+   any entry), open in no process, and holding no browser profile and no
+   folder this user cannot change move with `rsync -rlt
    --remove-source-files` to `/mnt/q/wsl-overflow-DATE/<original path>`. Each
    gets a `MANIFEST.md` row with the command to move it back. Nothing is
    deleted, and the move stops when Q: lacks room or rsync fails.

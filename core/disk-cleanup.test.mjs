@@ -1,7 +1,7 @@
 // The disk cleanup removes regenerable caches and finished checkouts, and moves
 // old artifacts to Q:. These tests cover the deletion and move boundaries.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { component, expect, feature, unit } from "bdd-vitest";
@@ -98,24 +98,27 @@ feature("disk cleanup removes only what regenerates and moves artifacts without 
     }],
   });
 
-  component("an artifact folder modified within 14 days or holding a browser profile stays; a recent ctime alone does not hold it", {
-    given: ["a folder with 20-day-old mtimes, a folder with one new file, and a test browser profile", () => {
+  // 2026-10-22: one folder with root-owned subfolders refused mid-move and stopped the row after 36 of 204 folders.
+  component("an artifact folder modified within 14 days, holding a browser profile or a folder this user cannot change stays; a recent ctime alone does not hold it", {
+    given: ["a folder with 20-day-old mtimes, a folder with one new file, a test browser profile and an old read-only subfolder", () => {
       const root = mkdtempSync(join(tmpdir(), "artifacts-")), artifacts = join(root, ".artifacts");
-      for (const name of ["old", "new"]) { mkdirSync(join(artifacts, name, "deep"), { recursive: true }); writeFileSync(join(artifacts, name, "deep", "frame.png"), "pixels"); }
+      for (const name of ["old", "new", "locked"]) { mkdirSync(join(artifacts, name, "deep"), { recursive: true }); writeFileSync(join(artifacts, name, "deep", "frame.png"), "pixels"); }
       mkdirSync(join(artifacts, "run", "chrome-profile", "Default"), { recursive: true }); writeFileSync(join(artifacts, "run", "chrome-profile", "Default", "Cookies"), "c");
       const past = new Date(Date.now() - 20 * DAY);
-      for (const path of ["old/deep/frame.png", "old/deep", "old", "new/deep", "new", "run/chrome-profile/Default/Cookies", "run/chrome-profile/Default", "run/chrome-profile", "run"]) {
+      for (const path of ["old/deep/frame.png", "old/deep", "old", "new/deep", "new", "run/chrome-profile/Default/Cookies", "run/chrome-profile/Default", "run/chrome-profile", "run",
+        "locked/deep/frame.png", "locked/deep", "locked"]) {
         utimesSync(join(artifacts, path), past, past);
       }
+      chmodSync(join(artifacts, "locked", "deep"), 0o555);
       return { root, artifacts };
     }],
     when: ["planning the move", ({ root, artifacts }) => planArtifactOverflow({ root: artifacts, overflowRoot: root, references: idle, freeBytes: () => 1e12 })],
     then: ["only the folder with old content is planned", (plan) => {
       expect(plan.candidates.map(({ path }) => path.split("/").at(-1))).toEqual(["old"]);
       expect(Object.fromEntries(plan.skipped.map(({ path, reasons }) => [path.split("/").at(-1), reasons])))
-        .toEqual({ new: ["modified within 14 days"], run: ["holds a browser profile"] });
+        .toEqual({ new: ["modified within 14 days"], run: ["holds a browser profile"], locked: ["holds folders this user cannot change"] });
     }],
-    cleanup: ({ root }) => rmSync(root, { recursive: true, force: true }),
+    cleanup: ({ root, artifacts }) => { chmodSync(join(artifacts, "locked", "deep"), 0o755); rmSync(root, { recursive: true, force: true }); },
   });
 
   component("a planned artifact folder moves with rsync, keeps every file and records how to move it back", {
