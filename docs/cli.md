@@ -281,7 +281,11 @@ amux asks bind ID --close "Non-task question answered"
 ```
 
 Run row/commit binding from the target Git repository. The row must exist in
-its `docs/TASKS.md` (HEAD for a bare repository); the commit must resolve there.
+its configured ledger (HEAD for a bare repository); the commit must resolve there.
+Row binding uses the matching repository `root` and relative `path` in
+`~/.config/v1d-stats/ledger-sources.json`, the same source configuration as stats.
+Without a matching path it uses `docs/TASKS.md`. A missing row in a configured
+ledger fails; it never tries another ledger to find the number.
 The recorded reference includes the repository path and exact row or full commit
 SHA. The owner binds tasks he gives; the lead uses `--close` for asks without a
 task. Exactly one target and all ids are checked before anything is written.

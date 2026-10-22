@@ -16,6 +16,7 @@ export function cmdAskBind(ids, flags, ctx) {
   if (!caller) throw Error("asks bind requires a configured agent:pane caller");
   validateAgentPane(ctx.configPath, caller.session, caller.pane);
   const rows = bindAsks({ ids, kind: targets[0], value: flags[targets[0]], by, cwd: ctx.cwd || process.cwd(),
+    sourcesPath: ctx.ledgerSourcesPath,
     ledgerEntries: ctx.readAskLedger ? ctx.readAskLedger() : readAskLedger() });
   for (const row of rows) console.log(`bound ${row.ledgerId} ${row.kind} ${row.ref}`);
   return rows;

@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { defaultAskBindingsPath } from "./ask-binding-paths.mjs";
+import { askRowLedger } from "./ask-row-ledger.mjs";
 
 const KINDS = new Set(["row", "commit", "close"]);
 const validBinding = row => row && typeof row.ledgerId === "string" && row.ledgerId.length > 0
@@ -25,25 +26,26 @@ const gitIn = (cwd, args) => execFileSync("git", ["-C", cwd, ...args], {
 }).trim();
 
 /** WHAT: Checks one repository target before any append. WHY: Keeps row and revision references scoped to the invoking repo. */
-export function askBindingTarget({ kind, value, cwd = process.cwd() }) {
+export function askBindingTarget({ kind, value, cwd = process.cwd(), sourcesPath }) {
   if (!KINDS.has(kind) || typeof value !== "string" || !value.trim()) throw Error("A row, commit or non-empty close reason is required");
   if (kind === "close") return value.trim();
   const bare = gitIn(cwd, ["rev-parse", "--is-bare-repository"]) === "true";
   const root = gitIn(cwd, ["rev-parse", bare ? "--absolute-git-dir" : "--show-toplevel"]);
   if (kind === "commit") return `${root}@${gitIn(root, ["rev-parse", "--verify", "--end-of-options", `${value}^{commit}`])}`;
   if (!/^\d+[a-z]?$/u.test(value)) throw Error("--row requires an exact ledger row id");
-  const file = join(root, "docs", "TASKS.md");
-  const text = bare ? gitIn(root, ["show", "HEAD:docs/TASKS.md"]) : readFileSync(file, "utf8");
+  const relativePath = askRowLedger(root, { sourcesPath });
+  const file = join(root, relativePath);
+  const text = bare ? gitIn(root, ["show", `HEAD:${relativePath}`]) : readFileSync(file, "utf8");
   if (!text.split("\n").some(line => line.split("|")[1]?.trim() === value)) throw Error(`Task row ${value} does not exist in ${file}`);
   return `${file}:${value}`;
 }
 
 /** WHAT: Stores one fully validated batch of exact ask identities. WHY: Prevents an unknown id or missing target from partially binding a bulk command. */
-export function bindAsks({ ids, kind, value, by, ledgerEntries, cwd, path = defaultAskBindingsPath(), now = Date.now }) {
+export function bindAsks({ ids, kind, value, by, ledgerEntries, cwd, sourcesPath, path = defaultAskBindingsPath(), now = Date.now }) {
   if (!Array.isArray(ids) || !ids.length) throw Error("At least one exact ask id is required");
   const known = new Set(ledgerEntries.map(row => row.id));
   for (const id of ids) if (!known.has(id)) throw Error(`Unknown ask id ${id}`);
-  const ref = askBindingTarget({ kind, value, cwd });
+  const ref = askBindingTarget({ kind, value, cwd, sourcesPath });
   const ts = new Date(now()).toISOString();
   const rows = [...new Set(ids)].map(ledgerId => ({ ledgerId, kind, ref, by, ts }));
   if (!rows.every(validBinding)) throw Error("Ask binding requires an agent:pane caller");
