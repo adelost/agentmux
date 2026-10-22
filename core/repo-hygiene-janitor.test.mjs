@@ -1,7 +1,7 @@
 // Real git on a throwaway origin and clone: the janitor reads every kind of
 // candidate, decides each with the table, and touches nothing in the repo.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,6 +100,35 @@ feature("the repo-hygiene janitor decides every candidate by the table and touch
       expect(journal).toContain(ctx.oldMerged);
     }],
     cleanup: (ctx) => rmSync(ctx.root,{recursive:true,force:true}),
+  });
+  // lsrc:0 2026-10-22, condition on the disk cleanup's worktree row: git worktree remove deletes ignored files without asking.
+  integration("a worktree holding over 100 MB of ignored files outside build folders is kept with the size named", {
+    given: ["an otherwise retirable worktree with a 150 MB ignored render and a 150 MB ignored node_modules file", () => {
+      const ctx = repoWithEveryKind();
+      ctx.target = join(ctx.root, "renders-kept");
+      git(ctx.work, ["worktree", "add", "-q", "--detach", ctx.target, ctx.oldMerged]);
+      mkdirSync(join(ctx.common, "info"), { recursive: true });
+      writeFileSync(join(ctx.common, "info", "exclude"), "renders/\nnode_modules/\n");
+      for (const file of ["renders/take.mov", "node_modules/pkg/big.bin"]) {
+        mkdirSync(dirname(join(ctx.target, file)), { recursive: true });
+        writeFileSync(join(ctx.target, file), "");
+        truncateSync(join(ctx.target, file), 150e6);
+      }
+      return ctx;
+    }],
+    when: ["checking eligibility with the render, then without it", (ctx) => {
+      const check = () => retirementEligibility({ common: ctx.common, now: Date.now() + 2 * DAY_S * 1000,
+        candidate: registeredWorktrees(ctx.common).find(({ path }) => path === ctx.target),
+        safety: { holders: { [ctx.target]: [] }, protectedPaths: [], errors: [] } });
+      const withRender = check();
+      rmSync(join(ctx.target, "renders"), { recursive: true });
+      return { withRender, buildOnly: check() };
+    }],
+    then: ["the render keeps the checkout; ignored build output alone does not", ({ withRender, buildOnly }) => {
+      expect(withRender).toEqual({ ok: false, reasons: ["ignored files outside build folders: 150 MB"] });
+      expect(buildOnly).toEqual({ ok: true, reasons: [] });
+    }],
+    cleanup: (ctx) => rmSync(ctx.root, { recursive: true, force: true }),
   });
   integration("each kind lands in its cell, with a restore command, and origin keeps every branch", {
     given: ["a repo touched today with merged, unmerged, planned, closed and worktree leftovers", repoWithEveryKind],

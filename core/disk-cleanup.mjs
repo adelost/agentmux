@@ -10,7 +10,7 @@ import { applyDependencyCacheRetention, dependencySymlinkConsumers, sampleRootDi
 import { dependencyCacheRepositories, packageCacheCandidates, readProcessArgs, removeIdleCache, uvPruneAllowed } from "./disk-pressure-relief.mjs";
 import { processPathReferences } from "./process-path-references.mjs";
 import { measureTrees } from "./tree-usage.mjs";
-import { checkoutReasons, registeredWorktrees, retireCheckouts, retirableWorktrees,
+import { checkoutReasons, IGNORED_FILES_REASON, registeredWorktrees, retireCheckouts, retirableWorktrees,
   retirementReceiptRoots, retirementSafety } from "./worktree-retirement.mjs";
 
 const WORKTREE_CONTAINER = /(?:-wt|^\.worktrees|^\.agents)$/u;
@@ -179,6 +179,9 @@ export function formatCleanupRows(result) {
   const byContainer = Object.entries(Object.groupBy(retiring, containerOf)).map(([name, paths]) => `${name} ${paths.length}`).join(", ");
   const trees = sized(retiring, result.worktrees.sizes);
   rows.push(`Worktrees, remove with git worktree remove: ${retiring.length} (${byContainer || "none"}), ${gb(trees.bytes)}, of which ${gb(trees.freeable)} unlinked elsewhere. Kept ${result.worktrees.skipped.length}: ${heldSummary(result.worktrees.skipped)}.`);
+  const ignoredHeld = result.worktrees.skipped.flatMap(({ target, reasons }) => reasons.filter((reason) => reason.startsWith(IGNORED_FILES_REASON))
+    .map((reason) => `${target.replace(homedir(), "~")} (${reason.split(": ")[1]})`));
+  rows.push(`Worktrees kept for over 100 MB of ${IGNORED_FILES_REASON}: ${ignoredHeld.length}${ignoredHeld.length ? `: ${ignoredHeld.join(", ")}` : ""}.`);
   for (const [store, entries] of Object.entries(Object.groupBy(result.dependencies.candidates, ({ path }) => storeOf(path)))) {
     rows.push(`Dependency entries unused 7 days (${store}), remove: ${entries.length}, ${gb(sum(entries, "bytes"))}, of which ${gb(sum(entries, "freeableBytes"))} frees now; the rest frees when the worktrees linking it go.`);
   }

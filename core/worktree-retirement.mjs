@@ -24,6 +24,31 @@ export function worktreeLastChange(root) {
   return latest;
 }
 
+// git worktree remove deletes ignored files without asking. Regenerable build output does not count; anything
+// else ignored over 100 MB (renders, recordings, local data) keeps the checkout (lsrc:0, 2026-10-22).
+const BUILD_FOLDERS=new Set(["node_modules","dist",".vite","coverage","__pycache__",".venv"]);
+const IGNORED_LIMIT_BYTES=100e6;
+/** WHAT: Names the hold reason for large ignored files. WHY: Keeps the cleanup report's list on the same words the guard writes. */
+export const IGNORED_FILES_REASON="ignored files outside build folders";
+
+/** WHAT: Reads the size of ignored files outside regenerable build folders. WHY: Keeps a checkout whose removal would delete data Git never tracked. */
+export function ignoredBytesOutsideBuildFolders(root) {
+  const listed=execFileSync("git",["-C",root,"ls-files","-z","--others","--ignored","--exclude-standard","--directory"],
+    {encoding:"utf8",stdio:["ignore","pipe","pipe"],timeout:30000,maxBuffer:64*1024*1024}).split("\0").filter(Boolean);
+  let total=0;
+  function visit(path) {
+    const stat=lstatSync(path);
+    if(stat.isFile()) total+=stat.size;
+    else if(stat.isDirectory()) for(const name of readdirSync(path)) {
+      if(!BUILD_FOLDERS.has(name)) visit(join(path,name));
+    }
+  }
+  for(const entry of listed) {
+    if(!entry.split("/").some((part)=>BUILD_FOLDERS.has(part))) visit(join(root,entry));
+  }
+  return total;
+}
+
 /** WHAT: Reads live worktree identities. WHY: Keeps branch, lock and HEAD evidence tied to Git's registered checkout. */
 export function registeredWorktrees(common) {
   return git(common,["worktree","list","--porcelain"]).split("\n\n").slice(1)
@@ -90,6 +115,8 @@ export function retirementEligibility({common,candidate,now=Date.now(),safety}) 
   try {
     const status=execFileSync("git",["-C",candidate.path,"status","--porcelain","--untracked-files=all"],{encoding:"utf8",timeout:30000});
     if(status.trim()) reasons.push("dirty");
+    const ignored=ignoredBytesOutsideBuildFolders(candidate.path);
+    if(ignored>IGNORED_LIMIT_BYTES) reasons.push(`${IGNORED_FILES_REASON}: ${Math.round(ignored/1e6)} MB`);
     if(now-worktreeLastChange(candidate.path)<DAY) reasons.push("non-dependency change within 24h");
   } catch(error) {reasons.push(`unreadable checkout: ${error.message}`);}
   return {ok:reasons.length===0,reasons};
