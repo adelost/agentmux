@@ -10,6 +10,8 @@ export function formatAskStatus(status) {
     case "delegate": return "↪ delegate";
     case "done": return "✅ done";
     case "answered": return "☑️ answered";
+    case "unbound": return "⚠️ unbound";
+    case "bound": return "✅ bound";
     case "unverified": return "❔ unverified";
     case "archived": return "🗄 archived";
     default: return status || "unknown";
@@ -66,6 +68,8 @@ export function formatAskEntry(entry, { fullReply = false } = {}) {
     lines.push(`    jsonl: ${location}${entry.timestamp ? ` @ ${entry.timestamp}` : ""}`);
   }
   if (entry.replySource === "conversation-log") lines.push(`    conversation: ${entry.ledgerId}`);
+  else if (entry.ledgerId) lines.push(`    ask: ${entry.ledgerId}`);
+  if (entry.binding) lines.push(`    binding: ${entry.binding.kind} ${entry.binding.ref} by ${entry.binding.by} @ ${entry.binding.ts}`);
   if (!entry.jsonlFile && entry.sessionFile && entry.replySource !== "conversation-log") {
     lines.push(`    session: ${entry.sessionFile} (no matching completion found)`);
   }

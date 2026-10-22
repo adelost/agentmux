@@ -130,6 +130,8 @@ import { formatAskEntry } from "./ask-format.mjs";
 import { attachDisplayedAskLineAnchors } from "./ask-anchors.mjs";
 import { formatAskOverview } from "./ask-overview.mjs";
 import { cmdConversationAsks } from "./conversation.mjs";
+import { ASKS_HELP, cmdAskBind } from "./ask-bind.mjs";
+import { readAskBindings } from "../core/ask-bindings.mjs";
 import { cmdLog } from "./log.mjs";
 import { cmdStop } from "./stop-compact.mjs";
 import {
@@ -970,10 +972,8 @@ async function cmdWatch(ctx, flags) {
 // --- Asks: human directive ledger -----------------------------------------
 
 async function cmdAsks(ctx, flags, positional = []) {
-  if (flags.help || flags.h) {
-    console.log(`Usage: amux asks [agent] [--since 2h] [--open] [--list | --full] [--raw] [--all-sources] [--all-repos] [--summary]\n\nDefault: canonical posted answers, grouped by agent and recent pane.\n--list prints source-bound rows; --full includes complete posted answer text.\n--raw explicitly uses legacy provider diagnostics and line anchors.\n--open keeps unresolved rows; needs-you means the operator's hands (a login, a card, a key), a decision for the delegate shows as delegate; --all-sources includes agent/automation input.\n--all-repos includes archived agents; --summary groups by repository.\nExample: amux asks claw --open; amux asks claw --pane 5 --full -n 3`);
-    return;
-  }
+  if (flags.help || flags.h) return console.log(ASKS_HELP);
+  if (positional[0] === "bind") return cmdAskBind(positional.slice(1), flags, ctx);
   if (!flags.raw) return cmdConversationAsks(flags, positional, ctx);
   const nowMs = Date.now();
   let backfill = null;
@@ -1092,7 +1092,7 @@ async function cmdAsks(ctx, flags, positional = []) {
   const joinedEntries = joinAskLedgerEntries({
     ledgerEntries: selectedLedger,
     liveEntries: entries,
-    nowMs,
+    bindings: readAskBindings(), nowMs,
   });
   if (typeof ctx.persistAskResolutions === "function") {
     await ctx.persistAskResolutions({ ledgerEntries: selectedLedger, joinedEntries });
@@ -2718,7 +2718,7 @@ const FLAG_SPECS = {
     grep: "string",
   },
   asks: {
-    raw: "boolean",
+    row: "string", commit: "string", close: "string", raw: "boolean",
     n: "number",
     agent: "string",
     pane: "number",

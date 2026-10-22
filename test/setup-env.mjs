@@ -19,6 +19,8 @@ process.env.AMUX_ASK_LEDGER_PATH = join(
   mkdtempSync(join(tmpdir(), "amux-test-asks-")),
   "ask-ledger.jsonl",
 );
+// Binding tests must never close real asks through the user's append-only evidence file.
+process.env.AMUX_ASK_BINDINGS_PATH = join(mkdtempSync(join(tmpdir(), "amux-test-bindings-")), "bindings.jsonl");
 
 // And for the day files of his messages that amux search writes next to the log: a test that searches must not write
 // his words into ~/.agentmux/search-human.

@@ -87,7 +87,7 @@ Usage:
   agent watch [--agent] [--pane]  Shortcut for 'timeline --follow'
     [--grep PAT]
   agent asks [-n N]               Human asks with canonical posted answers and source ids
-    --open                        Only open-ish asks (open/working/partial/needs-you/delegate)
+    --open                        Unresolved asks, including unbound human answers
     --since T                     Window (default 7d; ISO or '30min')
     --agent NAME --pane N         Filter to one pane
     --grep PAT                    Regex filter over ask/reply text
@@ -95,6 +95,7 @@ Usage:
     --raw                         Explicit legacy provider status/anchor diagnostic
     --all-repos                   Include archived agents outside active config
     --summary                     Group matching durable asks by repository
+  agent asks bind ID... --row N | --commit SHA | --close REASON  Bind tasks or close non-task asks
   agent quiet --act               Why a pane went quiet, and the one obvious action (the stall-watch cron runs it)
     --replay --since T --until T  Print each quiet episode's class and action, and needs-you before and after; sends nothing
     --hands                       Panes that wait for the operator's hands (a login, a card, a key, hardware)

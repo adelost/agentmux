@@ -1,4 +1,5 @@
 import { readWindow } from "../core/ask-ledger.mjs";
+import { readAskBindings } from "../core/ask-bindings.mjs";
 import { conversationAskEntries, conversationGroups, formatConversationGroups } from "../core/conversation-view.mjs";
 import { filterAskEntries, summarizeAskEntries } from "../core/ask-history.mjs";
 import { parseSinceArg } from "../core/jsonl-reader.mjs";
@@ -38,7 +39,7 @@ export function cmdConversationAsks(flags, positional, ctx) {
   if (agent && pane != null && !flags["all-repos"]) validateAgentPane(ctx.configPath, agent, pane);
   const configured = new Set(listAgents(ctx.configPath).map(row => row.name));
   const log = readWindow({ since, agents: agent ? [agent] : null });
-  const entries = conversationAskEntries(log).filter(row => (pane == null || row.pane === pane)
+  const entries = conversationAskEntries(log, { bindings: readAskBindings() }).filter(row => (pane == null || row.pane === pane)
     && (flags["all-repos"] || configured.has(row.agent)));
   const overview = !flags.full && !flags.list && !flags.summary && !flags.grep && pane == null && flags.n == null;
   const rows = filterAskEntries(entries, { sinceMs: since?.getTime(), grep, openOnly: flags.open,

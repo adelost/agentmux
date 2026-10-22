@@ -338,7 +338,8 @@ feature("amux quiet --replay: what the cron would have done", () => {
         expect(text).toMatch(/09:00–10:00Z · \d+ episodes · hands 1 · decision 1 · quota 0 · left work 0 · done 0 · unclear \d+/u);
         expect(text).toMatch(/needs-you in asks: before 2, after 1/u);
         expect(text).toMatch(/^ {2}claw:0 09:15Z → delegate$/mu);
-        expect(text).toMatch(/^ {2}lsrc:2 09:50Z → answered$/mu);
+        // Row 71 preserves the answer while leaving the human task open until bound.
+        expect(text).toMatch(/^ {2}lsrc:2 09:50Z → unbound$/mu);
         expect(text).toMatch(/^needs-you now: skyvw:0 09:40Z$/mu);
       } finally { w.remove(); }
     }],

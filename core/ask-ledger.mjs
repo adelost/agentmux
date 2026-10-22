@@ -364,18 +364,18 @@ export function persistAskCompletionEvidence({
   for (const row of joinedEntries) {
     if (!row?.ledgerId
         || !row.jsonlFile
-        || !PERSISTABLE_COMPLETION_STATUSES.has(row.status)) continue;
+        || !PERSISTABLE_COMPLETION_STATUSES.has(row.replyStatus || row.status)) continue;
     const ledger = byId.get(row.ledgerId);
     if (!ledger || ledger.completionStatus) continue;
     recordAsk({
       ...ledger,
       id: ledger.id,
-      completionStatus: row.status,
+      completionStatus: row.replyStatus || row.status,
       completionReply: row.replyPreview || row.reply || "",
       completionAt: row.endTimestamp || row.timestamp || new Date(now()).toISOString(),
       completionSessionFile: row.jsonlFile,
     }, { path, now });
-    ledger.completionStatus = row.status;
+    ledger.completionStatus = row.replyStatus || row.status;
     persisted++;
   }
   return persisted;

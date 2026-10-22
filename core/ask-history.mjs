@@ -10,7 +10,7 @@ import { inferAskOrigin } from "./ask-origin.mjs";
 import { classifyQuiet } from "./quiet-classify.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 
-const OPEN_STATUSES = new Set(["open", "working", "partial", "needs-you", "delegate", "unverified"]);
+const OPEN_STATUSES = new Set(["open", "working", "partial", "needs-you", "delegate", "unverified", "unbound"]);
 const LIVE_MATCH_WINDOW_MS = 15 * 60 * 1000;
 
 // needs-you means his hands only (docs/DESIGN-quiet-panes.md, I-3); a decision the delegate can make shows as delegate.
@@ -47,6 +47,17 @@ export function classifyAskTurn(turn = {}, opts = {}) {
 
 export function askStatusIsOpen(status) {
   return OPEN_STATUSES.has(status);
+}
+
+/** WHAT: Maps answer evidence to explicit task closure. WHY: Keeps a human task visible after a reply until a row, commit or lead closure owns it. */
+export function applyAskBindings(entries, bindings = []) {
+  const byId = new Map(bindings.map(binding => [binding.ledgerId, binding]));
+  return entries.map(entry => {
+    const binding = byId.get(entry.ledgerId);
+    const replyStatus = entry.replyStatus || entry.status;
+    const status = binding ? "bound" : entry.origin === "human" && ["done", "answered"].includes(replyStatus) ? "unbound" : replyStatus;
+    return { ...entry, replyStatus, status, open: askStatusIsOpen(status), ...(binding ? { binding } : {}) };
+  });
 }
 
 /** WHAT: Builds ask entries from a pane's turns, each with its status. WHY: Keeps the status rule in classifyAskTurn instead of in each caller. */
@@ -135,6 +146,7 @@ export function filterAskEntries(entries = [], opts = {}) {
 export function joinAskLedgerEntries({
   ledgerEntries = [],
   liveEntries = [],
+  bindings = [],
   nowMs = Date.now(),
   matchWindowMs = LIVE_MATCH_WINDOW_MS,
 } = {}) {
@@ -207,7 +219,7 @@ export function joinAskLedgerEntries({
       legacyLiveOnly: true,
     });
   }
-  return rows;
+  return applyAskBindings(rows, bindings);
 }
 
 /** WHAT: Maps selected asks to repository status totals. WHY: Keeps fleet overview independent from per-pane rendering. */

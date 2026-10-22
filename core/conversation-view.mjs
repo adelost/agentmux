@@ -1,4 +1,4 @@
-import { buildAskEntries } from "./ask-history.mjs";
+import { applyAskBindings, buildAskEntries } from "./ask-history.mjs";
 import { inferAskOrigin } from "./ask-origin.mjs";
 import { conversationPaneTurns } from "./dream-conversation.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
@@ -19,7 +19,7 @@ export function conversationGroups(log, agent, pane) {
 }
 
 /** WHAT: Builds ask status from the complete posted answers. WHY: Keeps an engine restart or a legacy preview from changing conversation evidence. */
-export function conversationAskEntries(log, { nowMs = Date.now(), waiting } = {}) {
+export function conversationAskEntries(log, { nowMs = Date.now(), waiting, bindings = [] } = {}) {
   const byPane = new Map();
   for (const ask of log.asks) {
     if (isSystemNoiseDirective(ask.verbatim)) continue;
@@ -42,7 +42,7 @@ export function conversationAskEntries(log, { nowMs = Date.now(), waiting } = {}
         sessionFile: ask.sessionFile, deliveryPath: ask.deliveryPath, deliveryStatus: ask.deliveryStatus });
     }
   }
-  return entries;
+  return applyAskBindings(entries, bindings);
 }
 
 /** WHAT: Formats exact input and posted text under a visible output budget. WHY: Prevents large pasted context from flooding a normal log read. */

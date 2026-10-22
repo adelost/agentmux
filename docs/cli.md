@@ -265,12 +265,30 @@ prints the measured one-time cost. Later invocations read only the ask ledger.
 Human/operator asks are the default view. Use `--all-sources` when auditing
 inter-agent and automation directives too.
 
-Whenever the live-history join proves an ask `done` or `answered`, that
-terminal receipt and its short reply evidence are appended to the ledger
-before rendering. Later compaction, respawn, and janitor passes therefore
-cannot turn known-complete work back into `unverified`. Pre-ledger sessions
-whose reply bytes were already trimmed remain honestly `unverified`; the
-migration never fabricates completion.
+A posted answer or persisted `done`/`answered` receipt does not close a human
+ask. Without an explicit binding it shows as `unbound`, included by `--open`.
+Agent and system asks keep their existing classification. Ordinary unresolved
+statuses (`open`, `working`, `partial`, `needs-you`, `delegate`, `unverified`)
+keep their meaning. A binding closes an ask as `bound`; the answer and its
+original status remain available as evidence, never rewritten as task completion.
+
+From a configured agent pane, use the exact conversation id printed by `--list`:
+
+```bash
+amux asks bind ID1 ID2 --row 71
+amux asks bind ID --commit COMMIT_SHA
+amux asks bind ID --close "Non-task question answered"
+```
+
+Run row/commit binding from the target Git repository. The row must exist in
+its `docs/TASKS.md` (HEAD for a bare repository); the commit must resolve there.
+The recorded reference includes the repository path and exact row or full commit
+SHA. The owner binds tasks he gives; the lead uses `--close` for asks without a
+task. Exactly one target and all ids are checked before anything is written.
+An unknown id, missing target or unidentified caller fails without a partial
+batch. One append-only `~/.agentmux/ask-bindings.jsonl` records only `ledgerId`,
+`kind` (`row`, `commit`, `close`), `ref`, `by` (`agent:pane`) and `ts`.
+Old conversation and reply records stay unchanged.
 
 ```bash
 amux asks

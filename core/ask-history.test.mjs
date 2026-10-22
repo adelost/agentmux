@@ -210,6 +210,7 @@ feature("ask-history: build and filter entries", () => {
 });
 
 feature("ask-history: durable ledger join", () => {
+  // Row 71 keeps the observed answer while a human task awaits an explicit binding.
   unit("live provider history enriches the durable ask instead of duplicating it", {
     given: ["one ledger row and its answered live turn", () => ({
       ledgerEntries: [{
@@ -231,7 +232,7 @@ feature("ask-history: durable ledger join", () => {
     then: ["one durable row carries the live result", (rows) => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
-        ledgerId: "ask-1", status: "done", reply: "Klart.",
+        ledgerId: "ask-1", status: "unbound", replyStatus: "done", reply: "Klart.",
         repo: "skydive-altimeter", jsonlFile: "/sessions/live.jsonl",
       });
     }],
@@ -257,7 +258,8 @@ feature("ask-history: durable ledger join", () => {
     }],
   });
 
-  unit("persisted completion evidence stays closed after provider history disappears", {
+  // Row 71 changes task closure, preserving the original terminal answer evidence.
+  unit("persisted answer evidence stays known but unbound after provider history disappears", {
     when: ["joining a completed ledger row without live history", () => joinAskLedgerEntries({
       ledgerEntries: [{
         id: "ask-complete",
@@ -274,11 +276,12 @@ feature("ask-history: durable ledger join", () => {
       liveEntries: [],
       nowMs: Date.parse("2026-07-22T10:00:00Z"),
     })],
-    then: ["the ask remains done instead of regressing to unverified", (rows) => {
+    then: ["the answer remains done and the task awaits a binding", (rows) => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
-        status: "done",
-        open: false,
+        status: "unbound",
+        replyStatus: "done",
+        open: true,
         replyPreview: "Klart och live.",
         jsonlFile: "/trimmed/session.jsonl",
         completionAt: "2026-07-21T10:03:00.000Z",
