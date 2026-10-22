@@ -25,28 +25,38 @@ export function worktreeLastChange(root) {
 }
 
 // git worktree remove deletes ignored files without asking. Regenerable build output does not count; anything
-// else ignored over 100 MB (renders, recordings, local data) keeps the checkout (lsrc:0, 2026-10-22).
+// else ignored over 100 MB (renders, recordings, local data) keeps the checkout (lsrc:0, 2026-10-22), and so
+// does any wrangler persist state, database or credential file, which the disk-pressure skill never touches.
 const BUILD_FOLDERS=new Set(["node_modules","dist",".vite","coverage","__pycache__",".venv"]);
 const IGNORED_LIMIT_BYTES=100e6;
+const PROTECTED_DATA=[
+  ["wrangler state",(parts)=>parts.some((part,index)=>part===".wrangler"&&parts[index+1]==="state")],
+  ["database",(parts)=>/\.(?:sqlite3?|db)(?:-wal|-shm|-journal)?$/u.test(parts.at(-1))],
+  ["credentials",(parts)=>/^(?:\.env(?:\.(?!example$|sample$|template$)[^/]+)?|\.dev\.vars|.+\.(?:pem|key|p12))$/u.test(parts.at(-1))],
+  ["browser profile",(parts)=>["Cookies","Login Data","Web Data"].includes(parts.at(-1))],
+];
 /** WHAT: Names the hold reason for large ignored files. WHY: Keeps the cleanup report's list on the same words the guard writes. */
 export const IGNORED_FILES_REASON="ignored files outside build folders";
+/** WHAT: Names the hold reason for ignored never-touch data. WHY: Keeps the cleanup report's list on the same words the guard writes. */
+export const PROTECTED_DATA_REASON="ignored protected data";
 
-/** WHAT: Reads the size of ignored files outside regenerable build folders. WHY: Keeps a checkout whose removal would delete data Git never tracked. */
-export function ignoredBytesOutsideBuildFolders(root) {
+/** WHAT: Reads the size and protected kinds of ignored files outside regenerable build folders. WHY: Keeps a checkout whose removal would delete data Git never tracked. */
+export function ignoredData(root) {
   const listed=execFileSync("git",["-C",root,"ls-files","-z","--others","--ignored","--exclude-standard","--directory"],
     {encoding:"utf8",stdio:["ignore","pipe","pipe"],timeout:30000,maxBuffer:64*1024*1024}).split("\0").filter(Boolean);
-  let total=0;
-  function visit(path) {
-    const stat=lstatSync(path);
-    if(stat.isFile()) total+=stat.size;
-    else if(stat.isDirectory()) for(const name of readdirSync(path)) {
-      if(!BUILD_FOLDERS.has(name)) visit(join(path,name));
+  let bytes=0; const kinds=new Set();
+  function visit(relative) {
+    const stat=lstatSync(join(root,relative)), parts=relative.split("/").filter(Boolean);
+    for(const [kind,matches] of PROTECTED_DATA) if(matches(parts)) kinds.add(kind);
+    if(stat.isFile()) bytes+=stat.size;
+    else if(stat.isDirectory()) for(const name of readdirSync(join(root,relative))) {
+      if(!BUILD_FOLDERS.has(name)) visit(join(relative,name));
     }
   }
   for(const entry of listed) {
-    if(!entry.split("/").some((part)=>BUILD_FOLDERS.has(part))) visit(join(root,entry));
+    if(!entry.split("/").some((part)=>BUILD_FOLDERS.has(part))) visit(entry);
   }
-  return total;
+  return {bytes,protectedKinds:[...kinds].sort()};
 }
 
 /** WHAT: Reads live worktree identities. WHY: Keeps branch, lock and HEAD evidence tied to Git's registered checkout. */
@@ -115,8 +125,9 @@ export function retirementEligibility({common,candidate,now=Date.now(),safety}) 
   try {
     const status=execFileSync("git",["-C",candidate.path,"status","--porcelain","--untracked-files=all"],{encoding:"utf8",timeout:30000});
     if(status.trim()) reasons.push("dirty");
-    const ignored=ignoredBytesOutsideBuildFolders(candidate.path);
-    if(ignored>IGNORED_LIMIT_BYTES) reasons.push(`${IGNORED_FILES_REASON}: ${Math.round(ignored/1e6)} MB`);
+    const ignored=ignoredData(candidate.path);
+    if(ignored.bytes>IGNORED_LIMIT_BYTES) reasons.push(`${IGNORED_FILES_REASON}: ${Math.round(ignored.bytes/1e6)} MB`);
+    if(ignored.protectedKinds.length) reasons.push(`${PROTECTED_DATA_REASON}: ${ignored.protectedKinds.join(", ")}`);
     if(now-worktreeLastChange(candidate.path)<DAY) reasons.push("non-dependency change within 24h");
   } catch(error) {reasons.push(`unreadable checkout: ${error.message}`);}
   return {ok:reasons.length===0,reasons};

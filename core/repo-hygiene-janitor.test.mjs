@@ -122,11 +122,18 @@ feature("the repo-hygiene janitor decides every candidate by the table and touch
         safety: { holders: { [ctx.target]: [] }, protectedPaths: [], errors: [] } });
       const withRender = check();
       rmSync(join(ctx.target, "renders"), { recursive: true });
-      return { withRender, buildOnly: check() };
+      const buildOnly = check();
+      // The disk-pressure skill's never-touch list: wrangler persist state, databases and credentials stay whatever their size.
+      mkdirSync(join(ctx.target, ".wrangler", "state", "v3", "d1"), { recursive: true });
+      writeFileSync(join(ctx.target, ".wrangler", "state", "v3", "d1", "db.sqlite"), "rows");
+      writeFileSync(join(ctx.target, ".dev.vars"), "TOKEN=x");
+      writeFileSync(join(ctx.common, "info", "exclude"), "renders/\nnode_modules/\n.wrangler/\n.dev.vars\n");
+      return { withRender, buildOnly, smallData: check() };
     }],
-    then: ["the render keeps the checkout; ignored build output alone does not", ({ withRender, buildOnly }) => {
+    then: ["the render and small protected data keep the checkout; ignored build output alone does not", ({ withRender, buildOnly, smallData }) => {
       expect(withRender).toEqual({ ok: false, reasons: ["ignored files outside build folders: 150 MB"] });
       expect(buildOnly).toEqual({ ok: true, reasons: [] });
+      expect(smallData).toEqual({ ok: false, reasons: ["ignored protected data: credentials, database, wrangler state"] });
     }],
     cleanup: (ctx) => rmSync(ctx.root, { recursive: true, force: true }),
   });
