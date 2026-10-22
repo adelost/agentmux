@@ -129,7 +129,9 @@ export function planDockerImages({ lines = dockerLines } = {}) {
 /** WHAT: Dispatches every cleanup category, or only plans it in a dry run. WHY: Keeps the dry run and the real run on one plan; Docker images are only listed. */
 export function runDiskCleanup({ dryRun = true, measure = dryRun, nowMs = Date.now(), home = homedir(),
   journal = join(home, ".agentmux", "janitor", "retirements.jsonl") } = {}) {
-  const started = sampleRootDisk();
+  const started = sampleRootDisk(), steps = [];
+  // df around each acting row; other writers on / move it too, so it is evidence per row, not exact.
+  const step = (name, act) => { const before = sampleRootDisk(), value = act(); steps.push({ name, before, after: sampleRootDisk() }); return value; };
   const worktrees = planWorktreeCleanup({ nowMs });
   // Registered worktrees whose folder is gone stay out: find fails on a missing root, and that would hold every entry.
   const searchRoots = [join(home, "lsrc"), ...worktrees.linkedPaths.filter((path) => !path.startsWith(`${join(home, "lsrc")}/`) && existsSync(path))];
@@ -137,19 +139,19 @@ export function runDiskCleanup({ dryRun = true, measure = dryRun, nowMs = Date.n
   const storeRoots = [join(home, ".cache/agentmux/agentmux-worktree-deps"),
     ...repositoryRoots.concat(worktrees.repositories.map(({ common }) => dirname(common)))
       .map((root) => join(root, ".git", "agentmux-worktree-deps")).filter(existsSync)];
-  const dependencies = applyDependencyCacheRetention({ dryRun, nowMs, repositoryRoots, storeRoots: [...new Set(storeRoots)],
-    consumers: (entries) => dependencySymlinkConsumers(entries, { searchRoots }) });
-  const retired = dryRun ? [] : worktrees.repositories.flatMap(({ common, retirements }) => retireCheckouts({ common, journal, now: nowMs,
-    safety: worktrees.safety, cell: "amux.disk-cleanup/worktree.retire", retirements }));
+  const dependencies = step("dependencies", () => applyDependencyCacheRetention({ dryRun, nowMs, repositoryRoots, storeRoots: [...new Set(storeRoots)],
+    consumers: (entries) => dependencySymlinkConsumers(entries, { searchRoots }) }));
+  const retired = step("worktrees", () => (dryRun ? [] : worktrees.repositories.flatMap(({ common, retirements }) => retireCheckouts({ common, journal, now: nowMs,
+    safety: worktrees.safety, cell: "amux.disk-cleanup/worktree.retire", retirements }))));
   const ps = readProcessArgs();
   const caches = packageCacheCandidates({ home, ps });
-  const cacheActions = dryRun ? [] : caches.map(removeIdleCache);
-  const uv = dryRun ? uvPruneVerdict({ ps }) : pruneUv({ ps });
+  const cacheActions = step("caches", () => (dryRun ? [] : caches.map(removeIdleCache)));
+  const uv = step("uv", () => (dryRun ? uvPruneVerdict({ ps }) : pruneUv({ ps })));
   const docker = planDockerImages();
   const artifacts = planArtifactOverflow({ nowMs });
-  const moved = dryRun ? [] : moveArtifacts(artifacts, { nowMs, sampleDisk: sampleRootDisk });
+  const moved = step("artifacts", () => (dryRun ? [] : moveArtifacts(artifacts, { nowMs, sampleDisk: sampleRootDisk })));
   const sizes = measure ? measureTrees([...worktrees.repositories.flatMap(({ retirements }) => retirements.map(({ target }) => target)), ...caches]) : {};
-  return { dryRun, at: new Date(nowMs).toISOString(), started, finished: sampleRootDisk(),
+  return { dryRun, at: new Date(nowMs).toISOString(), started, finished: sampleRootDisk(), steps,
     worktrees: { ...worktrees, retired, sizes }, dependencies, caches: { candidates: caches, actions: cacheActions, sizes }, uv, docker,
     artifacts: { ...artifacts, moved } };
 }
@@ -193,6 +195,11 @@ export function formatCleanupRows(result) {
   rows.push(`Docker images no running container uses, for approval only, never automatic: ${docker.unused.length}, ${gb(sum(docker.unused, "bytes"))} listed (shared layers count once per image). ${stoppedOnly.length} still belong to stopped containers (${[...new Set(stoppedOnly.map(({ name }) => name.split("/").at(-1).split(":")[0]))].join(", ")}), which go first; volumes stay${docker.errors.length ? `; ${docker.errors[0].error}` : ""}.`);
   const artifacts = result.artifacts;
   rows.push(`Artifacts unmodified 14 days, move to ${artifacts.destination}: ${artifacts.candidates.length}, ${gb(artifacts.bytes)}, of which ${gb(sum(artifacts.candidates, "freeableBytes"))} frees on /. Q: free ${artifacts.overflowFreeBytes === null ? "unknown" : gb(artifacts.overflowFreeBytes)}. Kept ${artifacts.skipped.length}: ${heldSummary(artifacts.skipped)}${artifacts.errors.length ? `; held by errors: ${artifacts.errors.map(({ error }) => error).join("; ")}` : ""}.`);
+  if (!result.dryRun) {
+    const modes = (items) => Object.entries(Object.groupBy(items, ({ mode }) => mode)).map(([mode, list]) => `${list.length} ${mode}`).join(", ") || "none";
+    rows.push(`Done: worktrees ${modes(result.worktrees.retired)}; dependency entries ${modes(result.dependencies.actions)}; caches ${modes(result.caches.actions)}; uv ${result.uv.mode}; artifacts ${modes(result.artifacts.moved)}.`);
+    rows.push(`df / free per row: ${result.steps.map(({ name, before, after }) => `${name} ${gb(before.availableBytes)} to ${gb(after.availableBytes)}`).join(", ")}.`);
+  }
   if (result.worktrees.errors.length) rows.push(`Worktree safety errors hold every removal: ${result.worktrees.errors.map((error) => JSON.stringify(error)).join("; ")}`);
   rows.push(`df /: ${gb(result.started.availableBytes)} free before, ${gb(result.finished.availableBytes)} after${result.dryRun ? " (dry run, nothing changed)" : ""}.`);
   return rows;
