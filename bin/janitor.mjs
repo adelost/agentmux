@@ -9,7 +9,7 @@ import { runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 import { loadRuntimeEnv } from "../core/runtime-env.mjs";
 import { commonDirOf, mainWorktreeOf, paneDirs, withChildDirs } from "../core/repo-hygiene-facts.mjs";
 import { ledgerEntries, reviewRepo, retireWorktrees } from "../core/repo-hygiene-janitor.mjs";
-import { retirementSafety,registeredWorktrees } from "../core/worktree-retirement.mjs";
+import { retirementReceiptRoots,retirementSafety,registeredWorktrees } from "../core/worktree-retirement.mjs";
 import { redCount, renderReport, withOpenNowNote } from "../core/repo-hygiene-report.mjs";
 
 const USAGE = "Usage: janitor.mjs [--repo PATH]... [--state-dir PATH] [--retire-safe-worktrees]\n"
@@ -79,9 +79,7 @@ function main() {
   const reportPath = join(options.stateDir, "reports", `${today}.md`);
   const firstSeen = readJson(seenPath);
   const reviewedOrigins = new Set();
-  const receiptRoots=[join(homedir(),"lsrc/.artifacts"),join(homedir(),"lsrc/.agents"),
-    join(homedir(),".openclaw/workspace/projects"),join(homedir(),".agentmux"),
-    join(homedir(),".config/systemd/user"),"/tmp"];
+  const receiptRoots=retirementReceiptRoots(homedir());
   const retirementContext=options.retire && commons.length ? retirementSafety(commons[0],
     [...receiptRoots,...commons.map(dirname)],started.getTime(),commons.flatMap((common)=>registeredWorktrees(common).map(({path})=>path))) : undefined;
   if(retirementContext) {

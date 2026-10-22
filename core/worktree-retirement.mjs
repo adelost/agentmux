@@ -34,6 +34,10 @@ export function registeredWorktrees(common) {
     }));
 }
 
+/** WHAT: Names the folders whose recent receipts and units can bind a checkout. WHY: Keeps the janitor and the disk cleanup on one protected set. */
+export const retirementReceiptRoots=(home)=>[join(home,"lsrc/.artifacts"),join(home,"lsrc/.agents"),
+  join(home,".openclaw/workspace/projects"),join(home,".agentmux"),join(home,".config/systemd/user"),"/tmp"];
+
 /** WHAT: Reads recent source-root bindings from receipts and units. WHY: Keeps the earlier cleanup's protected release and qualification roots alive. */
 export function receiptReferences(targets, roots, {now=Date.now()}={}) {
   return receiptPathReferences(targets,roots,now);
@@ -49,36 +53,57 @@ export function retirementSafety(common, roots, now=Date.now(), targets=register
     errors:[...processes.errors,...receipts.errors]};
 }
 
-/** WHAT: Checks the complete retirement contract against current facts. WHY: Keeps merged but dirty, active, referenced or recently changed worktrees intact. */
-export function retirementEligibility({common,branch,candidate,now=Date.now(),safety}) {
+// v2-live is the davinci-resolve skill's default CUTKIT_TOOLS path, so no process or receipt names it.
+const PROTECTED_CHECKOUTS=new Set(["skyvw0-verify","v2-live"]);
+
+/** WHAT: Checks whether a fetched origin ref contains a commit. WHY: Lets a pushed branch or detached HEAD be restored after its checkout is gone. */
+export function onOrigin(common,sha) {
+  try {return git(common,["for-each-ref","--count=1","--contains",sha,"--format=%(refname)","refs/remotes/origin"])!=="";}
+  catch {return false;}
+}
+
+/** WHAT: Checks the cheap Git identity of a checkout. WHY: Lets callers narrow candidates before the process and receipt scan. */
+export function checkoutReasons({common,candidate}) {
   const reasons=[]; const {path,sha}=candidate;
-  if(!candidate.branch || !sha || candidate.locked) reasons.push("detached, missing HEAD or locked");
-  if(path.split("/").at(-1)==="skyvw0-verify") reasons.push("protected verification checkout");
+  if(!sha || candidate.locked) reasons.push("missing HEAD or locked");
+  if(PROTECTED_CHECKOUTS.has(path.split("/").at(-1))) reasons.push("protected checkout");
+  try {if(realpathSync(path)!==resolve(path)) reasons.push("noncanonical checkout path");}
+  catch {reasons.push("missing checkout");}
+  if(sha && !onOrigin(common,sha)) reasons.push("not pushed or merged");
+  return reasons;
+}
+
+/** WHAT: Checks process and receipt evidence for one checkout. WHY: Keeps active or referenced checkouts intact whatever their Git state. */
+function safetyReasons(path,safety) {
+  const reasons=[];
   if(safety.errors.length) reasons.push("unreadable process or receipt evidence");
-  if((safety.holders[path]??[]).length) reasons.push("process cwd, fd or mapping inside");
+  if(!Array.isArray(safety.holders[path])) reasons.push("no process evidence for this checkout");
+  else if(safety.holders[path].length) reasons.push("process cwd, fd or mapping inside");
   if(safety.protectedPaths.some((root)=>inside(root,path)||inside(path,root))) reasons.push("recent receipt or guard source root");
-  try {
-    if(realpathSync(path)!==resolve(path)) reasons.push("noncanonical checkout path");
-    if(git(common,["merge-base","--is-ancestor",sha,`origin/${branch}`])!=="") reasons.push("not merged and pushed");
-  } catch { reasons.push("not merged and pushed"); }
+  return reasons;
+}
+
+/** WHAT: Checks the complete retirement contract against current facts. WHY: Keeps unpushed, dirty, active, referenced or recently changed worktrees intact. */
+export function retirementEligibility({common,candidate,now=Date.now(),safety}) {
+  const reasons=[...safetyReasons(candidate.path,safety),...checkoutReasons({common,candidate})];
   if(reasons.length) return {ok:false,reasons};
   try {
-    const status=execFileSync("git",["-C",path,"status","--porcelain","--untracked-files=all"],{encoding:"utf8",timeout:30000});
+    const status=execFileSync("git",["-C",candidate.path,"status","--porcelain","--untracked-files=all"],{encoding:"utf8",timeout:30000});
     if(status.trim()) reasons.push("dirty");
-    if(now-worktreeLastChange(path)<DAY) reasons.push("non-dependency change within 24h");
+    if(now-worktreeLastChange(candidate.path)<DAY) reasons.push("non-dependency change within 24h");
   } catch(error) {reasons.push(`unreadable checkout: ${error.message}`);}
   return {ok:reasons.length===0,reasons};
 }
 
 /** WHAT: Collects candidates admitted by every retirement guard. WHY: Keeps unsafe worktrees out of the single acting decision cell. */
-export function retirableWorktrees({common,branch,now,safety,onSkipped=()=>{}}) {
-  return registeredWorktrees(common).filter((candidate)=>{
-    const verdict=retirementEligibility({common,branch,now,safety,candidate});
+export function retirableWorktrees({common,now,safety,onSkipped=()=>{},candidates=registeredWorktrees(common)}) {
+  return candidates.filter((candidate)=>{
+    const verdict=retirementEligibility({common,now,safety,candidate});
     if(!verdict.ok) onSkipped({target:candidate.path,reasons:verdict.reasons});
     return verdict.ok;
   })
     .map(({path,sha,branch:name})=>({kind:"RETIRABLE_WORKTREE",target:path,sha,ageDays:Math.floor((now-worktreeLastChange(path))/DAY),
-      restore:`git -C ${quote(dirname(common))} worktree add --detach ${quote(path)} ${quote(sha)} # original branch ${name}`}));
+      restore:`git -C ${quote(dirname(common))} worktree add --detach ${quote(path)} ${quote(sha)}${name?` # original branch ${name}`:""}`}));
 }
 
 /** WHAT: Appends and syncs one action receipt. WHY: Keeps the restore command durable before Git can remove a checkout. */
@@ -90,18 +115,24 @@ function journalEntry(path,entry) {
 
 /** WHAT: Dispatches only the retirement cell after fresh checks. WHY: Prevents the report's other would-actions from deleting branches, plans or ledgers. */
 export function retireWorktrees({review,journal,now=Date.now(),safety,receiptRoots=[],readProcesses=processPathReferences}) {
-  const results=[]; const snapshot=safety??retirementSafety(review.common,receiptRoots,now);
-  for(const decision of review.decisions.filter(({values})=>values.action==="RETIRE_WORKTREE")) {
-    const candidate=registeredWorktrees(review.common).find(({path})=>path===decision.target);
-    const processes=readProcesses([decision.target]);
-    const fresh={...snapshot,holders:processes.holders,errors:[...snapshot.errors,...processes.errors]};
-    const verdict=candidate && retirementEligibility({common:review.common,branch:review.branch,candidate,now,safety:fresh});
-    const entry={at:new Date(now).toISOString(),cell:"amux.repo-hygiene/worktree.retire",target:decision.target,
-      sha:decision.sha,restore:decision.restore,mode:"skipped",reasons:verdict?.reasons??["worktree no longer registered"]};
-    if(!verdict?.ok || candidate.sha!==decision.sha) {journalEntry(journal,entry); results.push(entry);continue;}
+  return retireCheckouts({common:review.common,journal,now,safety:safety??retirementSafety(review.common,receiptRoots,now),readProcesses,
+    retirements:review.decisions.filter(({values})=>values.action==="RETIRE_WORKTREE")});
+}
+
+/** WHAT: Dispatches planned checkout removals after a fresh process and eligibility check. WHY: Keeps one journaled, never-forced removal path for the janitor and the disk cleanup. */
+export function retireCheckouts({common,retirements,journal,now=Date.now(),safety,readProcesses=processPathReferences,cell="amux.repo-hygiene/worktree.retire"}) {
+  const results=[];
+  for(const planned of retirements) {
+    const candidate=registeredWorktrees(common).find(({path})=>path===planned.target);
+    const processes=readProcesses([planned.target]);
+    const fresh={...safety,holders:processes.holders,errors:[...safety.errors,...processes.errors]};
+    const verdict=candidate && retirementEligibility({common,candidate,now,safety:fresh});
+    const entry={at:new Date(now).toISOString(),cell,target:planned.target,
+      sha:planned.sha,restore:planned.restore,mode:"skipped",reasons:verdict?.reasons??["worktree no longer registered"]};
+    if(!verdict?.ok || candidate.sha!==planned.sha) {journalEntry(journal,entry); results.push(entry);continue;}
     journalEntry(journal,{...entry,mode:"attempting"});
     try {
-      git(review.common,["worktree","remove",decision.target]);
+      git(common,["worktree","remove",planned.target]);
       entry.mode="removed";
     } catch(error) {entry.mode="refused";entry.reasons=[error.stderr?.toString().trim()||error.message];}
     journalEntry(journal,entry);results.push(entry);

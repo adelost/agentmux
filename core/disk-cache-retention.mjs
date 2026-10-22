@@ -10,28 +10,31 @@ const KEY = /^[a-f0-9]{32}$/u;
 const REPOSITORY_KEY = /^[a-f0-9]{16}$/u;
 const GRADLE_PROCESS = /(?:GradleDaemon|GradleWrapperMain|GradleMain|gradle-launcher|KotlinCompileDaemon|(?:^|[\s/])gradlew?(?:\s|$))/u;
 
-// O_NOATIME preserves usage evidence while inspecting immutable dependency trees.
-// Directory descriptors keep scandir from refreshing a stale entry on each sweep.
+// Use is the newest mtime or ctime: materializing a checkout hardlinks the files, which sets ctime.
+// Access time is no evidence: on 2026-10-22 scans had read a file in all 239 entries within the hour.
+// O_NOATIME and directory descriptors still keep the inspection itself from touching the tree.
 const INSPECT_ENTRY = String.raw`
 import hashlib, json, os, stat, sys, time
 request = json.load(sys.stdin)
 root = request["path"]
 limit = request["maxFiles"]
 deadline = time.monotonic() + request["timeoutMs"] / 1000
-count, newest, size = 0, 0, 0
+count, newest, size, freeable = 0, 0, 0, 0
 digest = hashlib.sha256()
 
 def observed(path):
-    global count, newest, size
+    global count, newest, size, freeable
     count += 1
     if count > limit or time.monotonic() > deadline:
         raise ValueError("entry inspection budget exceeded")
     item = os.lstat(path)
-    newest = max(newest, item.st_atime_ns, item.st_mtime_ns, item.st_ctime_ns)
+    newest = max(newest, item.st_mtime_ns, item.st_ctime_ns)
     digest.update(json.dumps([os.path.relpath(path, root), item.st_dev, item.st_ino,
         item.st_mode, item.st_size, item.st_mtime_ns, item.st_ctime_ns]).encode())
     if stat.S_ISREG(item.st_mode):
         size += item.st_blocks * 512
+        if item.st_nlink == 1:
+            freeable += item.st_blocks * 512
     return item
 
 def names(path):
@@ -91,16 +94,19 @@ try:
     packages = installed.get("packages")
     if not isinstance(packages, dict) or not packages or len(packages) > limit:
         raise ValueError("partial installed dependency metadata")
-    for package in packages:
+    for package, record in packages.items():
         if not package.startswith("node_modules/") or ".." in package.split("/"):
             raise ValueError("invalid installed dependency path")
+        # npm records optional packages for other platforms (fsevents, sharp-darwin) as ideallyInert and never installs them.
+        if isinstance(record, dict) and record.get("ideallyInert") is True:
+            continue
         target = os.path.join(root, package)
         if os.path.realpath(target) != target or not stat.S_ISDIR(os.lstat(target).st_mode):
             raise ValueError("missing or linked installed dependency")
     observed(os.path.join(root, "manifest.json"))
     walk(modules)
     print(json.dumps({"path": root, "newestUseMs": newest / 1000000,
-        "bytes": size, "identity": digest.hexdigest(), "files": count}))
+        "bytes": size, "freeableBytes": freeable, "identity": digest.hexdigest(), "files": count}))
 except (OSError, ValueError, TypeError, AttributeError, KeyError) as error:
     print(json.dumps({"path": root, "reason": str(error)}))
 `;
@@ -137,8 +143,30 @@ function referenceEvidence(targets, references) {
   } catch (error) { return { holders: {}, errors: [{ error: error.message }] }; }
 }
 
-/** WHAT: Collects recognized cache paths below explicit repositories. WHY: Keeps worktree copies, source and partial staging directories outside retirement. */
-export function dependencyCacheEntries(repositoryRoots, { maxRepositories = 128, maxEntries = 1024 } = {}) {
+/** WHAT: Collects recognized entries in one node directory. WHY: Keeps partial staging names out of retirement. */
+function nodeEntries(node, maxEntries, entries, skipped) {
+  try { canonicalDirectory(node); } catch (error) { if (error.code === "ENOENT") return; throw error; }
+  for (const name of boundedNames(node, maxEntries)) {
+    const path = join(node, name);
+    if (!KEY.test(name)) { skipped.push({ path, reasons: ["partial or unrecognized cache name"] }); continue; }
+    if (entries.length >= maxEntries) throw new Error("dependency entry budget exceeded");
+    entries.push(path);
+  }
+}
+
+/** WHAT: Collects entries in a store laid out as <repository key>/node/<entry key>, or node/<entry key> in the oldest in-.git stores. WHY: Lets every store generation use one recognizer. */
+function storeEntries(cache, maxEntries, entries, skipped) {
+  try { canonicalDirectory(cache); } catch (error) { if (error.code === "ENOENT") return; throw error; }
+  for (const name of boundedNames(cache, maxEntries)) {
+    if (name === "node") { nodeEntries(join(cache, name), maxEntries, entries, skipped); continue; }
+    if (!REPOSITORY_KEY.test(name)) continue;
+    canonicalDirectory(join(cache, name));
+    nodeEntries(join(cache, name, "node"), maxEntries, entries, skipped);
+  }
+}
+
+/** WHAT: Collects recognized cache paths below explicit repositories and stores. WHY: Keeps worktree copies, source and partial staging directories outside retirement. */
+export function dependencyCacheEntries(repositoryRoots, { maxRepositories = 128, maxEntries = 1024, storeRoots = [] } = {}) {
   const entries = [], skipped = [], errors = [];
   if (!Number.isSafeInteger(maxRepositories) || maxRepositories < 1 || maxRepositories > 128
     || !Number.isSafeInteger(maxEntries) || maxEntries < 1 || maxEntries > 100000
@@ -149,26 +177,19 @@ export function dependencyCacheEntries(repositoryRoots, { maxRepositories = 128,
     try {
       if (!isAbsolute(root)) throw new Error("repository root must be absolute");
       canonicalDirectory(root); canonicalDirectory(join(root, ".git"));
-      const cache = join(root, ".agentmux-worktree-deps");
-      try { canonicalDirectory(cache); } catch (error) { if (error.code === "ENOENT") continue; throw error; }
-      for (const repositoryKey of boundedNames(cache, maxEntries)) {
-        if (!REPOSITORY_KEY.test(repositoryKey)) continue;
-        const repositoryCache = join(cache, repositoryKey); canonicalDirectory(repositoryCache);
-        const node = join(repositoryCache, "node");
-        try { canonicalDirectory(node); } catch (error) { if (error.code === "ENOENT") continue; throw error; }
-        for (const name of boundedNames(node, maxEntries)) {
-          const path = join(node, name);
-          if (!KEY.test(name)) { skipped.push({ path, reasons: ["partial or unrecognized cache name"] }); continue; }
-          if (entries.length >= maxEntries) throw new Error("dependency entry budget exceeded");
-          entries.push(path);
-        }
-      }
+      storeEntries(join(root, ".agentmux-worktree-deps"), maxEntries, entries, skipped);
     } catch (error) { errors.push({ path: root, error: error.message }); }
+  }
+  for (const store of [...new Set(storeRoots)]) {
+    try {
+      if (!isAbsolute(store)) throw new Error("store root must be absolute");
+      storeEntries(store, maxEntries, entries, skipped);
+    } catch (error) { errors.push({ path: store, error: error.message }); }
   }
   return { entries, skipped, errors };
 }
 
-/** WHAT: Reads bounded dependency usage metadata without refreshing access times. WHY: Preserves the seven-day inactivity evidence across repeated guard sweeps. */
+/** WHAT: Reads bounded dependency usage metadata without touching the tree. WHY: Keeps the inspection from becoming the change it measures. */
 export function inspectDependencyCacheEntry(path, { maxFiles = 150000, timeoutMs = 15000 } = {}) {
   try {
     if (!Number.isSafeInteger(maxFiles) || maxFiles < 1 || maxFiles > 150000
@@ -180,9 +201,36 @@ export function inspectDependencyCacheEntry(path, { maxFiles = 150000, timeoutMs
   } catch (error) { return { path, reason: `entry inspection failed: ${error.message}` }; }
 }
 
+// Checkouts made before hardlink materialization (July 2026) read the store through symlinks.
+// Noninteractive sudo reads folders whose mode hides them from the user.
+/** WHAT: Collects cache entries that a checkout's node_modules symlinks into. WHY: Prevents retirement from breaking a checkout that reads its entry through a symlink. */
+export function dependencySymlinkConsumers(entries, { searchRoots = [join(homedir(), "lsrc")], maxDepth = 8,
+  listLinks = (root) => execFileSync(process.getuid?.() === 0 ? "/usr/bin/find" : "sudo", [
+    ...(process.getuid?.() === 0 ? [] : ["-n", "/usr/bin/find"]), root, "-xdev", "-maxdepth", String(maxDepth), "(", "-name", ".git",
+    "-o", "-path", "*/node_modules/[!@]*/*", "-o", "-path", "*/node_modules/@*/*/*", ")", "-prune", "-o", "-type", "l",
+    "-printf", "%h\\t%l\\n"], { encoding: "utf8", maxBuffer: 512 * 1024 * 1024, timeout: 900000, stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+  const linked = new Set(), errors = [], byPath = new Set(entries);
+  for (const root of searchRoots) {
+    let output;
+    try { output = listLinks(root); }
+    catch (error) { errors.push({ path: root, error: `symlink scan failed: ${(error.stderr?.toString().trim() || error.message).split("\n")[0]}` }); continue; }
+    for (const line of output.split("\n")) {
+      const [directory, target] = line.split("\t");
+      if (!target) continue;
+      let cursor = resolve(directory, target);
+      while (cursor !== dirname(cursor)) {
+        if (byPath.has(cursor)) { linked.add(cursor); break; }
+        cursor = dirname(cursor);
+      }
+    }
+  }
+  return { linked, errors };
+}
+
 /** WHAT: Checks one cache's inactivity and process evidence. WHY: Keeps recent, corrupt or live dependency inodes out of cleanup. */
-export function dependencyCacheRetirementDecision({ entry, nowMs = Date.now(), unusedDays = 7, holders = [], errors = [] }) {
+export function dependencyCacheRetirementDecision({ entry, nowMs = Date.now(), unusedDays = 7, holders = [], errors = [], linked = false }) {
   const reasons = [];
+  if (linked) reasons.push("symlinked by a checkout's node_modules");
   if (errors.length) reasons.push("unreadable process or filesystem evidence");
   if (entry?.reason) reasons.push(entry.reason);
   if (!entry?.identity || !Number.isFinite(entry?.bytes) || entry.bytes < 0
@@ -195,14 +243,15 @@ export function dependencyCacheRetirementDecision({ entry, nowMs = Date.now(), u
 
 /** WHAT: Collects dependency entries admitted by every retention check. WHY: Separates reviewable retirement plans from filesystem mutations. */
 export function planDependencyCacheRetirement({ repositoryRoots, nowMs = Date.now(), unusedDays = 7,
-  references = processPathReferences, inspectEntry = inspectDependencyCacheEntry, ...limits } = {}) {
+  references = processPathReferences, inspectEntry = inspectDependencyCacheEntry,
+  consumers = dependencySymlinkConsumers, ...limits } = {}) {
   const collected = dependencyCacheEntries(repositoryRoots, limits);
   const candidates = [], skipped = [...collected.skipped];
-  const safety = referenceEvidence(collected.entries, references);
-  const errors = [...collected.errors, ...(safety.errors || [])];
+  const safety = referenceEvidence(collected.entries, references), links = consumers(collected.entries);
+  const errors = [...collected.errors, ...(safety.errors || []), ...links.errors];
   for (const path of collected.entries) {
     const entry = inspectEntry(path);
-    const verdict = dependencyCacheRetirementDecision({ entry, nowMs, unusedDays, errors,
+    const verdict = dependencyCacheRetirementDecision({ entry, nowMs, unusedDays, errors, linked: links.linked.has(path),
       holders: safety.holders?.[path] || [] });
     if (verdict.ok) candidates.push(entry);
     else skipped.push({ path, reasons: verdict.reasons });

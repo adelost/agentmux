@@ -6,6 +6,10 @@ import sys
 import re
 
 
+# Generated trees hold no receipts, and Android build folders alone made the walk outlast its deadline.
+GENERATED = {"node_modules", ".git", ".venv", "__pycache__", "build", ".gradle", "dist", "target", "coverage", ".next", ".turbo"}
+
+
 def receipt_references(request):
     """WHAT: Reads source-root bindings. WHY: Keeps private or unreadable receipts from silently permitting retirement."""
     targets = set(request["targets"])
@@ -27,30 +31,45 @@ def receipt_references(request):
                 break
             cursor = parent
 
+    def candidate(entry):
+        """WHAT: Checks names before metadata. WHY: Keeps millions of source files from costing a stat each, which made the nightly scan exceed its deadline."""
+        path = entry.path
+        if not re.search(r"\.(jsonl?|md|txt|log|sh|service|timer|yaml|yml)$", path):
+            return False
+        unit = path.endswith((".service", ".timer"))
+        named = re.search(r"receipt|proof|qualif|guard|release|attest|context|runtime|manifest|source|build|live|deploy|window|verif|result|checkpoint|state|config|settings|agent|event|ledger|references", entry.name, re.I)
+        artifact_data = "/.artifacts/" in path and not re.search(r"/(source|tests?|fixtures|node_modules|docs|tools|core|packages|cloud)/", path)
+        if not (unit or named or artifact_data or path.endswith((".log", ".jsonl"))):
+            return False
+        try:
+            return unit or entry.stat(follow_symlinks=False).st_mtime >= cutoff
+        except FileNotFoundError:
+            return False
+
+    def walk(root):
+        """WHAT: Visits directories iteratively with entry types from the listing. WHY: Keeps deep trees within the stack and avoids a stat per directory."""
+        pending = [root]
+        while pending:
+            directory = pending.pop()
+            try:
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            if entry.name not in GENERATED:
+                                pending.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False) and candidate(entry):
+                            scan(entry.path)
+            except (FileNotFoundError, ProcessLookupError):
+                pass
+            except OSError as error:
+                errors.append({"path": directory, "error": str(error)})
+
     def scan(path):
         """WHAT: Reads bounded text chunks. WHY: Prevents large logs from exhausting memory during cleanup qualification."""
         nonlocal scanned_files, scanned_bytes
         try:
-            if os.path.islink(path):
-                return
-            if os.path.isdir(path):
-                if os.path.basename(path) in {"node_modules", ".git", ".venv", "__pycache__"}:
-                    return
-                with os.scandir(path) as entries:
-                    for entry in entries:
-                        scan(entry.path)
-                return
-            if not os.path.isfile(path):
-                return
-            unit = path.endswith((".service", ".timer"))
-            if not unit and os.stat(path).st_mtime < cutoff:
-                return
-            if not re.search(r"\.(jsonl?|md|txt|log|sh|service|timer|yaml|yml)$", path):
-                return
-            named = re.search(r"receipt|proof|qualif|guard|release|attest|context|runtime|manifest|source|build|live|deploy|window|verif|result|checkpoint|state|config|settings|agent|event|ledger|references", os.path.basename(path), re.I)
-            artifact_data = "/.artifacts/" in path and not re.search(r"/(source|tests?|fixtures|node_modules|docs|tools|core|packages|cloud)/", path)
-            if not (unit or named or artifact_data or path.endswith((".log", ".jsonl"))):
-                return
             if re.search(r"/worktree-cleanup-[^/]+/references\.json$", path):
                 with open(path, encoding="utf8") as source:
                     prior = json.load(source)
@@ -72,8 +91,8 @@ def receipt_references(request):
             errors.append({"path": path, "error": str(error)})
 
     for root in request["roots"]:
-        if os.path.exists(root):
-            scan(root)
+        if os.path.isdir(root) and not os.path.islink(root):
+            walk(root)
     return {"protectedPaths": sorted(protected), "errors": errors,
             "scannedFiles": scanned_files, "scannedBytes": scanned_bytes}
 
@@ -88,11 +107,17 @@ errors = []
 
 
 def record(value, pid):
-    """WHAT: Collects matching process references. WHY: Keeps unrelated private paths out of the result."""
-    value = value.removesuffix(" (deleted)")
-    for path in targets:
-        if value == path or value.startswith(path + "/"):
-            holders[path].add(int(pid))
+    """WHAT: Collects matching process references by walking the value's ancestors. WHY: Keeps the cost per descriptor independent of how many thousand targets a cleanup checks."""
+    cursor = value.removesuffix(" (deleted)")
+    if not cursor.startswith("/"):
+        return
+    while True:
+        if cursor in holders:
+            holders[cursor].add(int(pid))
+        parent = os.path.dirname(cursor)
+        if parent == cursor:
+            break
+        cursor = parent
 
 
 for pid in os.listdir("/proc"):

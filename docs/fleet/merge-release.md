@@ -25,3 +25,5 @@
    peer review. Human-requested review is welcome; a red gate or high-risk seam
    needs resolution, not a review loop.
    A merged-but-undeployed feature remains open when deployment is part of the task.
+   After delivery, or when the work is dropped, the owner removes its worktree with
+   `git worktree remove`; the disk cleanup retires pushed leftovers after 24 h.

@@ -55,13 +55,13 @@ function repoWithEveryKind() {
 const cellByTarget = (decisions) => Object.fromEntries(decisions.map(({ target, cell }) => [target, cell]));
 
 feature("the repo-hygiene janitor decides every candidate by the table and touches nothing", () => {
-  integration("only a clean pushed merged quiet unreferenced worktree is retired with a restore journal", {
+  integration("only a clean, pushed or merged, quiet and unreferenced worktree is retired with a restore journal", {
     given: ["a merged branch worktree and explicit idle process/receipt boundary", () => {
       const ctx = repoWithEveryKind();
       ctx.target = join(ctx.root, "retirable");
       git(ctx.work, ["worktree", "add", "-q", "-b", "retirable", ctx.target, ctx.oldMerged]);
       ctx.now = Date.now() + 2 * DAY_S * 1000;
-      ctx.safety = { holders: {}, protectedPaths: [], errors: [] };
+      ctx.safety = { holders: {[ctx.target]:[]}, protectedPaths: [], errors: [] };
       return ctx;
     }],
     when: ["reviewing and applying only the allowed cell", (ctx) => {
@@ -72,11 +72,19 @@ feature("the repo-hygiene janitor decides every candidate by the table and touch
       expect(eligible({...ctx.safety,protectedPaths:[ctx.target]})).toBe(false);
       expect(eligible({...ctx.safety,errors:["unreadable"]})).toBe(false);
       expect(eligible(ctx.safety,Date.now())).toBe(false);
-      expect(eligible(ctx.safety,ctx.now,{...candidate,sha:git(ctx.work,["rev-parse","unmerged"])})).toBe(false);
+      // lsrc:0 2026-10-22, on Mattias's yes to the disk cleanup: a finished worktree may go when its branch is pushed or merged.
+      git(ctx.work,["checkout","-q","-b","local-only"]);
+      const localOnly=commitDaysAgo(ctx.work,"local-only.txt",40);
+      git(ctx.work,["checkout","-q","main"]);
+      expect(eligible(ctx.safety,ctx.now,{...candidate,sha:localOnly})).toBe(false);
+      expect(eligible(ctx.safety,ctx.now,{...candidate,sha:git(ctx.work,["rev-parse","unmerged"])})).toBe(true);
+      expect(eligible(ctx.safety,ctx.now,{...candidate,branch:undefined})).toBe(true);
+      expect(eligible({...ctx.safety,holders:{}})).toBe(false);
       writeFileSync(join(ctx.target,"unsaved"),"keep me");
       expect(eligible(ctx.safety)).toBe(false);
       rmSync(join(ctx.target,"unsaved"));
-      const review = reviewRepo({ common:ctx.common, panes:[], now:ctx.now, sinceMs:0,
+      // git reads --since=@0 as now, so epoch second 1 is the earliest instant that counts every commit.
+      const review = reviewRepo({ common:ctx.common, panes:[], now:ctx.now, sinceMs:1000,
         today:new Date(ctx.now).toISOString().slice(0,10), firstSeen:{}, reviewedOrigins:new Set(), retirementContext:ctx.safety });
       const decision = review.decisions.find(({target}) => target === ctx.target);
       expect(decision?.values.action,JSON.stringify(review.retirementSkipped)).toBe("RETIRE_WORKTREE");

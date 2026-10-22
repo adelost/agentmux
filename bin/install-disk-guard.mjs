@@ -13,7 +13,10 @@ copyFileSync(join(root,"templates/gradle-disk-retention.gradle"),join(initRoot,"
 const node=process.execPath;
 const service=`[Unit]\nDescription=Agentmux root disk retention and pressure guard\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/flock -n %t/agentmux-disk-guard.lock ${node} ${root}/bin/disk-guard.mjs poll\nTimeoutStartSec=300\nNice=10\n`;
 const timer="[Unit]\nDescription=Check root disk hourly\n\n[Timer]\nOnCalendar=hourly\nPersistent=true\nAccuracySec=1min\n\n[Install]\nWantedBy=timers.target\n";
+// Nice and idle I/O keep the nightly scans and the move to Q: behind interactive work.
+const cleanup=`[Unit]\nDescription=Agentmux nightly and high-use root disk cleanup\n\n[Service]\nType=oneshot\nEnvironment=PATH=${homedir()}/.local/bin:/usr/local/bin:/usr/bin:/bin\nExecStart=/usr/bin/flock -n %t/agentmux-disk-cleanup.lock ${node} ${root}/bin/disk-cleanup.mjs apply\nTimeoutStartSec=8h\nNice=15\nIOSchedulingClass=idle\n`;
 writeFileSync(join(unitRoot,"agentmux-disk-guard.service"),service);
+writeFileSync(join(unitRoot,"agentmux-disk-cleanup.service"),cleanup);
 writeFileSync(join(unitRoot,"agentmux-disk-guard.timer"),timer);
 const run=(cmd,args)=>execFileSync(cmd,args,{encoding:"utf8",stdio:["ignore","pipe","pipe"]}).trim();
 const linger=run("loginctl",["show-user",userInfo().username,"-p","Linger","--value"]);

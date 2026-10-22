@@ -20,7 +20,8 @@ function readReferences(request,mode) {
     const args = privileged ? ["-n", "/usr/bin/python3", script] : [script];
     if(mode) args.push(mode);
     return JSON.parse(execFileSync(command, args, {
-      input: JSON.stringify(request), encoding: "utf8", timeout: mode ? 180000 : 30000,
+      // Receipts walk every checkout a cleanup may clear; nightly runs have no deadline of their own.
+      input: JSON.stringify(request), encoding: "utf8", timeout: mode ? 900000 : 30000,
       maxBuffer: 16 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"],
     }));
   } catch (error) {

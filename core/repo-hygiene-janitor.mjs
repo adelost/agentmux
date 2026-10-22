@@ -57,7 +57,7 @@ export function reviewRepo({ common, panes, now, sinceMs, today, firstSeen, revi
   const worktrees = staleWorktrees(facts);
   const originCandidates = originReviewedElsewhere ? [] : [...mergedBranches(facts), ...unreferencedPlans(facts)];
   const retirementSkipped=[];
-  const retiring=retirementContext ? retirableWorktrees({common,branch,now,safety:retirementContext,onSkipped:(entry)=>retirementSkipped.push(entry)}) : [];
+  const retiring=retirementContext ? retirableWorktrees({common,now,safety:retirementContext,onSkipped:(entry)=>retirementSkipped.push(entry)}) : [];
   const retiringPaths=new Set(retiring.map(({target})=>target));
   const candidates = [...originCandidates, ...rows.candidates,
     ...worktrees.candidates.filter(({target})=>!retiringPaths.has(target)),...retiring];

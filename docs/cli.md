@@ -475,22 +475,52 @@ green test command from dirtying the worktree's dependency contract.
 
 The nightly janitor enables only `worktree.retire`. Its other table actions
 remain reports. `node bin/janitor.mjs --repo PATH --retire-safe-worktrees`
-admits a registered branch checkout only when its HEAD is in fetched origin
-trunk, it is clean, it has no process cwd, open descriptor or mapping, and no
-non-dependency metadata changed in 24 hours. Recent source-root receipts and
-guard units protect their checkouts; `skyvw0-verify` stays protected.
+admits a registered checkout, branch or detached, only when a fetched origin
+ref contains its HEAD (pushed or merged), it is clean, it has no process cwd,
+open descriptor or mapping, and no non-dependency metadata changed in 24 hours.
+Recent source-root receipts and guard units protect their checkouts;
+`skyvw0-verify` and Cutkit's `v2-live` stay protected.
 Read-only scanners use noninteractive sudo to inspect other UIDs. Any unknown
 process or receipt evidence holds all removals. Removal itself runs as the
 user with normal `git worktree remove`, never force. The janitor syncs the
 exact SHA and restore command to `~/.agentmux/janitor/retirements.jsonl`
 before removal, then records the result. Without the flag it remains read-only.
 
-`node bin/install-disk-guard.mjs` installs the persistent hourly user timer
-and `~/.gradle/init.d/agentmux-disk-retention.gradle`. The timer runs
+`node bin/install-disk-guard.mjs` installs the persistent hourly user timer,
+the `agentmux-disk-cleanup.service` unit and
+`~/.gradle/init.d/agentmux-disk-retention.gradle`. The timer runs
 `node bin/disk-guard.mjs poll` under a nonblocking lock with a five-minute
-deadline. Every poll reads `df /` and maintains dependency entries unused
-seven days, preserving file access timestamps during inspection. Unlinking
-a cache leaves its hardlinked worktree consumers intact.
+deadline. Every poll reads `df /` and trims Gradle. The first poll after 03:00
+each night starts the cleanup unit, and so does a poll at 80 % used or more,
+at most every six hours. Reaching 80 % notifies the human once per episode.
+
+`node bin/disk-cleanup.mjs plan` is the dry run: one line per category with
+count, size and how much of it df would gain. `apply`, which the unit runs
+with idle I/O, acts in this order:
+
+1. Dependency entries unused seven days in every store generation (repository,
+   `~/.cache/agentmux` and in-`.git`). Use is the newest mtime or ctime, which
+   a checkout's hardlinking sets; access time is not, because any scan's read
+   refreshes it. An entry a checkout's node_modules symlinks into stays.
+   Unlinking keeps hardlinked worktree consumers intact; their space frees
+   when the last worktree goes.
+2. Finished worktrees in every repository under `~/lsrc` and its worktree
+   folders, by the janitor's rule above, journaled to its `retirements.jsonl`.
+3. npm and pip caches and older Playwright browsers, as under pressure.
+4. `uv cache prune`, never `--force`, only while no process has anything in
+   `~/.cache/uv` in its maps, cwd or descriptors and no `uv sync`, `uv add`,
+   `uv pip` or `pip install` runs. Otherwise uv is skipped: a forced prune on
+   2026-10-22 removed an archive that running voice-mode processes mapped.
+5. Folders in `~/lsrc/.artifacts` unchanged for 14 days (mtime and ctime of
+   every entry) and open in no process move with `rsync -rlt
+   --remove-source-files` to `/mnt/q/wsl-overflow-DATE/<original path>`. Each
+   gets a `MANIFEST.md` row with the command to move it back. Nothing is
+   deleted, and the move stops when Q: lacks room or rsync fails.
+
+Docker images that no running container uses are only listed, for a person
+to approve; the cleanup never removes images, containers or volumes. Each run
+writes its full result to `~/.agentmux/disk-cleanup/`.
+`~/.cache/agentmux/cuda` and `models` belong to `amux search` and stay.
 
 Gradle keeps downloaded resources seven days and build-cache entries one day,
 with cleanup after builds. At 10 GiB it pauses local cache pushes for the
