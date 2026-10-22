@@ -13,11 +13,12 @@
    Link current canonical Markdown in Spec/Design when creating/updating tasks;
    keep version, verification and dated approval scope there. Date artifacts
    separately; changed requirements need new evidence.
+   The owner binds each task he gives to its row or commit with
+   `amux asks bind`; the lead closes asks that hold no task.
    A row may carry a `Source` column: a pointer to his decision-log entry
    (file, date, and time to the precision the log proves, or a stable message
    id), `own`, after his pointer if any, or `inferred:` before the pointer
    when the row rests on your reading of his words.
-   The owner binds each task he gives to its row or commit with `amux asks bind`; the lead closes asks that hold no task.
 
 8. **Report only terminal outcomes:** a blocker, collision, handoff or DONE. The board and the ask
    ledger also carry progress.
