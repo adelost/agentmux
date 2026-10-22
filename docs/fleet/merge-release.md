@@ -11,7 +11,8 @@
    Preserve repo correctness and security requirements: never hide a real failure
    or add file-size exceptions to make a gate green; report a required check
    that cannot fit this budget instead of claiming success.
-   Heavy checks: testing-philosophy.md; named release checks stay required.
+   Release checks follow testing-philosophy.md, the release philosophy and point 8;
+   older named chains are not automatically required.
    GitHub-hosted CI is optional evidence, never release authority, no PR
    ceremony for a clean, locally verified change. Deploy by the repo's
    local-first release contract (exact source and rollback SHA, build, live

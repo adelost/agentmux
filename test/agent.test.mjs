@@ -466,9 +466,10 @@ feature("generated agent policy", () => {
     then: ["local proof stays small without weakening correctness requirements", (content) => {
       expect(content).toContain("test plan's tests (testing-philosophy.md) and lint, exercise the feature");
       expect(content).toContain("one relevant local smoke of at most 5 minutes");
-      // lsrc:0, 2026-10-20 16:4xZ (hints budget): the heavy-CI sentence became a pointer to testing-philosophy.md,
-      // worded after lsrc:3's review so it never reads as waiving a named release check.
-      expect(content).toMatch(/Heavy checks: testing-philosophy\.md; named release checks stay required\./u);
+      // lsrc:0, 2026-10-22 (release philosophy, testing-philosophy.md): release checks follow that file's
+      // release philosophy and point 8; an older named chain no longer binds by name alone.
+      expect(content).toMatch(/Release checks follow testing-philosophy\.md, the release philosophy and point 8;\s+older named chains are not automatically required\./u);
+      expect(content).not.toContain("named release checks stay required");
       expect(content).toContain("repo correctness and security requirements: never hide a real failure");
       expect(content).toContain("GitHub-hosted CI is optional evidence, never release authority");
       expect(content).not.toContain("amux gate --scoped");
