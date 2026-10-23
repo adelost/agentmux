@@ -15,13 +15,16 @@ import { dirname, join } from "node:path";
 import { leaderPanes } from "./pause-compact.mjs";
 
 export const LEADER_REVIEW_INTERVAL_MS = 60 * 60_000;
-// The one place the review text lives. It opens with the last change's effect:
-// of skyvw:0's 14 reviews on 2026-10-10/11, 3 of 9 improvements were checked
-// afterwards (Mattias: "metagranskar vad de metagranskar").
-export const LEADER_REVIEW_TEXT = "[amux leader review] About an hour since your last review. Before this request, in at most "
-  + "five lines: whether the last review's change helped: keep, adjust or drop, with its evidence; "
+// It opens with the last change's effect: of skyvw:0's 14 reviews on
+// 2026-10-10/11, 3 of 9 improvements were checked afterwards (Mattias:
+// "metagranskar vad de metagranskar"). No action is a valid outcome: "made now"
+// pulled leaders toward a new action every hour (Mattias, 2026-10-23, delivery 74d1733e).
+/** WHAT: Defines the one review text. WHY: Keeps the review from becoming an hourly mandate for new work. */
+export const LEADER_REVIEW_TEXT = "[amux leader review] About an hour since your last review. At the next natural checkpoint, "
+  + "in at most five lines: whether the last review's change helped: keep, adjust or drop, with its evidence; "
   + "what was delivered since then, with numbers and start and end points; what stands still and why; "
-  + "at most one or two concrete improvements, made now. No new rewrite without a measured problem.";
+  + "at most one small correction for a measured problem; otherwise say 'keep, no action'. "
+  + "This reminder creates no new task or rewrite mandate.";
 // "dry" logs when a review would be added and adds nothing; "on" adds it.
 export const LEADER_REVIEW_MODE = "on";
 
