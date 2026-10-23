@@ -117,6 +117,12 @@ const heldForCost = job => job?.costHold === true && job.status === "pending" &&
 export const isQuotaFloorHeldJob = job => heldForCost(job) && !job.submittedAt && !job.submitFenceAt
   && String(job.lastReason || "").startsWith("wake-refused:quota-floor:");
 
+// lsrc:0 2026-10-23: on 22 Oct 20:09-20:25Z rotate still refused lsrc:1 and claw:0. The prompts queued behind each
+// floor-held head had never been tried, so they were plain pending jobs, and the floor held them just the same.
+/** WHAT: Checks whether a pane's floor hold keeps one of its jobs unsent. WHY: Lets an account move take the whole held queue along, not only its head. */
+export const isHeldByPaneQuotaFloor = (job, paneJobs) => isQuotaFloorHeldJob(job)
+  || (job.status === "pending" && !job.draftOwned && !job.submittedAt && !job.submitFenceAt && paneJobs.some(isQuotaFloorHeldJob));
+
 /** WHAT: Returns the job the broker serves next for one pane. WHY: Lets the owner's message pass work held for a compact, without moving, cancelling or resending it. */
 export function deliveryHead(jobs) {
   const open = jobs.filter(job => !TERMINAL_DELIVERY_STATES.has(job.status));

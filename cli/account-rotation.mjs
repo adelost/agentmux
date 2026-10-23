@@ -9,7 +9,7 @@ import {
   claudeStartDialog,
   classifyClaudeRotationPane,
 } from "../core/account-rotation.mjs";
-import { isQuotaFloorHeldJob } from "../core/delivery-wake.mjs";
+import { isHeldByPaneQuotaFloor } from "../core/delivery-wake.mjs";
 import { recordCompactCall } from "../core/compact-log.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import {
@@ -47,12 +47,14 @@ function configuredClaudePanes(agents) {
 
 // A job parked by the pane's own limit waits for its exact-session restart; it is not live delivery
 // (2026-10-18 22:33Z: parked messages blocked skyvw, skybar and sandman from Claude S for 5.8 h). Nor is a
-// prompt the quota floor holds unsent: it follows the pane and is delivered on the account with room.
+// prompt the quota floor holds unsent, at the head or queued behind it: it follows the pane and is delivered on
+// the account with room.
 function liveDeliveryCount(queue, agentName, pane, { quotaStopped = false } = {}) {
   try {
-    return queue.list(agentName, pane)
+    const jobs = queue.list(agentName, pane);
+    return jobs
       .filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status) && !(quotaStopped && isQuotaParkedJob(job))
-        && !isQuotaFloorHeldJob(job)).length;
+        && !isHeldByPaneQuotaFloor(job, jobs)).length;
   } catch {
     return NaN;
   }

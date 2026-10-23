@@ -685,3 +685,50 @@ feature("the quota night of 20 to 21 October", () => {
     }],
   });
 });
+
+// lsrc:0 for Mattias 2026-10-23: from 20:09 to 20:25Z on 22 Oct rotate refused lsrc:1 and claw:0 as live delivery, and
+// lsrc:0 saved, cancelled, moved and resent their messages by hand. Each head was floor-held; the prompts queued
+// behind it had never been tried (lsrc:1: e575e225 and dd8cc949; claw:0: nine), so they were plain pending jobs.
+feature("the quota floor night of 22 October", () => {
+  const rotate = fx => rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps);
+  const held = { id: "36ebc0e5", status: "pending", costHold: true, attempts: 19, submittedAt: null, submitFenceAt: null,
+    lastReason: "wake-refused:quota-floor: Claude W has 3 % of its week left (floor 3 %) until 2026-10-28T07:00:00.000Z" };
+  const queued = id => ({ id, status: "pending", costHold: null, attempts: 0, submittedAt: null, submitFenceAt: null, lastReason: null });
+  const withQueue = jobs => {
+    const fx = fixture();
+    fx.jobs = jobs.map(job => ({ ...job }));
+    fx.ctx.deliveryQueue.list = (_name, pane) => (pane === 0 ? fx.jobs : []);
+    fx.ctx.agent.restartClaudeAccount = vi.fn(async () => ({ ok: true }));
+    return fx;
+  };
+
+  unit("a pane at the floor moves with the prompts queued behind its held one, each kept as it was", {
+    given: ["lsrc:0 idle at an empty composer: one floor-held prompt and two never tried behind it", () =>
+      withQueue([held, queued("e575e225"), queued("dd8cc949")])],
+    when: ["rotating to an account with room", rotate],
+    then: ["lsrc:0 restarts on it and all three wait there under their own ids, unsent", (result, fx) => {
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({ status: "switched" });
+      expect(fx.ctx.agent.restartClaudeAccount).toHaveBeenCalledWith("lsrc", 0, expect.objectContaining({ profile: expect.objectContaining({ id: "2" }) }));
+      expect(fx.jobs.map(job => [job.id, job.status, job.submittedAt])).toEqual([
+        ["36ebc0e5", "pending", null], ["e575e225", "pending", null], ["dd8cc949", "pending", null]]);
+    }],
+  });
+
+  unit("a message already submitted past the floor still holds the move", {
+    given: ["lsrc:0's floor-held prompt, and Mattias's message behind it submitted without a receipt yet", () =>
+      withQueue([held, { ...queued("owner"), status: "submitted", attempts: 1, submitFenceAt: 1, submittedAt: 2 }])],
+    when: ["rotating to an account with room", rotate],
+    then: ["lsrc:0 stays until that delivery is settled", (result, fx) => {
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({ status: "blocked", reason: "live-or-unknown-delivery" });
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+    }],
+  });
+
+  unit("a queued prompt with no floor hold on the pane still holds the move", {
+    given: ["lsrc:0 with one prompt waiting and no floor hold", () => withQueue([queued("e575e225")])],
+    when: ["rotating to an account with room", rotate],
+    then: ["lsrc:0 stays: the broker may deliver it on the current account", (result, fx) => {
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({ status: "blocked", reason: "live-or-unknown-delivery" });
+    }],
+  });
+});

@@ -158,7 +158,10 @@ that pane only; it is never retried automatically. A context that grew again
 between its compact and the restart is blocked rather than compacted twice.
 
 The real switch then requires idle/empty-composer observations, no pending
-delivery and an exact complete persisted session. Profile history links are
+delivery and an exact complete persisted session. Prompts the quota floor holds
+unsent, the held one and every untried one queued behind it, are not pending
+delivery: they move with the pane and are delivered on the target under their
+own job ids. A drafted or submitted message still holds the pane. Profile history links are
 prepared only after preflight. Immediately before each restart it rechecks the
 pane and journal fingerprint, with another check at the actual restart
 boundary. The CLI resumes the existing transcript under the new profile.
