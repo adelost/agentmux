@@ -55,6 +55,18 @@
    checkpoint it and release its active resources before taking independent work.
    Honor the project's concurrency limit; invent no extra parallelism. A board lease alone does not prove a pane is free.
 
+5. **One allocator, one shared-resource lock.** The project lead owns who does
+   which row, and the task ledger on trunk is the answer. When two
+   assignments cross, the ledger wins. The dispatcher confirms the ledger,
+   or asks the lead to change it, and never sends its own reassignment to
+   builders. (23 Oct: two rows changed owner five times in 25 min,
+   because under load each message arrived 7–9 min late.) Shared machine
+   resources (browser lanes, ports, test accounts) are taken through the
+   repo's slot lock, which waits. Agents do not agree on "windows" by
+   message. (Four collisions on the night of 22–23 Oct before Cutkit's slots.mjs.)
+   Each agent that tests live uses its own synthetic account, or takes the
+   account's slot.
+
 ## Subagents
 
 Never fork or copy a session into a subagent (Mattias 2026-10-10: "vi borde
