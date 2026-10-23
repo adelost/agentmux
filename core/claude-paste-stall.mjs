@@ -100,15 +100,41 @@ export const linuxProcesses = {
 export function findClaudeClipboardLookups(panePid, processes = linuxProcesses) {
   const table = processes.pids().map((pid) => processes.stat(pid)).filter(Boolean);
   const childrenOf = (pid) => table.filter((facts) => facts.ppid === pid);
-  const isClaude = (facts) => facts && (facts.comm === "claude"
-    || basename(processes.argv(facts.pid)?.[0] || "") === "claude");
-  const claude = [table.find((facts) => facts.pid === Number(panePid)), ...childrenOf(Number(panePid))].find(isClaude);
+  const claude = claudeProcessIn(table, panePid, processes);
   if (!claude) return [];
   return childrenOf(claude.pid)
     .map((facts) => ({ ...facts, argv: processes.argv(facts.pid) || [] }))
     .filter(({ argv }) => SHELL_RE.test(argv[0] || "") && argv[1] === "-c" && isClaudeClipboardScript(argv[2]))
     .map((shell) => ({ ...shell, claudePid: claude.pid, readers: childrenOf(shell.pid) }));
 }
+
+function claudeProcessIn(table, panePid, processes) {
+  const isClaude = (facts) => facts && (facts.comm === "claude"
+    || basename(processes.argv(facts.pid)?.[0] || "") === "claude");
+  return [table.find((facts) => facts.pid === Number(panePid)), ...table.filter((facts) => facts.ppid === Number(panePid))]
+    .find(isClaude) || null;
+}
+
+/** WHAT: Names the pane's Claude process by pid and kernel start time, or null. WHY: Keeps a reused pid or a restarted Claude from passing as the process that showed a paste. */
+export function paneClaudeProcess(panePid, processes = linuxProcesses) {
+  const claude = claudeProcessIn(processes.pids().map((pid) => processes.stat(pid)).filter(Boolean), panePid, processes);
+  return claude ? `${claude.pid}:${claude.startTicks}` : null;
+}
+
+// lsrc:0 2026-10-23: skyvw:0 took nothing from 01:29 to 04:50Z. amux pasted job e505e8a0 (four lines), Claude showed
+// "[Pasted text #95 +3 lines]" and dropped the Enter, and amux could not tell its own paste from a person's.
+// Line counts stay no identity (lsrc:3, 2026-10-10). This is: amux reads the composer right after its own paste into a
+// composer the draft guard found empty, and the paste number is that Claude process's own counter, so no later paste
+// in the same process shows the same text, and a new process starts its count over.
+/** WHAT: Reads the collapsed paste amux's own paste left in Claude's composer, with its Claude process. WHY: Keeps recovery from reading amux's own paste as a person's draft. */
+export function ownCollapsedPaste(screen, claudeProcess) {
+  const draft = composerDraft(screen);
+  return draft && claudeProcess && COLLAPSED_PASTE_RE.test(draft) ? { draft, claudeProcess } : null;
+}
+
+/** WHAT: Checks whether the composer still holds exactly the paste amux recorded, in the same Claude process. WHY: Keeps a person's paste, or one in a restarted Claude, out of amux's recovery. */
+export const holdsOwnCollapsedPaste = (screen, claudeProcess, owned) => Boolean(owned?.draft && owned.claudeProcess)
+  && owned.claudeProcess === claudeProcess && composerDraft(screen) === owned.draft;
 
 /** WHAT: Signals a process only while it keeps the recorded identity. WHY: A reused pid belongs to someone else. */
 function signalSame(processes, facts, signal) {

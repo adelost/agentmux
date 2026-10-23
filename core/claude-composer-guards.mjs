@@ -5,7 +5,8 @@ import { appendEvent } from "./events.mjs";
 import { codexDeliveryBlocked } from "./codex-delivery-blocked.mjs";
 import { eraseKeys } from "./delivery-fence.mjs";
 import { composerDraft } from "./dialects.mjs";
-import { claudeComposerHasCollapsedPaste, claudeComposerIsPasting, settleClaudePaste } from "./claude-paste-stall.mjs";
+import { claudeComposerHasCollapsedPaste, claudeComposerIsPasting, holdsOwnCollapsedPaste, ownCollapsedPaste, paneClaudeProcess,
+  settleClaudePaste } from "./claude-paste-stall.mjs";
 
 export { claudeSafePasteParts } from "./claude-paste-stall.mjs";
 
@@ -72,5 +73,31 @@ export function createClaudeComposerGuards({ capture, panePid, sendLiteral, send
     );
   }
 
-  return { settlePaste, requireSettledPaste, refuseToTypeAfterDraft };
+  const claudeProcess = async (agentName, pane) => paneClaudeProcess(await panePid(agentName, pane));
+
+  /** Reads the collapsed paste amux's own paste just left in the composer; null when Claude showed the text itself. */
+  async function recordOwnPaste(agentName, pane) {
+    return ownCollapsedPaste(await capture(agentName, pane), await claudeProcess(agentName, pane));
+  }
+
+  /**
+   * A paste waiting on Claude's clipboard lookup shows an empty composer; it is neither idle nor empty. A collapsed
+   * paste is a person's unless it is exactly the one this job's own paste left, in the same Claude process.
+   */
+  async function pasteTransport(agentName, pane, ownedPaste = null) {
+    const screen = await capture(agentName, pane).catch(() => "");
+    const state = claudePasteTransportState(screen);
+    if (state === "foreign" && ownedPaste && holdsOwnCollapsedPaste(screen, await claudeProcess(agentName, pane), ownedPaste)) {
+      return { state: "drafted", detail: "amux's own collapsed paste" };
+    }
+    return state && { state, detail: state === "pasting" ? "Pasting…" : "a collapsed paste amux cannot attribute" };
+  }
+
+  /** Checks that the composer still holds exactly that paste, in the same Claude process. */
+  async function holdsOwnPaste(agentName, pane, owned) {
+    if (!owned) return false;
+    return holdsOwnCollapsedPaste(await capture(agentName, pane), await claudeProcess(agentName, pane), owned);
+  }
+
+  return { settlePaste, requireSettledPaste, refuseToTypeAfterDraft, recordOwnPaste, holdsOwnPaste, pasteTransport };
 }

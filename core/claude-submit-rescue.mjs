@@ -11,8 +11,9 @@ export function createClaudeSubmitRescue({
   paneDialectName,
   isBusy,
   capturePane,
+  holdsOwnPaste = async () => false,
 }) {
-  return async function rescueClaudeSubmit(agentName, pane, target, prompt) {
+  return async function rescueClaudeSubmit(agentName, pane, target, prompt, { ownedPaste = null } = {}) {
     if (paneDialectName(agentName, pane) !== "claude") return;
     let dir;
     try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { return; }
@@ -24,7 +25,9 @@ export function createClaudeSubmitRescue({
     for (let attempt = 0; attempt < 2; attempt++) {
       if (await isBusy(agentName, pane)) return;
       const raw = await capturePane(agentName, pane, 15).catch(() => "");
-      if (!raw.split("\n").slice(-5).join("\n").includes(prompt.trim().slice(0, 20))) return;
+      // Claude shows a multi-line paste as "[Pasted text #N +K lines]", which never contains the prompt's words.
+      if (!raw.split("\n").slice(-5).join("\n").includes(prompt.trim().slice(0, 20))
+          && !await holdsOwnPaste(agentName, pane, ownedPaste)) return;
       await t.sendEnter(target);
       await wait(750);
       if (submitted()) return;

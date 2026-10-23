@@ -3018,3 +3018,31 @@ feature("one pane's backlog never holds the rest of its session", () => {
     }],
   });
 });
+
+// lsrc:0 for Mattias 2026-10-23: skyvw:0's own collapsed paste of job e505e8a0 read as a person's draft for 3 h.
+feature("the collapsed paste a job's own paste left stays with that job", () => {
+  component("a submitted job keeps the paste it left in Claude's composer for its recovery", {
+    given: ["a Claude transport that drafts a four-line prompt as a collapsed paste and gets no receipt", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const job = queue.enqueue({ agentName: "skyvw", pane: 0, text: "[from skyvw:6]\n\none\ntwo" });
+      const owned = { draft: "[Pasted text #95 +3 lines]", claudeProcess: "3471498:7806230" };
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.sendOnly = async (_name, _text, _pane, options = {}) => {
+        await options.onPasteStarted?.();
+        await options.onDrafted?.({ claudeOwnedPaste: owned });
+        await options.onSubmitting?.();
+        await options.onSubmitted?.();
+        return { submitted: true, queued: false };
+      };
+      return { rootDir, queue, job, owned, broker: createDeliveryBroker({ agent, queue, notify: async () => {} }) };
+    }],
+    when: ["the pane drains once", ({ broker }) => broker.kickTarget("skyvw", 0)],
+    then: ["the job waits for its receipt with that paste recorded", (_, ctx) => {
+      try {
+        expect(ctx.queue.read("skyvw", 0, ctx.job.id)).toMatchObject({ status: "submitted", metadata: { claudeOwnedPaste: ctx.owned } });
+      } finally { rmSync(ctx.rootDir, { recursive: true, force: true }); }
+    }],
+  });
+});

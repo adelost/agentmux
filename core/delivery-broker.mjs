@@ -25,7 +25,7 @@ import {
   blockedRetryMs,
 } from "./delivery-queue.mjs";
 import { recoverHiddenDeliveryTui, recoverSubmittedTui } from "./tui-stall-recovery.mjs";
-import { submittedTransportHint, submittedTuiInspectionDue } from "./submitted-tui-recovery.mjs";
+import { submittedTransportHint, submittedTuiInspectionDue, withOwnPaste } from "./submitted-tui-recovery.mjs";
 import { needsZoomFallback, terminalizeSlashRejection } from "./slash-ingest-guard.mjs";
 import { createDeliveryMemoryContext, deliveryMemoryReceiptText } from "./delivery-memory-context.mjs";
 import { drainDeliveryJobs } from "./delivery-drain.mjs";
@@ -450,11 +450,11 @@ export function createDeliveryBroker({
             queueEvent(job, "pasting");
           },
           suppressReceipt: true,
-          onDrafted: async () => {
+          onDrafted: async ({ claudeOwnedPaste = null } = {}) => {
             ownsPaneDraft = true;
             drafted = true;
             const current = queue.read(job.agentName, job.pane, job.id) || job;
-            job = queue.update(current, { status: "drafted", draftOwned: true });
+            job = queue.update(current, { status: "drafted", draftOwned: true, ...withOwnPaste(current, claudeOwnedPaste) });
             queueEvent(job, "drafted");
           },
           onSubmitting: async () => {

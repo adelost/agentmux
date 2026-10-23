@@ -62,7 +62,9 @@ function claudePane() {
     stdio: ["pipe", "pipe", "ignore"],
     env: { ...process.env, PATH: `${join(root, "bin")}:${process.env.PATH}` },
   });
-  const pane = { composer: "", lookup: null, submitted: [], pastes: 0, calls: [], expansions: new Map() };
+  // dropEnters: Claude drops that many Enters without submitting, as skyvw:0 did at 01:29:08Z on 23 Oct.
+  const pane = { composer: "", lookup: null, submitted: [], pastes: 0, calls: [], expansions: new Map(), dropEnters: 0 };
+  let current = claude;
   const buffers = new Map();
   const started = [];
   const lookups = [];
@@ -117,7 +119,7 @@ function claudePane() {
     tmuxExec: async (command) => {
       pane.calls.push(command);
       if (command.includes("#{pane_current_command}")) return { stdout: "claude\n" };
-      if (command.includes("#{pane_pid}")) return { stdout: `${claude.pid}\n` };
+      if (command.includes("#{pane_pid}")) return { stdout: `${current.pid}\n` };
       if (command.includes("#{pane_in_mode}") || command.includes("#{pane_dead}")) return { stdout: "0\n" };
       if (command.includes("capture-pane")) return { stdout: screen() };
       const load = command.match(/load-buffer -b '([^']+)' '([^']+)'/u);
@@ -128,14 +130,19 @@ function claudePane() {
       if (typed) pane.composer += typed[1];
       const erased = (command.match(/\bBSpace\b/gu) || []).length;
       if (erased) pane.composer = pane.composer.slice(0, Math.max(0, pane.composer.length - erased));
-      if (/send-keys.* Enter$/u.test(command) && !pane.lookup) submit();
+      if (/send-keys.* Enter$/u.test(command) && !pane.lookup) {
+        if (pane.dropEnters > 0) pane.dropEnters--;
+        else submit();
+      }
       return { stdout: "" };
     },
   });
 
   async function clean() {
-    for (const pid of descendants(claude.pid)) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
-    claude.kill("SIGKILL");
+    for (const process_ of new Set([claude, current])) {
+      for (const pid of descendants(process_.pid)) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
+      process_.kill("SIGKILL");
+    }
     rmSync(root, { recursive: true, force: true });
   }
 
@@ -144,6 +151,8 @@ function claudePane() {
     /** A paste that reached Claude before this test's delivery, still waiting on its lookup. */
     pasteEarlier: (text) => paste(text.replace(/\n/gu, "\r")),
     toolLookup: () => startLookup("tool"),
+    /** Claude starts again in the same pane: a new process whose paste counter starts over, the composer kept. */
+    newClaudeProcess: () => { current = spawn(join(root, "claude"), [], { stdio: ["pipe", "ignore", "ignore"] }); },
   };
 }
 
@@ -325,6 +334,114 @@ feature("a collapsed paste amux cannot attribute is never submitted, erased or r
         expect(fixture.pane.composer).toBe("[Pasted text #7 +1 lines]");
         expect(current).toMatchObject({ status: "submitted", acknowledgedAt: null });
       } finally { restore(); await fixture.clean(); }
+    }],
+  });
+});
+
+// lsrc:0 for Mattias 2026-10-23: skyvw:0 took nothing from 01:29 to 04:50Z. amux pasted skyvw:6's four-line job
+// e505e8a0, Claude showed "[Pasted text #95 +3 lines]" and dropped the Enter (no prompt, no queue entry in its
+// journal). amux could not tell its own paste from a person's, so the job waited 60 min for a receipt and then
+// every later job refused the pane as holding "a draft amux did not type".
+const FOUR_LINES = "[from skyvw:6]\n\nUtfall b i den lugna 3x3-mätningen.\nSamma fil och samma fördröjning.";
+
+/** A HOME whose session ended its last turn, so the pane reads idle; and a queue for the submitted job. */
+function idleHome(fixture) {
+  const oldHome = process.env.HOME;
+  const home = mkdtempSync(join(tmpdir(), "amux-own-paste-home-"));
+  process.env.HOME = home;
+  const project = join(home, ".claude", "projects", join(fixture.root, ".agents", "0").replace(/[\/\.]/gu, "-"));
+  mkdirSync(project, { recursive: true });
+  const turnAt = new Date(Date.now() - 20 * 60_000).toISOString();
+  writeFileSync(join(project, "session.jsonl"), [
+    { type: "user", timestamp: turnAt, message: { role: "user", content: "earlier turn" } },
+    { type: "assistant", timestamp: turnAt, message: { role: "assistant", model: "claude-opus-5-5", stop_reason: "end_turn",
+      content: [{ type: "text", text: "done" }], usage: { input_tokens: 1, output_tokens: 1 } } },
+  ].map((row) => JSON.stringify(row)).join("\n") + "\n");
+  return { queue: createDeliveryQueue({ rootDir: join(home, "queue") }),
+    restore: () => { process.env.HOME = oldHome; rmSync(home, { recursive: true, force: true }); } };
+}
+
+/** Delivers FOUR_LINES while Claude drops `drops` Enters, and keeps what amux recorded about its paste. */
+async function deliverDropped(fixture, drops) {
+  fixture.pane.dropEnters = drops;
+  let owned = null;
+  const error = await deliver(fixture, FOUR_LINES, { onDrafted: async (facts) => { owned = facts?.claudeOwnedPaste ?? null; } });
+  return { error, owned };
+}
+
+/** A job submitted three minutes ago with what amux recorded about its paste, visited by recovery once. */
+async function recoverAfterThreeMinutes(fixture, home, owned) {
+  const created = home.queue.enqueue({ agentName: "probe", pane: 0, text: FOUR_LINES });
+  const job = home.queue.update(created, { status: "submitted", submittedAt: Date.now() - 3 * 60_000,
+    echoCursor: { kind: "claude-prompt-events-v1", positions: {} }, metadata: { claudeOwnedPaste: owned } });
+  await recoverSubmittedTui({
+    job, agent: fixture.agent, queue: home.queue, now: Date.now, onRecovered: () => {},
+    exactEcho: async () => false, acknowledge: () => { throw new Error("no receipt exists"); },
+  });
+  return home.queue.read("probe", 0, job.id);
+}
+
+const enters = ({ calls }) => calls.filter((call) => /send-keys.* Enter$/u.test(call)).length;
+
+feature("amux's own collapsed paste whose Enter Claude dropped is submitted under its own job", () => {
+  component("one dropped Enter: the bounded rescue submits the job's own collapsed paste once", {
+    given: ["an idle Claude pane that drops the first Enter", () => {
+      const fixture = claudePane();
+      return { fixture, home: idleHome(fixture) };
+    }],
+    when: ["skyvw:6's four-line job is delivered", ({ fixture }) => deliverDropped(fixture, 1)],
+    then: ["the message is submitted exactly once and the composer is empty", async ({ error }, { fixture, home }) => {
+      try {
+        expect(error).toBeNull();
+        expect(fixture.pane.submitted).toEqual([FOUR_LINES]);
+        expect(fixture.pane.composer).toBe("");
+        expect(restarted(fixture.pane)).toBe(false);
+      } finally { home.restore(); await fixture.clean(); }
+    }],
+  });
+
+  component("every Enter dropped: recovery recognises the job's own paste and sends one Enter", {
+    given: ["the job's paste left in an idle composer after its Enter and both rescue Enters were dropped", async () => {
+      const fixture = claudePane();
+      const home = idleHome(fixture);
+      return { fixture, delivered: await deliverDropped(fixture, 3), home };
+    }],
+    when: ["recovery visits the job three minutes after its submit", async ({ fixture, delivered, home }) => ({
+      composerBefore: fixture.pane.composer,
+      job: await recoverAfterThreeMinutes(fixture, home, delivered.owned),
+    })],
+    then: ["the paste is submitted once, nothing is erased, restarted or pasted again", async (result, { fixture, home }) => {
+      try {
+        expect(result.composerBefore).toBe("[Pasted text #1 +3 lines]");
+        expect(fixture.pane.submitted).toEqual([FOUR_LINES]);
+        expect(result.job.metadata.submittedRecoveryKind).toBe("exact-draft-enter");
+        expect(fixture.pane.calls.filter((call) => /BSpace|C-u|Escape/u.test(call))).toEqual([]);
+        expect(fixture.pane.calls.filter((call) => call.includes("paste-buffer"))).toHaveLength(1);
+        expect(restarted(fixture.pane)).toBe(false);
+      } finally { home.restore(); await fixture.clean(); }
+    }],
+  });
+
+  component("the same marker under a new Claude process is not amux's and gets no Enter", {
+    given: ["the job's paste left in the composer, then a new Claude process in the pane", async () => {
+      const fixture = claudePane();
+      const home = idleHome(fixture);
+      const delivered = await deliverDropped(fixture, 3);
+      fixture.newClaudeProcess();
+      return { fixture, delivered, home };
+    }],
+    when: ["recovery visits the job three minutes after its submit", async ({ fixture, delivered, home }) => ({
+      entersBefore: enters(fixture.pane),
+      job: await recoverAfterThreeMinutes(fixture, home, delivered.owned),
+    })],
+    then: ["no Enter, erase or restart, and the draft is intact", async (result, { fixture, home }) => {
+      try {
+        expect(enters(fixture.pane)).toBe(result.entersBefore);
+        expect(fixture.pane.submitted).toEqual([]);
+        expect(fixture.pane.composer).toBe("[Pasted text #1 +3 lines]");
+        expect(restarted(fixture.pane)).toBe(false);
+        expect(result.job).toMatchObject({ status: "submitted", acknowledgedAt: null });
+      } finally { home.restore(); await fixture.clean(); }
     }],
   });
 });

@@ -165,11 +165,11 @@ export function createTuiStallRecovery({
   }
 
   /** WHAT: Restarts one proven-idle pane exactly. WHY: Keeps watchdog recovery from guessing sessions or models. */
-  async function restartPaneExact(agentName, pane, { expectedDraft = null } = {}) {
+  async function restartPaneExact(agentName, pane, { expectedDraft = null, ownedPaste = null } = {}) {
     const config = configFor(agentName);
     const paneCmd = config.panes?.[pane]?.cmd || "";
     if (await isBusy(agentName, pane)) return { ok: false, reason: "pane-is-busy" };
-    const transport = await promptTransportState(agentName, pane, expectedDraft || "").catch(() => null);
+    const transport = await promptTransportState(agentName, pane, expectedDraft || "", { ownedPaste }).catch(() => null);
     if (transport?.state === "foreign" || transport?.state === "pasting"
         || (transport?.state === "drafted" && !expectedDraft)) {
       return { ok: false, reason: `composer-${transport.state}` };

@@ -16,10 +16,17 @@ const SLOW_TUI_CHECK_MS = 10_000;
 export const submittedTuiInspectionDue = (job, submittedAge, nowMs) => submittedAge < MIN_RECOVERY_AGE_MS
   || nowMs - Number(job.tuiCheckedAt || 0) >= SLOW_TUI_CHECK_MS;
 
+// The collapsed paste the job's own paste left in Claude's composer, recorded at its paste (core/claude-paste-stall.mjs).
+const ownPaste = job => ({ ownedPaste: job.metadata?.claudeOwnedPaste ?? null });
+
+/** WHAT: Builds the job update that keeps the collapsed paste its own paste left. WHY: Keeps that paste tied to its job for recovery. */
+export const withOwnPaste = (job, claudeOwnedPaste) => (claudeOwnedPaste
+  ? { metadata: { ...(job.metadata || {}), claudeOwnedPaste } } : {});
+
 /** WHAT: Reads the pane's transport state as a hint for a waiting prompt. WHY: Keeps the reason readable without treating pixels as a receipt. */
 export async function submittedTransportHint(agent, job, submittedAge) {
   if (submittedAge < 5_000 || typeof agent.promptTransportState !== "function") return null;
-  const transport = await agent.promptTransportState(job.agentName, job.pane, job.text).catch(() => null);
+  const transport = await agent.promptTransportState(job.agentName, job.pane, job.text, ownPaste(job)).catch(() => null);
   return transport?.state ? `TUI hint: ${transport.state}${transport.detail ? ` (${transport.detail})` : ""}` : null;
 }
 
@@ -51,7 +58,7 @@ export async function recoverSubmittedTui({
 
   const submittedAge = now() - Number(job.submittedAt || job.submitFenceAt || now());
   const runtime = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
-  const transport = await agent.promptTransportState(job.agentName, job.pane, job.text)
+  const transport = await agent.promptTransportState(job.agentName, job.pane, job.text, ownPaste(job))
     .catch(() => null);
   if (transport?.busy !== false || transport.dialect === "codex") return null;
   if (await exactEcho(job)) return acknowledge(job, "late-echo-before-dead-tui-recovery");
@@ -64,7 +71,8 @@ export async function recoverSubmittedTui({
   }
   // A paste held by Claude's clipboard lookup: a restart would paste the same text into the same wait
   // (skyvw:0, 2026-10-09 22:09Z). End the lookup so the paste lands as a visible draft. The transport
-  // never attributes a collapsed paste to this job, so it then gets no Enter, erase or restart here.
+  // attributes a collapsed paste to this job only when it is the one this job's own paste left in the same
+  // Claude process; any other gets no Enter, erase or restart here.
   if (transport.state === "pasting") {
     if (typeof agent.settleClaudePaste !== "function") return null;
     const settled = await agent.settleClaudePaste(current.agentName, current.pane)
@@ -104,7 +112,7 @@ export async function recoverSubmittedTui({
   if (!deadRuntime && !stalledLiveRuntime) return null;
 
   const result = await agent.restartPaneExact(current.agentName, current.pane, {
-    expectedDraft: transport.state === "drafted" ? current.text : null,
+    expectedDraft: transport.state === "drafted" ? current.text : null, ...ownPaste(current),
   })
     .catch((error) => ({ ok: false, reason: error.message }));
   if (!result?.ok) {

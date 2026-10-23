@@ -84,7 +84,7 @@ import {
 } from "./core/tui-stall-recovery.mjs";
 import { eraseKeys, isDeliveryCancelRequested, shouldPastePrompt, submitCheckOrErase, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
-import { claudePasteTransportState, claudeSafePasteParts, createClaudeComposerGuards } from "./core/claude-composer-guards.mjs";
+import { claudeSafePasteParts, createClaudeComposerGuards } from "./core/claude-composer-guards.mjs";
 import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
 import { assertCodexWorkModel, createCodexCompact, startCodexProcess } from "./core/codex-process-launch.mjs";
 export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchCommand, buildQwenLaunchCommand } from "./core/agent-launch-command.mjs";
@@ -793,7 +793,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     isAlreadyRunning, isShellProcess: isShellProc, captureScreen, assertEngineStartAllowed,
   });
   const maybeRescueClaudeSubmit = createClaudeSubmitRescue({
-    t, wait, paneDir, agentConfig, paneDialectName, isBusy, capturePane,
+    t, wait, paneDir, agentConfig, paneDialectName, isBusy, capturePane, holdsOwnPaste: claudeGuards.holdsOwnPaste,
   });
 
   async function getResponseSegments(agentName, pane) {
@@ -1078,7 +1078,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     let alreadyComposed = await promptAlreadyInComposer(agentName, pane, prompt, {
       ownedDraft: knownDrafted,
     });
-    let busyAtSend = false;
+    let busyAtSend = false, ownedPaste = null;
     let exactDraft = dialect === "codex" && alreadyComposed;
 
     if (dialect === "codex" && knownDrafted && !alreadyComposed) {
@@ -1120,7 +1120,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // Durable ownership follows the completed pane write, not a later TUI
       // repaint. Composer scraping may help recovery, but it is never proof
       // that the payload was or was not delivered.
-      if (onDrafted) await onDrafted();
+      if (dialect === "claude" && !maintenanceGuard) ownedPaste = await claudeGuards.recordOwnPaste(agentName, pane).catch(() => null);
+      if (onDrafted) await onDrafted({ claudeOwnedPaste: ownedPaste });
     } else if (dialect === "codex" || dialect === "kimi") {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
@@ -1160,7 +1161,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       onSubmitted,
     });
     if (!maintenanceGuard) await maybeSendCodexSubmitEnter(agentName, pane, target, prompt, { notBeforeMs });
-    if (!maintenanceGuard) await maybeRescueClaudeSubmit(agentName, pane, target, prompt);
+    if (!maintenanceGuard) await maybeRescueClaudeSubmit(agentName, pane, target, prompt, { ownedPaste });
     if (dialect === "kimi") {
       await maybeRescueKimiSubmit(agentName, pane, target, prompt, { notBeforeMs });
     }
@@ -1243,12 +1244,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    * an exact draft that resurfaced after an eaten Enter, or an idle empty
    * composer where the prior submission was genuinely lost.
    */
-  async function promptTransportState(agentName, pane, prompt) {
+  async function promptTransportState(agentName, pane, prompt, { ownedPaste = null } = {}) {
     const dialect = await livePaneDialectName(agentName, pane);
     const busy = Boolean(await isBusy(agentName, pane).catch(() => true));
-    // A paste waiting on Claude's clipboard lookup shows an empty composer; it is neither idle nor empty.
-    const paste = dialect === "claude" ? claudePasteTransportState(await capturePane(agentName, pane, 15).catch(() => "")) : null;
-    if (paste) return { state: paste, busy, dialect, detail: paste === "pasting" ? "Pasting…" : "a collapsed paste amux cannot attribute" };
+    const paste = dialect === "claude" ? await claudeGuards.pasteTransport(agentName, pane, ownedPaste) : null;
+    if (paste) return { ...paste, busy, dialect };
     if (dialect !== "codex") {
       const drafted = await promptAlreadyInComposer(agentName, pane, prompt);
       if (drafted) return { state: "drafted", busy, dialect };
