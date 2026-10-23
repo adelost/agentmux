@@ -80,6 +80,17 @@ resume amux sent, or why it did not, instead of a rotate. It never
 wakes, moves or restarts a pane. `AMUX_IDLE_CAPACITY_ALERT_ENABLED=false` turns
 it off.
 
+## Foreign drafts
+
+Every minute the bridge reads each Claude pane's composer. A draft no waiting
+message owns, with messages waiting behind it for 10 minutes, earns one notice
+per draft to `AMUX_FOREIGN_DRAFT_TARGET`, else `AMUX_IDLE_CAPACITY_TARGET`. The
+notice names the pane, how long, how many wait, the draft's first lines and,
+for a collapsed paste, the first lines of the one matching copy in Claude's
+paste cache (written only for pastes over 1024 characters). amux never types
+into, clears or restarts the pane: the draft may be Mattias's.
+`AMUX_FOREIGN_DRAFT_ALERT_ENABLED=false` turns it off.
+
 ## Which account is in use
 
 Under each account `amux quota` prints the panes that run on it right now, for
