@@ -20,6 +20,7 @@ import { parkHoldsMove, quotaFloorPercent } from "../core/quota-park.mjs";
 import { createQuotaParkStore } from "../core/quota-park-store.mjs";
 import { createQuotaRecoveryLoop, parseQuotaRecoveryConfig } from "../channels/quota-recovery.mjs";
 import { startIdleCapacityAlarm } from "../channels/idle-capacity-runtime.mjs";
+import { startForeignDraftAlarm } from "../channels/foreign-draft-runtime.mjs";
 import { writeQuotaRecoveryHeartbeat } from "../core/quota-recovery-heartbeat.mjs";
 import { DEFAULT_TMUX_SOCKET, runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 
@@ -85,5 +86,6 @@ if (!config.enabled) {
     startIdleCapacityAlarm({ queue, state, configPath, tmuxSocket, tmuxExec, parkStore,
       activeReceipt: (agentName, pane) => lifecycle.activeReceipt(agentName, pane),
       profileFor: (agentName, pane) => lifecycle.profileFor(agentName, pane) });
+    startForeignDraftAlarm({ queue, state, configPath, tmuxSocket, tmuxExec, profileFor: (agentName, pane) => lifecycle.profileFor(agentName, pane) });
   } catch (error) { console.log(`idle-capacity | start failed: ${error.message}`); }
 }
