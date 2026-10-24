@@ -17,7 +17,7 @@ import {
   buildDreamBatch, collectDreamSources, DREAM_PROMPT_BYTES,
 } from "../core/dream-summarizer.mjs";
 import {
-  dreamOwnerPrompt, dreamSummaryBody, resolveDreamCandidates,
+  dreamOwnerPrompt, dreamSummaryBody, readDreamOwnerResult, resolveDreamCandidates,
   writeDreamOwnerInput,
 } from "../core/dream-owner.mjs";
 import { archiveNightDay } from "../core/memory-archive.mjs";
@@ -31,6 +31,8 @@ import { acquireDreamLock } from "../core/dream-lock.mjs";
 import { claimScheduledDream } from "../core/dream-schedule.mjs";
 import { commitDreamProduct, writeDreamAtomic } from "../core/dream-commit.mjs";
 import { judgeDreamMemory, protectedDreamBlocks } from "../core/dream-memory-guard.mjs";
+import { readDreamRegular, verifyDreamMemoryEffects } from "../core/dream-memory-effects.mjs";
+import { notifyDreamFailure } from "../core/dream-failure-notice.mjs";
 import { readDreamCurationProof } from "../core/dream-curation-proof.mjs";
 import { readDreamPaneHistory } from "../core/dream-history.mjs";
 import { dreamShadow, formatDreamShadow, memoizeHistory, writeDreamShadow } from "../core/dream-shadow.mjs";
@@ -148,6 +150,19 @@ export async function mirrorDreamOwnerPrompt(ctx, owner, prompt, {
 
 /** WHAT: Builds one fleet summary. WHY: Keeps editorial judgment visible while AMUX owns the memory write. */
 export async function cmdDream(ctx, flags = {}, dependencies = {}) {
+  try { return await runDream(ctx, flags, dependencies); }
+  catch (error) {
+    if (!flags.dry && !flags.recover && !flags.help && !flags.h) {
+      try {
+        const dateKey = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", year: "numeric", month: "2-digit", day: "2-digit" }).format(dependencies.now || new Date());
+        await notifyDreamFailure({ dateKey, reason: error?.message, notify: dependencies.notifyUser || notifyUser });
+      } catch (noticeError) { console.error(`Dream: failure notification unverified: ${noticeError.message}`); }
+    }
+    throw error;
+  }
+}
+
+async function runDream(ctx, flags, dependencies) {
   if (flags.help || flags.h) {
     console.log("Usage: amux dream [--quiet] [--dry] [--since 24h|ISO] [--workspace PATH] [--defer-sentinel]");
     console.log("Finish an existing run without a model turn: --recover INPUT.json --source-sha256 SHA [--memory-sha256 PRE_RUN_SHA] [--dry]");
@@ -335,7 +350,8 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
         createdAt: now.toISOString(),
         workspace: workspaceDir,
         memoryBeforeSha256: createHash("sha256").update(memoryBefore).digest("hex"),
-        memoryGuard: { readAt: new Date(memoryReadAt).toISOString(), blocks: protectedDreamBlocks(memoryBefore) },
+        memoryGuard: { readAt: new Date(memoryReadAt).toISOString(), blocks: protectedDreamBlocks(memoryBefore), effects: true,
+          paneDirs: [...new Set([owner.paneDir, ...agents.flatMap(agent => (agent.panes || []).map((_, pane) => join(agent.dir, ".agents", String(pane))))].filter(Boolean))] },
         owner: { agent: owner.agent, pane: owner.pane, engine: owner.engine },
         compact: {
           sessionId: compact.sessionId, boundary: compact.compactBoundary,
@@ -387,8 +403,12 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       }
       const proof = await (dependencies.getProof || readDreamCurationProof)({
         owner, sessionId: compact.sessionId, prompt, dateKey, runId: input.runId, memPath, quality });
-      const judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryBefore, current,
-        { ownerTexts: proof.ownerTexts, memPath });
+      product = readDreamOwnerResult(input.outputPath, dateKey, input.runId, owner, input.sha256);
+      if (!product.ok) throw new Error(`dream-owner-product-invalid:${product.reason}`);
+      const document = JSON.parse(readDreamRegular(input.path, 256 * 1024));
+      verifyDreamMemoryEffects({ inputPath: input.path, inputSha256: input.sha256,
+        descriptor: document.memoryGuard?.effects, workspace: workspaceDir, paneDirs: [owner.paneDir].filter(Boolean) });
+      const judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryBefore, current);
       const verdict = judgeConcurrentNotes(memoryBefore, readFileSync(memPath, "utf8"));
       if (!verdict.ok) throw Error(`daily-memory-changed-during-dream:${verdict.reason}`);
       product = finishDreamMemoryRepairs({ workspace: workspaceDir, input, product });

@@ -11,6 +11,7 @@ import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
 import { readClaudeScreenQuality } from "./claude-statusline.mjs";
 import { latestCodexModelObservation } from "./native-model-observation.mjs";
+import { prepareDreamMemoryEffects, readDreamRegular } from "./dream-memory-effects.mjs";
 import { decodeDreamRepairOutput } from "./dream-repair-plan.mjs";
 
 const CODING_ENGINE = /(?:^|[\s/])(claude|codex)(?:\s|$)/u;
@@ -144,6 +145,10 @@ export function writeDreamOwnerInput(document, {
 } = {}) {
   mkdirSync(rootDir, { recursive: true, mode: 0o700 });
   const path = join(rootDir, `${document.dateKey}-${runId}.json`);
+  if (document.memoryGuard?.effects === true) {
+    const { paneDirs = [], ...guard } = document.memoryGuard;
+    document = { ...document, memoryGuard: { ...guard, effects: prepareDreamMemoryEffects({ workspace: document.workspace, paneDirs, inputPath: path }) } };
+  }
   const content = `${JSON.stringify(document, null, 2)}\n`;
   const temporary = `${path}.${process.pid}.tmp`;
   writeFileSync(temporary, content, { mode: 0o600 });
@@ -206,8 +211,7 @@ export function dreamSummaryBody(content) {
 export function readDreamOwnerResult(outputPath, dateKey, runId, owner, sourceSha256) {
   let content;
   try {
-    if (statSync(outputPath).size > 48 * 1024) return { ok: false, reason: "summary-byte-limit" };
-    content = readFileSync(outputPath, "utf8").trim();
+    content = readDreamRegular(outputPath, 48 * 1024).toString("utf8").trim();
   }
   catch { return { ok: false, reason: "dream-output-missing" }; }
   const receipt = `> Kuraterad av ${owner.agent}:${owner.pane} efter verifierad kompaktering · run \`${runId}\` · source \`${sourceSha256}\`.`;

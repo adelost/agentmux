@@ -10,6 +10,7 @@ import { defaultDreamReceiptPath, isDreamActivityTurn, readDreamReceipts } from 
 import { readDreamSuccess } from "./dream-health.mjs";
 import { resumeDreamCommit } from "./dream-commit.mjs";
 import { readDreamCurationProof } from "./dream-curation-proof.mjs";
+import { verifyDreamMemoryEffects } from "./dream-memory-effects.mjs";
 import { judgeDreamMemory, protectedDreamBlocks } from "./dream-memory-guard.mjs";
 import { finishDreamMemoryRepairs } from "./dream-memory-repairs.mjs";
 
@@ -71,8 +72,9 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   if (!Array.isArray(memoryGuardBlocks) || memoryGuardBlocks.some(block => typeof block !== "string")) {
     throw new Error("dream-recovery-memory-guard-invalid");
   }
-  const judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryGuardBlocks.join("\n"), current,
-    { ownerTexts: proof.ownerTexts, memPath });
+  verifyDreamMemoryEffects({ inputPath: path, inputSha256: sha256, descriptor: document.memoryGuard?.effects,
+    workspace, paneDirs: [owner.paneDir] });
+  const judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryBefore, current);
   const verifyMemory = () => {
     const verdict = judgeConcurrentNotes(memoryBefore, readFileSync(memPath, "utf8"));
     if (!verdict.ok) throw new Error(`dream-recovery-memory-changed:${verdict.reason}`);

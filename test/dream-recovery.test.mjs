@@ -12,7 +12,7 @@ const hash = value => createHash("sha256").update(value).digest("hex");
 const roots = [], oldHome = process.env.HOME;
 afterEach(() => { process.env.HOME = oldHome; for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-function fixture({ legacy = false, memoryFormat } = {}) {
+function fixture({ legacy = false, memoryFormat, effects = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), "dream-recovery-"));
   roots.push(root); process.env.HOME = root;
   const workspace = join(root, "workspace"), dateKey = "2026-09-08";
@@ -30,7 +30,7 @@ function fixture({ legacy = false, memoryFormat } = {}) {
       { pane: "source:2", turns: [{ user: "Fix the current bug", at: "2026-09-07T20:00:00Z" }] },
       { pane: "source:3", turns: [{ user: "/compact Keep under 80000 tokens", at: "2026-09-07T21:00:00Z" }] },
     ] }, omitted: [], unreadable: [],
-    ...(!legacy && { workspace, memoryBeforeSha256: hash(memoryBefore) }) };
+    ...(!legacy && { workspace, memoryBeforeSha256: hash(memoryBefore), ...(effects && { memoryGuard: { effects: true, paneDirs: [join(workspace, ".agents", "0")] } }) }) };
   const input = writeDreamOwnerInput(document);
   const output = `> Kuraterad av example:0 efter verifierad kompaktering · run \`${input.runId}\` · source \`${input.sha256}\`.\n- Verified work.\n`;
   writeFileSync(input.outputPath, output);
@@ -55,16 +55,20 @@ function fixture({ legacy = false, memoryFormat } = {}) {
 }
 
 describe("no-model Dream completion", () => {
-  it("recovers format-two output after an independent insertion in the middle, preserving every note", async () => {
-    const fx = fixture({ memoryFormat: 2 });
-    const changed = fx.memoryBefore.replace("Manual note", "New note under the existing heading.\nManual note");
-    writeFileSync(fx.memPath, changed);
-    expect(await fx.run({ dry: true })).toMatchObject({ dryRun: true });
-    expect(readFileSync(fx.memPath, "utf8")).toBe(changed);
-    expect(await fx.run()).toMatchObject({ recovered: true });
-    expect(readFileSync(fx.memPath, "utf8")).toContain(changed.trimEnd());
+  it("does not manufacture a missing historical effect snapshot for an old result", async () => {
+    const fx = fixture({ effects: false });
+    await expect(fx.run({ dry: true })).rejects.toThrow("dream-memory-effects-unattested");
+    expect(fx.commit).not.toHaveBeenCalled();
+    expect(readFileSync(fx.memPath, "utf8")).toBe(fx.memoryBefore);
     expect(fx.ctx.agent.send).not.toHaveBeenCalled();
-    expect(fx.ctx.agent.ensureReady).not.toHaveBeenCalled();
+  });
+  it("refuses an uncommitted memory effect instead of accepting a concurrent writer", async () => {
+    const fx = fixture({ memoryFormat: 2 });
+    const changed = fx.memoryBefore + "A newer note.\n";
+    writeFileSync(fx.memPath, changed);
+    await expect(fx.run({ dry: true })).rejects.toThrow("dream-curator-touched-memory");
+    expect(readFileSync(fx.memPath, "utf8")).toBe(changed);
+    expect(fx.commit).not.toHaveBeenCalled();
   });
   it("finishes after the daily write, preserving later notes without contacting the curator again", async () => {
     const fx = fixture({ memoryFormat: 2 });

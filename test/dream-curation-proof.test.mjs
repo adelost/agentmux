@@ -85,8 +85,8 @@ describe("original native Dream proof", () => {
     expect(proof.started.at).toBe("2026-10-15T02:24:52.795Z");
     expect(proof.terminal.at).toBe("2026-10-15T02:29:46.583Z");
   });
-  it("rejects a curator write during the task even when the current daily bytes are unknown", () => {
-    expect(() => readDreamCurationProof(fixture({ writeMemory: true }))).toThrow("dream-curator-wrote-memory");
+  it("leaves memory effects to the filesystem guard, not tool-call interpretation", () => {
+    expect(readDreamCurationProof(fixture({ writeMemory: true })).terminal).toBeTruthy();
   });
   it("does not turn queue delivery or quoted completion into a native final receipt", () => {
     expect(() => readDreamCurationProof(fixture({ receipt: false }))).toThrow("terminal-receipt-unverified");

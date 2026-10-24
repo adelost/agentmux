@@ -43,6 +43,7 @@ function ownerDependencies(fx, events = []) {
     receiptPath: fx.receiptPath,
     readReceipts: () => fx.receipts,
     collectSources: () => ({ sources: [activeSource()], unreadable: [], skipped: [] }),
+    notifyUser: async () => ({ sent: false, outcome: "not-sent" }),
     getStatus: async () => "idle",
     getProof: async () => ({ sessionId: "session-1", ownerTexts: [] }),
     getContext: () => ({ model: "gpt-5.6-sol", effort: "max" }),
@@ -50,7 +51,7 @@ function ownerDependencies(fx, events = []) {
       events.push("compact");
       return { ok: true, sessionId: "session-1", compactBoundary: true };
     },
-    writeInput: document => writeDreamOwnerInput(document, { rootDir: fx.root }),
+    writeInput: document => writeDreamOwnerInput(document, { rootDir: join(fx.root, "input") }),
     mirrorPrompt: async () => {
       events.push("mirror");
       return { channelId: "channel-3", messages: 1 };

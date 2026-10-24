@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { cmdDream } from "../cli/dream.mjs";
 import { readDreamOwnerResult, writeDreamOwnerInput } from "../core/dream-owner.mjs";
 import { finishDreamMemoryRepairs } from "../core/dream-memory-repairs.mjs";
-import { curatorMemoryWrite } from "../core/dream-memory-guard.mjs";
 
 const now = new Date("2026-10-16T00:00:00Z");
 const owner = { agent: "sandman", pane: 1, engine: "codex", paneDir: "/isolated/curator" };
@@ -25,6 +24,7 @@ function fixture(file = "memory/references/source.md", text = "# Source\n- Verif
     now, owner, agents: [], receiptPath: join(root, "receipts.json"),
     readReceipts: () => ({ schemaVersion: 1, panes: {} }),
     collectSources: () => ({ sources: [], unreadable: [], skipped: [] }),
+    notifyUser: async () => ({ sent: false, outcome: "not-sent" }),
     getStatus: async () => "idle", getProof: async () => ({ ownerTexts: [] }),
     getContext: () => ({ model: "gpt-6.1-sol", effort: "xhigh" }),
     compactCodex: async () => ({ ok: true, sessionId: "session-1", compactBoundary: true }),
@@ -65,13 +65,6 @@ feature("Dream gives memory warnings an actor without giving the model write aut
       expect(fx.sends).toBe(0);
       expect(readFileSync(join(fx.root, fx.file), "utf8")).toBe(fx.original);
     }], cleanup: fx => fx.cleanup(),
-  });
-  unit("the curator cannot forge controller repair artifacts", {
-    when: ["auditing real-shaped apply_patch calls outside the memory directory", () => ({
-      receipt: curatorMemoryWrite(JSON.stringify({ tool: "apply_patch", input: "*** Begin Patch\n*** Add File: /private/run.memory-repair.json\n+{}\n*** End Patch" }), "/workspace/memory/2026-10-16.md"),
-      result: curatorMemoryWrite(JSON.stringify({ tool: "apply_patch", input: "*** Begin Patch\n*** Add File: /private/run.summary.md\n+summary\n*** End Patch" }), "/workspace/memory/2026-10-16.md"),
-    })],
-    then: ["only the isolated model result is writable", result => expect(result).toEqual({ receipt: true, result: false })],
   });
   component("recovery reuses the normalized repair product instead of applying or appending again", {
     given: ["a warning with a safe scripted repair", () => fixture()],
@@ -136,7 +129,7 @@ feature("Dream gives memory warnings an actor without giving the model write aut
         writeFileSync(join(fx.root, fx.file), fx.original + "- A newer verified fact.\n");
         return result(args);
       };
-      await fx.run(); return fx;
+      await expect(fx.run()).rejects.toThrow("dream-curator-touched-memory"); return fx;
     }],
     then: ["the newer authored bytes survive", fx => {
       expect(readFileSync(join(fx.root, fx.file), "utf8")).toBe(fx.original + "- A newer verified fact.\n");

@@ -3,7 +3,6 @@ import { persistedSessionIdentity } from "./native-session-identity.mjs";
 import { describeSearchEvent, readSearchRecords } from "./search-jsonl.mjs";
 import { normalizePrompt, promptEventMatches } from "./claude-prompt-text.mjs";
 import { toolCallTexts } from "./dream-memory-race.mjs";
-import { curatorMemoryWrite } from "./dream-memory-guard.mjs";
 import { launchModelId } from "./pane-model-state.mjs";
 import { observationFromCodexEntry } from "./native-model-observation.mjs";
 
@@ -60,7 +59,7 @@ export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runI
     for (const text of toolCallTexts(event, { includeCalls: true })) {
       toolBytes += Buffer.byteLength(text);
       if (toolBytes > MAX_TOOL_BYTES) throw new Error("dream-curator-tool-window-too-large");
-      if (terminal || curatorMemoryWrite(text, memPath)) throw new Error(`dream-curator-wrote-memory-or-after-final:${identity.path}:${record.line}`);
+      if (terminal) throw new Error(`dream-curator-tool-after-final:${identity.path}:${record.line}`);
       ownerTexts.push(text);
     }
     if (item.role === "ASSI" && item.text.trim() === expected) {

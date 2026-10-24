@@ -79,13 +79,17 @@ describe("Dream reads idle Claude quality without trusting stale cache", () => {
               items: [{ type: "text", content: "Merged; publication blocked." }] }],
           }], unreadable: [], skipped: [] }),
           getStatus: async () => "idle",
+          getProof: async () => ({ sessionId: ID, ownerTexts: [] }),
+          notifyUser: async () => ({ sent: false, outcome: "not-sent" }),
           compactClaude: async () => { calls.push("compact"); return { ok: true, compactBoundary: true,
             sessionId: variant === "different-compact-session" ? "other" : ID }; },
           mirrorPrompt: async () => { calls.push("mirror"); return { channelId: "visible", messages: 1 }; },
           send: async () => { calls.push("send"); return { delivered: true }; },
           // A curator product opens with the run identity Dream checks before writing memory.
-          waitForResult: async ({ runId, sourceSha256 }) => ({ ok: true,
-            content: `> Kuraterad av claw:0 · run \`${runId}\` · source \`${sourceSha256}\`.\n- Merged fix; publication still blocked.` }),
+          waitForResult: async ({ outputPath, runId, sourceSha256 }) => {
+            const content = `> Kuraterad av claw:0 efter verifierad kompaktering · run \`${runId}\` · source \`${sourceSha256}\`.\n- Merged fix; publication still blocked.`;
+            writeFileSync(outputPath, content); return { ok: true, content };
+          },
           recordReceipts: () => { calls.push("receipt"); },
         });
       } catch (caught) { error = caught; }
