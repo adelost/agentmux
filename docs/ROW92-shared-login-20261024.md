@@ -63,6 +63,42 @@ data. Reuse auth.v1d.io; Drive211 remains owned by lsrc:2 and has separate
 consent. Only the scoped Suggest app credential was later authorized; no new
 personal accounts, provider clients, real-data deletions or paid probes are authorized.
 
+## 92b dependency check,24October17:15Z
+
+Owner api:4, P2. Source: lsrc:0's Trackbook follow-up tolsrc:3 at17:03:21Z,
+delivery:92fd518587e649374d3f1716dacf25d0; allocation toapi:4 at17:12:10Z,
+delivery:8cb47476cdbbbcb61b2d507bf6f5ba3a.92/92a remain completed.
+
+**Waiting before implementation:** canonical /home/adelost/lsrc/trackbook is
+still on fix/live-session-consent, HEAD49ffbf33a6528c9c94e422737e2232def971ca38,
+with tracked and untracked consent changes, including a migration and a deleted
+shared-session module. No completion or single-writer handoff receipt was
+verified. Dirty source alone does not establish that its former owner is still
+actively working. No dormant owner was woken or historical task resumed.
+
+The remote main observed by git ls-remote is8d7fd2cd3327db18f87f5cbf7675325dbb7f81dd
+(21October edge routing); canonical HEAD is from12September. A release directly
+from that old tree could omit later changes. Existing extra worktrees were
+listed only, never used as an alternate identity implementation or cleaned.
+No checkout, WIP, credential, database, browser session or release was changed.
+
+The existing consent WIP must have a verified completion/reconciliation receipt
+and a current, clean canonical source with a sequential writer handoff before
+92b starts. Its existing2h estimate is retained; phase start is unset,
+checkpoint is20min after that actual start and the150%stop is3h after it.
+File plan and estimate come before code after the handoff. No new design is
+required for the existing profile/login controls.
+
+Trackbook README, product-copy.md and the single-origin/account rules are read.
+sky.v1d.io and skyvw.app use the same account/database owner. Planned adoption
+keeps existing Better Auth users, sessions, passkeys and device grants, adds an
+explicit unique broker link and keeps old login until an authorized operator's
+real-account proof. It does not merge by email. Any needed internal app credential
+uses the existing broker provisioning path. Legacy deletion remains withlsrc:0.
+
+Dependency receipt:
+/home/adelost/lsrc/.artifacts/shared-login-92b-api4-20261024/dependency-receipt.json.
+
 ## Inventory at the15:54Z checkpoint
 
 Anonymous live starts inspected24October15:50–15:54Z. No provider login,
