@@ -6,6 +6,25 @@ Source: lsrc:0's24October15:16:57Z direction, conversation
 delivery:abd82f44005cd83e07e5b09369a5cd87, and lsrc:3's allocated AMUX92.
 The broker and the Legacy app client are distinct. Jumpbook remains retired.
 
+## Current Trackbook adoption,24October18:57Z
+
+92b supersedes the historical consent-dependency and pre-migration states below.
+lsrc:3 approved the92r clean-source disposition. The old consent feature remains
+unfinished and its canonical16WIP paths/index are untouched.
+
+| App | Current login | Own row/timebox | Open |
+|---|---|---|---|
+| sky.v1d.io / skyvw.app | One Trackbook owner; old Google/password/passkeys plus explicit Connect v1d and mapped broker login, published5951140/Pagesc186a81e |92b api:4,17:55:42–19:55:42Z,150%stop20:55:42Z | Authorized operator existing-account link/logout/v1d, then SELECT-only server corroboration. Legacy stays. |
+| suggest.v1d.io | Broker opt-in with real account and server identity proof complete; old direct Google retained |92a complete17:00Z | No new Suggest work. |
+| skybar.v1d.io | Existing broker integration |92 inventory only | No new migration. |
+
+Trackbook has its own independent broker CLIENT_SECRET_TRACKBOOK and production
+Pages V1D_AUTH_CLIENT_SECRET. No value saved or copied from another product.
+Broker c235a34/version2d10c617 and edgec6902fce published with exact rollback
+receipts. Both public login handoffs and inspected390/1280 pass, provider network
+stopped before personal OAuth. [92b current evidence](ROW92b-trackbook-broker-20261024.md)
+owns remaining account proof. No broker/Google cleanup is authorized here.
+
 ## Current delivery,24October17:00Z
 
 Suggest's opt-in broker integration is published. App source00997c8 runs as

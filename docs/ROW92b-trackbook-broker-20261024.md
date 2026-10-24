@@ -9,6 +9,59 @@ Base8d7fd2cd3327db18f87f5cbf7675325dbb7f81dd. Historical canonical and its
 Actual92b start24October17:55:42Z. Original2h deadline19:55:42Z,
 checkpoint18:15:42Z,150%stop20:55:42Z. Active time is not measured.
 
+## Current publication,24October18:57Z
+
+Opt-in is live at https://skyvw.app/signin. App5951140 is on remote main and
+production Pages c186a81e-9ae0-4a6f-8aa8-76e150ad9ae3. Broker c235a34 runs
+version2d10c617-d0a0-40af-a1ea-2f887f880f2f at100%, health200. The ordinary
+release also published edge c6902fce-d2c6-4c4d-8de8-7ca2f32c49f8. This is
+one Trackbook owner/database, with old Google/password/passkeys retained.
+
+The ordinary account switch is verified onA in the exact native session
+01a16de5-2dd4-7b53-b4fa-e94b30aa0650. Actual18:50Z quota:5h74%used,
+week27%used. No parallelW work, fresh session or clock reset.
+
+The single additive migration submission completed. The receipt parser first
+rejected Wrangler's progress prefix; no SQL was resent. Independent sqlite_master
+comparison matches all3 exact objects, and6 PRAGMA reads confirm columns,
+unique indexes, owner references and expiry index. Reconciliation wrote0rows.
+
+Final source:318app tests,134broker tests,14edge tests, check/cache/copy/build;
+fresh pre-merge14identity/session tests in4.61s. Normal release check/build and
+14edge tests pass. Actual local Pages/D1 browser proof preserves the old cookie,
+owner/accountKey/passkey/device rows across link/logout/login. Its broker is
+synthetic. Live anonymous controls and both Google handoffs pass; OAuth provider
+network requests were stopped before Google. No personal authentication byapi4.
+
+Live390/1280 screenshots were opened. New status200/enabled, unsigned link401,
+invalid callback400, direct Pages broker403 and private-page302 pass. Public
+/web-app/ and /map-demo/ bytes match their existing upstream; served immutable
+app entry matches the exact local build. Initial legacy callback expectation
+was wrong: the existing documented registration remains sky.v1d.io and forwards
+once to skyvw.app. Only that failed check was repeated against the actual contract.
+
+Production before operator:2existing users,0broker links,0consumed link/login
+transactions, SELECT-only0writes. Old canonical16paths, mtimes, deletion, HEAD,
+branch and index remain unchanged. Own browser/local proof processes are closed.
+
+**Open:** authorized operator signs into an existing Trackbook account through
+its old Google/passkey path, Settings > Connect v1d, returns Connected, signs out,
+then Sign in with v1d. Verify same account/data/devices. api4 then corroborates
+the unique existing-owner mapping and consumed session-bound link/login using
+SELECT-only evidence.92b is not DONE before this proof. Legacy stays.
+
+Rollback: preceding Pages88d525e0-99bf-490a-93bb-ed62e6cab487;
+broker baf1bcab-0354-4752-8583-bec9ca67b40c; edge890ba920-75f6-4a22-80ff-6f35b4c773ba.
+Retain additive schema and credentials. Reconcile every operation receipt before
+any retry. No release outcome remains UNKNOWN.
+
+Release18:55:37Z:59min55s from original phase start,40min36s from first app
+commit,1implementation/release writer. Original19:55:42Z deadline and20:55:42Z
+150%stop persist. Evidence: receipt.json, broker-release.json,
+migration-release.json, app-release.json, provider-release-after.json,
+live-proof.json and cleanup-after-release.json in
+/home/adelost/lsrc/.artifacts/shared-login-92b-api4-20261024/.
+
 ## File plan before code
 
 - Reuse @v1d/auth-client from the existing broker client package; update app
@@ -52,7 +105,7 @@ profile/entry and actual images20min, provision/release/live30min. These are
 owner estimates, not additional phases or a restarted clock. At the budget,
 bank the verified part and exact remaining boundary.
 
-## Safe account-switch bank,24October18:40Z
+## Historical account-switch bank,24October18:40Z
 
 Current lsrc:3 account instruction requests the ordinary safe A path at the
 nearest boundary, with exact session, no force/fresh session/credit override
