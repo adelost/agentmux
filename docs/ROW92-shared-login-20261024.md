@@ -6,7 +6,7 @@ Source: lsrc:0's24October15:16:57Z direction, conversation
 delivery:abd82f44005cd83e07e5b09369a5cd87, and lsrc:3's allocated AMUX92.
 The broker and the Legacy app client are distinct. Jumpbook remains retired.
 
-## Current delivery,24October16:44Z
+## Current delivery,24October17:00Z
 
 Suggest's opt-in broker integration is published. App source00997c8 runs as
 Worker e45b2fa8-71a6-4887-89fd-e08fcd7c2612 at100%. Broker source4944323
@@ -24,12 +24,31 @@ Live anonymous checks reached the real Google entry through the shared broker,
 kept the old Google path, refused anonymous linking and invalid callbacks, and
 matched the served JavaScript to the local release bytes. No paid provider probe.
 
-**Waiting boundary:** a real existing test account still needs Google login,
-Profile > Connect v1d, then logout and Sign in with v1d. No personal OAuth action
-or live account link was performed. The original Google route and all existing
-local session keys/subjects remain. This is a published first slice, not a
-verified full cutover. Trackbook waits for its other WIP and still uses Legacy.
-Own local runtime is closed; original deadlines17:30Z/17:46Z are not restarted.
+**Done:** lsrc:0 completed the real existing-account Google login, explicit
+Profile > Connect v1d, logout and broker login in Mattias's Chrome. Same owner,
+project and counts203/14/17/154 were observed. Source: api:4 inbound
+delivery:669f590002c0af7eea485294d9a5fde7 at16:51:20Z. His approximate clock
+estimate was later than delivery; server timestamps below establish the times.
+
+At16:59Z api:4 independently read both live authority databases using only
+SELECT through Cloudflare Data Studio. The single broker mapping points to the
+existing Suggest singleton owner and identity, both created14July07:29:32Z.
+Its local subject equals the Google method subject of that exact enabled broker
+identity; identifiers were compared only in memory. One mapping exists on each
+side. Link completion is16:49:31.888Z; subsequent broker login is16:50:42.563Z.
+Both durable transactions are consumed. The link transaction has the original
+subject, session hash and browser hash. Published complete() requires the same
+valid old session at callback, and the linked callback does not replace its
+cookie. Production before/after cookie bytes were not captured; exact byte
+continuity was separately proved in the local actual-workerd test.
+
+server-identity-proof.json records these predicates without raw identifiers,
+cookies or session hashes. Provider metadata confirms zero SQL rows written.
+closeout-live.json confirms the unchanged published source and both health200.
+No new release, credential write or personal-browser interaction by api:4 was
+needed.92/92a are complete within the original deadlines17:30Z/17:46Z.
+The old Google route remains available. Trackbook still waits for its other WIP
+and uses Legacy; its later migration and final provider cleanup are outside92a.
 
 Authoritative aggregate: /home/adelost/lsrc/.artifacts/shared-login-92-api4-20261024/receipt.json.
 Normal app rollback is084b7a2a-c812-4877-957f-9ae7baa7a4bc; broker rollback is
@@ -140,13 +159,20 @@ Sanitized artifacts under
   IDs/source metadata, configured secret names.
 - login-boundaries.json: exact callback destinations, provider-client label
   comparison, broker/Suggest secret names and inspected Git heads.
-- broker-settings.json: current production registry and secret names only.
+- broker-settings.json: initial15:54Z production registry and secret names only.
+- server-link-read.json and server-identity-proof.json: independent24October
+  server predicates from app and broker, one unique existing-owner mapping,
+  matching verified Google subject, consumed link/login and zero SQL writes.
+- operator-real-account-proof.json: source-bound real-account UI proof bylsrc:0;
+  no email, credentials or raw identity values copied into the receipt.
+- closeout-live.json: exact unchanged app build and health readback at completion.
 - inspect-live.py and check-login-boundaries.py: repeatable read-only probes;
   no cookie, auth code, token or raw provider client ID is retained.
 
 At the initial checkpoint no deployment, secret change, account mutation, console
 cleanup or paid API execution had occurred. That prerequisite blocker is historical;
-the current published result and remaining personal boundary are stated above. Original92 timebox is retained rather than restarted.
+the current completed result and real-account/server proof are stated above.
+Original92 timebox is retained rather than restarted.
 
 ## Authorized continuation,24October15:59Z
 
