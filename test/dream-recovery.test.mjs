@@ -55,6 +55,37 @@ function fixture({ legacy = false, memoryFormat, effects = true } = {}) {
 }
 
 describe("no-model Dream completion", () => {
+  it("imports an explicitly selected old result as visibly unattested history without changing original failures or cursors", async () => {
+    const fx = fixture({ effects: false });
+    const original = `${fx.memoryBefore}<!-- amux-dream-failed:2026-09-08 04:00 original-failure -->\n`;
+    writeFileSync(fx.memPath, original);
+    fx.getProof.mockResolvedValue({ sessionId: fx.quality.sessionId, ownerTexts: [], terminal: { at: "2026-09-08T02:05:00Z", line: 10 } });
+    expect(await fx.run({ "import-historical": true, dry: true })).toMatchObject({ dryRun: true, originalEffects: "unattested" });
+    expect(readFileSync(fx.memPath, "utf8")).toBe(original);
+    const result = await fx.run({ "import-historical": true });
+    expect(result).toMatchObject({ historicalImported: true, originalStatusPreserved: true, receiptsAdvanced: false });
+    const day = readFileSync(fx.memPath, "utf8"), audit = readFileSync(result.audit, "utf8");
+    expect(day.startsWith(original)).toBe(true);
+    expect(day).toContain("effektattest saknas"); expect(day).not.toContain("amux-dream-summary:");
+    expect(readFileSync(result.artifact, "utf8")).toContain("Verified work.");
+    expect(JSON.parse(audit)).toMatchObject({ originalEffects: "unattested", phase: "committed", receiptsAdvanced: false });
+    expect(await fx.run({ "import-historical": true })).toMatchObject({ alreadyImported: true });
+    expect(readFileSync(fx.memPath, "utf8")).toBe(day); expect(readFileSync(result.audit, "utf8")).toBe(audit);
+    expect(readDreamReceipts().panes).toEqual({}); expect(fx.commit).not.toHaveBeenCalled();
+    expect(fx.ctx.agent.send).not.toHaveBeenCalled(); expect(fx.ctx.agent.ensureReady).not.toHaveBeenCalled();
+    writeFileSync(fx.memPath, original);
+    await expect(fx.run({ "import-historical": true })).rejects.toThrow("reference-removed");
+  });
+
+  it("refuses changes during historical qualification instead of converting them into old effect proof", async () => {
+    const fx = fixture({ effects: false });
+    fx.getProof.mockImplementation(async () => {
+      writeFileSync(fx.memPath, fx.memoryBefore + "Concurrent memory change.\n");
+      return { sessionId: fx.quality.sessionId, terminal: { at: "2026-09-08T02:05:00Z" } };
+    });
+    await expect(fx.run({ "import-historical": true })).rejects.toThrow("dream-historical-memory-changed");
+    expect(fx.commit).not.toHaveBeenCalled(); expect(readDreamReceipts().panes).toEqual({});
+  });
   it("does not manufacture a missing historical effect snapshot for an old result", async () => {
     const fx = fixture({ effects: false });
     await expect(fx.run({ dry: true })).rejects.toThrow("dream-memory-effects-unattested");

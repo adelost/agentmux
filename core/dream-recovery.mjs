@@ -13,6 +13,7 @@ import { readDreamCurationProof } from "./dream-curation-proof.mjs";
 import { assertDreamWritePath, readDreamRegular, verifyDreamMemoryEffects } from "./dream-memory-effects.mjs";
 import { judgeDreamMemory, protectedDreamBlocks } from "./dream-memory-guard.mjs";
 import { finishDreamMemoryRepairs } from "./dream-memory-repairs.mjs";
+import { beginDreamHistoricalImport, finishDreamHistoricalImport } from "./dream-historical-import.mjs";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -37,18 +38,18 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   const memPath = join(workspace, "memory", `${dateKey}.md`);
   assertDreamWritePath(memPath);
   const success = readDreamSuccess(workspace, dateKey, { home: homedir(), now });
-  if (success.ok && success.runId === runId) return { alreadyCommitted: true, runId, dateKey, path: memPath };
+  if (!flags["import-historical"] && success.ok && success.runId === runId) return { alreadyCommitted: true, runId, dateKey, path: memPath };
   const expectedMemory = document.memoryBeforeSha256 || flags["memory-sha256"];
   if (!/^[a-f0-9]{64}$/u.test(expectedMemory || "")) throw new Error("dream-recovery-pre-run-memory-hash-required");
   if (document.memoryBeforeSha256 && flags["memory-sha256"] && flags["memory-sha256"] !== document.memoryBeforeSha256) {
     throw new Error("dream-recovery-pre-run-memory-hash-mismatch");
   }
-  const resumed = resumeDreamCommit({ path, sha256, document, workspace, memPath, dateKey, runId,
+  const resumed = !flags["import-historical"] && resumeDreamCommit({ path, sha256, document, workspace, memPath, dateKey, runId,
     expectedMemory, dry: !!flags.dry });
   if (resumed) return resumed;
   const memoryBefore = readFileSync(memPath, "utf8");
   // Old format-one packets have no scoped memory contract and retain their hash fence.
-  if (!document.memoryGuard && document.memoryFormat !== 2 && hash(memoryBefore) !== expectedMemory) {
+  if (!flags["import-historical"] && !document.memoryGuard && document.memoryFormat !== 2 && hash(memoryBefore) !== expectedMemory) {
     throw new Error("dream-recovery-memory-changed");
   }
   const owner = resolveDreamCandidates(loadConfig(ctx.configPath)).find(candidate =>
@@ -61,6 +62,7 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   const prompt = dreamOwnerPrompt({ owner, input, memPath,
     previousMemPath: join(workspace, "memory", `${previous.toISOString().slice(0, 10)}.md`), dateKey,
     included: document.payload.panes.length, omitted: document.omitted.length, unreadable: document.unreadable.length });
+  const historical = flags["import-historical"] && beginDreamHistoricalImport({ workspace, owner, inputPath: path });
   let product = readDreamOwnerResult(input.outputPath, dateKey, runId, owner, sha256);
   if (!product.ok) throw new Error(`dream-recovery-product-invalid:${product.reason}`);
   const proof = await getProof({ owner, prompt, dateKey, runId, memPath, sessionId: document.compact.sessionId, quality: document.compact });
@@ -68,6 +70,7 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
       || !document.compact.effort || document.compact.effort.toLowerCase() === "low") {
     throw new Error("dream-recovery-session-quality-mismatch");
   }
+  if (historical) return finishDreamHistoricalImport({ baseline: historical, workspace, memPath, memoryBefore, input, document, product, proof, dateKey, dry: !!flags.dry });
   const memoryGuardBlocks = document.memoryGuard?.blocks ?? protectedDreamBlocks(
     hash(memoryBefore) === expectedMemory ? memoryBefore : "");
   if (!Array.isArray(memoryGuardBlocks) || memoryGuardBlocks.some(block => typeof block !== "string")) {

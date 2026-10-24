@@ -65,7 +65,7 @@ export function snapshotDreamMemory(roots, { artifactRoot, ignored = [] } = {}) 
       visit(target);
     } else if (stat.isDirectory()) {
       // The one permitted output may change its parent directory's timestamps and size.
-      entries[path] = path === artifactRoot
+      entries[path] = path === artifactRoot && skip.size > 0
         ? { kind: "directory", dev: id.dev, ino: id.ino, mode: id.mode }
         : { kind: "directory", ...id };
       for (const name of readdirSync(path).sort()) visit(join(path, name));
@@ -94,6 +94,12 @@ export function snapshotDreamMemory(roots, { artifactRoot, ignored = [] } = {}) 
 }
 
 const pathsFor = inputPath => ({ input: inputPath, manifest: inputPath.replace(/\.json$/u, ".memory-before.json"), output: inputPath.replace(/\.json$/u, ".summary.md") });
+
+/** WHAT: Returns every changed path in two memory observations. WHY: Keeps missing, restored and newly created files inside the same effect check. */
+export function changedDreamMemory(before, after) {
+  return [...new Set([...Object.keys(before.entries), ...Object.keys(after.entries)])]
+    .filter(path => JSON.stringify(before.entries[path]) !== JSON.stringify(after.entries[path]));
+}
 
 /** WHAT: Stores the controller's pre-curation snapshot. WHY: Prevents recovery from manufacturing a historical baseline or changing its scope. */
 export function prepareDreamMemoryEffects({ workspace, paneDirs = [], inputPath }) {
@@ -128,8 +134,7 @@ export function verifyDreamMemoryEffects({ inputPath, inputSha256, descriptor, w
   if (before.version !== 1 || !Array.isArray(before.roots) || !before.entries
       || dreamMemoryRoots(workspace, paneDirs).some(root => !before.roots.includes(root))) throw new Error("dream-memory-scope-changed");
   const after = snapshotDreamMemory(before.roots, { artifactRoot, ignored: Object.values(paths) });
-  const changed = [...new Set([...Object.keys(before.entries), ...Object.keys(after.entries)])]
-    .filter(path => JSON.stringify(before.entries[path]) !== JSON.stringify(after.entries[path]));
+  const changed = changedDreamMemory(before, after);
   if (changed.length) throw new Error(`dream-curator-touched-memory:${changed.slice(0, 3).join(",")}`);
   readDreamRegular(paths.output, 48 * 1024);
   return { version: 1, files: Object.keys(after.entries).length, sha256: descriptor.sha256 };

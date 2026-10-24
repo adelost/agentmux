@@ -17,7 +17,7 @@ import {
   buildDreamBatch, collectDreamSources, DREAM_PROMPT_BYTES,
 } from "../core/dream-summarizer.mjs";
 import {
-  dreamOwnerPrompt, dreamSummaryBody, readDreamOwnerResult, resolveDreamCandidates,
+  dreamOwnerPrompt, dreamSummaryBody, resolveDreamCandidates,
   writeDreamOwnerInput,
 } from "../core/dream-owner.mjs";
 import { archiveNightDay } from "../core/memory-archive.mjs";
@@ -30,10 +30,10 @@ import { recoverDreamRun } from "../core/dream-recovery.mjs";
 import { acquireDreamLock } from "../core/dream-lock.mjs";
 import { claimScheduledDream } from "../core/dream-schedule.mjs";
 import { commitDreamProduct, writeDreamAtomic } from "../core/dream-commit.mjs";
-import { judgeDreamMemory, protectedDreamBlocks } from "../core/dream-memory-guard.mjs";
-import { assertDreamWritePath, readDreamRegular, verifyDreamMemoryEffects } from "../core/dream-memory-effects.mjs";
+import { protectedDreamBlocks } from "../core/dream-memory-guard.mjs";
+import { assertDreamWritePath } from "../core/dream-memory-effects.mjs";
 import { notifyDreamFailure } from "../core/dream-failure-notice.mjs";
-import { readDreamCurationProof } from "../core/dream-curation-proof.mjs";
+import { checkDreamCuration } from "../core/dream-curation-check.mjs";
 import { readDreamPaneHistory } from "../core/dream-history.mjs";
 import { dreamShadow, formatDreamShadow, memoizeHistory, writeDreamShadow } from "../core/dream-shadow.mjs";
 import { readWindow } from "../core/ask-ledger.mjs";
@@ -167,6 +167,7 @@ async function runDream(ctx, flags, dependencies) {
   if (flags.help || flags.h) {
     console.log("Usage: amux dream [--quiet] [--dry] [--since 24h|ISO] [--workspace PATH] [--defer-sentinel]");
     console.log("Finish an existing run without a model turn: --recover INPUT.json --source-sha256 SHA [--memory-sha256 PRE_RUN_SHA] [--dry]");
+    console.log("Explicit historical import only: add --import-historical; missing original effects stay unattested, failures and cursors unchanged.");
     return { help: true };
   }
   if (flags.recover) {
@@ -402,17 +403,10 @@ async function runDream(ctx, flags, dependencies) {
         // the nightly limit, even if that model cannot finish its response.
         throw new Error(`dream-owner-product-invalid:${product.reason}`);
       }
-      const proof = await (dependencies.getProof || readDreamCurationProof)({
-        owner, sessionId: compact.sessionId, prompt, dateKey, runId: input.runId, memPath, quality });
-      product = readDreamOwnerResult(input.outputPath, dateKey, input.runId, owner, input.sha256);
-      if (!product.ok) throw new Error(`dream-owner-product-invalid:${product.reason}`);
-      const document = JSON.parse(readDreamRegular(input.path, 256 * 1024));
-      verifyDreamMemoryEffects({ inputPath: input.path, inputSha256: input.sha256,
-        descriptor: document.memoryGuard?.effects, workspace: workspaceDir, paneDirs: [owner.paneDir].filter(Boolean) });
-      const judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryBefore, current);
-      const verdict = judgeConcurrentNotes(memoryBefore, readFileSync(memPath, "utf8"));
-      if (!verdict.ok) throw Error(`daily-memory-changed-during-dream:${verdict.reason}`);
-      product = finishDreamMemoryRepairs({ workspace: workspaceDir, input, product });
+      const checked = await checkDreamCuration({ owner, sessionId: compact.sessionId, prompt, dateKey, input, memPath,
+        quality, workspace: workspaceDir, memoryBefore, getProof: dependencies.getProof });
+      const { judgeConcurrentNotes } = checked;
+      product = finishDreamMemoryRepairs({ workspace: workspaceDir, input, product: checked.product });
       commitDreamProduct({ memPath, memoryBefore, product, dateKey, included: batch.included,
         memoryGuardBlocks: protectedDreamBlocks(memoryBefore),
         omitted: batch.omitted, receipts, receiptPath, now, recordReceipts, input, unreadable: observed.unreadable,
