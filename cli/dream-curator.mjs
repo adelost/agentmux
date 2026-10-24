@@ -24,11 +24,16 @@ export function dreamCandidateBlocker(status) {
  * WHAT: Returns the first capable idle configured curator.
  * WHY: Prevents a transient busy state from silently changing editorial ownership.
  */
-export async function selectIdleOwner(ctx, candidates, { ensureReady, prepare, attempts, ...idleOptions } = {}) {
+export async function selectIdleOwner(ctx, candidates, { ensureReady, prepare, attempts, capable = () => true, ...idleOptions } = {}) {
   const skipped = [];
   const reasons = [];
   let lastError = null;
   for (const candidate of candidates) {
+    if (!capable(candidate)) {
+      skipped.push(`${candidate.agent}:${candidate.pane}`);
+      reasons.push(`${candidate.agent}:${candidate.pane} has no enforced Dream sandbox`);
+      continue;
+    }
     try { await ensureReady(candidate.agent, candidate.pane); }
     catch (error) {
       lastError = error;

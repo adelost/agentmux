@@ -323,6 +323,7 @@ async function runDream(ctx, flags, dependencies) {
 
     {
       const selection = await selectIdleOwner(ctx, candidates, {
+        capable: candidate => candidate.engine === "codex" || !!dependencies.enterSandbox,
         ensureReady: (agent, pane) => ctx.agent.ensureReady(agent, pane),
         prepare: (candidate) => prepareDreamOwner(ctx, candidate, dependencies),
         attempts: dependencies.idleAttempts,

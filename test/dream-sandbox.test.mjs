@@ -13,18 +13,22 @@ it("accepts another process's reference and own daily heading while the curator 
   try {
     const workspace = join(root, "workspace"), memory = join(workspace, "memory"), dateKey = "2026-10-24";
     mkdirSync(join(memory, "references"), { recursive: true });
-    const memPath = join(memory, dateKey + ".md"), memoryBefore = "# " + dateKey + "\n";
+    const memPath = join(memory, dateKey + ".md"), memoryBefore = "# " + dateKey + "\n<!-- amux-dream-summary:2026-10-23 -->\nOld fact.\n<!-- /amux-dream-summary:2026-10-23 -->\n";
     writeFileSync(memPath, memoryBefore);
     const owner = { agent: "dream", pane: 1, engine: "codex" };
     const input = writeDreamOwnerInput({ dateKey, workspace, memoryGuard: { effects: true, sandbox: true } }, { rootDir: join(root, "input") });
     writeFileSync(input.outputPath, `> Kuraterad av dream:1 efter verifierad kompaktering · run \`${input.runId}\` · source \`${input.sha256}\`.\n- Verified result.\n`);
     execFileSync("python3", ["-c", "import pathlib,sys; p=pathlib.Path(sys.argv[1]); (p/'references'/'other.md').write_text('Other verified fact.'); f=p/'2026-10-24.md'; f.write_text(f.read_text()+'\\n## Other panel\\nOwn note.\\n')", memory]);
     const sandboxProof = { ...input.sandbox, runId: input.runId, inputSha256: input.sha256, sessionId: "test-session", status: "running" };
-    const result = await checkDreamCuration({ owner, sessionId: "test-session", prompt: "fixture", dateKey, input, memPath, workspace, memoryBefore,
-      sandboxProof, getProof: async () => ({ sessionId: "test-session", ownerTexts: [], sandboxDenied: false }) });
+    const options = { owner, sessionId: "test-session", prompt: "fixture", dateKey, input, memPath, workspace, memoryBefore,
+      sandboxProof, getProof: async () => ({ sessionId: "test-session", ownerTexts: [], sandboxDenied: false }) };
+    const result = await checkDreamCuration(options);
     expect(result.product.ok).toBe(true);
     expect(readFileSync(memPath, "utf8")).toContain("Own note.");
     expect(readFileSync(join(memory, "references", "other.md"), "utf8")).toBe("Other verified fact.");
+    await expect(checkDreamCuration({ ...options, sandboxProof: null })).rejects.toThrow("sandbox-unattested");
+    writeFileSync(memPath, readFileSync(memPath, "utf8").replace("Old fact.", "Altered fact."));
+    await expect(checkDreamCuration(options)).rejects.toThrow("protected-block-changed");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -66,13 +66,13 @@ export function snapshotDreamMemory(roots, { artifactRoot, ignored = [], audit =
       catch (error) { if (!audit) throw error; target = resolve(dirname(path), readlinkSync(path)); }
       if (!audit && !scope.some(root => inside(target, root))) throw new Error(`dream-memory-link-outside-scope:${path}`);
       entries[path] = { kind: "link", ...id, target: readlinkSync(path) };
-      if (scope.some(root => inside(target, root))) visit(target);
+      if (scope.some(root => inside(target, root))) observe(target);
     } else if (stat.isDirectory()) {
       // The one permitted output may change its parent directory's timestamps and size.
       entries[path] = path === artifactRoot && skip.size > 0
         ? { kind: "directory", dev: id.dev, ino: id.ino, mode: id.mode }
         : { kind: "directory", ...id };
-      for (const name of readdirSync(path).sort()) visit(join(path, name));
+      for (const name of readdirSync(path).sort()) observe(join(path, name));
     } else if (stat.isFile()) {
       totalBytes += Number(stat.size);
       if (totalBytes > 512 * 1024 * 1024 || stat.size > 256n * 1024n * 1024n) throw new Error("dream-memory-snapshot-byte-limit");
@@ -94,8 +94,15 @@ export function snapshotDreamMemory(roots, { artifactRoot, ignored = [], audit =
       } finally { closeSync(fd); }
     } else throw new Error(`dream-memory-snapshot-special-file:${path}`);
   };
-  scope.forEach(visit);
-  if (artifactRoot) visit(artifactRoot);
+  const observe = path => {
+    try { visit(path); }
+    catch (error) {
+      if (!audit) throw error;
+      entries[path] = { kind: "unobserved", reason: error.code || error.message };
+    }
+  };
+  scope.forEach(observe);
+  if (artifactRoot) observe(artifactRoot);
   return { version: 1, roots: scope, entries };
 }
 
