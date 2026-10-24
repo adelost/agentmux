@@ -36,10 +36,11 @@ budget, bank the result, finish safe resource closure and report the stop plus
 the smallest continuation proposal; do not begin another investigation or phase
 without a new bounded decision. Independent assigned READY work may proceed.
 Preserve the first estimate and distinguish an approved revision from a guess.
-At 5 times the first estimate, re-plan before another phase; at 10 times, require
-an explicit dispatcher continuation decision. These are escalation signals, not
-permission to run past the current budget. Documented wall time is not measured
+Documented wall time is not measured
 active work; unknown work/wait intervals remain unknown.
+
+Why: make overruns visible before spending more time. Source: lsrc:3's
+24 October correction, [TASKS 78b](../TASKS.md); original voice not rechecked here.
 
 ## A drained backlog is healthy idle
 
