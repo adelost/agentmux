@@ -424,6 +424,23 @@ curates the nightly fleet digest. AMUX verifies an exact compact receipt and
 posts the full prompt to that pane's Discord channel; there is no hidden model.
 Only explicitly configured `dream.candidates` may replace an unavailable curator.
 
+`amux dream --setup-care` configures the existing Claude curator for ordinary
+Markdown care in one fixed private Git worktree. Linux requires `bubblewrap`,
+`socat` and the sandbox runtime's seccomp filter. Restart an idle curator through
+its normal exact-session path after setup. Startup uses fixed controller-owned
+settings, native file permissions and the strict Bash sandbox, with a clean
+environment and no MCP servers. A working directory alone provides no isolation.
+The configured Codex fallback keeps its existing digest-only path in this slice.
+
+The same normal conversation-log turn reads `MEMORY.md` and the selected
+technical reference, creates a current `care-<date>.md` reference and appends its
+index link. Existing lint and a private Git diff qualify the draft. Publication
+refuses changed source facts, preserves concurrent index appends and never
+replaces an existing reference. This is additive publication, not an atomic
+multi-file transaction. Durable per-input receipts retain partial or unknown
+append outcomes without a blind retry. Care failure preserves a valid digest.
+Drafts, diffs and memory content stay private; historical runs are never replayed.
+
 Dream also runs a separate nightly context-budget pass, including when there is
 no new digest work or the curator fails. It uses tokens, not file bytes or the
 bridge's unchanged 60-percent daytime trigger. Defaults are more than 80,000

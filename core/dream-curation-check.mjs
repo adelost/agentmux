@@ -11,11 +11,12 @@ import { freezeDreamCare } from "./dream-care-workspace.mjs";
 export async function checkDreamCuration({ owner, sessionId, prompt, dateKey, input, memPath, quality, workspace, memoryBefore, getProof = readDreamCurationProof }) {
   await getProof({ owner, sessionId, prompt, dateKey, runId: input.runId, memPath, quality });
   const document = JSON.parse(readDreamRegular(input.path, 256 * 1024));
-  const product = readDreamOwnerResult(existsSync(input.outputPath) ? input.outputPath : input.modelOutputPath || input.outputPath, dateKey, input.runId, owner, input.sha256);
+  const resultPath = existsSync(input.outputPath) ? input.outputPath : input.modelOutputPath || input.outputPath;
+  const product = readDreamOwnerResult(resultPath, dateKey, input.runId, owner, input.sha256);
   if (!product.ok) throw new Error(`dream-owner-product-invalid:${product.reason}`);
   if (document.memoryCare) {
     if (document.memoryCare.runtimeAttested !== true) throw Error("dream-care-runtime-unattested");
-    writeDreamAtomic(input.outputPath, product.content + "\n", { immutable: true });
+    writeDreamAtomic(input.outputPath, readDreamRegular(resultPath, 128 * 1024).toString("utf8"), { immutable: true });
     const memoryCare = freezeDreamCare(input);
     const judgeConcurrentNotes = (_before, current) => ({ ok: JSON.stringify(protectedDreamBlocks(memoryBefore)) === JSON.stringify(protectedDreamBlocks(current)), reason: "dream-marker" });
     if (!judgeConcurrentNotes(memoryBefore, readFileSync(memPath, "utf8")).ok) throw Error("daily-memory-changed-during-dream:dream-marker");

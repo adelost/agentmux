@@ -1,6 +1,7 @@
 // Conservative recovery for coding-agent panes whose live TUI stops rendering.
 
 import { buildClaudeLaunchCommand } from "./agent-launch-command.mjs";
+import { runDreamCareCommand } from "./dream-care-policy.mjs";
 import { claudePaneSelection } from "./claude-model.mjs";
 import { getContextPercent } from "./context.mjs";
 import { codexModelOverride, selectedCodexProfile } from "./codex-profiles.mjs";
@@ -92,7 +93,7 @@ export function createTuiStallRecovery({
       profileHome: runtimeProfileLaunchHome(profile),
       cwd: dir,
     });
-    await tmux.runShell(target, `cd ${esc(dir)} && ${command}`);
+    if (!await runDreamCareCommand(tmux, target, dir, command)) await tmux.runShell(target, `cd ${esc(dir)} && ${command}`);
     await delay(2000);
   }
 

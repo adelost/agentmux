@@ -39,7 +39,7 @@ export function normalizeClaudeEffort(value) {
   return EFFORT_TOKEN.test(effort) ? effort : null;
 }
 
-const FOOTER_MODEL = /(?:^|[│|]\s*)(claude-[\w.\[\]-]+|(?:Fable|Mythos|Opus|Sonnet|Haiku)\s+\d+(?:[.\-]\d+)*(?:\s*\(1M context\))?)(?=\s*[│|])/iu;
+const FOOTER_MODEL = /(?:^|[│|·]\s*)(claude-[\w.\[\]-]+|(?:Fable|Mythos|Opus|Sonnet|Haiku)\s+\d+(?:[.\-]\d+)*(?:\s*\(1M context\))?)(?=\s*[│|·])/iu;
 // a label the terminal cut short ("thinking: m…") is no effort at all (E93)
 const footerEffort = (line) => normalizeClaudeEffort(line.match(/\b(?:thinking|effort)\s*:\s*([\w-]+)\b(?!…|\.\.\.)/iu)?.[1]);
 
@@ -57,8 +57,8 @@ const footerLines = (screen) => {
  */
 export function readClaudeFooterModel(screen) {
   for (const line of footerLines(screen) || []) {
-    if (!/[│|]/u.test(line)) continue;
-    const model = line.match(FOOTER_MODEL)?.[1];
+    if (!/[│|·]/u.test(line)) continue;
+    const model = line.trim().match(FOOTER_MODEL)?.[1];
     if (model) return { model, effort: footerEffort(line), source: "claude-live-statusline" };
   }
   return null;
@@ -69,8 +69,8 @@ export function readClaudeScreenStatus(screen) {
   const footer = footerLines(screen);
   if (!footer) return null;
   for (const line of footer) {
-    if (!/[█▓▒░│|]/u.test(line) || !/\b\d{1,3}\s*%/u.test(line)) continue;
-    const model = line.match(FOOTER_MODEL)?.[1];
+    if (!/[█▓▒░│|·]/u.test(line) || !/\b\d{1,3}\s*%/u.test(line)) continue;
+    const model = line.trim().match(FOOTER_MODEL)?.[1];
     const effort = footerEffort(line);
     const percent = Number(line.match(/\b(\d{1,3})\s*%/u)?.[1]);
     if (model && Number.isFinite(percent) && percent <= 100) {

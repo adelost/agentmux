@@ -4,6 +4,7 @@ import { appendEvent } from "./events.mjs";
 import { readFileSync } from "node:fs";
 import { getAgent } from "../cli/config.mjs";
 import { buildClaudeLaunchCommand } from "./agent-launch-command.mjs";
+import { runDreamCareCommand } from "./dream-care-policy.mjs";
 import { createTmuxAdapter } from "./tmux.mjs";
 import { findBlockingPrompt, hasEmptyClaudeComposer, isClaudeLimitChoiceMenu } from "./dismiss.mjs";
 import { latestClaudeSessionIdentity, persistedSessionIdentity } from "./native-session-identity.mjs";
@@ -254,7 +255,7 @@ export function createClaudeQuotaLifecycle({
       profileHome: runtimeProfileLaunchHome(profile),
       cwd: targetConfig.cwd,
     });
-    await tmux.runShell(target, `cd '${targetConfig.cwd.replaceAll("'", "'\\''")}' && ${launch}`);
+    if (!await runDreamCareCommand(tmux, target, targetConfig.cwd, launch)) await tmux.runShell(target, `cd '${targetConfig.cwd.replaceAll("'", "'\\''")}' && ${launch}`);
     if (!await waitForComposer(target)) return { ok: false, reason: "resumed-composer-not-ready" };
 
     try {

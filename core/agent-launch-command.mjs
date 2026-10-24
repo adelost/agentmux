@@ -43,7 +43,9 @@ export function buildClaudeLaunchCommand({
     ? ` --resume ${shellQuote(exactResume)}`
     : resume ? " --continue" : "";
   const profile = profileHome ? `CLAUDE_CONFIG_DIR=${shellQuote(profileHome)} ` : "";
-  return `${profile}ANTHROPIC_DISABLE_SURVEY=1 claude ${dreamCareNativeFlags("claude", cwd) || CLAUDE_AUTONOMOUS_FLAGS} ` +
+  const careFlags = dreamCareNativeFlags("claude", cwd);
+  const environment = careFlags ? `env -i HOME="$HOME" PATH="$PATH" TERM="$TERM" LANG="\${LANG:-C.UTF-8}" ${profile}` : profile;
+  return `${environment}ANTHROPIC_DISABLE_SURVEY=1 claude ${careFlags || CLAUDE_AUTONOMOUS_FLAGS} ` +
     `--model ${shellQuote(exactModel)}${exactEffort ? ` --effort ${shellQuote(exactEffort)}` : ""}${sessionFlag}`;
 }
 

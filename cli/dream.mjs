@@ -215,7 +215,7 @@ async function runDream(ctx, flags, dependencies) {
   const candidates = dependencies.candidates
     || (dependencies.owner ? [dependencies.owner] : resolveDreamCandidates(runtimeConfig));
   let owner = candidates[0];
-  if (flags["setup-care"]) return configureDreamCare(candidates, { ...(flags["care-root"] && { root: flags["care-root"] }), ...(flags["care-reference"] && { reference: flags["care-reference"] }) });
+  if (flags["setup-care"]) return configureDreamCare(candidates.filter(candidate => candidate.engine === "claude"), { ...(flags["care-root"] && { root: flags["care-root"] }), ...(flags["care-reference"] && { reference: flags["care-reference"] }) });
   const primarySource = process.env.AMUX_DREAM_SOURCE || "conversation-log";
   if (!["conversation-log", "raw"].includes(primarySource)) throw Error(`Unknown AMUX_DREAM_SOURCE '${primarySource}'; use conversation-log or raw`);
   const readConversation = dependencies.readConversation || (dependencies.collectSources
@@ -348,6 +348,7 @@ async function runDream(ctx, flags, dependencies) {
       const { compact, quality } = selection;
 
       const careConfig = dependencies.memoryCare || readDreamCarePolicy(owner.paneDir);
+      if (careConfig && primarySource === "raw") throw Error("dream-care-raw-retreat-unqualified: fixed permission scope remains active");
       let memoryCare = null;
       if (careConfig && primarySource === "conversation-log") {
         const runtime = await (dependencies.verifyCareRuntime || verifyDreamCareRuntime)(ctx, owner);
@@ -380,7 +381,7 @@ async function runDream(ctx, flags, dependencies) {
         unreadable: observed.unreadable,
         skipped: observed.skipped || [],
       });
-      const prompt = dreamOwnerPrompt({
+      const prompt = (dependencies.ownerPrompt || dreamOwnerPrompt)({
         owner,
         input,
         memPath,
