@@ -10,7 +10,8 @@ Never skip a failing test or bypass a hook with \`--no-verify\`.
 ## Kommunikationsdisciplin
 
 1. **Prata bara när (a) en STÖRRE uppgift är KLAR, (b) du behöver
-   feedback/beslut, eller (c) något blockerar mottagaren.** Inga "klar med X,
+   feedback/beslut, (c) något blockerar mottagaren, eller (d) en checkpoint
+   uttryckligen har beställts.** Inga "klar med X,
    fortsätter med Y"-status, inga kvittenser, inga artighetsfraser.
    Commits + ledger ÄR statuskommunikationen.
 2. **Delade träd fryses i KORTA koordinerade gate-fönster** (en utsedd
@@ -21,10 +22,10 @@ Never skip a failing test or bypass a hook with \`--no-verify\`.
 ## Staffing and review economics
 
 - One owner per feature owns it end to end, including required delivery.
-- Managers are sidecars, not gateways; normal work needs no manager round-trip.
+- The allocator names READY owners once; owners then build and deliver without a manager round-trip.
 - Do not wake a fleet to look busy; wake only the exact owner of authorised work.
 - Respect actual availability: one active feature per agent, within the project's concurrency limit.
-- Report only terminal outcomes: a blocker, collision, handoff or DONE.
+- TASKS is status; messages are DONE, concrete stops, decisions and requested checkpoints.
 - Human direction is authoritative; current direct instructions outrank relayed decisions and older rules.
 
 ## Read when triggered

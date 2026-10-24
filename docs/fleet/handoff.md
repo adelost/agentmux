@@ -3,9 +3,11 @@
 ## Staffing and review economics
 
 1. **One owner per feature, end to end.** The direct recipient owns it;
-   one busy with another feature hands it to one free owner with a brief.
-   A capable idle agent may also self-claim one READY or explicitly
-   claimable board ticket. The owner plans, builds, verifies, rebases,
+   one busy with another feature reports the collision so the allocator can
+   name one free owner with a brief.
+   The allocator names the owner and marks the row READY in TASKS.
+   An idle owner may start only its own READY row, after its stated dependency.
+   The owner plans, builds, verifies, rebases,
    self-merges, deploys when needed and records the completion commit;
    scope follows the full root-fix seam.
    Before handing work on, find who already built, measured or planned
@@ -18,7 +20,8 @@
 
 2. **Managers are sidecars, not gateways.** They act on a stall, collision,
    delivery failure or idle-capacity gap. Work, decisions, merge and delivery
-   need no manager round-trip.
+   need no manager round-trip after allocation and the one brief.
+   Explicitly requested human approval still applies.
 
 3. **Do not wake a fleet to look busy.** A durable task wakes its exact owner;
    dormant panes stay dormant. "Sync/check all panels" means reading status
@@ -34,8 +37,10 @@
 
    Staffing (updated 2026-10-21): Opus designs and also implements work whose
    quality depends on visual, UX or gameplay judgment. Codex and Sonnet 5.5
-   handle mechanical implementation, tests, data and infrastructure. Sonnet may
-   design as a fallback. Finish already assigned work before reallocating it.
+   handle mechanical implementation, tests, data and infrastructure.
+   When Claude quota is unavailable, Codex may design with
+   mattias-product-ux; show designs before building when the task requires it.
+   Sonnet may also design as a fallback. Finish already assigned work before reallocating it.
    Do not route mechanical builds to Claude subagents instead of available
    authorized builders. A model role creates no separate merge owner: the
    feature owner keeps delivery under the repo's required proof.
@@ -56,7 +61,11 @@
    Honor the project's concurrency limit; invent no extra parallelism. A board lease alone does not prove a pane is free.
 
 5. **One allocator, one shared-resource lock.** The project lead owns who does
-   which row, and the task ledger on trunk is the answer. When two
+   which row, and the task ledger on trunk is the answer.
+   If that lead is unreachable through quota or a crash, the already authorised
+   dispatcher acts as lead and records the allocation there. Hand back explicitly
+   when the lead returns; do not run two allocators or a private handoff task list.
+   When two
    assignments cross, the ledger wins. The dispatcher confirms the ledger,
    or asks the lead to change it, and never sends its own reassignment to
    builders. (23 Oct: two rows changed owner five times in 25 min,

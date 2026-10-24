@@ -423,10 +423,10 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["agents self-claim while managers observe only concrete exceptions", (content) => {
+    then: ["allocated owners deliver while managers observe concrete exceptions", (content) => {
       expect(content).toContain(`<!-- amux-hints-version: ${HINTS_VERSION} -->`);
       expect(content).toContain("Managers are sidecars, not gateways");
-      expect(content).toContain("self-claim one READY");
+      expect(content).toContain("The allocator names the owner and marks the row READY in TASKS.");
       expect(content).toContain("Do not wake a fleet to look busy");
       expect(content).toContain("amux reconcile");
       expect(content).toMatch(/not a\s+staffing command/u);
@@ -523,7 +523,7 @@ feature("generated agent policy", () => {
     }],
     then: ["only his request may remove what he sees, and busy owners hand off", (content) => {
       expect(content).toMatch(/Mark each item as his request or your own\s+addition; only his request may remove something he sees or change a\s+test's expected output/u);
-      expect(content).toMatch(/one busy with another feature hands it to one free owner/u);
+      expect(content).toMatch(/one busy with another feature reports the collision so the allocator can\s+name one free owner/u);
     }],
   });
 
@@ -543,7 +543,7 @@ feature("generated agent policy", () => {
     }],
   });
 
-  unit("allows idle agents to self-claim without a manager round-trip", {
+  unit("allows idle owners to start their allocated READY row without another manager round-trip", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -551,8 +551,8 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["READY work is self-claimable and managers are observers", (content) => {
-      expect(content).toMatch(/capable idle agent may also self-claim one READY/u);
+    then: ["assigned READY work is autonomous and managers are observers", (content) => {
+      expect(content).toMatch(/An idle owner may start only its own READY row/u);
       expect(content).toContain("Managers are sidecars, not gateways");
       expect(content).toMatch(/do not need a manager round-trip to claim, update or\s+finish their own work/u);
       expect(content).toContain("A drained backlog is healthy idle");
@@ -624,7 +624,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["rule 5 lists priority, says what P0-P2 mean and that missing is unknown", (content) => {
-      expect(content).toMatch(/Keep task, owner, state, priority, blocker\/reason and completion SHA\/PR, in\s+the repo's canonical ledger \(`docs\/TASKS\.md`/u);
+      expect(content).toMatch(/Keep task, owner, state, priority, blocker\/reason and completion SHA\/PR, in\s+the configured project TASKS\.md ledger/u);
       expect(content).toMatch(/P0 stops the current main flow or threatens data\/access, P1 next\s+delivery work, P2 later; missing means unknown, not lowest/u);
       expect(content).toMatch(/State and\s+dependencies decide what can run/u);
     }],

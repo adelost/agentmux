@@ -16,8 +16,11 @@
    GitHub-hosted CI is optional evidence, never release authority, no PR
    ceremony for a clean, locally verified change. Deploy by the repo's
    local-first release contract (exact source and rollback SHA, build, live
-   check); no duplicate gates. Test the hardest representative case early in
-   the actual engine; unit tests cannot close a task while that exercise fails.
+   check); no duplicate gates. Test the hardest representative case early using
+   the smallest slice that
+   reaches the same failing route in the actual engine, then scale from its
+   time/cost receipt within the authorised budget. A small input that bypasses
+   that route is not evidence. Unit tests cannot close a task while that exercise fails.
 
 ## Owners self-merge and self-deliver
 
@@ -25,5 +28,5 @@
    peer review. Human-requested review is welcome; a red gate or high-risk seam
    needs resolution, not a review loop.
    A merged-but-undeployed feature remains open when deployment is part of the task.
-   After delivery, or when the work is dropped, the owner removes its worktree with
-   `git worktree remove`; the disk cleanup retires pushed leftovers after 24 h.
+   Worktree lifetime and safe cleanup are owned by [shared-edits.md](shared-edits.md);
+   project checkout restrictions still apply.

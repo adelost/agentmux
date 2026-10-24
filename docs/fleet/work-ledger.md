@@ -4,7 +4,7 @@
 
 5. **A configured board is a shared work list, not an orchestration ceremony.**
    Keep task, owner, state, priority, blocker/reason and completion SHA/PR, in
-   the repo's canonical ledger (`docs/TASKS.md`, which stats.v1d.io reads).
+   the configured project TASKS.md ledger, which stats.v1d.io reads.
    Priority: P0 stops the current main flow or threatens data/access, P1 next
    delivery work, P2 later; missing means unknown, not lowest. State and
    dependencies decide what can run. Comments go to
@@ -20,17 +20,30 @@
    id), `own`, after his pointer if any, or `inferred:` before the pointer
    when the row rests on your reading of his words.
 
-8. **Report only terminal outcomes:** a blocker, collision, handoff or DONE. The board and the ask
-   ledger also carry progress.
+8. **The ledger is status.** Messages report DONE, a concrete stop/collision,
+   handoff or decision; explicitly requested checkpoints are still delivered.
+   Ordinary progress stays in TASKS and its linked proof.
 
 9. **Record blockers where work is tracked:** a concrete reason and the
    dependency or evidence that clears it, in the board's typed states when
    there is one, never only in a private note. Silence
    is not a worker failure.
 
+## Time budgets
+
+Each allocated row names a time budget and next checkpoint in TASKS. At the
+budget, bank the result, finish safe resource closure and report the stop plus
+the smallest continuation proposal; do not begin another investigation or phase
+without a new bounded decision. Independent assigned READY work may proceed.
+Preserve the first estimate and distinguish an approved revision from a guess.
+At 5 times the first estimate, re-plan before another phase; at 10 times, require
+an explicit dispatcher continuation decision. These are escalation signals, not
+permission to run past the current budget. Documented wall time is not measured
+active work; unknown work/wait intervals remain unknown.
+
 ## A drained backlog is healthy idle
 
 12. **A drained backlog is healthy idle.** On DONE or BLOCKED, re-read the existing queue.
     Re-evaluate conditional deferrals against completed prerequisites.
-    Take the next authorised independent READY item; a blocker holds only its
+    Take the next independent READY item already allocated to you; a blocker holds only its
     actual dependents. Stay idle only when no authorised runnable work remains.

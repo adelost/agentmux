@@ -65,7 +65,7 @@ feature("fleet hints synchronization", () => {
     )],
     then: ["startup sync precedes the heartbeat", (source) => {
       const syncAt = source.indexOf("syncConfiguredAgentHints(listAgents(AGENTS_YAML)");
-      const heartbeatAt = source.indexOf("startHeartbeat({");
+      const heartbeatAt = source.indexOf("const attachQuotaFloorAlert = startQuotaFloorHeartbeat({");
       expect(syncAt).toBeGreaterThan(0);
       expect(heartbeatAt).toBeGreaterThan(syncAt);
     }],
