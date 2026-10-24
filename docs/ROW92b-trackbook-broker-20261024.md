@@ -51,3 +51,45 @@ Estimate within2h: identity/storage/routes45min, focused tests/local flow25min,
 profile/entry and actual images20min, provision/release/live30min. These are
 owner estimates, not additional phases or a restarted clock. At the budget,
 bank the verified part and exact remaining boundary.
+
+## Safe account-switch bank,24October18:40Z
+
+Current lsrc:3 account instruction requests the ordinary safe A path at the
+nearest boundary, with exact session, no force/fresh session/credit override
+and no budget reset. api:4 is still listed onW. Ordinary dry preview of
+codex:1 forapi:4 returns would-defer(working); an A switch is not yet verified.
+The current read shows A5h69%used/week26%used; the mover must read both windows
+again at the actual switch. No account credentials are copied by this feature.
+
+Banked source: app59511408650a49a44367fcbfb9b5d42374c88855 is clean and pushed
+to feat/broker-login-92b-api4-20261024, not main. Brokerc235a34dc1da87e8b0d8818f5001c3b832f1bacc
+is onmain; its Trackbook registration has not been deployed. Both independent
+secret bindings are accepted through Wrangler stdin and the generated value
+was absent from3 owned logs. Read provision-receipt.json; never regenerate or
+repeat it on resume. Existing production Pages/source remains unchanged.
+
+Verified on the final app source:318tests, TypeScript and cache gate;14edge
+tests and product-copy smoke. Broker134tests/build/dry-run pass. Actual built
+Pages/workerd with local D1 completed existing-session link, logout and mapped
+login, same owner/accountKey, unchanged cookie/passkey row/device row and
+unlinked recovery.390/1280 images were opened. The provider boundary was
+synthetic, with Basic authentication, exact callback, PKCE and one-use codes;
+redirect-only transport wrappers are documented in browser-proof.json.
+Initial local fixture startup/navigation/teardown failures were corrected;
+the final browser process exits0 with no page errors and closes its browser.
+
+No D1 production migration, broker registry deploy or app/edge release has
+started. Own local proof server8936 and headless browser are closed. The old
+canonical's16 source paths, deletion state and index are verified unchanged.
+
+Resume only after ordinary tooling proves the same session is onA. Then read
+these receipts, fetch/reconcile source, merge the verified app to currentmain,
+deploy the broker once with its current version as rollback, apply only the
+additive broker-links migration once, and run scripts/deploy.sh from the clean
+approved copy. Record versions and anonymous live390/1280/bytes/perimeter.
+An authorized operator's real existing-account proof still remains after the
+opt-in release. Old Google/passkeys and Legacy remain. Deadlines19:55:42Z and
+20:55:42Z continue across the account wait; a late continuation needs a bounded
+decision, not a new clock.
+
+Aggregate receipt: /home/adelost/lsrc/.artifacts/shared-login-92b-api4-20261024/receipt.json.
