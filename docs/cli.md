@@ -586,7 +586,9 @@ remain supported. `--dry` checks the file and resolves the target without
 uploading it.
 
 The CLI cap is 20 MiB, matching the [documented Discord base limit](https://docs.discord.com/developers/reference#uploading-files)
-checked on 24 October 2026. MP4 files use `video/mp4`; their bytes are preserved.
+checked on 24 October 2026. MP4 files use `video/mp4`; AMUX uploads their original bytes. Discord may
+remove container metadata, so a downloaded file hash can differ even when
+the encoded video and audio are unchanged.
 
 Video sends print a persistent receipt path and Discord message ID. Repeating
 an acknowledged file/caption/target returns that receipt. An unknown outcome
