@@ -1,7 +1,7 @@
 // WHAT: Publishes new references and an append-only index suffix from a frozen care receipt.
 // WHY: Existing shared files and other writers' edits must not be replaced by the curator's snapshot.
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, openSync, readFileSync, statSync, writeSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { acquireFileLease } from "./file-lease.mjs";
 import { assertDreamWritePath, readDreamRegular } from "./dream-memory-effects.mjs";
 import { careHash } from "./dream-care-workspace.mjs";
@@ -9,6 +9,10 @@ import { writeDreamAtomic } from "./dream-commit.mjs";
 
 /** WHAT: Stores this verified run's additive filesystem publication. WHY: Prevents a retry from buying another model turn or replacing changed memory. */
 export function publishDreamCare(workspace, input) {
+  const bytes = readDreamRegular(input.path, 256 * 1024);
+  if (careHash(bytes) !== input.sha256) throw Error("dream-care-input-changed");
+  const document = JSON.parse(bytes);
+  if (!document.workspace || resolve(document.workspace) !== resolve(workspace)) throw Error("dream-care-workspace-mismatch");
   const path = input.path.replace(/\.json$/u, ".care.json");
   if (!existsSync(path)) return { state: "refused", reason: "care-receipt-missing" };
   const report = JSON.parse(readDreamRegular(path, 512 * 1024));

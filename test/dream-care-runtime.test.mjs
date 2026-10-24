@@ -114,7 +114,7 @@ function publicationFixture() {
   const file = "memory/references/care-source.md", suffix = `\n- Current reference: \`${file}\`\n`;
   writeFileSync(join(care.worktree, file), prefix + "# Current reference\n\n- Stable technical fact.\n");
   appendFileSync(join(care.worktree, "MEMORY.md"), suffix);
-  const input = writeDreamOwnerInput({ dateKey: "2026-10-24", memoryCare: care }, { rootDir: join(fx.root, "input") });
+  const input = writeDreamOwnerInput({ dateKey: "2026-10-24", workspace: fx.workspace, memoryCare: care }, { rootDir: join(fx.root, "input") });
   expect(freezeDreamCare(input).state).toBe("ready");
   return { ...fx, care, input, file, suffix, receipt: input.path.replace(/\.json$/u, ".care.json") };
 }
@@ -128,6 +128,12 @@ it("publishes once, preserving another owner's concurrent append", () => {
   expect(readFileSync(join(fx.workspace, "MEMORY.md"), "utf8")).toBe(bytes);
   expect(bytes).toContain("Other owner's fact.");
   expect(bytes.split(fx.suffix)).toHaveLength(2);
+});
+
+it("refuses to publish a frozen run into another workspace", () => {
+  const fx = publicationFixture();
+  expect(() => publishDreamCare(join(fx.root, "other-workspace"), fx.input)).toThrow("workspace-mismatch");
+  expect(existsSync(join(fx.root, "other-workspace"))).toBe(false);
 });
 
 it("refuses a changed source reference without replacing its new facts", () => {

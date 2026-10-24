@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "row": "76d",
+  "at": "2026-10-24T17:43:44.570Z",
+  "scope": "First additive ordinary memory-care runtime slice; private workspace copies of actual index/reference",
+  "normalController": true,
+  "source": "conversation-log",
+  "includedPanes": 1,
+  "owner": "sandman:0",
+  "model": "claude-opus-5-5",
+  "effort": "max",
+  "nativeTerminalVerified": true,
+  "terminalAt": "2026-10-24T17:34:33.167Z",
+  "inputSha256": "0b4bf1e968b5c6fd61c34243f9e80a9c3e3c9c6b07b385f73adebd007eed07fc",
+  "authoredPromptSha256": "cfbe87a74685c142f06bcab7a7912fcf4ffb4b9b0a6375a17477230a351adbd9",
+  "runId": "1bbdbfb7-422c-4651-8c19-362b483fa738",
+  "careState": "published",
+  "newReferences": 1,
+  "publishedFiles": 2,
+  "indexPrefixPreserved": true,
+  "sourceReferenceUnchanged": true,
+  "publishedReferenceHashesMatch": true,
+  "rawResultArchivedByteForByte": true,
+  "validDigestSaved": true,
+  "nativeFileToolOutsideWriteDenied": true,
+  "nativeBashOutsideWriteDenied": true,
+  "sentinelUnchanged": true,
+  "kernel": {
+    "allowedWrite": true,
+    "outsideWriteRefused": true,
+    "unixConnectRefused": true,
+    "sandboxRuntimeVersion": "0.0.81",
+    "sameFinalFilesystemPolicy": true,
+    "noModelCall": true
+  },
+  "newModelTurns": 2,
+  "priorUnqualifiedFallback": {
+    "terminal": true,
+    "care": false,
+    "sentinelUnchanged": false
+  },
+  "historicalReplay": false,
+  "paidApiPurchase": false,
+  "privateDiffPublished": false,
+  "boundaries": [
+    "Additive publication, not atomic multi-file replacement",
+    "Full destructive reordering remains outside this slice",
+    "Configured Codex fallback remains digest-only",
+    "Function uses isolated receipt path and omits unrelated housekeeping",
+    "Native Bash negative proven in real turn; final temp routing additionally checked by kernel probe, no extra model call"
+  ]
+}

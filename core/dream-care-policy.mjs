@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { esc } from "../lib.mjs";
 import { renderShellArgs } from "./execution-safety.mjs";
 import { assertDreamWritePath, readDreamRegular } from "./dream-memory-effects.mjs";
@@ -11,6 +11,9 @@ import { writeDreamAtomic } from "./dream-commit.mjs";
 
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const marker = cwd => join(cwd, ".amux-native-policy.json");
+const seccomp = join(dirname(process.execPath), "../lib/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp", process.arch, "apply-seccomp");
+const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object"
+  ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
 
 /** WHAT: Routes restricted startup through literal tmux input. WHY: Prevents legacy runShell from stripping empty arguments and JSON quotes. */
 export async function runDreamCareCommand(tmux, target, cwd, command) {
@@ -57,8 +60,15 @@ export function configureDreamCare(owners, { root = join(homedir(), ".local/shar
       sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true,
         filesystem: { allowWrite: [worktree, outbox], denyWrite: ["/tmp", "/var/tmp", "/dev/shm", owner.paneDir, join(root, "controller"), join(root, "repo"), join(worktree, ".git"), join(worktree, ".claude")], denyRead: credentials },
         network: { allowedDomains: [], allowUnixSockets: [] } },
+      env: { CLAUDE_CODE_TMPDIR: join(outbox, "tmp") },
       statusLine: { type: "command", command: "amux-claude-statusline" }, hooks: {}, autoMemoryEnabled: false, disableAllHooks: false, enableAllProjectMcpServers: false };
-    const settingsPath = join(root, "controller", `${owner.engine}-${owner.agent}-${owner.pane}.json`), bytes = JSON.stringify(settings, null, 2) + "\n";
+    const settingsPath = join(root, "controller", `${owner.engine}-${owner.agent}-${owner.pane}.json`);
+    let bytes = JSON.stringify(settings, null, 2) + "\n";
+    if (existsSync(settingsPath)) {
+      const previous = readDreamRegular(settingsPath, 32 * 1024).toString("utf8");
+      if (JSON.stringify(canonical(JSON.parse(previous))) !== JSON.stringify(canonical(settings))) throw Error("dream-care-settings-conflict");
+      bytes = previous;
+    }
     assertDreamWritePath(settingsPath); writeDreamAtomic(settingsPath, bytes, { immutable: true }); chmodSync(settingsPath, 0o400);
     const policy = { version: 1, engine: owner.engine, root, reference, settingsPath, settingsSha256: hash(bytes) };
     mkdirSync(owner.paneDir, { recursive: true, mode: 0o700 }); assertDreamWritePath(marker(owner.paneDir));
@@ -69,6 +79,7 @@ export function configureDreamCare(owners, { root = join(homedir(), ".local/shar
 
 /** WHAT: Checks the actual process carries the fixed policy. WHY: Prevents an unrestricted process from attesting isolation merely by reading settings. */
 export async function verifyDreamCareRuntime(ctx, owner) {
+  if (process.platform === "linux" && !existsSync(seccomp)) throw Error("dream-care-seccomp-missing: install the sandbox runtime under the current Node prefix");
   const policy = readDreamCarePolicy(owner.paneDir);
   if (!policy) throw Error("dream-care-policy-missing");
   const target = `${owner.agent}:.${owner.pane}`;
