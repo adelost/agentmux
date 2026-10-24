@@ -44,11 +44,28 @@ Production before operator:2existing users,0broker links,0consumed link/login
 transactions, SELECT-only0writes. Old canonical16paths, mtimes, deletion, HEAD,
 branch and index remain unchanged. Own browser/local proof processes are closed.
 
-**Open:** authorized operator signs into an existing Trackbook account through
-its old Google/passkey path, Settings > Connect v1d, returns Connected, signs out,
-then Sign in with v1d. Verify same account/data/devices. api4 then corroborates
-the unique existing-owner mapping and consumed session-bound link/login using
-SELECT-only evidence.92b is not DONE before this proof. Legacy stays.
+**Done24October19:05Z:** lsrc:0 completed existing Google login, Settings
+Connect v1d, logout and v1d login in the real account. Same11jumps, highest136,
+same name and2devices. Source api:4 delivery:901e49cbd94559dfeb7ce28476b72f68,
+received19:03:15.109Z. His18:57–19:00Z window was approximate; authoritative
+server link completion19:01:47.270Z and broker login19:02:45.748Z establish times.
+
+Independent server-identity-proof.json:4 SELECT statements across production
+D1 and broker Data Studio,29rows read,0written. Exactly1mapping each way to
+the existing owner created10July, with its12July auth_link. Old app Google
+subject equals the enabled broker identity's verified Google subject; raw
+identifiers compared only in memory.2users before/after,2preexisting active
+device credentials,1consumed browser/session-bound link and1consumed login,
+2consumed Trackbook broker codes. The mapped local session was created at
+19:02:45.895Z with the existing30day lifetime.
+
+The consumed link plus published exact-session/atomic recheck proves the old
+session was valid at linking. Production cookie bytes were not captured;
+byte-identical continuity is local actual-worker evidence. The real account
+has0passkeys, so no real passkey ceremony is claimed. Synthetic preservation
+proof covers that case. closeout-live.json confirms identical deployed versions,
+broker/app200 and opt-in enabled. No new release, provisioning or personal
+browser interaction byapi4. No remaining92b work. Old login and Legacy stay.
 
 Rollback: preceding Pages88d525e0-99bf-490a-93bb-ed62e6cab487;
 broker baf1bcab-0354-4752-8583-bec9ca67b40c; edge890ba920-75f6-4a22-80ff-6f35b4c773ba.
