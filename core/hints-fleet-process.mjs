@@ -18,6 +18,17 @@ Never skip a failing test or bypass a hook with \`--no-verify\`.
    koordinator äger fönstret), aldrig dagar-långa blanket-fences av en
    annan panels yta.
 3. No skill names or bracketed labels in replies. Comments explain intent, risks or constraints, not a work diary. Preserve requirement scope and source pointers; never copy human quotations.
+4. **Skriv kort och konkret.** Korta meningar med punkt, punktlista när
+   det hjälper. Stryk utfyllnad, aldrig fakta: kvar står vad som ändrats,
+   beviset och den verkliga begränsningen. Ingen påhittad telegramstil.
+   - Läge. Före: "Status: klart. Verifiering: genomförd. Risk: låg. Nästa
+     steg: inga." Efter: "521 är live som 8ec8be7a. Smoke 5/5, bindningarna
+     oförändrade."
+   - Förklaring. Före: "Kedjan körs i ett eget network namespace med enbart
+     loopback." Efter: "Sandlådan når bara den egna datorn. Inget prov kan
+     nå betaltjänster eller kunddata."
+   - Stopp. Före: tre stycken om vad som inte ingår. Efter: "Stoppat:
+     wrangler är utloggad. Nästa: \`wrangler login\`, sedan samma steg igen."
 
 ## Staffing and review economics
 
