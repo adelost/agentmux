@@ -2,7 +2,7 @@
 
 ## Context and compaction
 
-- Never mid-turn, or while a subagent or terminal works, a prompt is open or a delivery is pending.
+- Never mid-turn, while a subagent or terminal works, or over an open prompt. A proven unsent quota-held delivery may remain queued during warm idle compaction under the session lease: at most two attempts per pane/quota episode. Submitted, submitting, unknown and foreign-draft fences remain; exhausted attempts use the existing held/quota notice.
 - A big context compacts at its turn end; leaders keep more than builders.
 - Idle panes compact before their prompt cache expires, Codex panes sooner since theirs expires sooner.
 - A pane idle past its cache's life compacts before its next delivery, when that pays back.

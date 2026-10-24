@@ -1,3 +1,4 @@
+import { warmQuotaHold, claimQuotaCompact, finishQuotaCompact, blocksQuotaCompact } from "./quota-floor-compact.mjs";
 import { contextCostDecision, readContextCostPolicy, workAdmission } from "../policies/context-cost.mjs";
 import { recordCompactCall } from "./compact-log.mjs";
 import { isOwnerChannelJob } from "./ask-origin.mjs";
@@ -108,6 +109,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const { outcome } = await withdrawDraft({ agent, job: { agentName: name, pane, text: record.command || "/compact" } });
     if (outcome !== "cleared") return record;
     write(state, paneKey(name, pane), { ...record, status: "NOT_SENT", reason: "abandoned-before-submit", finishedAt: now() });
+    finishQuotaCompact(state, record.quotaClaim, "not-sent", "abandoned-before-submit", now());
     log(`${name}:${pane} erased the compact command a stopped writer left unsent; the policy decides again`);
     return null;
   }
@@ -161,11 +163,16 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     }
     const identity = identityFor(target.engine, target.dir);
     if (!identity) return { ok: true, skipped: "no-session" };
+    const ended = state?.get?.(STATE_KEY, {})?.[paneKey(name, pane)];
+    if (ended?.status === "NOT_SENT") finishQuotaCompact(state, ended.quotaClaim, "not-sent", ended.reason, now());
     let prior = existing(name, pane, identity);
     if (prior?.status === "ATTEMPTING" && compactWriterGone(prior, { now: now(), alive: writerAlive })) {
       prior = await withdrawAbandonedCompact(name, pane, prior);
     }
-    if (prior?.status === "VERIFIED") return { ok: true, cell: "receipt-exists" };
+    if (prior?.status === "VERIFIED") {
+      finishQuotaCompact(state, prior.quotaClaim, "verified", "native-receipt", now());
+      return { ok: true, cell: "receipt-exists" };
+    }
     const context = await (agent.getContext?.(name, pane) ?? agent.getContextPercent(name, pane));
     let activity = activityFor(target.dir, target.engine, { recoverCodexHistory: true });
     if (!Number.isFinite(activity)) {
@@ -197,7 +204,11 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     // need says whether the policy required a compact that did not settle, for the work admission.
     const need = decision.at.need;
     if (decision.values.action === "HOLD") return { ok: false, need, reason: `context-cost:${decision.cell}${holder}${prior?.reason ? `:${prior.reason}` : ""}` };
-    const result = await compactOnce({ name, pane, target, identity, context, decision, dry, leaseHeld, heldLease, jobId, focus, beforeDelivery });
+    const warmMs = target.engine === "codex" ? 30 * 60_000 : policy.coldMs;
+    const quota = !cold && Number.isFinite(activity) && now() < activity + warmMs
+      ? warmQuotaHold(state, name, pane, queue.list(name, pane)) : null;
+    const result = await compactOnce({ name, pane, target, identity, context, decision, dry, leaseHeld, heldLease, jobId, focus, beforeDelivery,
+      quota: quota && { ...quota, expiresAt: activity + warmMs } });
     if (cold && coldPolicy !== policy) {
       try { coldBeforeDelivery.record({ at: new Date(now()).toISOString(), pane: `${name}:${pane}`, cell: "before-delivery",
         outcome: result.compacted ? "compacted" : result.dry ? "would-compact" : "failed", detail: result.reason || result.cell || null }); }
@@ -207,14 +218,20 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   }
 
   // Sends one compact under the session lease, with its intent stored before the paid call.
-  async function compactOnce({ name, pane, target, identity, context, decision, dry, leaseHeld, heldLease, jobId, focus, beforeDelivery }) {
+  async function compactOnce({ name, pane, target, identity, context, decision, dry, leaseHeld, heldLease, jobId, focus, beforeDelivery, quota }) {
     const lease = leaseHeld ? null : queue.acquireSessionLease(name, pane);
     if (!leaseHeld && !lease) return { ok: false, reason: "delivery-lease-busy" };
     // Once the command is sent only this pane stays fenced, so its siblings
     // are served during a compact that can take minutes.
     const writer = lease ?? heldLease;
-    const pending = () => queue.list(name, pane).some(j => j.id !== jobId && !TERMINAL_DELIVERY_STATES.has(j.status) && (!beforeDelivery || j.status !== "pending"));
-    let submitted = false, intent = null;
+    const pending = () => {
+      if (quota && now() >= quota.expiresAt) return true;
+      const jobs = queue.list(name, pane);
+      const held = quota && now() < quota.expiresAt ? warmQuotaHold(state, name, pane, jobs) : null;
+      return jobs.some(j => !TERMINAL_DELIVERY_STATES.has(j.status)
+        && blocksQuotaCompact(j, { jobId, beforeDelivery, hold: held?.id === quota?.id ? held : null }));
+    };
+    let submitted = false, intent = null, quotaClaim = null;
     try {
       const currentAttempt = existing(name, pane, identity);
       if (currentAttempt) return currentAttempt.status === "VERIFIED"
@@ -225,16 +242,29 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       }
       const current = identityFor(target.engine, target.dir);
       if (current?.sessionId !== identity.sessionId || await agent.isBusy(name, pane)) return { ok: false, reason: "context-cost:session-or-activity-changed" };
+      const background = quota && coldBeforeDelivery?.background({ engine: target.engine, sessionPath: identity.path,
+        sessionId: identity.sessionId, paneDir: target.dir, now: now() });
+      if (background) return { ok: false, reason: `context-cost:${background}` };
       if (dry) return { ok: true, dry: true, cell: decision.cell, tokens: context.tokens };
       if (target.engine === "codex") {
         const idle = await prepareCodexIdle({ agent, name, pane });
         if (!idle.ok) return { ok: false, reason: `context-cost:${idle.stage}:${idle.error}` };
       }
+      if (quota) {
+        const currentHold = warmQuotaHold(state, name, pane, queue.list(name, pane));
+        if (currentHold?.id !== quota.id) return { ok: false, reason: "context-cost:delivery-pending:quota-episode-changed" };
+        if (currentHold.attempts.some(attempt => ["attempting", "unknown"].includes(attempt.status))) {
+          return { ok: false, reason: "context-cost:delivery-pending:quota-floor-compact-unknown" };
+        }
+        if (currentHold.attempts.length >= 2) return { ok: false, reason: "context-cost:delivery-pending:quota-floor-compact-limit:2/2" };
+        quotaClaim = claimQuotaCompact(state, quota, identity.sessionId, now());
+        if (!quotaClaim) return { ok: false, reason: "context-cost:delivery-pending:quota-floor-compact-budget-unavailable" };
+      }
       const cursor = captureJsonlAppendCursor("context-maintenance-v1", [identity.path]);
       const command = focus && target.engine === "claude" ? `/compact ${focus}` : "/compact";
       // pid and command let the next pass erase what this attempt typed if this process stops before its Enter.
       const record = { sessionId: identity.sessionId, cursor, status: "ATTEMPTING", at: now(), cell: decision.cell, beforeTokens: context.tokens,
-        pid: process.pid, command };
+        pid: process.pid, command, ...(quotaClaim && { quotaClaim }) };
       intent = record;
       write(state, paneKey(name, pane), record);
       onUnsentPreparationTimeout(error => {
@@ -252,6 +282,9 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
           assertDeliveryPreparation();
           const latest = identityFor(target.engine, target.dir);
           const input = await agent.promptTransportState(name, pane, stage === "submit" ? text : "");
+          const background = quota && coldBeforeDelivery?.background({ engine: target.engine, sessionPath: identity.path,
+            sessionId: identity.sessionId, paneDir: target.dir, now: now() });
+          if (background) throw new Error(`context-cost:${background}`);
           if (latest?.sessionId !== identity.sessionId || pending() || await agent.isBusy(name, pane)
               || input?.state !== (stage === "submit" ? "drafted" : "empty-idle")) throw new Error("context-cost:pre-submit-state-changed");
           assertDeliveryPreparation();
@@ -267,6 +300,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       const retryAt = result.reason === "provider-usage-limited" ? claudeRefusalResetAt(result.detail, now()) : null;
       write(state, paneKey(name, pane), { ...record, status: result.ok ? "VERIFIED" : "FAILED", reason: result.reason || null, finishedAt: now(),
         ...(retryAt ? { retryAt } : {}) });
+      finishQuotaCompact(state, quotaClaim, result.ok ? "verified" : result.reason === "provider-usage-limited" ? "refused" : "unknown", result.reason, now());
       log(`${name}:${pane} ${decision.cell}: ${result.ok ? "compact verified" : result.reason}`);
       const after = result.ok ? await Promise.resolve(agent.getContext?.(name, pane)).catch(() => null) : null;
       recordCompact({ at: new Date(now()).toISOString(), pane: paneKey(name, pane), engine: target.engine, source: "bridge", cell: decision.cell,
@@ -276,6 +310,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
         : { ok: false, attempted: true, reason: `context-cost:${result.reason}`, detail: result.detail || null, ...(retryAt ? { retryAt } : {}) };
     } catch (error) {
       if (intent) write(state, paneKey(name, pane), { ...intent, status: submitted ? "FAILED" : "NOT_SENT", reason: error.message, finishedAt: now() });
+      finishQuotaCompact(state, quotaClaim, submitted ? "unknown" : "not-sent", error.message, now());
       log(`${name}:${pane} context compact failed: ${error.message}`);
       return { ok: false, reason: `context-cost:${error.message}` };
     } finally { lease?.release(); }

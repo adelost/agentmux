@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createState } from "./state.mjs";
 import { createQuotaFloorAlert, QUOTA_FLOOR_ALERT_STATE, quotaAlertCodexCapacity } from "./quota-floor-alert.mjs";
+import { warmQuotaHold, claimQuotaCompact, finishQuotaCompact } from "./quota-floor-compact.mjs";
 
 const START = Date.parse("2026-10-24T00:38:00Z");
 function world() {
@@ -28,6 +29,18 @@ function world() {
 }
 
 describe("one durable notification per account's continuous floor hold", () => {
+  it("retains compact attempt evidence in the same episode and sends no extra notification on reload", async () => {
+    const w = world(); await w.controller().tick();
+    const state = createState(w.path), id = w.data().id;
+    for (let i = 0; i < 2; i++) {
+      const hold = warmQuotaHold(state, "claw", 2, w.jobs.filter(job => job.pane === 2));
+      const claim = claimQuotaCompact(state, hold, "original-session", w.now + i);
+      expect(claim).toBeTruthy(); finishQuotaCompact(state, claim, "not-sent", "fixture pre-submit refusal", w.now + i);
+    }
+    w.now += 31 * 60000; await w.controller().tick(); await w.controller().tick();
+    expect(w.data().id).toBe(id); expect(w.data().warmCompactions["claw:2"].attempts).toHaveLength(2);
+    expect(w.human).toHaveBeenCalledTimes(1); expect(w.dispatcher).toHaveBeenCalledTimes(1);
+  });
   it("uses first refusal rather than job age, strictly after 30 minutes, aggregating queued jobs", async () => {
     const w = world(), c = w.controller();
     await c.tick(); expect(w.human).not.toHaveBeenCalled();

@@ -1,3 +1,4 @@
+import { isUnsubmittedQuotaJob, isUnsentQuotaFloorJob } from "./quota-floor-job.mjs";
 import { createHash } from "node:crypto";
 import { accountWindows, quotaFloorHold } from "./quota-park.mjs";
 import { quotaObservedAt } from "./quota-wind-down.mjs";
@@ -8,8 +9,8 @@ export const QUOTA_FLOOR_ALERT_STATE = "quota_floor_alert_v1";
 /** WHAT: Defines the delay after a proven refusal. WHY: Keeps brief quota holds from alerting the operator. */
 export const QUOTA_FLOOR_ALERT_AFTER_MS = 30 * 60_000;
 const FRESH_MS = 10 * 60_000;
-const unsent = job => job.status === "pending" && !job.submittedAt && !job.acknowledgedAt;
-const floorHeld = job => unsent(job) && String(job.lastReason || "").startsWith("wake-refused:quota-floor:");
+const unsent = isUnsubmittedQuotaJob;
+const floorHeld = isUnsentQuotaFloorJob;
 const paneOf = job => `${job.agentName}:${job.pane}`;
 const identity = account => account?.account?.email || account?.account?.identityKey;
 const accountKey = account => identity(account) ? `${account.provider}:${String(identity(account)).toLowerCase()}` : null;
@@ -82,11 +83,15 @@ export function formatQuotaFloorAlert(episode, accounts, now) {
     const age = Number.isFinite(item.lastActivityMs) ? `${Math.max(0, Math.floor((now - item.lastActivityMs) / 60_000))} min` : "unknown";
     return `${item.pane}: belagd compaction waiting for quota-held delivery; källa ${item.source || `compact-held-notices/${item.pane}`}, tid ${instant(item.observedAt)}, cacheålder ${age}, cacheutgång ${instant(item.cacheExpiresAt)}${item.cacheTimePrecision === "minute" ? " (minutprecision)" : ""}`;
   }).join(". ");
+  const attempts = Object.entries(episode.warmCompactions || {}).map(([pane, record]) => {
+    const last = record.attempts.at(-1);
+    return `${pane}: varm kompaktering ${record.attempts.length}/2 försök, utfall ${last?.status || "unknown"}${record.attempts.length >= 2 ? ", försöksgränsen nådd för denna episod" : ""}`;
+  }).join("; ");
   return `${episode.name} har spärrat leveranser i minst ${Math.floor((now - episode.firstRefusedAt) / 60_000)} min. `
     + `${episode.jobs.length} jobb väntar i ${episode.panes.length} panel${episode.panes.length === 1 ? "" : "er"}: ${compactPaneList(episode.panes)}. `
     + `Återställning ${episode.resetAt || "unknown"} (datum med tidszon), avläst ${episode.observedAt || "unknown"}. `
     + `Första belagda nekande ${instant(episode.firstRefusedAt)}, källa ${episode.source}. `
-    + `Codex-kapacitet: ${room}. ${compactions ? `${compactions}. ` : ""}`
+    + `Codex-kapacitet: ${room}. ${compactions ? `${compactions}. ` : ""}${attempts ? `${attempts}. ` : ""}`
     + (episode.compactions.length > 2 ? `Även kompakteringsväntan i ${compactPaneList(episode.compactions.slice(2).map(item => item.pane))}; fulla källor sparade i episod ${episode.id}. ` : "")
     + "Förslag: dispatchern väljer ett redan beställt arbete som kan utföras där. Aviseringen flyttar eller skickar inte om någon leverans.";
 }
