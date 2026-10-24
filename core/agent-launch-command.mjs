@@ -3,6 +3,7 @@
 import { esc } from "../lib.mjs";
 import { resolveClaudeEffort, resolveClaudeModel } from "./claude-model.mjs";
 import { allowedCodexLaunchModel } from "./codex-profiles.mjs";
+import { dreamCareNativeFlags } from "./dream-care-policy.mjs";
 import {
   CLAUDE_AUTONOMOUS_FLAGS,
   CODEX_AUTONOMOUS_FLAGS,
@@ -33,6 +34,7 @@ export function buildClaudeLaunchCommand({
   model = resolveClaudeModel(),
   effort = null,
   profileHome = null,
+  cwd = null,
 } = {}) {
   const exactModel = resolveClaudeModel(model);
   const exactEffort = resolveClaudeEffort(effort);
@@ -41,7 +43,7 @@ export function buildClaudeLaunchCommand({
     ? ` --resume ${shellQuote(exactResume)}`
     : resume ? " --continue" : "";
   const profile = profileHome ? `CLAUDE_CONFIG_DIR=${shellQuote(profileHome)} ` : "";
-  return `${profile}ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_AUTONOMOUS_FLAGS} ` +
+  return `${profile}ANTHROPIC_DISABLE_SURVEY=1 claude ${dreamCareNativeFlags("claude", cwd) || CLAUDE_AUTONOMOUS_FLAGS} ` +
     `--model ${shellQuote(exactModel)}${exactEffort ? ` --effort ${shellQuote(exactEffort)}` : ""}${sessionFlag}`;
 }
 
@@ -85,7 +87,7 @@ export function buildCodexLaunchCommand({
     // Verified on codex-cli 0.162.1: no goal turn starts, and the goal resumes on the next launch.
     disableGoals ? "--disable goals" : "",
   ].filter(Boolean).join(" ");
-  const flags = [CODEX_AUTONOMOUS_FLAGS, overrideFlags].filter(Boolean).join(" ");
+  const flags = [dreamCareNativeFlags("codex", cwd) || CODEX_AUTONOMOUS_FLAGS, overrideFlags].filter(Boolean).join(" ");
   const env = `CODEX_HOME=${shellQuote(profileHome)}`;
   const exactResume = exactSessionId(resumeSessionId, "Codex");
   if (exactResume) return `${env} codex resume ${shellQuote(exactResume)} ${flags}`;

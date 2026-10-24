@@ -90,6 +90,7 @@ export function createTuiStallRecovery({
       model: launch?.model || selected?.model || observed?.model || configured.model || undefined,
       effort: launch?.effort || selected?.effort || observed?.effort || configured.effort || null,
       profileHome: runtimeProfileLaunchHome(profile),
+      cwd: dir,
     });
     await tmux.runShell(target, `cd ${esc(dir)} && ${command}`);
     await delay(2000);

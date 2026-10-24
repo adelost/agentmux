@@ -1,5 +1,5 @@
 // Finish an already-curated run without compacting, prompting or waking a pane.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
@@ -14,6 +14,8 @@ import { assertDreamWritePath, readDreamRegular, verifyDreamMemoryEffects } from
 import { judgeDreamMemory, protectedDreamBlocks } from "./dream-memory-guard.mjs";
 import { finishDreamMemoryRepairs } from "./dream-memory-repairs.mjs";
 import { beginDreamHistoricalImport, finishDreamHistoricalImport } from "./dream-historical-import.mjs";
+import { checkDreamCuration } from "./dream-curation-check.mjs";
+import { publishDreamCare } from "./dream-care-publish.mjs";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -38,7 +40,8 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   const memPath = join(workspace, "memory", `${dateKey}.md`);
   assertDreamWritePath(memPath);
   const success = readDreamSuccess(workspace, dateKey, { home: homedir(), now });
-  if (!flags["import-historical"] && success.ok && success.runId === runId) return { alreadyCommitted: true, runId, dateKey, path: memPath };
+  if (!flags["import-historical"] && success.ok && success.runId === runId) return { alreadyCommitted: true, runId, dateKey, path: memPath,
+    ...(document.memoryCare && !flags.dry && { memoryCare: publishDreamCare(workspace, { path, sha256 }) }) };
   const expectedMemory = document.memoryBeforeSha256 || flags["memory-sha256"];
   if (!/^[a-f0-9]{64}$/u.test(expectedMemory || "")) throw new Error("dream-recovery-pre-run-memory-hash-required");
   if (document.memoryBeforeSha256 && flags["memory-sha256"] && flags["memory-sha256"] !== document.memoryBeforeSha256) {
@@ -46,7 +49,7 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   }
   const resumed = !flags["import-historical"] && resumeDreamCommit({ path, sha256, document, workspace, memPath, dateKey, runId,
     expectedMemory, dry: !!flags.dry });
-  if (resumed) return resumed;
+  if (resumed) return { ...resumed, ...(document.memoryCare && !flags.dry && { memoryCare: publishDreamCare(workspace, { path, sha256 }) }) };
   const memoryBefore = readFileSync(memPath, "utf8");
   // Old format-one packets have no scoped memory contract and retain their hash fence.
   if (!flags["import-historical"] && !document.memoryGuard && document.memoryFormat !== 2 && hash(memoryBefore) !== expectedMemory) {
@@ -56,14 +59,15 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
     candidate.agent === document.owner?.agent && candidate.pane === document.owner.pane && candidate.engine === document.owner.engine);
   if (!owner) throw new Error("dream-recovery-owner-not-configured");
   const input = { path, outputPath: path.replace(/\.json$/u, ".summary.md"), runId, sha256, bytes: bytes.length,
-    memoryFormat: document.memoryFormat, memoryRepair: !!document.payload.memoryRepair };
+    memoryFormat: document.memoryFormat, memoryRepair: !!document.payload.memoryRepair,
+    ...(document.memoryCare && { memoryCare: document.memoryCare, modelOutputPath: document.memoryCare.modelOutputPath }) };
   const previous = new Date(`${dateKey}T12:00:00Z`);
   previous.setUTCDate(previous.getUTCDate() - 1);
   const prompt = dreamOwnerPrompt({ owner, input, memPath,
     previousMemPath: join(workspace, "memory", `${previous.toISOString().slice(0, 10)}.md`), dateKey,
     included: document.payload.panes.length, omitted: document.omitted.length, unreadable: document.unreadable.length });
   const historical = flags["import-historical"] && beginDreamHistoricalImport({ workspace, owner, inputPath: path });
-  let product = readDreamOwnerResult(input.outputPath, dateKey, runId, owner, sha256);
+  let product = readDreamOwnerResult(existsSync(input.outputPath) ? input.outputPath : input.modelOutputPath || input.outputPath, dateKey, runId, owner, sha256);
   if (!product.ok) throw new Error(`dream-recovery-product-invalid:${product.reason}`);
   const proof = await getProof({ owner, prompt, dateKey, runId, memPath, sessionId: document.compact.sessionId, quality: document.compact });
   if (proof.sessionId !== document.compact.sessionId || /haiku/iu.test(document.compact.model || "")
@@ -76,9 +80,13 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   if (!Array.isArray(memoryGuardBlocks) || memoryGuardBlocks.some(block => typeof block !== "string")) {
     throw new Error("dream-recovery-memory-guard-invalid");
   }
-  verifyDreamMemoryEffects({ inputPath: path, inputSha256: sha256, descriptor: document.memoryGuard?.effects,
-    workspace, paneDirs: [owner.paneDir] });
-  const judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryBefore, current);
+  let judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryBefore, current);
+  if (document.memoryCare) {
+    if (flags.dry) throw Error("dream-care-recovery-dry: inspect the private care receipt; no publication attempted");
+    const checked = await checkDreamCuration({ owner, sessionId: document.compact.sessionId, prompt, dateKey, input, memPath,
+      quality: document.compact, workspace, memoryBefore: memoryGuardBlocks.join("\n"), getProof: async () => proof });
+    product = checked.product; judgeConcurrentNotes = checked.judgeConcurrentNotes;
+  } else verifyDreamMemoryEffects({ inputPath: path, inputSha256: sha256, descriptor: document.memoryGuard?.effects, workspace, paneDirs: [owner.paneDir] });
   const verifyMemory = () => {
     const verdict = judgeConcurrentNotes(memoryBefore, readFileSync(memPath, "utf8"));
     if (!verdict.ok) throw new Error(`dream-recovery-memory-changed:${verdict.reason}`);
@@ -103,5 +111,6 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
     memoryBeforeSha256: expectedMemory, memoryGuardBlocks, judgeConcurrentNotes,
     receipts, receiptTargets, receiptPath, now, input, unreadable: document.unreadable });
   return { recovered: !flags.dry, dryRun: !!flags.dry, dateKey, runId, path: memPath,
+    ...(document.memoryCare && !flags.dry && { memoryCare: publishDreamCare(workspace, input) }),
     included: included.length, receipts: receiptTargets.length, unreadable: document.unreadable.length };
 }

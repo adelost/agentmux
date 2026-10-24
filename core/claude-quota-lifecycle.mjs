@@ -252,6 +252,7 @@ export function createClaudeQuotaLifecycle({
       model,
       effort,
       profileHome: runtimeProfileLaunchHome(profile),
+      cwd: targetConfig.cwd,
     });
     await tmux.runShell(target, `cd '${targetConfig.cwd.replaceAll("'", "'\\''")}' && ${launch}`);
     if (!await waitForComposer(target)) return { ok: false, reason: "resumed-composer-not-ready" };

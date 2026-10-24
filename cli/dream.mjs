@@ -4,7 +4,7 @@ import {
   existsSync, mkdirSync, readFileSync, writeFileSync,
 } from "fs";
 import { dirname, join } from "path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { findChannelForPane, listAgents, loadConfig } from "./config.mjs";
 import { notifyUser, sendToChannelId } from "./send-notify.mjs";
 import { getPaneStatus, sendToPane } from "./tmux.mjs";
@@ -40,6 +40,9 @@ import { readWindow } from "../core/ask-ledger.mjs";
 import { DREAM_CATCH_UP_MS } from "../core/dream-turn-selection.mjs";
 import { readDreamMemoryWarnings } from "../core/dream-repair-plan.mjs";
 import { finishDreamMemoryRepairs } from "../core/dream-memory-repairs.mjs";
+import { configureDreamCare, readDreamCarePolicy, verifyDreamCareRuntime } from "../core/dream-care-policy.mjs";
+import { prepareDreamCare } from "../core/dream-care-workspace.mjs";
+import { publishDreamCare } from "../core/dream-care-publish.mjs";
 export { commitDreamProduct } from "../core/dream-commit.mjs";
 export { isPidAlive } from "../core/dream-lock.mjs";
 export { waitForDreamOwnerResult } from "../core/dream-result.mjs";
@@ -168,6 +171,7 @@ async function runDream(ctx, flags, dependencies) {
     console.log("Usage: amux dream [--quiet] [--dry] [--since 24h|ISO] [--workspace PATH] [--defer-sentinel]");
     console.log("Finish an existing run without a model turn: --recover INPUT.json --source-sha256 SHA [--memory-sha256 PRE_RUN_SHA] [--dry]");
     console.log("Explicit historical import only: add --import-historical; missing original effects stay unattested, failures and cursors unchanged.");
+    console.log("Configure existing curators once for ordinary bounded file care: --setup-care [--care-root PATH] [--care-reference memory/references/name.md]");
     return { help: true };
   }
   if (flags.recover) {
@@ -211,6 +215,7 @@ async function runDream(ctx, flags, dependencies) {
   const candidates = dependencies.candidates
     || (dependencies.owner ? [dependencies.owner] : resolveDreamCandidates(runtimeConfig));
   let owner = candidates[0];
+  if (flags["setup-care"]) return configureDreamCare(candidates, { ...(flags["care-root"] && { root: flags["care-root"] }), ...(flags["care-reference"] && { reference: flags["care-reference"] }) });
   const primarySource = process.env.AMUX_DREAM_SOURCE || "conversation-log";
   if (!["conversation-log", "raw"].includes(primarySource)) throw Error(`Unknown AMUX_DREAM_SOURCE '${primarySource}'; use conversation-log or raw`);
   const readConversation = dependencies.readConversation || (dependencies.collectSources
@@ -342,6 +347,16 @@ async function runDream(ctx, flags, dependencies) {
       owner = selection.owner;
       const { compact, quality } = selection;
 
+      const careConfig = dependencies.memoryCare || readDreamCarePolicy(owner.paneDir);
+      let memoryCare = null;
+      if (careConfig && primarySource === "conversation-log") {
+        const runtime = await (dependencies.verifyCareRuntime || verifyDreamCareRuntime)(ctx, owner);
+        if (!runtime) throw Error("dream-care-runtime-unattested");
+        try { memoryCare = { ...prepareDreamCare(workspaceDir, careConfig), runtimeAttested: true, nativePolicy: runtime }; }
+        catch (error) { const runId = randomUUID(); memoryCare = { version: 1, root: careConfig.root, worktree: join(careConfig.root, "worktree"), runId,
+          modelOutputPath: join(careConfig.root, "outbox", `${runId}.summary.md`), preparationError: error.message, runtimeAttested: true, nativePolicy: runtime }; }
+      }
+
       ensureDreamDailyFile(memPath, dateKey);
       const memoryBefore = readFileSync(memPath, "utf8");
       const memoryReadAt = Date.now();
@@ -352,7 +367,8 @@ async function runDream(ctx, flags, dependencies) {
         createdAt: now.toISOString(),
         workspace: workspaceDir,
         memoryBeforeSha256: createHash("sha256").update(memoryBefore).digest("hex"),
-        memoryGuard: { readAt: new Date(memoryReadAt).toISOString(), blocks: protectedDreamBlocks(memoryBefore), effects: true,
+        ...(memoryCare && { memoryCare }),
+        memoryGuard: { readAt: new Date(memoryReadAt).toISOString(), blocks: protectedDreamBlocks(memoryBefore), effects: !memoryCare,
           paneDirs: [...new Set([owner.paneDir, ...agents.flatMap(agent => (agent.panes || []).map((_, pane) => join(agent.dir, ".agents", String(pane))))].filter(Boolean))] },
         owner: { agent: owner.agent, pane: owner.pane, engine: owner.engine },
         compact: {
@@ -391,7 +407,7 @@ async function runDream(ctx, flags, dependencies) {
         throw new Error(`dream-owner-prompt-unverified:${sent?.reason || sent?.queueState || "unknown"}`);
       }
       let product = await (dependencies.waitForResult || waitForDreamOwnerResult)({
-        ctx, owner, prompt, outputPath: input.outputPath, dateKey, runId: input.runId,
+        ctx, owner, prompt, outputPath: input.modelOutputPath || input.outputPath, dateKey, runId: input.runId,
         sourceSha256: input.sha256,
         attempts: dependencies.resultAttempts,
         pollMs: dependencies.resultPollMs,
@@ -411,6 +427,8 @@ async function runDream(ctx, flags, dependencies) {
         memoryGuardBlocks: protectedDreamBlocks(memoryBefore),
         omitted: batch.omitted, receipts, receiptPath, now, recordReceipts, input, unreadable: observed.unreadable,
         judgeConcurrentNotes });
+      const careReport = memoryCare ? publishDreamCare(workspaceDir, input) : null;
+      if (careReport && careReport.state !== "published") console.warn(`Dream digest saved; memory care ${careReport.state}: ${careReport.reason}`);
 
       if (!flags.deferSentinel && !flags["defer-sentinel"]) {
         writeDreamRunSentinel(memPath, dateKey, timeStr, batch.included.length, observed.unreadable.length);
@@ -432,6 +450,7 @@ async function runDream(ctx, flags, dependencies) {
         compact,
         visibleMirror,
         input,
+        ...(careReport && { memoryCare: careReport }),
         path: memPath,
       };
     }
