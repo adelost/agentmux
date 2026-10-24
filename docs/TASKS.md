@@ -97,3 +97,22 @@ Historical runtime receipt (2026-09-20): **1.25.84 / 4241763cd9acae64bf6de40305b
 Verification limits: only the five additional migration recipients were deliberately activated, with exact compact/model proofs. Other dormant panes were not awakened for tests. The next scheduled nightly run was not forced or observed. Historical unverified commands were not replayed. The original failed Dream scheduler record was not forged into success: its recovered 04:00 snapshot is historical, and later manual notes remain intact. `amux doctor` is NOT globally green: it also reports existing workspace inventory, geometry and Suggestions/watchdog warnings outside this repair scope.
 
 Latest verification: 118 affected cases passed in0.967s; the final Dream follow-up passed23 cases in1.50s. Changed-file strict lint and diff checks passed. All automated checks were synthetic/offline at the provider boundary. Live model transitions and real worker tasks are separate paid execution, not unit tests.
+
+## Night checkpoint — 24 October 2026, 15:42Z
+
+Source snapshot for the existing Stats Tasks view. Initial30min dispatcher deadline missed. Elapsed below means wall time since the cited phase start, never verified active work. Product owners retain delivery. Each linked row remains canonical; this section adds no second state.
+
+| Row | Owner | Current budget | Elapsed at snapshot | Budget position | Next step | Fallback |
+|---|---|---|---|---|---|---|
+| AMUX91 | api:5 | 30min check;1h only for measured defect | Not received yet | Not started | Verify Stats estimate/time/source; update this section | Bank exact source/telemetry gap; no invented time |
+| Cutkit224/514 | skyvw:4 | Existing1.25USD total; small-step bound0.68988807USD | 60s Start sent once; execution time unknown | Cost/execution unknown | Read same render-mvmjkdj5-gm7ozt until15:41:16Z; preserve fence | Stop paid stages pending durable outcome; no second Start |
+| Huset489a | claw:3 | 10USD total; time estimate absent | Since money-GO11:29; active time unknown | Time unknown; last reported0.75USD, needs fresh owner total | First real room consumer and model family release | Bank models/cost receipts; exclude entrance doll |
+| Huset493 | skyvw:6 | 2h from15:13Z | 29min wall | Under; until17:13Z | Own bounded profile/achievement panel release | Small verified panel slice or bank |
+| Huset487 | skydive:3 | Original1h12:46–13:46; later lead removed cap | 176min wall including urgent separate repair | Original exceeded; current bounded phase needs reconciliation | Finish already-bankable music release/audio proof | Bank without new gameplay/model input |
+| Huset510 | claw:4 | Original2h; UI phase30min from12:19Z | 203min wall since UI phase | Old phase exceeded; current assignment/source needs refresh | Resolve Today tooltip truthfully asUTC, release banked UI | Keep505 counters live, bank appearance |
+| Cutkit522 | lsrc:4 | 1.5h; fresh receipt needed | Phase accepted around15:00;42min wall estimate | Under if15:00 start; verify actual | Source-specific waveform readiness, all readers inventory | Preserve old film; bank exact failing source |
+| Cutkit524 | lsrc:8 | 3h; original receipt not yet extracted | Unknown | Unknown | Even Songs/autogain representative real film | Small verified solver/render slice or bank |
+| Huset523 | ai:5 | 80min from15:08Z | 34min wall | Under; until16:28Z | Two-version live proof; preserve active game | Keep reload behavior, bank candidate |
+| Huset524 | skyvw:2 | 2h; observed start15:35Z | 7min wall | Under; row says latest17:45Z | Close camera distance chosen from390/1280 subject views | Preserve wall/floor clamps; bank if blocked |
+
+Canonical ledgers: [Cutkit TASKS](https://github.com/adelost/cutkit/blob/master/docs/TASKS.md), [Huset TASKS](https://github.com/adelost/claw-workspace/blob/master/projects/haunt-ux-2026-10-18/TASKS.md). Revision and uncertainty must be shown by the existing source reader, not hidden by this snapshot.
