@@ -213,3 +213,17 @@ account and budget window, and only when he writes. A cache-only read would be
 cold whenever nobody ran `amux quota` in the last minutes. A failed read posts
 nothing. amux never switches by itself on a warning.
 `AMUX_QUOTA_WARNING_ENABLED=false` turns it off.
+
+## Manual billing facts
+
+`account-profiles.json` keeps billing-page observations beside their login.
+`freeResetsReadAt`, `renewsReadAt` and `planReadAt` are ISO times with an offset;
+`freeResetsReadOn` remains supported for legacy day-only observations. `planTier`
+can distinguish Max (20x) from a login's generic max label. Optional
+`creditsBalance`/`creditsReadAt` and `autoReload`/`autoReloadReadAt` record manual
+page observations separately from the live credit balance. `source` names the
+evidence. Missing or future reading times have unknown age and are STALE.
+Both quota surfaces show the reading time and age; more than 24 hours is STALE.
+A past renewal day is INVALID, never advanced by guessing the next billing date.
+A fresh usage response does not refresh manual facts. Reset recommendations
+require a positive reset count with fresh evidence.

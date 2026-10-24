@@ -149,6 +149,15 @@ const isMoment = (value) => typeof value === "string"
 // The names are the ones stats.v1d.io reads (api:0, 2026-10-17), so the push forwards them unchanged.
 // freeResetsExpire: lsrc:0 the same day, when each reset ends, so the box can show the first.
 const SUBSCRIPTION_FIELDS = Object.freeze({
+  renewsReadAt: { valid: isMoment, need: "an ISO time with offset" },
+  freeResetsReadAt: { valid: isMoment, need: "an ISO time with offset" },
+  planTier: { valid: value => typeof value === "string" && value.trim().length > 0 && value.length <= 80, need: "a plan tier" },
+  planReadAt: { valid: isMoment, need: "an ISO time with offset" },
+  creditsBalance: { valid: value => Number.isFinite(value) && value >= 0, need: "a nonnegative balance" },
+  creditsReadAt: { valid: isMoment, need: "an ISO time with offset" },
+  autoReload: { valid: value => typeof value === "boolean", need: "a boolean" },
+  autoReloadReadAt: { valid: isMoment, need: "an ISO time with offset" },
+  source: { valid: value => typeof value === "string" && value.length <= 500, need: "a source pointer" },
   renewsOn: { valid: isDay, need: "YYYY-MM-DD" },
   freeResetsLeft: { valid: (value) => Number.isInteger(value) && value >= 0, need: "a whole number" },
   freeResetsReadOn: { valid: isDay, need: "YYYY-MM-DD" },

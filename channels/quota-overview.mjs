@@ -7,9 +7,9 @@
 import { accountName, loginOfEmail } from "../core/account-names.mjs";
 import { weeklyForecast } from "../core/quota-forecast.mjs";
 import { clockOf, creditsText, nearestMinute } from "../core/quota-format.mjs";
+import { manualSubscriptionFacts, manualFactText } from "../core/quota-manual-facts.mjs";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const LOGGED_OUT = new Set(["login_expired", "credentials_expired", "credentials_unavailable", "login_required"]);
 const codexWindows = account => (account.limits?.find(limit => limit.limitId === "codex") || account.limits?.[0])?.windows || [];
 
@@ -61,34 +61,24 @@ function accountFact(engine, account, shown, context) {
     blockedBy5h: fiveHour?.usedPercent >= 100 && Date.parse(fiveHour.resetsAt) > context.now ? fiveHour : null };
 }
 
-/** WHAT: Phrases the free resets left and the day the first of them ends. WHY: Keeps a reset from ending unused. */
-function freeResetsText(left, [first] = []) {
-  const count = `${left} free reset${left === 1 ? "" : "s"}`;
-  if (!left || !first) return count;
-  const end = new Date(first);
-  return `${count}, ${left === 1 ? "" : "1st "}ends ${MONTHS[end.getMonth()]} ${end.getDate()}`;
-}
-
 /** WHAT: Phrases the renewal date and free resets the login's entry holds, or nothing. WHY: Keeps a renewal from being forgotten. */
-function subscriptionLines({ renewsOn, freeResetsLeft, freeResetsExpire } = {}) {
-  const day = renewsOn ? new Date(`${renewsOn}T12:00:00Z`) : null;
-  const parts = [...(day ? [`renews ${MONTHS[day.getUTCMonth()]} ${day.getUTCDate()}`] : []),
-    ...(Number.isInteger(freeResetsLeft) ? [freeResetsText(freeResetsLeft, freeResetsExpire)] : [])];
-  const line = `  ${parts.join(" · ")}`;
-  // lsrc:0 2026-10-17: what does not fit 32 characters gets its own short line.
-  return !parts.length ? [] : line.length <= 32 ? [line] : parts.map(part => `  ${part}`);
+function subscriptionLines(subscription, now) {
+  return manualSubscriptionFacts(subscription, now).map(fact => `  ${manualFactText(fact)}`);
 }
 
 /** WHAT: Phrases one account's panes and week, its blocking five-hour window and its subscription. WHY: The week is what he plans by. */
 function linesOf(fact, width, now) {
+  const account = fact.account;
+  const subscription = account.provider === "claude" && !account.subscription?.planTier && account.account?.plan
+    ? { ...account.subscription, planTier: account.account.plan } : account.subscription;
   const head = `${fact.name.padEnd(width)} ${String(fact.account.inUse?.length || 0).padStart(5)}`;
-  if (!fact.week) return [`${head}  unreadable`, ...subscriptionLines(fact.account.subscription)];
+  if (!fact.week) return [`${head}  unreadable`, ...subscriptionLines(subscription, now)];
   const left = Math.max(0, Math.min(100, Math.round(100 - fact.week.usedPercent)));
   return [`${head}  ${`${left}%`.padStart(4)}  ${dayAndClock(fact.week.resetsAt)}`,
     ...(fact.blockedBy5h ? [`    5h 0% until ${untilClock(fact.blockedBy5h.resetsAt, now)}`] : []),
     // lsrc:0 2026-10-20: past a spent window Codex draws these paid credits, so the balance stands beside the windows.
     ...(fact.account.credits ? [`    ${creditsText(fact.account.credits)}`] : []),
-    ...subscriptionLines(fact.account.subscription)];
+    ...subscriptionLines(subscription, now)];
 }
 
 /** WHAT: Finds the engine's other account with the most room that nothing stops now. WHY: A switch is only advice when it helps. */
@@ -106,10 +96,12 @@ function actionLine(facts, { config, now }) {
   if (!fact) return null;
   const spare = spareFor(fact, facts, config);
   if (spare) return `→ Use ${spare.name}: ${fact.engine.switchCommand(spare.account)}`;
-  // A free reset clears the week; a five-hour window comes back by itself.
-  if (fact.week?.usedPercent >= 100) return `→ Free reset ${fact.name} now`;
+  // A manually read reset is only actionable while its evidence is fresh.
+  const reset = manualSubscriptionFacts(fact.account.subscription, now).find(item => item.field === "freeResetsLeft");
+  const canReset = reset && !reset.stale && fact.account.subscription.freeResetsLeft > 0;
+  if (fact.week?.usedPercent >= 100) return canReset ? `→ Free reset ${fact.name} now` : `→ ${fact.name} back ${dayAndClock(fact.week.resetsAt)}`;
   if (fact.blockedBy5h) return `→ ${fact.name} back at ${untilClock(fact.blockedBy5h.resetsAt, now)}`;
-  return `→ Free reset ${fact.name} at 0% left`;
+  return canReset ? `→ Free reset ${fact.name} at 0% left` : `→ ${fact.name} back ${dayAndClock(fact.week.resetsAt)}`;
 }
 
 /**

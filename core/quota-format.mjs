@@ -8,6 +8,7 @@
 //       callers own how fresh their snapshot is.
 
 import { accountName as displayName } from "./account-names.mjs";
+import { manualSubscriptionFacts, manualFactText } from "./quota-manual-facts.mjs";
 
 // Mattias 2026-10-17 12:03Z: "Undvik emoji...", so a high row says it in words.
 const WARN_PERCENT = 70;
@@ -124,10 +125,7 @@ const launchSlotIds = (account) => (Array.isArray(account?.sharedBy)
   : null);
 
 // The renewal date and free resets come from the login's entry in account-profiles.json, read by hand.
-const subscriptionText = ({ renewsOn, freeResetsLeft, freeResetsReadOn } = {}) => [
-  ...(renewsOn ? [`renews ${renewsOn}`] : []),
-  ...(Number.isInteger(freeResetsLeft) ? [`free resets ${freeResetsLeft} (read ${freeResetsReadOn})`] : []),
-];
+const subscriptionText = (subscription, now) => manualSubscriptionFacts(subscription, now).map(manualFactText);
 
 // The slots a pane can start on, which //switch N and amux accounts name.
 const slotText = (account) => {
@@ -135,22 +133,23 @@ const slotText = (account) => {
   return slots.length ? `slot ${slots.join("+")}` : "no slot";
 };
 
-const accountSuffix = (account, duplicate) => {
+const accountSuffix = (account, duplicate, now) => {
   const identity = account?.account?.email || account?.profile?.label;
-  const plan = account?.account?.plan;
+  const plan = account?.provider === "claude" ? null : account?.account?.plan;
   // Without its login the name already is the slot.
   const values = [account?.account?.email ? slotText(account) : null, identity, plan,
-    ...subscriptionText(account?.subscription)].filter(Boolean);
+    ...subscriptionText(account?.provider === "claude" && !account.subscription?.planTier && account.account?.plan
+      ? { ...account.subscription, planTier: account.account.plan } : account?.subscription, now)].filter(Boolean);
   if (duplicate) values.push("same login");
   return values.length ? ` · ${values.join(" · ")}` : "";
 };
 
-const accountLine = (account, peers, duplicates = new Set()) => {
+const accountLine = (account, peers, duplicates = new Set(), now) => {
   const rendered = account?.provider === "claude" ? claudeLine(account)
     : account?.provider === "kimi" ? kimiLine(account)
       : codexLine(account);
   if (!account?.profile?.id) return rendered;
-  return `${displayName(account, peers)}${accountSuffix(account, duplicates.has(account.profile?.key))}  `
+  return `${displayName(account, peers)}${accountSuffix(account, duplicates.has(account.profile?.key), now)}  `
     + rendered.replace(/^\S+\s+/u, "");
 };
 
@@ -185,8 +184,8 @@ export const compactPaneList = (keys) => {
 const inUseLine = (account) => (account.inUse.length
   ? `  in use: ${compactPaneList(account.inUse)}` : "  no pane");
 
-const accountLines = (account, peers, duplicates) => (Array.isArray(account?.inUse)
-  ? [accountLine(account, peers, duplicates), inUseLine(account)] : [accountLine(account, peers, duplicates)]);
+const accountLines = (account, peers, duplicates, now) => (Array.isArray(account?.inUse)
+  ? [accountLine(account, peers, duplicates, now), inUseLine(account)] : [accountLine(account, peers, duplicates, now)]);
 
 // A logged-out login is named among every login, so one sharing an initial with a live one keeps its whole name.
 const trailingLines = (snapshot, collapsed) => [
@@ -197,7 +196,7 @@ const trailingLines = (snapshot, collapsed) => [
       .map((pane) => `${pane.key} (${pane.home})`).join(", ")}`] : []),
 ];
 
-const snapshotLines = (snapshot) => {
+const snapshotLines = (snapshot, now) => {
   if (Array.isArray(snapshot?.accounts) && snapshot.accounts.length) {
     const order = ["codex", "claude", "kimi"];
     const identities = new Map();
@@ -213,7 +212,7 @@ const snapshotLines = (snapshot) => {
     const ordered = order.flatMap((provider) => snapshot.accounts.filter((account) => account.provider === provider));
     const shown = ordered.filter((account) => !isIdleLoggedOut(account));
     return [
-      ...shown.flatMap((account) => accountLines(account, shown, duplicates)),
+      ...shown.flatMap((account) => accountLines(account, shown, duplicates, now)),
       ...trailingLines(snapshot, ordered.filter(isIdleLoggedOut)),
     ];
   }
@@ -221,7 +220,7 @@ const snapshotLines = (snapshot) => {
 };
 
 /** WHAT: Builds one shared account view. WHY: Keeps terminal and Discord quota truth identical. */
-export const formatQuotaSnapshot = (snapshot) => [
+export const formatQuotaSnapshot = (snapshot, { now = Date.now() } = {}) => [
   "Quota (used, shared per account):",
-  ...snapshotLines(snapshot),
+  ...snapshotLines(snapshot, now),
 ].join("\n");

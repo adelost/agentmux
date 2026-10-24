@@ -142,8 +142,8 @@ feature("one Claude line per account", () => {
       const lines = text.split("\n").filter((line) => line.startsWith("Claude"));
       // adelost and attrois share an initial, so both keep their whole login.
       expect(lines).toEqual([
-        "Claude adelost · slot 1+2 · adelost@example.com · max  session 10%",
-        "Claude W · slot wetterlind · wetterlind@example.com · max  session 10%",
+        "Claude adelost · slot 1+2 · adelost@example.com · plan max (STALE · read unknown · age unknown)  session 10%",
+        "Claude W · slot wetterlind · wetterlind@example.com · plan max (STALE · read unknown · age unknown)  session 10%",
         "Claude attrois · no slot · attrois@example.com  unavailable (login_expired)",
       ]);
       expect(text).not.toContain("same login");
@@ -158,9 +158,9 @@ feature("a login's subscription in the detail lines", () => {
         account: { email: "wetterlind@example.com", plan: "prolite" }, name: "Codex W",
         subscription: { renewsOn: "2026-11-05", freeResetsLeft: 1, freeResetsReadOn: "2026-10-17" } }],
       accountFileProblems: ["claude:adelost: subscription.renewsOn needs YYYY-MM-DD"],
-    }).split("\n")],
+    }, { now: Date.parse("2026-10-24T06:00:00Z") }).split("\n")],
     then: ["both are on the account line and the problem trails", (lines) => {
-      expect(lines[1]).toBe("Codex W · slot 2 · wetterlind@example.com · prolite · renews 2026-11-05 · free resets 1 (read 2026-10-17)  unavailable (network_error)");
+      expect(lines[1]).toBe("Codex W · slot 2 · wetterlind@example.com · prolite · renews 2026-11-05 (STALE · read unknown · age unknown) · free resets 1 (STALE · manual read 2026-10-17 · age 174h)  unavailable (network_error)");
       expect(lines.at(-1)).toBe("account-profiles.json: claude:adelost: subscription.renewsOn needs YYYY-MM-DD");
     }],
   });
