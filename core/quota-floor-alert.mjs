@@ -191,7 +191,8 @@ export function createQuotaFloorAlert({ state, readEvidence, notifyHuman, notify
     for (const id of Object.keys(state.get(QUOTA_FLOOR_ALERT_STATE).history || {})) await reconcile(id, true);
     for (const [key, episode] of Object.entries(state.get(QUOTA_FLOOR_ALERT_STATE).accounts)) {
       await reconcile(key);
-      if (episode.status !== "held" || at - episode.firstRefusedAt <= QUOTA_FLOOR_ALERT_AFTER_MS) continue;
+      const compactLimit = Object.values(episode.warmCompactions || {}).some(record => record.attempts?.length >= 2);
+      if (episode.status !== "held" || !compactLimit && at - episode.firstRefusedAt <= QUOTA_FLOOR_ALERT_AFTER_MS) continue;
       // No waiting work means no new send; retain the episode until recovery is proven.
       if (!groups.some(group => group.key === key)) continue;
       await recipient(key, "human", notifyHuman, accounts);

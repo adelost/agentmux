@@ -37,7 +37,7 @@ describe("one durable notification per account's continuous floor hold", () => {
       const claim = claimQuotaCompact(state, hold, "original-session", w.now + i);
       expect(claim).toBeTruthy(); finishQuotaCompact(state, claim, "not-sent", "fixture pre-submit refusal", w.now + i);
     }
-    w.now += 31 * 60000; await w.controller().tick(); await w.controller().tick();
+    w.now += 60000; await w.controller().tick(); await w.controller().tick();
     expect(w.data().id).toBe(id); expect(w.data().warmCompactions["claw:2"].attempts).toHaveLength(2);
     expect(w.human).toHaveBeenCalledTimes(1); expect(w.dispatcher).toHaveBeenCalledTimes(1);
   });
