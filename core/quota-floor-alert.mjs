@@ -19,6 +19,10 @@ const fresh = (account, now) => account?.ok && Number.isFinite(quotaObservedAt(a
   && quotaObservedAt(account) <= now && now - quotaObservedAt(account) <= FRESH_MS;
 const holdOf = (account, floorPercent, now) => quotaFloorHold({ windows: accountWindows(account),
   provider: account.provider, floorPercent, now });
+const namesAccount = (reason, name) => {
+  const text = String(reason || "").replace(/^wake-refused:/u, "");
+  return text.startsWith(`quota-floor: ${name} has `) || text.startsWith(`quota-floor: ${name} (reading failed;`);
+};
 
 /** WHAT: Returns dated Codex capacity in both windows. WHY: Prevents absent or stale windows from being advertised as spare quota. */
 export function quotaAlertCodexCapacity(accounts, now) {
@@ -34,15 +38,30 @@ export function quotaAlertCodexCapacity(accounts, now) {
 
 /** WHAT: Returns proven unsent floor holds by stable account. WHY: Keeps retry counts and other accounts out of the waiting-job total. */
 export function quotaFloorGroups({ snapshot, jobs, refusals, compactions = {}, now }) {
-  return (snapshot?.accounts || []).flatMap(account => {
+  const accounts = snapshot?.accounts || [];
+  const assigned = new Map(accounts.flatMap(account => (account.inUse || []).map(pane => [pane, accountKey(account)])));
+  const named = reason => accounts.find(account => account.name && namesAccount(reason, account.name)
+    && accounts.filter(other => other.name === account.name).length === 1);
+  const deniedAccount = job => {
+    const current = named(job.lastReason);
+    if (current) return accountKey(current);
+    const prior = refusals.filter(row => row.jobId === job.id && row.at <= now && named(row.reason)).sort((a, b) => b.at - a.at)[0];
+    return prior ? accountKey(named(prior.reason)) : null;
+  };
+  return accounts.flatMap(account => {
     const key = accountKey(account);
     if (!key) return [];
     const panes = new Set(account.inUse || []);
-    const held = jobs.filter(job => panes.has(paneOf(job)) && floorHeld(job));
+    const held = jobs.filter(job => {
+      if (!floorHeld(job)) return false;
+      const denied = deniedAccount(job);
+      return assigned.has(paneOf(job)) ? panes.has(paneOf(job)) && (!denied || denied === key) : denied === key;
+    });
     if (!held.length) return [];
     const heldPanes = new Set(held.map(paneOf));
     const evidence = held.map(job => {
-      const rows = refusals.filter(row => row.jobId === job.id && Number.isFinite(row.at) && row.at <= now);
+      const rows = refusals.filter(row => row.jobId === job.id && Number.isFinite(row.at) && row.at <= now
+        && (!row.reason || !named(row.reason) || namesAccount(row.reason, account.name)));
       return { jobId: job.id, at: rows.length ? Math.min(...rows.map(row => row.at)) : now,
         lastAt: rows.length ? Math.max(...rows.map(row => row.at)) : now,
         source: rows.length ? `events.jsonl:${job.id}` : `queue:${job.id}:first-observed-hold` };
@@ -61,10 +80,10 @@ export function formatQuotaFloorAlert(episode, accounts, now) {
   const room = capacity.length ? capacity.map(item => `${item.name}: 5h ${item.sessionLeft}% kvar, vecka ${item.weekLeft}% kvar, avläst ${item.observedAt}`).join("; ") : "unknown (ingen verifierad kapacitet i båda fönstren)";
   const compactions = episode.compactions.slice(0, 2).map(item => {
     const age = Number.isFinite(item.lastActivityMs) ? `${Math.max(0, Math.floor((now - item.lastActivityMs) / 60_000))} min` : "unknown";
-    return `${item.pane}: compaction waiting for quota-held delivery; källa ${item.source || `compact-held-notices/${item.pane}`}, tid ${instant(item.observedAt)}, cacheålder ${age}, cacheutgång ${instant(item.cacheExpiresAt)}${item.cacheTimePrecision === "minute" ? " (minutprecision)" : ""}`;
+    return `${item.pane}: belagd compaction waiting for quota-held delivery; källa ${item.source || `compact-held-notices/${item.pane}`}, tid ${instant(item.observedAt)}, cacheålder ${age}, cacheutgång ${instant(item.cacheExpiresAt)}${item.cacheTimePrecision === "minute" ? " (minutprecision)" : ""}`;
   }).join(". ");
   return `${episode.name} har spärrat leveranser i minst ${Math.floor((now - episode.firstRefusedAt) / 60_000)} min. `
-    + `${episode.jobs.length} jobb väntar i ${episode.panes.length} paneler: ${compactPaneList(episode.panes)}. `
+    + `${episode.jobs.length} jobb väntar i ${episode.panes.length} panel${episode.panes.length === 1 ? "" : "er"}: ${compactPaneList(episode.panes)}. `
     + `Återställning ${episode.resetAt || "unknown"} (datum med tidszon), avläst ${episode.observedAt || "unknown"}. `
     + `Första belagda nekande ${instant(episode.firstRefusedAt)}, källa ${episode.source}. `
     + `Codex-kapacitet: ${room}. ${compactions ? `${compactions}. ` : ""}`
@@ -83,17 +102,19 @@ export function createQuotaFloorAlert({ state, readEvidence, notifyHuman, notify
   const get = key => state.get(QUOTA_FLOOR_ALERT_STATE)?.accounts[key];
   let running = null;
 
-  async function reconcile(key) {
-    const receipt = get(key).receipts.dispatcher;
+  async function reconcile(key, archived = false) {
+    const read = () => archived ? state.get(QUOTA_FLOOR_ALERT_STATE).history[key] : get(key);
+    const record = data => archived ? data.history[key] : data.accounts[key];
+    const receipt = read().receipts.dispatcher;
     if (receipt && ["attempting", "unknown", "queued"].includes(receipt.status)) {
-      const job = await lookupDispatcher(`quota-floor:${get(key).id}:dispatcher`, receipt);
+      const job = await lookupDispatcher(`quota-floor:${read().id}:dispatcher`, receipt);
       const status = job?.status === "acknowledged" ? "delivered"
         : ["cancelled", "dead_letter"].includes(job?.status) ? "not-delivered" : job ? "queued" : "unknown";
-      change(data => { data.accounts[key].receipts.dispatcher = { ...receipt, status,
+      change(data => { record(data).receipts.dispatcher = { ...receipt, status,
         ...(job ? { jobId: job.id, transportStatus: job.status, acknowledgedAt: job.acknowledgedAt || null } : {}) }; });
     }
-    if (get(key).receipts.human?.status === "attempting") {
-      change(data => { data.accounts[key].receipts.human.status = "unknown"; });
+    if (read().receipts.human?.status === "attempting") {
+      change(data => { record(data).receipts.human.status = "unknown"; });
     }
   }
 
@@ -150,6 +171,7 @@ export function createQuotaFloorAlert({ state, readEvidence, notifyHuman, notify
         if (!proofs.length) continue;
         const proof = proofs.reduce((a, b) => a.at < b.at ? a : b);
         const first = previous?.status !== "recovered" ? previous : null;
+        if (previous && !first) { data.history ??= {}; data.history[previous.id] = previous; }
         const started = first?.firstRefusedAt ?? Math.max(proof.at, previous?.recoveredAt || 0);
         const hold = fresh(group.account, at) ? holdOf(group.account, floorPercent, at) : null;
         data.accounts[group.key] = { ...first, id: first?.id || hash(`${group.key}:${started}:${at}`),
@@ -161,6 +183,7 @@ export function createQuotaFloorAlert({ state, readEvidence, notifyHuman, notify
       data.lastCheckedAt = at;
     });
     const result = [];
+    for (const id of Object.keys(state.get(QUOTA_FLOOR_ALERT_STATE).history || {})) await reconcile(id, true);
     for (const [key, episode] of Object.entries(state.get(QUOTA_FLOOR_ALERT_STATE).accounts)) {
       await reconcile(key);
       if (episode.status !== "held" || at - episode.firstRefusedAt <= QUOTA_FLOOR_ALERT_AFTER_MS) continue;

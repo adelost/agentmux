@@ -88,6 +88,34 @@ describe("one durable notification per account's continuous floor hold", () => {
     w.now += 3600000; await w.controller().tick();
     expect(w.human).not.toHaveBeenCalled(); expect(w.jobs).toEqual(original);
   });
+  it("a stopped pane remains attributable through its actual uniquely named refusal", async () => {
+    const w = world(); w.now += 31 * 60000;
+    const snapshot = w.snapshot; w.snapshot = () => ({ accounts: snapshot().accounts.map(a => ({ ...a, inUse: [] })) });
+    w.jobs[0].lastReason = "wake-refused:quota-floor: Claude A has 3 % of its week left";
+    await w.controller().tick();
+    expect(w.human).toHaveBeenCalledTimes(1); expect(w.human.mock.calls[0][0]).toContain("2 jobb väntar i 1 panel:");
+  });
+  it("a stopped pane with a later failed reading keeps its proven event account", async () => {
+    const w = world(); w.now += 31 * 60000;
+    const snapshot = w.snapshot; w.snapshot = () => ({ accounts: snapshot().accounts.map(a => ({ ...a, inUse: [] })) });
+    w.jobs[0].lastReason = "wake-refused:quota-floor: fresh account reading unavailable; existing hold remains";
+    w.refusals[0].reason = "quota-floor: Claude A has 3 % of its week left";
+    await w.controller().tick();
+    expect(w.human).toHaveBeenCalledTimes(1);
+    expect(w.data().firstRefusedAt).toBe(START);
+  });
+  it("an old refusal cannot override a pane now observed on another account", async () => {
+    const w = world(); w.now += 31 * 60000;
+    const snapshot = w.snapshot;
+    w.snapshot = () => {
+      const a = snapshot().accounts[0];
+      return { accounts: [{ ...a, inUse: [] }, { ...a, name: "Claude W", account: { email: "other@example.test" }, inUse: ["claw:2","claw:0"] }] };
+    };
+    w.jobs[0].lastReason = "wake-refused:quota-floor: Claude A has 3 % of its week left";
+    // The current account has a verified roomy reading newer than the old refusal.
+    w.used = 0;
+    await w.controller().tick(); expect(w.human).not.toHaveBeenCalled();
+  });
   it("adds a sourced compaction wait inside the same episode without a second alert", async () => {
     const w = world(); w.now += 31 * 60000;
     w.compactions["claw:2"] = { cause: "context-cost:delivery-pending", observedAt: w.now - 1000,
@@ -121,6 +149,17 @@ describe("one durable notification per account's continuous floor hold", () => {
     w.now += 3600000; w.used = 97;
     w.refusals.push({ jobId: "head", at: w.now });
     await w.controller().tick(); expect(w.data().firstRefusedAt).toBe(w.now);
+  });
+  it("a later episode preserves the previous episode and its late dispatcher receipt", async () => {
+    const w = world(); w.now += 31 * 60000; await w.controller().tick(); const first = w.data().id;
+    w.used = 0; w.now += 60000; await w.controller().tick();
+    w.used = 97; w.now += 3600000; w.refusals = w.refusals.map(row => ({ ...row, at: w.now }));
+    w.lookup.mockReturnValue({ id: "dispatcher-job", status: "acknowledged", acknowledgedAt: w.now });
+    await w.controller().tick();
+    const history = createState(w.path).get(QUOTA_FLOOR_ALERT_STATE).history;
+    expect(history[first].receipts.human.status).toBe("delivered");
+    expect(history[first].receipts.dispatcher.status).toBe("delivered");
+    expect(w.human).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -12,7 +12,7 @@ export function createQuotaCompactionEvidence({ configPath, posts = readWindow, 
       const agents = [...new Set(jobs.map(job => job.agentName))];
       for (const row of posts({ since: now() - 24 * 3600000, agents }).posts) {
         const match = /^Auto-compact of \*\*([^*]+)\*\* is held:.*context-cost:delivery-pending/u.exec(row.text || "");
-        if (row.status !== "sent" || !match) continue;
+        if (row.status !== "sent" || row.kind !== "notice" || !match || `${row.agent}:${row.pane}` !== match[1]) continue;
         const observedAt = Date.parse(row.ts), clock = /cache goes cold at (\d{2}):(\d{2})/u.exec(row.text);
         let cacheExpiresAt = null;
         if (clock) {

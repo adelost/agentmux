@@ -40,7 +40,7 @@ describe("the real queue adapter sends only the notice and follows its receipt",
     const root = mkdtempSync(join(tmpdir(), "quota-hold-history-"));
     const read = createQuotaCompactionEvidence({ configPath: join(root, "agents.yaml"), posts: () => ({ posts: [
       { id: "warning", ts: new Date().toISOString(), status: "sent", text: "Auto-compact in 60s: **claw:2**" },
-      { id: "hold-proof", ts: "2026-10-24T03:44:53.699Z", status: "sent",
+      { id: "hold-proof", kind: "notice", agent: "claw", pane: 2, ts: "2026-10-24T03:44:53.699Z", status: "sent",
         text: "Auto-compact of **claw:2** is held: the compact was refused: context-cost:delivery-pending. Its prompt cache goes cold at 05:48." },
       { id: "failed", ts: new Date().toISOString(), status: "failed", text: "Auto-compact of **claw:3** is held: context-cost:delivery-pending" },
     ] }) });

@@ -22,7 +22,7 @@ export function createQuotaFloorAlertRuntime({ queue, state, configPath, floorPe
       const snapshot = await readSnapshot();
       const jobs = queue.targets().flatMap(target => queue.list(target.agentName, target.pane));
       const refusals = events().filter(row => row.event === "delivery_queue" && row.state === "wake_refused"
-        && String(row.reason || "").startsWith("quota-floor:")).map(row => ({ jobId: row.jobId, at: Date.parse(row.ts) }));
+        && String(row.reason || "").startsWith("quota-floor:")).map(row => ({ jobId: row.jobId, at: Date.parse(row.ts), reason: row.reason }));
       return { snapshot, jobs, refusals, compactions: readCompactions(jobs) };
     },
     notifyHuman: (text, idempotencyKey) => notifyHuman(text, { strictSingleAttempt: true, idempotencyKey,
