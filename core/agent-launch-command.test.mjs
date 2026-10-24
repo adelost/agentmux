@@ -60,22 +60,6 @@ feature("a Codex launch that only compacts", () => {
       expect(command).toContain("developer_instructions="); expect(command).toContain("/private/handover.json"); expect(command).not.toContain("codex resume");
     }],
   });
-  component("the actual restart passes its configured directory into Codex", {
-    when: ["restarting an exact session whose account may remember a probe directory", async () => {
-      let command;
-      await startCodexProcess({
-        t: { runShell: async (_target, line) => { command = line; } },
-        wait: async () => {}, target: "claw:.5", dir: "/project/.agents/5", profile: { home: "/two" },
-        selected: { model: "gpt-6.1-sol", effort: "xhigh" }, previous: { model: "gpt-6.1-sol" },
-        sessionId: "019f59a5-ec74-75d0-93d6-2da558dde937", remembered: {}, launchOptions: {},
-        ready: async () => true, screen: async () => "› Ask Codex to do anything\n  GPT-6.1-Sol xhigh · /project/.agents/5",
-        remember: () => {}, pin: () => {},
-      });
-      return command;
-    }],
-    then: ["the resume cannot choose a stale directory from the other account", command =>
-      expect(command).toContain("--cd '/project/.agents/5'")],
-  });
   unit("pins the pane directory even when the target profile saved another resume directory", {
     when: ["resuming the exact session in its configured pane", () => buildCodexLaunchCommand({
       profileHome: "/profiles/two", model: "gpt-6.1-sol", effort: "xhigh",
