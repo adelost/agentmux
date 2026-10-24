@@ -33,7 +33,6 @@
     "sameFinalFilesystemPolicy": true,
     "noModelCall": true
   },
-  "newModelTurns": 2,
   "priorUnqualifiedFallback": {
     "terminal": true,
     "care": false,
@@ -48,5 +47,13 @@
     "Configured Codex fallback remains digest-only",
     "Function uses isolated receipt path and omits unrelated housekeeping",
     "Native Bash negative proven in real turn; final temp routing additionally checked by kernel probe, no extra model call"
-  ]
+  ],
+  "newCuratorTurns": 2,
+  "setupCliCorrection": {
+    "initialInstalledVersion": "1.25.340",
+    "curatorSubmit": false,
+    "controllerStoppedBeforeInput": true,
+    "nativeCompactCompleted": true,
+    "fixedRoutingVersion": "1.25.341"
+  }
 }

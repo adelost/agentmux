@@ -59,6 +59,7 @@ import { createBridgeLifecycle } from "./bridge.mjs";
 import { runStopAll } from "./stop-all.mjs";
 import { cmdImage } from "./image.mjs";
 import { cmdDream, isPidAlive } from "./dream.mjs";
+import { parseDreamArgs } from "./dream-args.mjs";
 import { cmdCompact } from "./compact.mjs";
 import { cmdDoctor } from "./doctor.mjs";
 import { cmdTodo } from "./todo.mjs";
@@ -2666,10 +2667,6 @@ const FLAG_SPECS = {
     "per-pane": "number",
   },
   compact: { dry: "boolean", nightly: "boolean", self: "boolean", help: "boolean", h: "boolean", force: "boolean", "no-resume": "boolean", "continue-file": "string", "min-tokens": "number", p: "number", m: "string", message: "string" },
-  dream: {
-    since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean", recover: "string", "source-sha256": "string", "memory-sha256": "string", "import-historical": "boolean",
-    retry: "boolean", "defer-sentinel": "boolean", deferSentinel: "boolean", help: "boolean", h: "boolean",
-  },
   janitor: { dry: "boolean", days: "number" },
   trim: { dry: "boolean", "max-files": "number", "min-stable-minutes": "number" },
   "playwright-reap": { dry: "boolean", minutes: "number" },
@@ -2938,10 +2935,7 @@ export async function dispatch(argv, ctx) {
       return cmdCompact(ctx, flags, positional);
     }
 
-    case "dream": {
-      const { flags } = parseFlags(rest, FLAG_SPECS.dream);
-      return cmdDream(ctx, flags);
-    }
+    case "dream": return cmdDream(ctx, parseDreamArgs(rest));
 
     case "janitor": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.janitor);
