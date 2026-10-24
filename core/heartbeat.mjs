@@ -78,11 +78,13 @@ export function startHeartbeat({
   hintsVersion = null,
   intervalMs = HEARTBEAT_INTERVAL_MS,
   path = heartbeatPath(),
+  onTick = () => {},
 }) {
   const startedAt = new Date().toISOString();
   const tick = () => {
     try {
       writeHeartbeat({ version, sourceSha, hintsVersion, startedAt, path });
+      Promise.resolve().then(onTick).catch(err => console.warn(`heartbeat observer failed: ${err.message}`));
     } catch (err) {
       console.warn(`heartbeat write failed: ${err.message}`);
     }

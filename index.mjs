@@ -44,10 +44,9 @@ import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
 import { createPermissionWatchdog } from "./channels/permission-watchdog.mjs";
 import { parsePermissionWatchdogConfig } from "./core/permission-watchdog.mjs";
 import { notifyUser as notifyUserDm } from "./cli/send-notify.mjs";
-import { startHeartbeat } from "./core/heartbeat.mjs";
+import { startQuotaFloorHeartbeat } from "./channels/quota-floor-alert.mjs";
 import { startBridgeMemoryGuard } from "./core/memory-relief.mjs";
 import { createDiscordDeliveryNotify } from "./core/delivery-notices.mjs";
-import { readReleaseManifest } from "./core/release-identity.mjs";
 import { resolveConfigSources } from "./core/config-sources.mjs";
 import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
@@ -137,16 +136,7 @@ const tmuxExec = (cmd) =>
 // Liveness contract for `amux doctor` + bin/bridge-watchdog-cron.sh: a 30s
 // heartbeat with pid + version. Catches what the supervisor cannot see —
 // hung event loop, and a bridge running older code than the repo.
-const pkgVersion = (() => {
-  try { return JSON.parse(readFileSync(resolve(__dir, "package.json"), "utf-8")).version; }
-  catch { return "unknown"; }
-})();
-const releaseManifest = readReleaseManifest(__dir);
-startHeartbeat({
-  version: pkgVersion,
-  sourceSha: releaseManifest?.sourceSha || null,
-  hintsVersion: HINTS_VERSION,
-});
+const attachQuotaFloorAlert = startQuotaFloorHeartbeat({ packageRoot: __dir, hintsVersion: HINTS_VERSION });
 
 const appState = createState(STATE_FILE);
 const audioOutbox = createAudioOutbox();
@@ -344,6 +334,8 @@ const autoCompact = createAutoCompact({
     log: message => console.log(`pause-compact | ${message}`), selfRequests: selfCompactRequests, notify: contextMaintenance.notify }),
 });
 autoCompact.start();
+attachQuotaFloorAlert({ queue: deliveryQueue, state: appState,
+  configPath: AGENTS_YAML, floorPercent: quotaFloor.percent });
 startQuotaStopMover({ agent, deliveryBroker, state: appState, configPath: AGENTS_YAML, floorPercent: quotaFloor.percent });
 
 // Drift-guard: periodic reminder to panes that have accumulated many turns

@@ -5,7 +5,9 @@
 // be a `connect` req with auth token; after hello-ok, subsequent methods
 // use `{type: "req", id, method, params}` format.
 
-import { createHash, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
+import { notifyKey, notificationNonce } from "../core/notification-identity.mjs";
+export { notificationNonce } from "../core/notification-identity.mjs";
 import {
   mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from "fs";
@@ -170,7 +172,9 @@ async function postMessage(channelId, content, nonce) {
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`discord post ${res.status}: ${body}`);
+    const error = new Error(`discord post ${res.status}: ${body}`);
+    error.notSent = res.status >= 400 && res.status < 500 && res.status !== 408;
+    throw error;
   }
   return res.json();
 }
@@ -322,21 +326,6 @@ export function resolveNotifyUserId(explicitUserId) {
 
 export { formatUserNotification };
 
-function notifyKey(content, userId, channelName, idempotencyKey = null) {
-  const identity = idempotencyKey == null ? content : `idempotency:${idempotencyKey}`;
-  return createHash("sha256")
-    .update(`${userId || ""}\0${channelName || ""}\0${identity}`).digest("hex");
-}
-
-export function notificationNonce(idempotencyKey) {
-  if (idempotencyKey == null) return null;
-  if (typeof idempotencyKey !== "string" || Buffer.byteLength(idempotencyKey, "utf8") > 256
-      || !/^[a-zA-Z0-9:._/-]+$/u.test(idempotencyKey)) {
-    throw new Error("idempotencyKey must be 1-256 safe identity characters");
-  }
-  return createHash("sha256").update(`notifyuser\0${idempotencyKey}`).digest("hex").slice(0, 25);
-}
-
 function readNotifyState() {
   let parsed;
   try {
@@ -450,19 +439,26 @@ export async function notifyUser(message, opts = {}) {
   }
 
   let dmError = null;
+  let dmPostStarted = false, posted = null, dmChannelId = null;
   if (userId) {
     try {
       const dm = await discordCreateDm(userId);
       if (!dm?.id) throw new Error("Discord DM response missing channel id");
-      await discordPost(dm.id, content, nonce);
+      dmChannelId = dm.id;
+      dmPostStarted = true;
+      posted = await discordPost(dm.id, content, nonce);
     } catch (err) {
+      if (opts.strictSingleAttempt && dmPostStarted && err.notSent !== true) {
+        return { sent: false, outcome: "unknown", target: "dm", reason: err.message };
+      }
       dmError = err;
     }
     if (!dmError) {
+      if (opts.strictSingleAttempt && !posted?.id) return { sent: false, outcome: "unknown", target: "dm", reason: "message receipt missing id" };
       // Receipt failures must remain visible, but must not turn a successful DM
       // into a second fallback-channel post.
       await rememberNotification(key);
-      return { sent: true, target: "dm", userId };
+      return { sent: true, target: "dm", userId, messageId: posted?.id, channelId: dmChannelId };
     }
   }
 
@@ -472,9 +468,15 @@ export async function notifyUser(message, opts = {}) {
     throw new Error(`notify channel '${channelName}' not found${suffix}`);
   }
   const fallback = userId ? `<@${userId}>\n${content}` : content;
-  await discordPost(channelId, fallback, nonce);
+  let fallbackPost;
+  try { fallbackPost = await discordPost(channelId, fallback, nonce); }
+  catch (error) {
+    if (opts.strictSingleAttempt) return { sent: false, outcome: error.notSent ? "not-sent" : "unknown", reason: error.message };
+    throw error;
+  }
+  if (opts.strictSingleAttempt && !fallbackPost?.id) return { sent: false, outcome: "unknown", target: channelName, reason: "message receipt missing id" };
   await rememberNotification(key);
-  return { sent: true, target: channelName, channelId, fallback: !!dmError, dmError: dmError?.message };
+  return { sent: true, target: channelName, channelId, messageId: fallbackPost?.id, fallback: !!dmError, dmError: dmError?.message };
 }
 
 /** WHAT: Dispatches a file with its original optional caption. WHY: Keeps caller-provided output unchanged. */

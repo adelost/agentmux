@@ -227,3 +227,26 @@ Both quota surfaces show the reading time and age; more than 24 hours is STALE.
 A past renewal day is INVALID, never advanced by guessing the next billing date.
 A fresh usage response does not refresh manual facts. Reset recommendations
 require a positive reset count with fresh evidence.
+
+## A delivery held at the quota floor
+
+The existing 30-second bridge identity heartbeat also observes quota-floor
+holds. No additional polling timer is started. After strictly more than 30
+minutes from the earliest proven refusal, one notice per account episode goes
+to the human through notifyuser and to dispatcher lsrc:3 through the normal
+queue. Waiting jobs/panes, dated resets and verified Codex capacity in both
+windows are named; missing readings stay unknown. The original jobs never move
+or replay. Existing automatic account policies are independent of this observer.
+
+Episodes and independent recipient receipts use the existing atomic state
+store (the bridge's configured STATE_FILE). Send intent is durable before I/O.
+A lost response or interrupted send remains unknown and is not retried blindly;
+a proven failure before sending may retry. The ordinary dispatcher queue ACK
+is followed even after the original episode recovers. Fresh provider evidence,
+not reset-time jitter, establishes recovery before a new episode can alert.
+
+Compaction waiting for a quota-held delivery is evidence within that same
+episode. The existing compact-held metadata and canonical posted notices own
+its source/time. Cache age remains unknown without activity evidence; no
+compaction or move rule changes. Detailed evidence remains in state when a
+notice summarises several compact holds. Stats has a separate builder/release.
