@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-24T18:06:07.823Z",
+  "packageVersion": "1.25.341",
+  "sourceSha": "7b9f049d6414491b82cae27a05ab64f1fcab3f8b",
+  "installedAt": "2026-10-24T18:04:04.514Z",
+  "bridgePid": 4176995,
+  "bridgeSourceSha": "7b9f049d6414491b82cae27a05ab64f1fcab3f8b",
+  "bridgeHeartbeatAt": "2026-10-24T18:07:55.120Z",
+  "globalBinary": "/home/adelost/.nvm/versions/node/v22.19.0/lib/node_modules/agentmux/bin/agent-cli.mjs",
+  "installedSetupCli": true,
+  "nativePolicyHash": "021c0df2c4c6124daf8fa58a4ca69d17ad442fce676a24457d353efd6ab59f12",
+  "nativePid": 3929374,
+  "installedNoModelPublication": "published",
+  "dreamAdmission": "acquired-and-released",
+  "interAgentSendFalse": true,
+  "historicalReplay": false,
+  "paidOverride": false
+}
