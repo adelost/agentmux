@@ -2737,7 +2737,7 @@ const FLAG_SPECS = {
   },
   compact: { dry: "boolean", nightly: "boolean", self: "boolean", help: "boolean", h: "boolean", force: "boolean", "no-resume": "boolean", "continue-file": "string", "min-tokens": "number", p: "number", m: "string", message: "string" },
   dream: {
-    since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean", recover: "string", "source-sha256": "string", "memory-sha256": "string",
+    since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean", recover: "string", "source-sha256": "string", "memory-sha256": "string", "import-historical": "boolean",
     retry: "boolean", "defer-sentinel": "boolean", deferSentinel: "boolean", help: "boolean", h: "boolean",
   },
   janitor: { dry: "boolean", days: "number" },
