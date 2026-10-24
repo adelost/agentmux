@@ -1,12 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { assertDreamWritePath } from "./dream-memory-effects.mjs";
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const IDENTITY = / · run `([0-9a-f-]{36})` · source `([0-9a-f]{64})`\./u;
 const SNAPSHOT = /<!-- amux-dream-snapshot:(\d{4}-\d{2}-\d{2}) ([0-9a-f-]{36}) ([0-9a-f]{64}) ([0-9a-f]{64}) -->/u;
 
 function readSnapshot(path) {
+  assertDreamWritePath(path);
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stat = fstatSync(fd);
@@ -31,6 +33,7 @@ export function publishDreamSnapshot(memPath, content, dateKey, included, omitte
   const [, runId, sourceSha] = identity;
   const relativePath = `dream/${[dateKey, runId].join("-")}.md`;
   const path = join(dirname(memPath), relativePath), bytes = snapshotBytes(content, dateKey);
+  assertDreamWritePath(path);
   if (bytes.length > 14 * 1024) throw new Error("Dream snapshot exceeds byte limit");
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;

@@ -7,6 +7,20 @@ const inside = (path, root) => path === root || path.startsWith(`${root}${sep}`)
 const indexes = ["MEMORY.md", "USER.md", "SOUL.md", "people.md"];
 const identity = stat => Object.fromEntries(["dev", "ino", "mode", "nlink", "size", "mtimeNs", "ctimeNs"].map(key => [key, String(stat[key])]));
 
+/** WHAT: Checks a controller-owned file path before any write. WHY: Prevents a memory link or linked parent from redirecting controller authority. */
+export function assertDreamWritePath(path) {
+  let cursor = resolve(path), file = true;
+  for (;;) {
+    try {
+      const stat = lstatSync(cursor);
+      if (stat.isSymbolicLink() || (file ? !stat.isFile() || stat.nlink !== 1 : !stat.isDirectory())) throw new Error(`dream-controller-path-not-isolated:${cursor}`);
+    } catch (error) { if (error.code !== "ENOENT") throw error; }
+    const parent = dirname(cursor);
+    if (parent === cursor) return;
+    cursor = parent; file = false;
+  }
+}
+
 /** WHAT: Reads one bounded ordinary file without following its final link. WHY: Prevents a result or manifest from aliasing protected memory. */
 export function readDreamRegular(path, maxBytes) {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -94,6 +108,7 @@ export function prepareDreamMemoryEffects({ workspace, paneDirs = [], inputPath 
   if (roots.some(root => inside(artifactRoot, root) || inside(root, artifactRoot))) throw new Error("dream-artifact-memory-overlap");
   const before = snapshotDreamMemory(roots, { artifactRoot, ignored: Object.values(paths) });
   const bytes = Buffer.from(`${JSON.stringify(before)}\n`);
+  if (bytes.length > 16 * 1024 * 1024) throw new Error("dream-memory-manifest-byte-limit");
   const fd = openSync(paths.manifest, "wx", 0o400);
   try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
   const directory = openSync(artifactRoot, "r");

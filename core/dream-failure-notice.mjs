@@ -2,10 +2,12 @@ import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeFileSync 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeDreamAtomic } from "./dream-commit.mjs";
+import { assertDreamWritePath } from "./dream-memory-effects.mjs";
 
 /** WHAT: Stores one human notice per failed night using the existing transport. WHY: Prevents a lost response from triggering a blind duplicate. */
 export async function notifyDreamFailure({ dateKey, reason, notify, home = homedir(), now = new Date() }) {
   const directory = join(home, ".agentmux", "dream-failure-notices"), path = join(directory, `${dateKey}.json`);
+  assertDreamWritePath(path);
   let previous;
   try { previous = JSON.parse(readFileSync(path, "utf8")); }
   catch (error) { if (error.code !== "ENOENT") throw error; }

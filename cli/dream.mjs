@@ -31,7 +31,7 @@ import { acquireDreamLock } from "../core/dream-lock.mjs";
 import { claimScheduledDream } from "../core/dream-schedule.mjs";
 import { commitDreamProduct, writeDreamAtomic } from "../core/dream-commit.mjs";
 import { judgeDreamMemory, protectedDreamBlocks } from "../core/dream-memory-guard.mjs";
-import { readDreamRegular, verifyDreamMemoryEffects } from "../core/dream-memory-effects.mjs";
+import { assertDreamWritePath, readDreamRegular, verifyDreamMemoryEffects } from "../core/dream-memory-effects.mjs";
 import { notifyDreamFailure } from "../core/dream-failure-notice.mjs";
 import { readDreamCurationProof } from "../core/dream-curation-proof.mjs";
 import { readDreamPaneHistory } from "../core/dream-history.mjs";
@@ -60,6 +60,7 @@ function escapeRegExp(text) {
 }
 
 function ensureDreamDailyFile(memPath, dateKey) {
+  assertDreamWritePath(memPath);
   mkdirSync(dirname(memPath), { recursive: true });
   if (!existsSync(memPath)) {
     writeFileSync(memPath, dailyMemoryHeader(dateKey));

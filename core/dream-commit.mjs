@@ -7,6 +7,7 @@ import { readDreamOwnerResult } from "./dream-owner.mjs";
 import { dreamSnapshotReference, publishDreamSnapshot, verifyDreamSnapshot } from "./dream-snapshot.mjs";
 import { upsertDreamSummary } from "./dream-summarizer.mjs";
 import { protectedDreamBlocks } from "./dream-memory-guard.mjs";
+import { assertDreamWritePath } from "./dream-memory-effects.mjs";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
 const intentPath = input => input.replace(/\.json$/u, ".commit.json");
@@ -17,6 +18,7 @@ const syncDirectory = path => {
 
 /** WHAT: Stores one durable Dream file atomically. WHY: Prevents a host restart from losing an acknowledged rename. */
 export function writeDreamAtomic(path, content, { immutable = false } = {}) {
+  assertDreamWritePath(path);
   const temporary = `${path}.${randomUUID()}.tmp`;
   const fd = openSync(temporary, "wx", 0o600);
   try {

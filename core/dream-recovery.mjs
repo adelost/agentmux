@@ -1,5 +1,5 @@
 // Finish an already-curated run without compacting, prompting or waking a pane.
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
@@ -10,7 +10,7 @@ import { defaultDreamReceiptPath, isDreamActivityTurn, readDreamReceipts } from 
 import { readDreamSuccess } from "./dream-health.mjs";
 import { resumeDreamCommit } from "./dream-commit.mjs";
 import { readDreamCurationProof } from "./dream-curation-proof.mjs";
-import { verifyDreamMemoryEffects } from "./dream-memory-effects.mjs";
+import { assertDreamWritePath, readDreamRegular, verifyDreamMemoryEffects } from "./dream-memory-effects.mjs";
 import { judgeDreamMemory, protectedDreamBlocks } from "./dream-memory-guard.mjs";
 import { finishDreamMemoryRepairs } from "./dream-memory-repairs.mjs";
 
@@ -20,8 +20,8 @@ const hash = (value) => createHash("sha256").update(value).digest("hex");
 export async function recoverDreamRun(ctx, flags, { commit, getProof = readDreamCurationProof } = {}) {
   const path = resolve(String(flags.recover));
   const name = /^(\d{4}-\d{2}-\d{2})-([0-9a-f-]{36})\.json$/u.exec(basename(path));
-  if (!name || statSync(path).size > 256 * 1024) throw new Error("dream-recovery-invalid-input");
-  const bytes = readFileSync(path);
+  if (!name) throw new Error("dream-recovery-invalid-input");
+  const bytes = readDreamRegular(path, 256 * 1024);
   const sha256 = hash(bytes);
   if (sha256 !== flags["source-sha256"]) throw new Error("dream-recovery-source-hash-mismatch");
   const document = JSON.parse(bytes);
@@ -35,6 +35,7 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   const workspace = resolve(flags.workspace || process.env.OPENCLAW_WORKSPACE || defaultWorkspace());
   if (document.workspace && resolve(document.workspace) !== workspace) throw new Error("dream-recovery-workspace-mismatch");
   const memPath = join(workspace, "memory", `${dateKey}.md`);
+  assertDreamWritePath(memPath);
   const success = readDreamSuccess(workspace, dateKey, { home: homedir(), now });
   if (success.ok && success.runId === runId) return { alreadyCommitted: true, runId, dateKey, path: memPath };
   const expectedMemory = document.memoryBeforeSha256 || flags["memory-sha256"];
