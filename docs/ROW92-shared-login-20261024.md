@@ -117,3 +117,15 @@ Sanitized artifacts under
 No deployment, secret change, account mutation, console cleanup or paid API
 execution occurred. Mapping is verified; first-app implementation and migration
 remain blocked. Original92 timebox is retained rather than restarted.
+
+## Authorized continuation,24October15:59Z
+
+Lsrc:0 authorizes one independent Suggest app credential, generated in memory
+and piped only into Wrangler secrets for broker and Suggest, then its own
+registry entry. This narrowly supersedes the credential blocker above.
+No secret value or disk copy. Keep current Google login until explicit linking
+passes on a test account; preserve every existing session. Trackbook waits for
+its other WIP.92a starts16:00Z,90min until17:30Z within92's original17:46Z cap;
+checkpoint16:20Z. Files: new broker route/authority feature, additive schema,
+existing router/session helper, shared auth-client dependency, relevant tests.
+UI adoption is separate from replacing the existing Google route.
