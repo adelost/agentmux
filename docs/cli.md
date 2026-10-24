@@ -576,3 +576,20 @@ detached worktree before either measured gate.
   }
 }
 ```
+
+
+## Images and MP4 clips
+
+`amux image /absolute/clip.mp4 "Caption" -p lsrc:0` sends the original file
+through Discord's existing attachment transport. PNG, JPEG, GIF and WebP
+remain supported. `--dry` checks the file and resolves the target without
+uploading it.
+
+The CLI cap is 20 MiB, matching the [documented Discord base limit](https://docs.discord.com/developers/reference#uploading-files)
+checked on 24 October 2026. MP4 files use `video/mp4`; their bytes are preserved.
+
+Video sends print a persistent receipt path and Discord message ID. Repeating
+an acknowledged file/caption/target returns that receipt. An unknown outcome
+stops another matching upload: inspect the original receipt and delivery
+before taking further action. Changing the delivery identity to hide an
+unknown result is not a recovery.

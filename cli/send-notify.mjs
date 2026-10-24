@@ -203,29 +203,32 @@ async function discordCreateDm(userId) {
  * Uses multipart/form-data — JSON-only `discordPost` can't carry binaries.
  * `text` is an optional message body that lands alongside the attachment.
  */
-async function discordPostFile(channelId, filePath, text = "", kind = "file") {
+async function discordPostFile(channelId, filePath, text = "", kind = "file", options = {}) {
   return recordedPost(channelId, { content: text.slice(0, 2000), files: [filePath] }, kind,
-    () => postFile(channelId, filePath, text));
+    () => postFile(channelId, filePath, text, options));
 }
 
-async function postFile(channelId, filePath, text) {
+async function postFile(channelId, filePath, text, options = {}) {
   const token = getDiscordBotToken();
   if (!token) throw new Error("DISCORD_TOKEN not found — cannot post file");
-  const fileBuffer = readFileSync(filePath);
+  const fileBuffer = options.fileBuffer || readFileSync(filePath);
   const fileName = filePath.split("/").pop() || "audio.mp3";
 
   const formData = new FormData();
-  formData.append("payload_json", JSON.stringify({ content: text.slice(0, 2000) }));
-  formData.append("files[0]", new Blob([fileBuffer]), fileName);
+  formData.append("payload_json", JSON.stringify(discordMessagePayload(text, options.nonce)));
+  formData.append("files[0]", new Blob([fileBuffer], { type: options.contentType || "application/octet-stream" }), fileName);
 
   const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bot ${token}` },
     body: formData,
+    ...(options.signal && { signal: options.signal }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`discord file-post ${res.status}: ${body}`);
+    const error = new Error(`discord file-post ${res.status}: ${body}`);
+    error.notSent = res.status >= 400 && res.status < 500 && res.status !== 408;
+    throw error;
   }
   return res.json();
 }
@@ -480,8 +483,8 @@ export async function notifyUser(message, opts = {}) {
 }
 
 /** WHAT: Dispatches a file with its original optional caption. WHY: Keeps caller-provided output unchanged. */
-export async function sendFileToChannelId(channelId, filePath, text = "", { kind = "file" } = {}) {
-  return discordPostFile(channelId, filePath, text, kind);
+export async function sendFileToChannelId(channelId, filePath, text = "", { kind = "file", ...options } = {}) {
+  return discordPostFile(channelId, filePath, text, kind, options);
 }
 
 /** Send a message to an OpenClaw session. */
