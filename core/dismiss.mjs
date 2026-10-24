@@ -116,8 +116,28 @@ const FOLDER_ACCESS_MENU = {
   footer: /^enter continue\s*·\s*esc quit$/iu,
 };
 
+/** WHAT: Checks the current Codex update menu's explicit skip action. WHY: Keeps a changed header and footer from stranding startup or installing an update. */
+function activeCodexUpdateSkip(text) {
+  const lines = tailLines(String(text || ""), 12);
+  if (!/^enter continue\s*·\s*esc skip$/iu.test(lines.at(-1)?.trim() || "")) return false;
+  if (!lines.some(line => /^\s*Update available\s*·\s*\S+\s*(?:→|->)\s*\S+\s*$/u.test(line))) return false;
+  const choices = [
+    /(?:^|[\s›❯])1\.\s*Update now\b/u,
+    /(?:^|[\s›❯])2\.\s*Skip\s*$/u,
+    /(?:^|[\s›❯])3\.\s*Skip until next version\s*$/u,
+  ];
+  return choices.every(choice => lines.some(line => choice.test(line)))
+    && lines.some(line => /^\s*[›❯]\s*[123]\.\s/u.test(line));
+}
+
 /** WHAT: Maps active TUI menus to safe choices. WHY: Keeps startup from updating Codex or resuming unrelated work. */
 export const BLOCKING_PROMPTS = [
+  {
+    name: "codex-update",
+    match: activeCodexUpdateSkip,
+    keys: "Escape",
+    waitMs: 1000,
+  },
   {
     name: "codex-update",
     match: text => activeCodexChoice(text, UPDATE_MENU) === "first",
