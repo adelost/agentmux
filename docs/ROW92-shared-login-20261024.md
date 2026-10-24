@@ -6,15 +6,45 @@ Source: lsrc:0's24October15:16:57Z direction, conversation
 delivery:abd82f44005cd83e07e5b09369a5cd87, and lsrc:3's allocated AMUX92.
 The broker and the Legacy app client are distinct. Jumpbook remains retired.
 
+## Current delivery,24October16:44Z
+
+Suggest's opt-in broker integration is published. App source00997c8 runs as
+Worker e45b2fa8-71a6-4887-89fd-e08fcd7c2612 at100%. Broker source4944323
+runs as aff8e4f1-2ce5-4668-87d9-cd13f98c4a4b at100%. Both health checks pass.
+The new independent app credential was generated in memory and piped through
+Wrangler secret put only to CLIENT_SECRET_SUGGEST and V1D_AUTH_CLIENT_SECRET;
+provision-receipt.json confirms both steps. No value was printed and no copy was written to disk.
+
+Verified:33 focused auth tests,134 broker tests,25 normal-release tests,
+isolated and production canaries, strict changed lint0, builds, local actual
+workerd linking/logout/broker login, and inspected390/1280 views. The local
+account was synthetic; the broker transport checked PKCE and one-use codes.
+A small local proxy translated captured redirects into browser navigations.
+Live anonymous checks reached the real Google entry through the shared broker,
+kept the old Google path, refused anonymous linking and invalid callbacks, and
+matched the served JavaScript to the local release bytes. No paid provider probe.
+
+**Waiting boundary:** a real existing test account still needs Google login,
+Profile > Connect v1d, then logout and Sign in with v1d. No personal OAuth action
+or live account link was performed. The original Google route and all existing
+local session keys/subjects remain. This is a published first slice, not a
+verified full cutover. Trackbook waits for its other WIP and still uses Legacy.
+Own local runtime is closed; original deadlines17:30Z/17:46Z are not restarted.
+
+Authoritative aggregate: /home/adelost/lsrc/.artifacts/shared-login-92-api4-20261024/receipt.json.
+Normal app rollback is084b7a2a-c812-4877-957f-9ae7baa7a4bc; broker rollback is
+dd0cd568-f2a0-41da-bca4-f4d157a564b4. Additive mappings are retained; no rollback,
+secret write or deploy is repeated without its receipt.
+
 ## Scope
 
 Map current code, live entry routes and configured secret names for sky,
 skyvw,skybar,suggest. Preserve existing identity, memberships, sessions and
 data. Reuse auth.v1d.io; Drive211 remains owned by lsrc:2 and has separate
-consent. No new credentials, accounts, provider clients, deletions or paid
-calls are authorized.
+consent. Only the scoped Suggest app credential was later authorized; no new
+personal accounts, provider clients, real-data deletions or paid probes are authorized.
 
-## Verified inventory
+## Inventory at the15:54Z checkpoint
 
 Anonymous live starts inspected24October15:50–15:54Z. No provider login,
 consent, new account, real data change or session exchange was completed.
@@ -26,7 +56,7 @@ contains client labels and short one-way fingerprints, never their values.
 | sky.v1d.io | Trackbook Better Auth Google, **Legacy app logins**; old browser bookmarks redirect to skyvw.app | trackbook-jump-proxy4836 requests over7days, including machine/scheduled traffic | Covered by92 inventory; future Trackbook migration must have its own named row | Preserve Better Auth user/account IDs, auth_links, passkeys, owner data and device tokens; coordinate existing WIP first |
 | Skyvw / skyvw.app | Same Trackbook account service through trackbook-jump-proxy; skyvw-web owns the public frontend, not a second identity store | Same4836 proxy requests, not additional users or a second independent count | Same Trackbook migration boundary; canonical-only skydive-altimeter is read-only here | Public Google start returns the old sky.v1d.io/api/auth/callback/google callback; native pairing and release paths remain unchanged |
 | skybar.v1d.io | **Already brokered**:302 to auth.v1d.io/authorize, app_id skybar, exact own callback | Public start verified; Pages human-use count not measured by this worker aggregate |92 inventory only; no duplicate migration row or release | Existing app-local sid and authorization remain owned by Skybar |
-| suggest.v1d.io | Direct Google OIDC; provider client is **v1d Login**, the same client as the broker, not Legacy app logins | suggestions-v1d3324 requests over7days, including machine/scheduled traffic |92a api:4, proposed90min within original92 deadline; blocked before code | First candidate: custom auth is smaller than Trackbook's Better Auth/passkey/device seam and checkout has no WIP; needs explicit identity link and its own broker app registration/credential |
+| suggest.v1d.io | Direct Google OIDC; provider client is **v1d Login**, the same client as the broker, not Legacy app logins | suggestions-v1d3324 requests over7days, including machine/scheduled traffic |92a api:4, 90min16:00–17:30Z; opt-in integration published, real-account proof pending | First candidate: custom auth is smaller than Trackbook's Better Auth/passkey/device seam and checkout has no WIP; needs explicit identity link and its own broker app registration/credential |
 
 Period:17October15:50:44Z through24October15:50:44Z. Requests are sampled
 Cloudflare aggregates, not unique people or proven human logins. The broker
@@ -41,7 +71,7 @@ must ultimately move, but they are not uses of the same old client.
 
 ## Secret names and deployment owners
 
-Only names were read from Wrangler and Cloudflare deployment metadata.
+Initial15:54Z inventory below. Only names were read from Wrangler and Cloudflare deployment metadata. The approved continuation added only CLIENT_SECRET_SUGGEST at the broker and V1D_AUTH_CLIENT_SECRET at Suggest.
 
 | Deployment | Relevant configured secret names | Broker readiness |
 |---|---|---|
@@ -87,13 +117,13 @@ separation, creator/data ownership and logout. Before release, run the app's
 normal local canary/build/lint and record exact source, rollback and live result.
 That canary and a real linked login have **not** run in this read-only phase.
 
-The missing prerequisite is concrete: Suggest has no broker registry entry and
+The missing prerequisite at the initial checkpoint was concrete: Suggest has no broker registry entry and
 no documented matching app credential. The existing deployment contract requires
 an independent per-app credential before registration; registering first breaks
 global broker health. AMUX92 explicitly forbids new secrets. A different app's
 secret, a Google secret or a personal Drive token cannot fill that gap.
-Consequently92a is blocked before code/activation pending a narrow authority
-decision on that prerequisite. Speculative app code is not a completed migration.
+Consequently92a was blocked before code/activation until the narrow authority
+decision recorded below. Speculative app code is not a completed migration.
 
 Trackbook's checkout is dirty on fix/live-session-consent with another feature's
 work. No files were changed, stashed, moved or copied. The skydive-altimeter
@@ -114,9 +144,9 @@ Sanitized artifacts under
 - inspect-live.py and check-login-boundaries.py: repeatable read-only probes;
   no cookie, auth code, token or raw provider client ID is retained.
 
-No deployment, secret change, account mutation, console cleanup or paid API
-execution occurred. Mapping is verified; first-app implementation and migration
-remain blocked. Original92 timebox is retained rather than restarted.
+At the initial checkpoint no deployment, secret change, account mutation, console
+cleanup or paid API execution had occurred. That prerequisite blocker is historical;
+the current published result and remaining personal boundary are stated above. Original92 timebox is retained rather than restarted.
 
 ## Authorized continuation,24October15:59Z
 
