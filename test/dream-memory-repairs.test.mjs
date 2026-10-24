@@ -26,7 +26,7 @@ function fixture(file = "memory/references/source.md", text = "# Source\n- Verif
     collectSources: () => ({ sources: [], unreadable: [], skipped: [] }),
     notifyUser: async () => ({ sent: false, outcome: "not-sent" }),
     getStatus: async () => "idle", getProof: async () => ({ ownerTexts: [] }),
-    enterSandbox: async (_ctx, _owner, input) => ({ ...input.sandbox, runId: input.runId, inputSha256: input.sha256, sessionId: "session-1", status: "running" }),
+    enterSandbox: async (_ctx, _owner, input) => ({ ...input.sandbox, runId: input.runId, inputSha256: input.sha256, sessionId: "session-1", status: "running", kernelVerified: true }),
     finishSandbox: () => {},
     getContext: () => ({ model: "gpt-6.1-sol", effort: "xhigh" }),
     compactCodex: async () => ({ ok: true, sessionId: "session-1", compactBoundary: true }),

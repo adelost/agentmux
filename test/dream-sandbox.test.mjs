@@ -19,7 +19,7 @@ it("accepts another process's reference and own daily heading while the curator 
     const input = writeDreamOwnerInput({ dateKey, workspace, memoryGuard: { effects: true, sandbox: true } }, { rootDir: join(root, "input") });
     writeFileSync(input.outputPath, `> Kuraterad av dream:1 efter verifierad kompaktering · run \`${input.runId}\` · source \`${input.sha256}\`.\n- Verified result.\n`);
     execFileSync("python3", ["-c", "import pathlib,sys; p=pathlib.Path(sys.argv[1]); (p/'references'/'other.md').write_text('Other verified fact.'); f=p/'2026-10-24.md'; f.write_text(f.read_text()+'\\n## Other panel\\nOwn note.\\n')", memory]);
-    const sandboxProof = { ...input.sandbox, runId: input.runId, inputSha256: input.sha256, sessionId: "test-session", status: "running" };
+    const sandboxProof = { ...input.sandbox, runId: input.runId, inputSha256: input.sha256, sessionId: "test-session", status: "running", kernelVerified: true };
     const options = { owner, sessionId: "test-session", prompt: "fixture", dateKey, input, memPath, workspace, memoryBefore,
       sandboxProof, getProof: async () => ({ sessionId: "test-session", ownerTexts: [], sandboxDenied: false }) };
     const result = await checkDreamCuration(options);

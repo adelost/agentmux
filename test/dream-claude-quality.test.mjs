@@ -80,7 +80,7 @@ describe("Dream reads idle Claude quality without trusting stale cache", () => {
           }], unreadable: [], skipped: [] }),
           getStatus: async () => "idle",
           getProof: async () => ({ sessionId: ID, ownerTexts: [] }),
-          enterSandbox: async (_ctx, _owner, input) => ({ ...input.sandbox, runId: input.runId, inputSha256: input.sha256, sessionId: ID, status: "running" }),
+          enterSandbox: async (_ctx, _owner, input) => ({ ...input.sandbox, runId: input.runId, inputSha256: input.sha256, sessionId: ID, status: "running", kernelVerified: true }),
           finishSandbox: () => {},
           notifyUser: async () => ({ sent: false, outcome: "not-sent" }),
           compactClaude: async () => { calls.push("compact"); return { ok: true, compactBoundary: true,

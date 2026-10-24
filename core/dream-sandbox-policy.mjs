@@ -22,7 +22,7 @@ export function dreamSandboxFlags(guard) {
 /** WHAT: Checks controller startup evidence against this immutable input. WHY: Prevents a result file from attesting its own sandbox or borrowing another run's launch. */
 export function verifyDreamSandboxProof(input, proof) {
   const expected = input.sandbox;
-  if (!expected || !proof || !["running", "terminal"].includes(proof.status)
+  if (!expected || !proof || proof.kernelVerified !== true || !["running", "terminal"].includes(proof.status)
     || proof.runId !== input.runId || proof.inputSha256 !== input.sha256
     || proof.root !== expected.root || proof.profile !== expected.profile || !proof.sessionId) throw Error("dream-sandbox-unattested");
   dreamSandboxConfig(expected);
