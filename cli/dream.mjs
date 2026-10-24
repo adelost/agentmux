@@ -34,6 +34,8 @@ import { protectedDreamBlocks } from "../core/dream-memory-guard.mjs";
 import { assertDreamWritePath } from "../core/dream-memory-effects.mjs";
 import { notifyDreamFailure } from "../core/dream-failure-notice.mjs";
 import { checkDreamCuration } from "../core/dream-curation-check.mjs";
+import { readDreamCurationProof } from "../core/dream-curation-proof.mjs";
+import { enterDreamSandbox, finishDreamSandbox } from "../core/dream-sandbox.mjs";
 import { readDreamPaneHistory } from "../core/dream-history.mjs";
 import { dreamShadow, formatDreamShadow, memoizeHistory, writeDreamShadow } from "../core/dream-shadow.mjs";
 import { readWindow } from "../core/ask-ledger.mjs";
@@ -352,7 +354,7 @@ async function runDream(ctx, flags, dependencies) {
         createdAt: now.toISOString(),
         workspace: workspaceDir,
         memoryBeforeSha256: createHash("sha256").update(memoryBefore).digest("hex"),
-        memoryGuard: { readAt: new Date(memoryReadAt).toISOString(), blocks: protectedDreamBlocks(memoryBefore), effects: true,
+        memoryGuard: { readAt: new Date(memoryReadAt).toISOString(), blocks: protectedDreamBlocks(memoryBefore), effects: true, sandbox: true,
           paneDirs: [...new Set([owner.paneDir, ...agents.flatMap(agent => (agent.panes || []).map((_, pane) => join(agent.dir, ".agents", String(pane))))].filter(Boolean))] },
         owner: { agent: owner.agent, pane: owner.pane, engine: owner.engine },
         compact: {
@@ -374,6 +376,8 @@ async function runDream(ctx, flags, dependencies) {
         omitted: batch.omitted.length,
         unreadable: observed.unreadable.length,
       });
+      const sandboxProof = await (dependencies.enterSandbox || enterDreamSandbox)(ctx, owner, input, compact, quality);
+      const finishSandbox = () => (dependencies.finishSandbox || finishDreamSandbox)(ctx, owner, input);
       const visibleMirror = await (dependencies.mirrorPrompt || mirrorDreamOwnerPrompt)(
         ctx, owner, prompt,
       );
@@ -397,6 +401,13 @@ async function runDream(ctx, flags, dependencies) {
         pollMs: dependencies.resultPollMs,
         sleep: dependencies.sleep,
         getStatus: async candidate => (dependencies.getStatus || getPaneStatus)(ctx, candidate.agent, candidate.pane),
+        sandboxDenial: async () => {
+          try {
+            const proof = await (dependencies.getProof || readDreamCurationProof)({ owner, sessionId: compact.sessionId, prompt, dateKey, runId: input.runId, memPath, quality });
+            if (proof.sandboxDenied) { finishSandbox(); return true; }
+          } catch { /* A partial native turn cannot attest a denial or completion. */ }
+          return false;
+        },
       });
       if (!product.ok) {
         // Candidate fallback is preparation-only. One dispatched curation is
@@ -404,7 +415,7 @@ async function runDream(ctx, flags, dependencies) {
         throw new Error(`dream-owner-product-invalid:${product.reason}`);
       }
       const checked = await checkDreamCuration({ owner, sessionId: compact.sessionId, prompt, dateKey, input, memPath,
-        quality, workspace: workspaceDir, memoryBefore, getProof: dependencies.getProof });
+        quality, workspace: workspaceDir, memoryBefore, getProof: dependencies.getProof, sandboxProof, onTerminal: finishSandbox });
       const { judgeConcurrentNotes } = checked;
       product = finishDreamMemoryRepairs({ workspace: workspaceDir, input, product: checked.product });
       commitDreamProduct({ memPath, memoryBefore, product, dateKey, included: batch.included,

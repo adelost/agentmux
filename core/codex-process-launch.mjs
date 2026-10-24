@@ -7,6 +7,7 @@ import { verifiedCodexCompact } from "./verified-compact.mjs";
 import { beginContextCompact, rememberContextCompact } from "./context-maintenance.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
 import { esc } from "../lib.mjs";
+import { dreamSandboxFor, markDreamSandboxRunning } from "./dream-sandbox.mjs";
 
 /** WHAT: Reads the requested live model after startup. WHY: Prevents an early empty composer from masquerading as a fully rendered startup. */
 export async function waitForCodexModelSelection({ screen, wait, selected, status, dismiss, attempts = 40 }) {
@@ -37,8 +38,10 @@ export async function waitForCodexModelSelection({ screen, wait, selected, statu
 /** WHAT: Routes process launch through compact-first policy. WHY: Keeps every wake and recovery on the same session-preserving transition. */
 export async function startCodexProcess({
   t, wait, target, dir, profile, selected, sessionId, previous, remembered,
-  launchOptions, compact, ready, screen, status, dismiss, remember, pin,
+  launchOptions, compact, ready, screen, status, dismiss, remember, pin, state, name, pane,
 }) {
+  const dreamSandbox = dreamSandboxFor(state, name, pane, sessionId, profile.id) || launchOptions?.dreamSandbox;
+  if (dreamSandbox && (!sessionId || dreamSandbox.model && (selected.model !== dreamSandbox.model || selected.effort !== dreamSandbox.effort))) throw Error("dream-sandbox-session-mismatch");
   const reset = async () => {
     await t.respawnPane(target, { kill: true, cwd: dir });
     const deadline = Date.now() + 5_000;
@@ -53,9 +56,11 @@ export async function startCodexProcess({
     retry: launchOptions?.retryModelChange === true,
     receipt: launchOptions?.compactReceipt, context: launchOptions?.resumeContext, work: launchOptions?.work,
     launch: async (choice, { goals = true, fresh = false } = {}) => {
+      if (dreamSandbox && fresh) throw Error("dream-sandbox-fresh-session-refused");
       const cmd = buildCodexLaunchCommand({ profileHome: profile.home, ...choice,
         resumeSessionId: fresh ? null : sessionId, allowFreshBootstrap: fresh || !sessionId, disableGoals: !goals, cwd: dir,
-        developerInstructions: !sessionId && !launchOptions?.newSession ? remembered?.deferredHandover?.text : null });
+        developerInstructions: !sessionId && !launchOptions?.newSession ? remembered?.deferredHandover?.text : null,
+        dreamSandbox });
       // runShell's outer quoting must preserve the launch builder's inner quotes.
       await t.runShell(target, esc(`cd '${esc(dir)}' && ${cmd}`));
       await wait(500);
@@ -69,6 +74,7 @@ export async function startCodexProcess({
       remember({ sessionId: current, status: current ? "ready" : "awaiting-first-rollout",
         model: actual.model, effort: actual.effort, modelTransitionBlocked: null, supersededSessionId: replacedSessionId });
       pin(actual);
+      markDreamSandboxRunning(state, name, pane, dreamSandbox);
     },
     recordBlocked: (error) => remember({ sessionId, status: "model-change-blocked",
       model: previous?.model || null, effort: previous?.effort || null, modelTransitionBlocked: error }),

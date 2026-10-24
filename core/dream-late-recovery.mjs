@@ -19,7 +19,7 @@ export async function recoverLateDream({ workspace, home, dateKey, dry = false, 
     const path = join(root, name), bytes = readFileSync(path), document = JSON.parse(bytes);
     if (document.workspace !== resolve(workspace) || document.dateKey !== dateKey || !document.owner) continue;
     const sourceSha256 = createHash("sha256").update(bytes).digest("hex");
-    const product = readDreamOwnerResult(path.replace(/\.json$/u, ".summary.md"), dateKey, match[1], document.owner, sourceSha256);
+    const product = readDreamOwnerResult(document.outputPath || path.replace(/\.json$/u, ".summary.md"), dateKey, match[1], document.owner, sourceSha256);
     if (product.ok) candidates.push({ path, sourceSha256, runId: match[1] });
   }
   if (candidates.length !== 1) return { skipped: candidates.length ? "ambiguous-late-products" : "no-late-product" };

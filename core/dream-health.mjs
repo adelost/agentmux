@@ -93,7 +93,7 @@ export function readDreamSuccess(workspace, dateKey, { home, now = new Date(), d
       || !Number.isFinite(Date.parse(input.createdAt)) || Date.parse(input.createdAt) > now.getTime()) {
       return { ok: false, reason: "input identity/date mismatch" };
     }
-    const product = readDreamOwnerResult(`${path}.summary.md`, dateKey, receipt[1], input.owner, receipt[2]);
+    const product = readDreamOwnerResult(input.outputPath || `${path}.summary.md`, dateKey, receipt[1], input.owner, receipt[2]);
     if (!product.ok) return { ok: false, reason: product.reason };
     const identity = { sourceSha256: receipt[2], createdAt: input.createdAt };
     if (snapshot) {

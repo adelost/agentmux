@@ -30,6 +30,22 @@ function fixture({ writeMemory = false, receipt = true, laterWrite = false } = {
 }
 
 describe("original native Dream proof", () => {
+  it("reports a completed native OS denial without fabricating a DREAM_OK answer", () => {
+    const fx = fixture(), turnId = "denied-turn";
+    const events = [
+      { type: "event_msg", payload: { type: "task_started", turn_id: turnId } },
+      { type: "turn_context", payload: { turn_id: turnId, model: "gpt-6.1-sol", effort: "xhigh" } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: fx.prompt }], internal_chat_message_metadata_passthrough: { content_item_kinds: ["user.text"] } } },
+      { type: "response_item", payload: { type: "function_call_output", output: "Process exited with code 1\nOSError: [Errno 30] Read-only file system" } },
+      { type: "event_msg", payload: { type: "task_complete", turn_id: turnId } },
+    ].map(event => ({ timestamp: "2026-10-15T10:08:33Z", ...event }));
+    const save = () => writeFileSync(fx.path, events.map(JSON.stringify).join("\n") + "\n");
+    const options = { ...fx, owner: { ...fx.owner, engine: "codex" }, quality: { model: "gpt-6.1-sol", effort: "xhigh" } };
+    save(); const proof = readDreamCurationProof(options);
+    expect(proof.sandboxDenied).toBe(true); expect(proof.terminal.expectedReply).toBe(false);
+    events[3].payload.output = "Process exited with code 0\nA reference mentions Read-only file system";
+    save(); expect(() => readDreamCurationProof(options)).toThrow("terminal-receipt-unverified");
+  });
   it("ignores request snapshots as inputs or terminal evidence", () => {
     const fx = fixture();
     const events = readFileSync(fx.path, "utf8").trim().split("\n").map(JSON.parse);

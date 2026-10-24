@@ -145,9 +145,15 @@ export function writeDreamOwnerInput(document, {
 } = {}) {
   mkdirSync(rootDir, { recursive: true, mode: 0o700 });
   const path = join(rootDir, `${document.dateKey}-${runId}.json`);
+  const sandbox = document.memoryGuard?.sandbox === true
+    ? { root: join(rootDir, `${document.dateKey}-${runId}.artifacts`), profile: `amux_dream_${runId.replaceAll("-", "")}` } : null;
+  if (sandbox) {
+    mkdirSync(sandbox.root, { mode: 0o700 });
+    document = { ...document, runId, sandbox, outputPath: join(sandbox.root, "summary.md") };
+  }
   if (document.memoryGuard?.effects === true) {
     const { paneDirs = [], ...guard } = document.memoryGuard;
-    document = { ...document, memoryGuard: { ...guard, effects: prepareDreamMemoryEffects({ workspace: document.workspace, paneDirs, inputPath: path }) } };
+    document = { ...document, memoryGuard: { ...guard, effects: prepareDreamMemoryEffects({ workspace: document.workspace, paneDirs, inputPath: path, sandbox }) } };
   }
   const content = `${JSON.stringify(document, null, 2)}\n`;
   const temporary = `${path}.${process.pid}.tmp`;
@@ -156,7 +162,8 @@ export function writeDreamOwnerInput(document, {
   try { chmodSync(path, 0o400); } catch {}
   return {
     path,
-    outputPath: join(rootDir, `${document.dateKey}-${runId}.summary.md`),
+    outputPath: document.outputPath || join(rootDir, `${document.dateKey}-${runId}.summary.md`),
+    ...(sandbox && { sandbox }),
     runId,
     sha256: createHash("sha256").update(content).digest("hex"),
     bytes: Buffer.byteLength(content),

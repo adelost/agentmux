@@ -551,7 +551,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       previous: launch?.model || paneOverride ? null : previous,
     });
     await startCodexProcess({
-      t, wait, target, dir, profile, selected: override, previous,
+      t, wait, target, dir, profile, selected: override, previous, state, name, pane,
       remembered: remembered?.sessionId === resumeSessionId ? remembered : null, launchOptions,
       sessionId: resumeSessionId,
       compact: () => compactCodex(name, pane),

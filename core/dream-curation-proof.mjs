@@ -17,7 +17,7 @@ export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runI
   const expected = `DREAM_OK ${dateKey} ${runId}`, needle = normalizePrompt(prompt);
   const endByteOffset = Math.min(statSync(identity.path).size, MAX_JOURNAL_BYTES);
   let started = null, terminal = null, toolBytes = 0, observedQuality = null;
-  let pendingTurnId = null, pendingQuality = null;
+  let pendingTurnId = null, pendingQuality = null, sandboxDenied = false;
   const ownerTexts = [];
   for (const record of records(identity.path, { endByteOffset })) {
     if (!record.raw) {
@@ -51,6 +51,11 @@ export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runI
     if (started.turnId && ((startsCodexTurn && event.payload.turn_id !== started.turnId)
         || (observation && observation.turnId !== started.turnId))) throw new Error("dream-original-turn-mismatch");
     if (observation) observedQuality = observation;
+    if (event.type === "response_item" && ["function_call_output", "custom_tool_call_output"].includes(event.payload?.type)) {
+      const output = typeof event.payload.output === "string" ? event.payload.output : JSON.stringify(event.payload.output);
+      if (/(?:read-only file system|sandbox.{0,40}(?:denied|refused)|operation not permitted)/iu.test(output || "")
+        && /(?:exit(?:ed)?(?: with)?(?: code)?[:\s]+[1-9]|"exit_code"\s*:\s*[1-9]|error|failed)/iu.test(output || "")) sandboxDenied = true;
+    }
     if (item.role === "USER" && item.text && !matches) {
       // Tool-result arrays and engine bookkeeping do not start authored turns.
       const authored = owner.engine === "claude" ? typeof event.message?.content === "string" : true;
@@ -69,15 +74,15 @@ export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runI
             || String(event.perTurnEffort ?? event.effort) !== quality.effort)) {
           throw new Error("dream-original-session-quality-mismatch");
         }
-        return { ownerTexts, started, terminal, sessionId, path: identity.path };
+        return { ownerTexts, started, terminal, sessionId, path: identity.path, sandboxDenied };
       }
     }
-    if (terminal && event.type === "event_msg" && event.payload?.type === "task_complete") {
+    if ((terminal || sandboxDenied) && event.type === "event_msg" && event.payload?.type === "task_complete") {
       if (started.turnId && event.payload.turn_id !== started.turnId) throw new Error("dream-original-turn-mismatch");
       if (quality && (observedQuality?.model !== quality.model || observedQuality?.effort !== quality.effort)) {
         throw new Error("dream-original-session-quality-mismatch");
       }
-      return { ownerTexts, started, terminal, sessionId, path: identity.path };
+      return { ownerTexts, started, terminal: terminal || { at: item.date, line: record.line, byteOffset: record.byteOffset, expectedReply: false }, sessionId, path: identity.path, sandboxDenied };
     }
   }
   throw new Error("dream-original-terminal-receipt-unverified");

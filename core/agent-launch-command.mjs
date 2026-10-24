@@ -3,6 +3,7 @@
 import { esc } from "../lib.mjs";
 import { resolveClaudeEffort, resolveClaudeModel } from "./claude-model.mjs";
 import { allowedCodexLaunchModel } from "./codex-profiles.mjs";
+import { dreamSandboxFlags } from "./dream-sandbox-policy.mjs";
 import {
   CLAUDE_AUTONOMOUS_FLAGS,
   CODEX_AUTONOMOUS_FLAGS,
@@ -66,6 +67,7 @@ export function buildCodexLaunchCommand({
   disableGoals = false,
   developerInstructions = null,
   cwd = null,
+  dreamSandbox = null,
 } = {}) {
   if (!profileHome) throw new Error("Codex profile home is required");
   const policy = allowedCodexLaunchModel(model);
@@ -85,7 +87,7 @@ export function buildCodexLaunchCommand({
     // Verified on codex-cli 0.162.1: no goal turn starts, and the goal resumes on the next launch.
     disableGoals ? "--disable goals" : "",
   ].filter(Boolean).join(" ");
-  const flags = [CODEX_AUTONOMOUS_FLAGS, overrideFlags].filter(Boolean).join(" ");
+  const flags = [dreamSandbox ? dreamSandboxFlags(dreamSandbox) : CODEX_AUTONOMOUS_FLAGS, overrideFlags].filter(Boolean).join(" ");
   const env = `CODEX_HOME=${shellQuote(profileHome)}`;
   const exactResume = exactSessionId(resumeSessionId, "Codex");
   if (exactResume) return `${env} codex resume ${shellQuote(exactResume)} ${flags}`;

@@ -2,6 +2,7 @@ import { getPaneStatus } from "./tmux.mjs";
 import { readDreamOwnerQuality } from "../core/dream-owner.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
+import { DREAM_SANDBOX_STATE } from "../core/dream-sandbox.mjs";
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -93,6 +94,9 @@ function ownerQuality(ctx, owner, dependencies) {
 
 /** WHAT: Checks one curator's quality and exact compaction. WHY: Prevents dispatch before native session and quality proof. */
 export async function prepareDreamOwner(ctx, owner, dependencies) {
+  if (owner.engine !== "codex" && !dependencies.enterSandbox) throw Error("dream-sandbox-requires-configured-codex-curator");
+  const prior = ctx.state?.get?.(DREAM_SANDBOX_STATE)?.[`${owner.agent}:${owner.pane}`];
+  if (prior && prior.status !== "terminal") throw Error("dream-sandbox-prior-outcome-unknown");
   const before = verifyOwnerQuality(owner, await ownerQuality(ctx, owner, dependencies));
   const compact = owner.engine === "codex"
     ? await (dependencies.compactCodex || verifiedCodexCompact)({

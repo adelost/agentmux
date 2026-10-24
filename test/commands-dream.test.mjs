@@ -1,6 +1,8 @@
 import { feature, component, expect } from "bdd-vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
+import { execFileSync } from "node:child_process";
+import { it } from "vitest";
 import { join } from "path";
 import { cmdDream } from "../cli/commands.mjs";
 import { writeDreamOwnerInput } from "../core/dream-owner.mjs";
@@ -46,6 +48,8 @@ function ownerDependencies(fx, events = []) {
     notifyUser: async () => ({ sent: false, outcome: "not-sent" }),
     getStatus: async () => "idle",
     getProof: async () => ({ sessionId: "session-1", ownerTexts: [] }),
+    enterSandbox: async (_ctx, _owner, input) => ({ ...input.sandbox, runId: input.runId, inputSha256: input.sha256, sessionId: "session-1", status: "running" }),
+    finishSandbox: () => {},
     getContext: () => ({ model: "gpt-5.6-sol", effort: "max" }),
     compactCodex: async () => {
       events.push("compact");
@@ -72,6 +76,38 @@ function cleanup(fx) {
   else process.env.AMUX_DREAM_SOURCE = fx.previousDreamSource;
   rmSync(fx.root, { recursive: true, force: true });
 }
+
+it("commits the real Dream controller while a separate process adds a reference and daily heading", async () => {
+  const fx = fixture();
+  try {
+    const deps = ownerDependencies(fx); let commits = 0;
+    deps.recordReceipts = () => { commits++; };
+    deps.waitForResult = async ({ outputPath, dateKey, runId, sourceSha256 }) => {
+      execFileSync("python3", ["-c", "import pathlib,sys; p=pathlib.Path(sys.argv[1]); (p/'references').mkdir(); (p/'references'/'other.md').write_text('Independent fact.'); f=p/(sys.argv[2]+'.md'); f.write_text(f.read_text()+'\\n## Another panel\\nIndependent note.\\n')", join(fx.workspace, "memory"), dateKey]);
+      const content = `> Kuraterad av claw:3 efter verifierad kompaktering · run \`${runId}\` · source \`${sourceSha256}\`.\n- Verified source work.\n`;
+      writeFileSync(outputPath, content); return { ok: true, content };
+    };
+    const result = await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, { workspace: fx.workspace, quiet: true, deferSentinel: true }, deps);
+    expect(commits).toBe(1);
+    expect(readFileSync(result.path, "utf8")).toContain("Independent note.");
+    expect(readFileSync(result.path, "utf8")).toContain(result.input.runId);
+    expect(readFileSync(result.input.outputPath, "utf8")).toContain("Verified source work.");
+    expect(readFileSync(join(fx.workspace, "memory", "references", "other.md"), "utf8")).toBe("Independent fact.");
+  } finally { cleanup(fx); }
+});
+
+it("fails and notifies from a native sandbox refusal without waiting for a missing product", async () => {
+  const fx = fixture();
+  try {
+    const deps = ownerDependencies(fx); let notices = 0, reads = 0;
+    deps.notifyUser = async () => { notices++; return { sent: true, messageId: "fixture-notice" }; };
+    deps.getProof = async () => { reads++; return { sandboxDenied: true, sessionId: "session-1" }; };
+    const agent = { ensureReady: async () => {}, isBusy: async () => false };
+    await expect(cmdDream({ configPath: "unused", agent }, { workspace: fx.workspace, quiet: true, deferSentinel: true }, deps))
+      .rejects.toThrow("dream-sandbox-denied");
+    expect(reads).toBe(1); expect(notices).toBe(1);
+  } finally { cleanup(fx); }
+});
 
 feature("amux dream configured-pane orchestration", () => {
   for (const source of ["conversation-log", "raw"]) component(`Dream source ${source} is explicit and the default uses canonical posts`, {

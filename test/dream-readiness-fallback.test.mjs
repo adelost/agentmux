@@ -28,6 +28,8 @@ describe('Dream candidate preparation', () => {
           }], omitted: [], unreadable: [], skipped: [] }),
           getStatus: async () => 'idle',
           getProof: async () => ({ sessionId: 'session-2', ownerTexts: [] }),
+          enterSandbox: async (_ctx, _owner, input) => ({ ...input.sandbox, runId: input.runId, inputSha256: input.sha256, sessionId: 'session-2', status: 'running' }),
+          finishSandbox: () => {},
           getContext: (dir) => {
             if (dir === '/pane/1') {
               primaryQualityReads++;

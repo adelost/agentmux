@@ -10,6 +10,7 @@ import { defaultDreamReceiptPath, isDreamActivityTurn, readDreamReceipts } from 
 import { readDreamSuccess } from "./dream-health.mjs";
 import { resumeDreamCommit } from "./dream-commit.mjs";
 import { readDreamCurationProof } from "./dream-curation-proof.mjs";
+import { DREAM_SANDBOX_STATE, finishDreamSandbox } from "./dream-sandbox.mjs";
 import { assertDreamWritePath, readDreamRegular, verifyDreamMemoryEffects } from "./dream-memory-effects.mjs";
 import { judgeDreamMemory, protectedDreamBlocks } from "./dream-memory-guard.mjs";
 import { finishDreamMemoryRepairs } from "./dream-memory-repairs.mjs";
@@ -55,7 +56,8 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   const owner = resolveDreamCandidates(loadConfig(ctx.configPath)).find(candidate =>
     candidate.agent === document.owner?.agent && candidate.pane === document.owner.pane && candidate.engine === document.owner.engine);
   if (!owner) throw new Error("dream-recovery-owner-not-configured");
-  const input = { path, outputPath: path.replace(/\.json$/u, ".summary.md"), runId, sha256, bytes: bytes.length,
+  const input = { path, outputPath: document.outputPath || path.replace(/\.json$/u, ".summary.md"), runId, sha256, bytes: bytes.length,
+    ...(document.sandbox && { sandbox: document.sandbox }),
     memoryFormat: document.memoryFormat, memoryRepair: !!document.payload.memoryRepair };
   const previous = new Date(`${dateKey}T12:00:00Z`);
   previous.setUTCDate(previous.getUTCDate() - 1);
@@ -76,8 +78,11 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   if (!Array.isArray(memoryGuardBlocks) || memoryGuardBlocks.some(block => typeof block !== "string")) {
     throw new Error("dream-recovery-memory-guard-invalid");
   }
+  if (proof.sandboxDenied) throw Error("dream-sandbox-denied");
+  const sandboxProof = input.sandbox ? ctx.state?.get?.(DREAM_SANDBOX_STATE)?.[`${owner.agent}:${owner.pane}`] : null;
   verifyDreamMemoryEffects({ inputPath: path, inputSha256: sha256, descriptor: document.memoryGuard?.effects,
-    workspace, paneDirs: [owner.paneDir] });
+    workspace, paneDirs: [owner.paneDir], sandboxProof });
+  if (input.sandbox && !flags.dry) finishDreamSandbox(ctx, owner, input);
   const judgeConcurrentNotes = (_before, current) => judgeDreamMemory(memoryBefore, current);
   const verifyMemory = () => {
     const verdict = judgeConcurrentNotes(memoryBefore, readFileSync(memPath, "utf8"));

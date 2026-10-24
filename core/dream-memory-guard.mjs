@@ -12,5 +12,5 @@ export function judgeDreamMemory(before, current) {
   try {
     if (JSON.stringify(protectedDreamBlocks(before)) !== JSON.stringify(protectedDreamBlocks(current))) return { ok: false, reason: "dream-marker" };
   } catch { return { ok: false, reason: "dream-marker" }; }
-  return before === current ? { ok: true } : { ok: false, reason: "curator-wrote" };
+  return { ok: true };
 }

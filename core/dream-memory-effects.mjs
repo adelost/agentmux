@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, readSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
+import { protectedDreamBlocks } from "./dream-memory-guard.mjs";
+import { verifyDreamSandboxProof } from "./dream-sandbox-policy.mjs";
 
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const inside = (path, root) => path === root || path.startsWith(`${root}${sep}`);
@@ -46,7 +48,7 @@ export function dreamMemoryRoots(workspace, paneDirs = []) {
 }
 
 /** WHAT: Reads bytes, identities, additions, removals and link targets. WHY: Keeps dynamic arguments and restored bytes from concealing memory effects. */
-export function snapshotDreamMemory(roots, { artifactRoot, ignored = [] } = {}) {
+export function snapshotDreamMemory(roots, { artifactRoot, ignored = [], audit = false } = {}) {
   const scope = [...new Set(roots.map(path => resolve(path)))].sort();
   const skip = new Set(ignored.map(path => resolve(path))), entries = {}, visited = new Set();
   let files = 0, totalBytes = 0;
@@ -59,10 +61,12 @@ export function snapshotDreamMemory(roots, { artifactRoot, ignored = [] } = {}) 
     catch (error) { if (error.code === "ENOENT") { entries[path] = { kind: "missing" }; return; } throw error; }
     const id = identity(stat);
     if (stat.isSymbolicLink()) {
-      const target = realpathSync(path);
-      if (!scope.some(root => inside(target, root))) throw new Error(`dream-memory-link-outside-scope:${path}`);
+      let target;
+      try { target = realpathSync(path); }
+      catch (error) { if (!audit) throw error; target = resolve(dirname(path), readlinkSync(path)); }
+      if (!audit && !scope.some(root => inside(target, root))) throw new Error(`dream-memory-link-outside-scope:${path}`);
       entries[path] = { kind: "link", ...id, target: readlinkSync(path) };
-      visit(target);
+      if (scope.some(root => inside(target, root))) visit(target);
     } else if (stat.isDirectory()) {
       // The one permitted output may change its parent directory's timestamps and size.
       entries[path] = path === artifactRoot && skip.size > 0
@@ -74,17 +78,19 @@ export function snapshotDreamMemory(roots, { artifactRoot, ignored = [] } = {}) 
       if (totalBytes > 512 * 1024 * 1024 || stat.size > 256n * 1024n * 1024n) throw new Error("dream-memory-snapshot-byte-limit");
       const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
-        if (JSON.stringify(identity(fstatSync(fd, { bigint: true }))) !== JSON.stringify(id)) throw new Error("dream-memory-snapshot-race");
-        const hasher = createHash("sha256"), buffer = Buffer.alloc(64 * 1024);
+        if (!audit && JSON.stringify(identity(fstatSync(fd, { bigint: true }))) !== JSON.stringify(id)) throw new Error("dream-memory-snapshot-race");
+        const hasher = createHash("sha256"), buffer = Buffer.alloc(64 * 1024), text = [];
         let count, bytes = 0;
         while ((count = readSync(fd, buffer)) > 0) {
           bytes += count;
-          if (bytes > Number(stat.size)) throw new Error("dream-memory-snapshot-race");
+          if (bytes > (audit ? 256 * 1024 * 1024 : Number(stat.size))) throw new Error("dream-memory-snapshot-race");
           hasher.update(buffer.subarray(0, count));
+          if (audit && path.endsWith(".md")) text.push(Buffer.from(buffer.subarray(0, count)));
         }
         const sha256 = hasher.digest("hex");
-        if (JSON.stringify(identity(fstatSync(fd, { bigint: true }))) !== JSON.stringify(id)) throw new Error("dream-memory-snapshot-race");
+        if (!audit && JSON.stringify(identity(fstatSync(fd, { bigint: true }))) !== JSON.stringify(id)) throw new Error("dream-memory-snapshot-race");
         entries[path] = { kind: "file", ...id, sha256 };
+        if (audit && path.endsWith(".md")) entries[path].blocks = protectedDreamBlocks(Buffer.concat(text).toString("utf8"));
       } finally { closeSync(fd); }
     } else throw new Error(`dream-memory-snapshot-special-file:${path}`);
   };
@@ -102,7 +108,7 @@ export function changedDreamMemory(before, after) {
 }
 
 /** WHAT: Stores the controller's pre-curation snapshot. WHY: Prevents recovery from manufacturing a historical baseline or changing its scope. */
-export function prepareDreamMemoryEffects({ workspace, paneDirs = [], inputPath }) {
+export function prepareDreamMemoryEffects({ workspace, paneDirs = [], inputPath, sandbox = null }) {
   const paths = pathsFor(resolve(inputPath)), artifactRoot = dirname(paths.input);
   mkdirSync(artifactRoot, { recursive: true, mode: 0o700 });
   if (lstatSync(artifactRoot).isSymbolicLink() || realpathSync(artifactRoot) !== artifactRoot) throw new Error("dream-artifact-directory-link");
@@ -112,30 +118,46 @@ export function prepareDreamMemoryEffects({ workspace, paneDirs = [], inputPath 
   }
   const roots = dreamMemoryRoots(workspace, paneDirs);
   if (roots.some(root => inside(artifactRoot, root) || inside(root, artifactRoot))) throw new Error("dream-artifact-memory-overlap");
-  const before = snapshotDreamMemory(roots, { artifactRoot, ignored: Object.values(paths) });
+  const before = snapshotDreamMemory(roots, { artifactRoot, ignored: [...Object.values(paths), ...(sandbox ? [sandbox.root] : [])], audit: !!sandbox });
   const bytes = Buffer.from(`${JSON.stringify(before)}\n`);
   if (bytes.length > 16 * 1024 * 1024) throw new Error("dream-memory-manifest-byte-limit");
   const fd = openSync(paths.manifest, "wx", 0o400);
   try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
   const directory = openSync(artifactRoot, "r");
   try { fsyncSync(directory); } finally { closeSync(directory); }
-  return { version: 1, sha256: digest(bytes) };
+  return { version: sandbox ? 2 : 1, sha256: digest(bytes), ...(sandbox && { sandbox }) };
 }
 
 /** WHAT: Checks every protected effect before the controller writes. WHY: Prevents script syntax, legacy fallbacks or result links from granting memory-write authority. */
-export function verifyDreamMemoryEffects({ inputPath, inputSha256, descriptor, workspace, paneDirs = [] }) {
-  if (descriptor?.version !== 1 || !/^[a-f0-9]{64}$/u.test(descriptor.sha256 || "")) throw new Error("dream-memory-effects-unattested");
+export function verifyDreamMemoryEffects({ inputPath, inputSha256, descriptor, workspace, paneDirs = [], sandboxProof = null }) {
+  if (![1, 2].includes(descriptor?.version) || !/^[a-f0-9]{64}$/u.test(descriptor.sha256 || "")) throw new Error("dream-memory-effects-unattested");
   const paths = pathsFor(resolve(inputPath)), artifactRoot = dirname(paths.input);
   if (realpathSync(artifactRoot) !== artifactRoot) throw new Error("dream-artifact-directory-link");
-  if (digest(readDreamRegular(paths.input, 256 * 1024)) !== inputSha256) throw new Error("dream-input-changed");
+  const inputBytes = readDreamRegular(paths.input, 256 * 1024);
+  if (digest(inputBytes) !== inputSha256) throw new Error("dream-input-changed");
+  const document = JSON.parse(inputBytes);
+  const sandbox = descriptor.version === 2 ? descriptor.sandbox : null;
+  if (descriptor.version === 2 && (!sandbox || JSON.stringify(sandbox) !== JSON.stringify(document.sandbox)
+      || dirname(document.outputPath || "") !== sandbox.root || realpathSync(sandbox.root) !== sandbox.root)) throw Error("dream-sandbox-scope-changed");
+  if (sandbox) verifyDreamSandboxProof({ sandbox, runId: document.runId, sha256: inputSha256 }, sandboxProof);
   const bytes = readDreamRegular(paths.manifest, 16 * 1024 * 1024);
   if (digest(bytes) !== descriptor.sha256) throw new Error("dream-memory-manifest-changed");
   const before = JSON.parse(bytes);
   if (before.version !== 1 || !Array.isArray(before.roots) || !before.entries
-      || dreamMemoryRoots(workspace, paneDirs).some(root => !before.roots.includes(root))) throw new Error("dream-memory-scope-changed");
-  const after = snapshotDreamMemory(before.roots, { artifactRoot, ignored: Object.values(paths) });
+      || !sandbox && dreamMemoryRoots(workspace, paneDirs).some(root => !before.roots.includes(root))) throw new Error("dream-memory-scope-changed");
+  const after = snapshotDreamMemory(sandbox ? [...new Set([...before.roots, ...dreamMemoryRoots(workspace, paneDirs)])] : before.roots,
+    { artifactRoot, ignored: [...Object.values(paths), ...(sandbox ? [sandbox.root] : [])], audit: !!sandbox });
   const changed = changedDreamMemory(before, after);
-  if (changed.length) throw new Error(`dream-curator-touched-memory:${changed.slice(0, 3).join(",")}`);
-  readDreamRegular(paths.output, 48 * 1024);
-  return { version: 1, files: Object.keys(after.entries).length, sha256: descriptor.sha256 };
+  if (!sandbox && changed.length) throw new Error(`dream-curator-touched-memory:${changed.slice(0, 3).join(",")}`);
+  if (sandbox) {
+    for (const path of new Set([...Object.keys(before.entries), ...Object.keys(after.entries)])) {
+      if (JSON.stringify(before.entries[path]?.blocks || []) !== JSON.stringify(after.entries[path]?.blocks || [])) throw Error(`dream-protected-block-changed:${path}`);
+    }
+    const auditPath = inputPath.replace(/\.json$/u, ".memory-after.json");
+    assertDreamWritePath(auditPath);
+    try { writeFileSync(auditPath, JSON.stringify({ inputSha256, changed, after }) + "\n", { flag: "wx", mode: 0o400 }); }
+    catch (error) { if (error.code !== "EEXIST") throw error; }
+  }
+  readDreamRegular(document.outputPath || paths.output, 48 * 1024);
+  return { version: descriptor.version, files: Object.keys(after.entries).length, sha256: descriptor.sha256, ...(sandbox && { externalChanges: changed }) };
 }

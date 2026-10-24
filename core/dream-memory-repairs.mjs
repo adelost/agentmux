@@ -61,7 +61,7 @@ export function finishDreamMemoryRepairs({ workspace, input, product, dry = fals
     if (product.repairPlan?.repairs?.length) throw Error("dream-repair-unrequested-plan");
     return product;
   }
-  const receiptPath = input.outputPath.replace(/\.summary\.md$/u, ".memory-repair.json");
+  const receiptPath = input.path.replace(/\.json$/u, ".memory-repair.json");
   const original = readFileSync(input.outputPath, "utf8");
   if (existsSync(receiptPath)) {
     const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
@@ -76,7 +76,7 @@ export function finishDreamMemoryRepairs({ workspace, input, product, dry = fals
   if (Buffer.byteLength(product.content) > 4096 || product.content.split(/\r?\n/u).filter(line => line.trim()).length > 30) {
     throw Error("dream-repair-summary-reserve-exceeded");
   }
-  if (!dry) writeDreamAtomic(input.outputPath.replace(/\.summary\.md$/u, ".curator.md"), original, { immutable: true });
+  if (!dry) writeDreamAtomic(input.path.replace(/\.json$/u, ".curator.md"), original, { immutable: true });
   const report = applyDreamMemoryRepairs(workspace, snapshot, product.repairPlan, { dry, now: new Date(document.createdAt) });
   const content = [product.content,
     `\nMinneskontroll: ${report.applied.length} ${dry ? "föreslagna" : "validerade"} rättning(ar), ${report.rejected.length} avvisade.`,

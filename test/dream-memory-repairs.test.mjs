@@ -26,6 +26,8 @@ function fixture(file = "memory/references/source.md", text = "# Source\n- Verif
     collectSources: () => ({ sources: [], unreadable: [], skipped: [] }),
     notifyUser: async () => ({ sent: false, outcome: "not-sent" }),
     getStatus: async () => "idle", getProof: async () => ({ ownerTexts: [] }),
+    enterSandbox: async (_ctx, _owner, input) => ({ ...input.sandbox, runId: input.runId, inputSha256: input.sha256, sessionId: "session-1", status: "running" }),
+    finishSandbox: () => {},
     getContext: () => ({ model: "gpt-6.1-sol", effort: "xhigh" }),
     compactCodex: async () => ({ ok: true, sessionId: "session-1", compactBoundary: true }),
     writeInput: document => { fx.document = document; fx.input = writeDreamOwnerInput(document, { rootDir: join(root, "input") }); return fx.input; },
@@ -129,7 +131,7 @@ feature("Dream gives memory warnings an actor without giving the model write aut
         writeFileSync(join(fx.root, fx.file), fx.original + "- A newer verified fact.\n");
         return result(args);
       };
-      await expect(fx.run()).rejects.toThrow("dream-curator-touched-memory"); return fx;
+      await fx.run(); return fx;
     }],
     then: ["the newer authored bytes survive", fx => {
       expect(readFileSync(join(fx.root, fx.file), "utf8")).toBe(fx.original + "- A newer verified fact.\n");

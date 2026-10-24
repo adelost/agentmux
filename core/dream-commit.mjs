@@ -73,7 +73,7 @@ export function resumeDreamCommit({ path, sha256, document, workspace, memPath, 
     if (statSync(intentPath(path)).size > 128 * 1024) throw new Error("dream-commit-intent-too-large");
     record = JSON.parse(readFileSync(intentPath(path), "utf8"));
   } catch (error) { if (error.code === "ENOENT") return null; throw error; }
-  const product = readDreamOwnerResult(path.replace(/\.json$/u, ".summary.md"), dateKey, runId, document.owner, sha256);
+  const product = readDreamOwnerResult(document.outputPath || path.replace(/\.json$/u, ".summary.md"), dateKey, runId, document.owner, sha256);
   const reference = dreamSnapshotReference(record.block, dateKey);
   if (record.version !== 1 || record.runId !== runId || record.dateKey !== dateKey || record.sourceSha256 !== sha256
       || record.memPath !== resolve(memPath) || record.receiptPath !== resolve(defaultDreamReceiptPath())
