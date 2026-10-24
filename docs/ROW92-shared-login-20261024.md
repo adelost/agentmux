@@ -65,6 +65,12 @@ personal accounts, provider clients, real-data deletions or paid probes are auth
 
 ## 92b dependency check,24October17:15Z
 
+Historical precheck. The [92r semantic reconciliation](ROW92r-trackbook-reconciliation-20261024.md)
+subsequently found no functional login dependency on the old consent feature
+and no applicable Trackbook canonical-only rule. Its proposed clean-source
+writer disposition awaitslsrc:3's next routine decision.92b has not started;
+the old consent work is not declared complete.
+
 Owner api:4, P2. Source: lsrc:0's Trackbook follow-up tolsrc:3 at17:03:21Z,
 delivery:92fd518587e649374d3f1716dacf25d0; allocation toapi:4 at17:12:10Z,
 delivery:8cb47476cdbbbcb61b2d507bf6f5ba3a.92/92a remain completed.
