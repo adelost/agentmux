@@ -40,9 +40,10 @@ describe("original native Dream proof", () => {
       { type: "event_msg", payload: { type: "task_complete", turn_id: turnId } },
     ].map(event => ({ timestamp: "2026-10-15T10:08:33Z", ...event }));
     const save = () => writeFileSync(fx.path, events.map(JSON.stringify).join("\n") + "\n");
-    const options = { ...fx, owner: { ...fx.owner, engine: "codex" }, quality: { model: "gpt-6.1-sol", effort: "xhigh" } };
+    const options = { ...fx, sandbox: true, owner: { ...fx.owner, engine: "codex" }, quality: { model: "gpt-6.1-sol", effort: "xhigh" } };
     save(); const proof = readDreamCurationProof(options);
     expect(proof.sandboxDenied).toBe(true); expect(proof.terminal.expectedReply).toBe(false);
+    expect(() => readDreamCurationProof({ ...options, sandbox: false })).toThrow("terminal-receipt-unverified");
     events[3].payload.output = "Process exited with code 0\nA reference mentions Read-only file system";
     save(); expect(() => readDreamCurationProof(options)).toThrow("terminal-receipt-unverified");
   });

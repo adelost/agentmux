@@ -404,7 +404,7 @@ async function runDream(ctx, flags, dependencies) {
         getStatus: async candidate => (dependencies.getStatus || getPaneStatus)(ctx, candidate.agent, candidate.pane),
         sandboxDenial: async () => {
           try {
-            const proof = await (dependencies.getProof || readDreamCurationProof)({ owner, sessionId: compact.sessionId, prompt, dateKey, runId: input.runId, memPath, quality });
+            const proof = await (dependencies.getProof || readDreamCurationProof)({ owner, sessionId: compact.sessionId, prompt, dateKey, runId: input.runId, memPath, quality, sandbox: true });
             if (proof.sandboxDenied) { finishSandbox(); return true; }
           } catch { /* A partial native turn cannot attest a denial or completion. */ }
           return false;

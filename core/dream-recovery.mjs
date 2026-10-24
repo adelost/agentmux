@@ -67,18 +67,18 @@ export async function recoverDreamRun(ctx, flags, { commit, getProof = readDream
   const historical = flags["import-historical"] && beginDreamHistoricalImport({ workspace, owner, inputPath: path });
   let product = readDreamOwnerResult(input.outputPath, dateKey, runId, owner, sha256);
   if (!product.ok) throw new Error(`dream-recovery-product-invalid:${product.reason}`);
-  const proof = await getProof({ owner, prompt, dateKey, runId, memPath, sessionId: document.compact.sessionId, quality: document.compact });
+  const proof = await getProof({ owner, prompt, dateKey, runId, memPath, sessionId: document.compact.sessionId, quality: document.compact, sandbox: !!input.sandbox });
   if (proof.sessionId !== document.compact.sessionId || /haiku/iu.test(document.compact.model || "")
       || !document.compact.effort || document.compact.effort.toLowerCase() === "low") {
     throw new Error("dream-recovery-session-quality-mismatch");
   }
+  if (proof.sandboxDenied || proof.terminal?.expectedReply === false) throw Error("dream-sandbox-denied");
   if (historical) return finishDreamHistoricalImport({ baseline: historical, workspace, memPath, memoryBefore, input, document, product, proof, dateKey, dry: !!flags.dry });
   const memoryGuardBlocks = document.memoryGuard?.blocks ?? protectedDreamBlocks(
     hash(memoryBefore) === expectedMemory ? memoryBefore : "");
   if (!Array.isArray(memoryGuardBlocks) || memoryGuardBlocks.some(block => typeof block !== "string")) {
     throw new Error("dream-recovery-memory-guard-invalid");
   }
-  if (proof.sandboxDenied) throw Error("dream-sandbox-denied");
   const sandboxProof = input.sandbox ? ctx.state?.get?.(DREAM_SANDBOX_STATE)?.[`${owner.agent}:${owner.pane}`] : null;
   verifyDreamMemoryEffects({ inputPath: path, inputSha256: sha256, descriptor: document.memoryGuard?.effects,
     workspace, paneDirs: [owner.paneDir], sandboxProof });

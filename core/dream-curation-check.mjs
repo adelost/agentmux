@@ -6,7 +6,7 @@ import { judgeDreamMemory } from "./dream-memory-guard.mjs";
 
 /** WHAT: Reads the completed product and checks its original proof and memory effects. WHY: Separates curator acceptance from controller repairs and commit authority. */
 export async function checkDreamCuration({ owner, sessionId, prompt, dateKey, input, memPath, quality, workspace, memoryBefore, sandboxProof = null, onTerminal = () => {}, getProof = readDreamCurationProof }) {
-  const proof = await getProof({ owner, sessionId, prompt, dateKey, runId: input.runId, memPath, quality });
+  const proof = await getProof({ owner, sessionId, prompt, dateKey, runId: input.runId, memPath, quality, sandbox: !!input.sandbox });
   onTerminal();
   if (proof.sandboxDenied) throw Error("dream-sandbox-denied");
   const product = readDreamOwnerResult(input.outputPath, dateKey, input.runId, owner, input.sha256);

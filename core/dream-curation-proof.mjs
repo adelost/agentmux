@@ -10,7 +10,7 @@ const MAX_JOURNAL_BYTES = 256 * 1024 * 1024;
 const MAX_TOOL_BYTES = 8 * 1024 * 1024;
 
 /** WHAT: Checks one completed Dream task in its original journal. WHY: Prevents later work or today's pane state from replacing original terminal evidence. */
-export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runId, memPath, quality,
+export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runId, memPath, quality, sandbox = false,
   identityFor = persistedSessionIdentity, records = readSearchRecords }) {
   const identity = identityFor(owner.engine, sessionId, owner.paneDir);
   if (!identity?.path || identity.sessionId !== sessionId) throw new Error("dream-curator-journal-unknown");
@@ -51,7 +51,7 @@ export function readDreamCurationProof({ owner, sessionId, prompt, dateKey, runI
     if (started.turnId && ((startsCodexTurn && event.payload.turn_id !== started.turnId)
         || (observation && observation.turnId !== started.turnId))) throw new Error("dream-original-turn-mismatch");
     if (observation) observedQuality = observation;
-    if (event.type === "response_item" && ["function_call_output", "custom_tool_call_output"].includes(event.payload?.type)) {
+    if (sandbox && event.type === "response_item" && ["function_call_output", "custom_tool_call_output"].includes(event.payload?.type)) {
       const output = typeof event.payload.output === "string" ? event.payload.output : JSON.stringify(event.payload.output);
       if (/(?:read-only file system|sandbox.{0,40}(?:denied|refused)|operation not permitted)/iu.test(output || "")
         && /(?:exit(?:ed)?(?: with)?(?: code)?[:\s]+[1-9]|"exit_code"\s*:\s*[1-9]|error|failed)/iu.test(output || "")) sandboxDenied = true;
