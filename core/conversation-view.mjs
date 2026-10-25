@@ -60,6 +60,7 @@ export function formatConversationGroups(groups, { maxBytes = 65536 } = {}) {
   };
   const text = groups.map(group => group.map(render).join("\n\n")).join("\n\n");
   if (Buffer.byteLength(text) <= maxBytes) return text;
-  const marker = "\n[Display truncated. Narrow --since/--grep or raise --max-bytes; exact rows remain in the conversation log.]";
-  return Buffer.from(text).subarray(0, maxBytes - Buffer.byteLength(marker)).toString("utf8").replace(/\uFFFD$/u, "") + marker;
+  const marker = "[Display truncated: older content omitted; newest records follow. Narrow --since/--grep or raise --max-bytes for more.]\n";
+  const bytes = Buffer.from(text), keep = Math.max(0, maxBytes - Buffer.byteLength(marker));
+  return marker + bytes.subarray(bytes.length - keep).toString("utf8").replace(/^\uFFFD+/u, "");
 }
