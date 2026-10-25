@@ -94,7 +94,7 @@ export function createDeliveryBroker({
   // Exact-target wake still requires release identity and memory admission.
   const wakeGate = typeof wakeAdmission === "function" ? wakeAdmission
     : (bridgeDir ? createWakeAdmissionGate({ runtimeRoot: bridgeDir, reserveMiB: 512 }) : null);
-  const { runExclusive, peerWaiting: sessionPeerWaiting, settle: settleLanes } = createSessionLanes({ queue, now });
+  const { runExclusive, runDrain, peerWaiting: sessionPeerWaiting, settle: settleLanes } = createSessionLanes({ queue, now });
   let timer = null, started = false, stopped = false;
   let startupBarrier = Promise.resolve();
   async function acknowledge(job, via = "echo") {
@@ -596,7 +596,7 @@ export function createDeliveryBroker({
 
   function kickTarget(agentName, pane) {
     if (stopped) return Promise.resolve();
-    return runExclusive(agentName, pane, async () => {
+    return runDrain(agentName, pane, async () => {
       await startupBarrier;
       return stopped ? undefined : drainTarget(agentName, pane);
     });

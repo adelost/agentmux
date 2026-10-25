@@ -7,6 +7,7 @@ import { deliveryHead } from "./delivery-wake.mjs";
 /** WHAT: Builds the session-wide delivery lanes. WHY: Keeps one pane's zoom or backlog from racing or holding its session. */
 export function createSessionLanes({ queue, now = () => Date.now() }) {
   const lanes = new Map();
+  const drains = new Map();
   const laneKey = (agentName) => String(agentName);
 
   function runExclusive(agentName, _pane, work) {
@@ -21,6 +22,18 @@ export function createSessionLanes({ queue, now = () => Date.now() }) {
     return tracked;
   }
 
+  /** WHAT: Shares one pending drain per pane. WHY: Repeated polls must not enqueue thousands of duplicate passes behind a busy sibling. */
+  function runDrain(agentName, pane, work) {
+    const key = `${agentName}:${pane}`;
+    if (drains.has(key)) return drains.get(key);
+    let tracked;
+    tracked = runExclusive(agentName, pane, work).finally(() => {
+      if (drains.get(key) === tracked) drains.delete(key);
+    });
+    drains.set(key, tracked);
+    return tracked;
+  }
+
   // claw, 2026-10-20 16:1xZ: after a quota recovery the lane delivered claw:0's seven paused jobs and claw:1's ten
   // before claw:2's continuation, 11 minutes after its restart. A pane yields the lane once another pane waits.
   /** WHAT: Checks whether another pane of the session has a head to deliver now. WHY: Keeps one pane's backlog from holding the session. */
@@ -32,5 +45,5 @@ export function createSessionLanes({ queue, now = () => Date.now() }) {
     });
   }
 
-  return { runExclusive, peerWaiting, settle: () => Promise.allSettled([...lanes.values()]) };
+  return { runExclusive, runDrain, peerWaiting, settle: () => Promise.allSettled([...lanes.values()]) };
 }

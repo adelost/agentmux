@@ -32,6 +32,33 @@ function acceptingAgent() {
 }
 
 feature("single-writer delivery broker", () => {
+  component("repeated polls share one pending target drain behind a busy session", {
+    given: ["a session writer held while the same idle pane is polled repeatedly", async () => {
+      const rootDir = tempRoot(), queue = createDeliveryQueue({ rootDir }), passes = [];
+      const broker = createDeliveryBroker({ agent: acceptingAgent(), queue,
+        validateTarget: (_name, pane) => { passes.push(pane); }, notify: async () => {} });
+      let release, markStarted;
+      const started = new Promise(resolve => { markStarted = resolve; });
+      const held = broker.runExclusive("lsrc", 0, () => new Promise(resolve => { release = resolve; markStarted(); }));
+      await started;
+      return { rootDir, broker, passes, held, release };
+    }],
+    when: ["twenty polls and a sibling wait, then the real writer releases", async ctx => {
+      const waiting = Array.from({ length: 20 }, () => ctx.broker.kickTarget("lsrc", 9));
+      waiting.push(ctx.broker.kickTarget("lsrc", 2));
+      ctx.release();
+      await Promise.all([ctx.held, ...waiting]);
+      return ctx.passes;
+    }],
+    then: ["the idle target has one drain, its sibling runs, and future input can drain again", async (passes, ctx) => {
+      try {
+        expect(passes).toEqual([9, 2]);
+        await ctx.broker.kickTarget("lsrc", 9);
+        expect(passes).toEqual([9, 2, 9]);
+      } finally { rmSync(ctx.rootDir, { recursive: true, force: true }); }
+    }],
+  });
+
   component("pre-submit auto-compact yields immediately to real queued work", {
     given: ["an untouched maintenance head followed by a Discord prompt", () => {
       const rootDir = tempRoot();
