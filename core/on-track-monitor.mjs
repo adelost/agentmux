@@ -1,4 +1,5 @@
 import { ON_TRACK_CHECKS, validateOnTrackReceipt } from "./on-track-validation.mjs";
+import { onTrackOwner } from "./on-track-evidence.mjs";
 
 /** WHAT: Names the persisted scheduler state. WHY: Prevents bridge restarts from losing deadlines and uncertain delivery outcomes. */
 export const ON_TRACK_STATE = "on_track_v1";
@@ -16,7 +17,7 @@ export function onTrackReminder(project, cycle) {
 
 /** WHAT: Builds one durable logical hourly schedule per configured project. WHY: Prevents missed reviews from disappearing and uncertain sends from repeating. */
 export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHuman = null, now = Date.now,
-  commands = () => ({}), lookup = () => null, log = message => console.warn(message) }) {
+  commands = () => ({}), lookup = () => null, validatorIdentity = null, log = message => console.warn(message) }) {
   const mutate = fn => state.updateKey(ON_TRACK_STATE, old => { const data = old || { projects: {}, history: [], commands: {}, daily: {} }; fn(data); return data; });
   const get = id => state.get(ON_TRACK_STATE)?.projects[id];
   const findCycle = (data, project, cycle) => data.projects[project.id]?.cycle?.id === cycle.id
@@ -127,6 +128,7 @@ export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHu
       const cycle = get(project.id)?.cycle;
       if (!cycle || cycle.review) throw Error("no pending cycle; an accepted receipt is immutable");
       const review = validateOnTrackReceipt({ project, cycle, receipt, at: now(), commands: commands() });
+      review.validatorIdentity = validatorIdentity;
       if (cycle.sourceError) { review.valid = false; review.errors.push(`source UNKNOWN: ${cycle.sourceError}`); }
       mutate(data => {
         const record = data.projects[project.id];
@@ -142,12 +144,13 @@ export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHu
       });
       if (!review.valid) await escalate(project, cycle, `invalid receipt: ${review.errors.join("; ")}`);
       else if (review.deviations.length) {
-        for (const owner of new Set(review.deviations.map(d => d.owner))) {
-          await deliver(project, cycle, `owner:${owner}`, owner,
-            `On-track ${project.id}: ${review.deviations.filter(d => d.owner === owner).map(d => `${d.check}/${d.row}: ${d.action}`).join("; ")}`);
+        for (const target of new Set(review.deviations.map(d => onTrackOwner(d.owner)))) {
+          if (target === "human") continue;
+          await deliver(project, cycle, `owner:${target}`, target,
+            `On-track ${project.id}: ${review.deviations.filter(d => onTrackOwner(d.owner) === target).map(d => `${d.check}/${d.row}: ${d.action}`).join("; ")}`);
         }
         const impact = receipt.userOrMoneyImpact || receipt.deviations?.some(d => ["user", "money"].includes(d.impact))
-          || receipt.live?.some(path => path.result === "FAIL");
+          || receipt.live?.some(path => path.result === "FAIL") || review.deviations.some(d => onTrackOwner(d.owner) === "human");
         if (impact && notifyHuman && !get(project.id).cycle.human) {
           mutate(data => { data.projects[project.id].cycle.human = { status: "attempting" }; });
           try {

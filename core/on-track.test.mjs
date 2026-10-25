@@ -10,11 +10,11 @@ import { onTrackHash } from "./on-track-evidence.mjs";
 import { onTrackStatistics, ON_TRACK_STATE } from "./on-track-monitor.mjs";
 import { snapshotOnTrackProject } from "./on-track-projects.mjs";
 
-function fixture() {
+function fixture({ owner = "lsrc:4", state = "closed" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-on-track-"));
   const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
   git("init", "-q"); git("config", "user.name", "Test"); git("config", "user.email", "test@example.test");
-  const quote = "| 1 | Open film | lsrc:4 | Film opens | closed | 20min |";
+  const quote = `| 1 | Open film | ${owner} | Film opens | ${state} | 20min |`;
   writeFileSync(join(root, "TASKS.md"), "| # | Outcome | Owner | Done when | State | Estimate |\n|---|---|---|---|---|---|\n" + quote + "\n");
   writeFileSync(join(root, "live.json"), JSON.stringify({ live: [{ path: "open", result: "PASS", at: "2026-10-25T11:00:00.000Z" }] }));
   git("add", "TASKS.md", "live.json"); git("commit", "-qm", "fixture");
@@ -24,13 +24,35 @@ function fixture() {
   const project = { id: "cutkit", root, ledger: "TASKS.md", reviewer: "lsrc:3", dispatcher: "lsrc:0", livePaths: ["open"] };
   const receipt = { project: "cutkit", at: new Date(at).toISOString(), cycle: cycle.id,
     checks: ["C1", "C2", "C3", "C4", "C5"].map(id => ({ id, result: "PASS", evidence: [evidence] })), deviations: [],
-    asks: [{ askId: "ask-1", row: "1", owner: "lsrc:4", estimate: "20min", outcome: "Film opens", evidence }],
+    asks: [{ askId: "ask-1", row: "1", owner, estimate: "20min", outcome: "Film opens", evidence }],
     outcomeChanges: [], rows: [], live: [{ path: "open", result: "PASS", at: new Date(at).toISOString(),
       evidence: { ...evidence, path: "live.json", line: 1, quote: JSON.stringify({ live: [{ path: "open", result: "PASS", at: "2026-10-25T11:00:00.000Z" }] }) } }], resolved: [] };
   return { root, at, sha, evidence, project, cycle, receipt };
 }
 
 feature("on-track evidence and omission protection", () => {
+  component("a role annotation does not invent a second owner or invalidate the real owner log", {
+    given: ["an actual working TASKS row with an annotated owner", () => {
+      const f = fixture({ owner: "lsrc:4 (Opus V)", state: "working" });
+      const text = JSON.stringify({ owner: "lsrc:4", latest: { ts: new Date(f.at).toISOString(), text: "actual owner progress" } });
+      const evidence = { kind: "command", record: "owner", command: ["read-owner-log"], at: f.receipt.at, exitCode: 0, sha256: onTrackHash(text) };
+      f.receipt.asks[0].owner = "lsrc:4";
+      f.receipt.rows = [{ row: "1", evidence: f.evidence, ownerLog: evidence, progressAt: f.receipt.at }];
+      f.commands = { owner: { ...evidence, project: f.project.id, cycle: f.cycle.id, stdout: text } };
+      return f;
+    }],
+    when: ["the source-bound receipt is validated", f => validateOnTrackReceipt(f)],
+    then: ["the single real owner and actual log qualify", r => { expect(r.errors).toEqual([]); expect(r.valid).toBe(true); }],
+  });
+  component("an explicitly human-owned deviation remains assignable", {
+    given: ["a missing live proof with a human decision owner", fixture],
+    when: ["the reviewer records the actual decision dependency", f => {
+      f.receipt.checks[3].result = "UNKNOWN"; f.receipt.live = [];
+      f.receipt.deviations = [{ check: "C4", row: "open", owner: "human", action: "Decide the existing blocked user outcome" }];
+      return validateOnTrackReceipt(f);
+    }],
+    then: ["the human owner is preserved", r => { expect(r.valid).toBe(true); expect(r.deviations[0].owner).toBe("human"); }],
+  });
   component("two real repeated ask identities remain required while the timer excludes itself", {
     given: ["a project and two human orders with identical words", fixture],
     when: ["the canonical ask window is frozen", f => snapshotOnTrackProject({ ...f.project, askAgents: ["lsrc"] }, f.at, {

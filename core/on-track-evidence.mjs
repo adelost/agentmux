@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve, sep } from "node:path";
+import { operatorName } from "./runtime-defaults.mjs";
 
 /** WHAT: Returns the hash of exact command output bytes. WHY: Prevents a summary from standing in for observed output. */
 export const onTrackHash = value => createHash("sha256").update(value).digest("hex");
@@ -70,6 +71,13 @@ export function captureOnTrackCommand({ project, cycle, probe, now = Date.now() 
 }
 
 const normalized = value => value.toLowerCase().replace(/[^a-z0-9#]/gu, "");
+/** WHAT: Returns one explicit owner identity from a TASKS owner cell. WHY: Keeps role annotations separate from pane addresses and preserves ambiguous ownership. */
+export function onTrackOwner(value) {
+  const addresses = [...new Set(String(value).match(/[\w-]+:\d+/gu) || [])];
+  if (addresses.length === 1) return addresses[0];
+  if (!addresses.length && ["human", operatorName()].includes(String(value).trim())) return "human";
+  return null;
+}
 /** WHAT: Reads TASKS fields by their existing column names. WHY: Projects keep their canonical Markdown instead of maintaining another task list. */
 export function onTrackRows(text) {
   let headers = [];
@@ -81,7 +89,7 @@ export function onTrackRows(text) {
     if (!/^\d+[a-z]*$/u.test(cells[0] || "") || !headers.length) continue;
     if (rows[cells[0]]) throw Error(`duplicate TASKS row ${cells[0]}; source is ambiguous`);
     const field = (...names) => { const pos = names.map(name => headers.indexOf(name)).find(index => index >= 0); return pos === undefined ? "" : cells[pos] || ""; };
-    rows[cells[0]] = { row: cells[0], line: index + 1, quote: line, owner: field("owner"), estimate: field("estimate", "budget"),
+    rows[cells[0]] = { row: cells[0], line: index + 1, quote: line, owner: field("owner"), ownerId: onTrackOwner(field("owner")), estimate: field("estimate", "budget"),
       outcome: field("donewhen", "acceptance", "outcome"), state: field("state", "status"), title: field("outcome", "task", "title") };
   }
   return rows;

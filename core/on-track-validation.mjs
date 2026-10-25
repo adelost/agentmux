@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { onTrackFresh, onTrackGit, onTrackRows, verifyOnTrackEvidence, verifyOnTrackLive } from "./on-track-evidence.mjs";
+import { onTrackFresh, onTrackGit, onTrackRows, onTrackOwner, verifyOnTrackEvidence, verifyOnTrackLive } from "./on-track-evidence.mjs";
 
 /** WHAT: Defines the fixed review checklist. WHY: Prevents agents from silently replacing the human's review with their own plan. */
 export const ON_TRACK_CHECKS = Object.freeze({
@@ -41,7 +41,7 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
   const isPass = id => checks.find(c => c.id === id)?.result === "PASS";
   const owned = (check, row) => receipt.deviations.some(d => d.check === check && d.row === row && d.owner && d.action);
   for (const d of receipt.deviations) {
-    if (!Object.hasOwn(ON_TRACK_CHECKS, d.check) || !d.row || !/^[\w-]+:\d+$/u.test(d.owner || "") || !d.action) add("deviation", "missing check/row/configured pane-shaped owner/action");
+    if (!Object.hasOwn(ON_TRACK_CHECKS, d.check) || !d.row || !onTrackOwner(d.owner) || !d.action) add("deviation", "missing check/row/single owner/action");
     else if (!deviations.some(existing => existing.check === d.check && existing.row === d.row)) deviations.push(d);
   }
   const mappings = receipt?.asks || [];
@@ -50,7 +50,8 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
     if (mapping?.disposition && mapping.disposition === ask.disposition?.kind && mapping.bindingRef === ask.disposition.binding.ref && mapping.reason) continue;
     if (ask.originUncertain && (isPass("C1") || !owned("C1", ask.id))) add("C1", `source origin unknown: ${ask.id}`);
     if (mapping?.row === null && mapping.reason && !isPass("C1") && owned("C1", ask.id) && verify(mapping.evidence)) continue;
-    if (!mapping || !row || mapping.owner !== row.owner || !row.owner || mapping.estimate !== row.estimate || !row.estimate
+    if (row && isPass("C1") && (!row.ownerId || /^(unknown|okän[dt]|saknas|tbd|n\/a|[-—?])$/iu.test(row.estimate))) add("C1", `owner or estimate unknown/ambiguous: ${ask.id}`);
+    if (!mapping || !row || ![row.owner, row.ownerId].includes(mapping.owner) || !row.owner || mapping.estimate !== row.estimate || !row.estimate
       || mapping.outcome !== row.outcome || !row.outcome || !verify(mapping.evidence)
       || mapping.evidence.path !== project.ledger || mapping.evidence.line !== row.line || mapping.evidence.sha !== cycle.tip) add("C1", `unmapped or incomplete ask ${ask.id}`);
   }
@@ -73,6 +74,8 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
   const tracked = receipt?.rows || [];
   for (const row of Object.values(rows).filter(r => !closed(r.state))) {
     const record = tracked.find(r => r.row === row.row);
+    if (row.ownerId === "human" && record && verify(record.evidence)
+      && record.stop?.kind === "human-decision" && verify(record.stop.evidence)) continue;
     if (!record || !verify(record.evidence) || !verify(record.ownerLog)) {
       if (isPass("C3") || !owned("C3", row.row)) add("C3", `missing task/latest-owner-log evidence: ${row.row}`);
       continue;
@@ -80,7 +83,7 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
     let latest = null;
     try {
       const log = JSON.parse(commands[record.ownerLog.record]?.stdout);
-      if (log.owner === row.owner) latest = log.latest;
+      if (log.owner === row.ownerId) latest = log.latest;
     } catch { /* Missing source is an explicit C3 validation error below. */ }
     if ((!latest || (record.progressAt && record.progressAt !== latest.ts)) && (isPass("C3") || !owned("C3", row.row))) add("C3", `latest owner post not verified: ${row.row}`);
     if (record.waitingSince && (!Number.isFinite(Date.parse(record.waitingSince)) || Date.parse(record.waitingSince) > at)) add("C3", `invalid wait timestamp: ${row.row}`);

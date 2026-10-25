@@ -90,6 +90,10 @@ already authorised, bounded, read-only probes. There are no default paid probes.
 Use `capture-owner cutkit lsrc:4` for the fixed read-only canonical owner-log
 reader. Its command result names the actual latest posted response, not a claimed
 working duration. Git wall time is never treated as active model work.
+Role annotations in a TASKS owner cell retain the single pane identity; multiple
+different pane identities remain ambiguous. An explicit human owner is preserved
+and receives actionable deviations through the existing human notifier. A verified
+human-decision stop does not require pretending the human has an agent log.
 
 For machine-verifiable C4, a captured native receipt or immutable JSON file must
 contain `live:[{path,result,at}]`. The path IDs match the registration; the source
@@ -122,6 +126,7 @@ owners with actions. User/money impact, or an explicitly red live path, also
 notifies the human immediately. Otherwise there are no all-green messages; one
 short daily summary goes to the existing human notification channel.
 
+Each accepted/invalid validation also records the installed validator manifest.
 Each send has a stable idempotency key and separate persisted transport receipt.
 Queued is not delivered. An uncertain send is never blindly repeated; existing
 queue evidence may resolve it. Restart retains the deadline, and missed hours are
