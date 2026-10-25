@@ -43,7 +43,7 @@ export function askBindingTarget({ kind, value, cwd = process.cwd(), sourcesPath
 /** WHAT: Stores one fully validated batch of exact ask identities. WHY: Prevents an unknown id or missing target from partially binding a bulk command. */
 export function bindAsks({ ids, kind, value, by, ledgerEntries, cwd, sourcesPath, path = defaultAskBindingsPath(), now = Date.now }) {
   if (!Array.isArray(ids) || !ids.length) throw Error("At least one exact ask id is required");
-  const known = new Set(ledgerEntries.map(row => row.id));
+  const known = new Set(ledgerEntries.flatMap(row => [row.id, ...(row.observationIds || [])]));
   for (const id of ids) if (!known.has(id)) throw Error(`Unknown ask id ${id}`);
   const ref = askBindingTarget({ kind, value, cwd, sourcesPath });
   const ts = new Date(now()).toISOString();

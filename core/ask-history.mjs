@@ -53,9 +53,10 @@ export function askStatusIsOpen(status) {
 export function applyAskBindings(entries, bindings = []) {
   const byId = new Map(bindings.map(binding => [binding.ledgerId, binding]));
   return entries.map(entry => {
-    const binding = byId.get(entry.ledgerId);
+    const binding = [entry.ledgerId, ...(entry.observationIds || [])].map(id => byId.get(id)).filter(Boolean)
+      .sort((left, right) => Date.parse(right.ts) - Date.parse(left.ts))[0];
     const replyStatus = entry.replyStatus || entry.status;
-    const status = binding ? "bound" : entry.origin === "human" && ["done", "answered"].includes(replyStatus) ? "unbound" : replyStatus;
+    const status = binding ? "bound" : ["human", "unknown"].includes(entry.origin) && ["done", "answered"].includes(replyStatus) ? "unbound" : replyStatus;
     return { ...entry, replyStatus, status, open: askStatusIsOpen(status), ...(binding ? { binding } : {}) };
   });
 }
@@ -130,7 +131,7 @@ export function filterAskEntries(entries = [], opts = {}) {
   if (grep instanceof RegExp) {
     out = out.filter((e) => grep.test(e.prompt) || grep.test(e.reply || ""));
   }
-  if (humanOnly) out = out.filter((e) => (e.origin || "human") === "human");
+  if (humanOnly) out = out.filter((e) => ["human", "unknown"].includes(e.origin || "human"));
   if (openOnly) out = out.filter((e) => e.open);
 
   out = [...out].sort((a, b) => (b.tsMs || 0) - (a.tsMs || 0));

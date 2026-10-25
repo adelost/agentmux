@@ -15,17 +15,35 @@ reminder, additional polling process, self-rating or release gate.
 ```json
 [{"id":"cutkit","root":"/home/adelost/lsrc/cutkit","ref":"origin/master",
   "ledger":"docs/TASKS.md","reviewer":"lsrc:3","dispatcher":"lsrc:0",
-  "askAgents":["lsrc"],"livePaths":["open-film","play","export-test-project","speak"],
+  "askAgents":["lsrc","skyvw"],"livePaths":["open-film","play","export-test-project","speak"],
   "probes":{}}]
 ```
 
 Only registered projects run. The same data contract supports other projects.
 Their existing owner must name the reviewer, routing agents and main live paths.
+Set `enabled:false` when preparing a handover. Activation uses the same validated
+configuration with `enabled:true`, after the prior review schedule's terminal
+handoff. An unrelated billing or dispatcher wake may remain active.
 Routing includes all human asks to the declared agents, plus human asks already
 bound to this repository. Ambiguous messages remain in the frozen input. This
 conservative scope is visible, not an invented project classifier. Ask identity
 and origin reuse the ask-ledger readers; row timing reuses existing ask bindings.
 No second task database is introduced.
+
+Source classification is shared with normal `amux asks`. Claude scheduled inputs
+are classified from their native journal metadata and exact event identity.
+Existing external automation can register its reserved queue idempotency prefix,
+producer script, verified SHA-256 and authority pointer with
+`amux on-track register-producers FILE`. The actual queue job must match. Neither
+the prompt's words nor a guessed name make an order disappear. Changed/missing
+producer code loses the registration's evidential force. Ambiguous origins remain
+visible as unknown candidates and require an owned C1 deviation.
+
+Native lookup reads bounded journal tails and retains only matching user events.
+An unavailable older native event remains unknown. Proven provider/backfill and
+delivery aliases retain every original ID and existing bindings. `asks --list`
+prints source aliases; the frozen cycle retains both excluded automation evidence
+and unresolved original identities. Raw ledgers are never rewritten.
 
 Configuration lives in `~/.agentmux/on-track/projects.json`; atomic review state,
 original submissions, command captures and transport receipts live beside it in

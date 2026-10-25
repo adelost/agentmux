@@ -48,6 +48,7 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
   for (const ask of cycle.asks || []) {
     const mapping = mappings.find(m => m.askId === ask.id), row = rows[mapping?.row];
     if (mapping?.disposition && mapping.disposition === ask.disposition?.kind && mapping.bindingRef === ask.disposition.binding.ref && mapping.reason) continue;
+    if (ask.originUncertain && (isPass("C1") || !owned("C1", ask.id))) add("C1", `source origin unknown: ${ask.id}`);
     if (mapping?.row === null && mapping.reason && !isPass("C1") && owned("C1", ask.id) && verify(mapping.evidence)) continue;
     if (!mapping || !row || mapping.owner !== row.owner || !row.owner || mapping.estimate !== row.estimate || !row.estimate
       || mapping.outcome !== row.outcome || !row.outcome || !verify(mapping.evidence)
@@ -112,7 +113,7 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
     outcomes: Object.fromEntries(Object.values(rows).map(r => [r.row, r.outcome])), at, reviewed: checks.length,
     askLatencyMs: (cycle.asks || []).map(a => { const mapping = mappings.find(m => m.askId === a.id);
       const created = cycle.rowFirstSeen?.[mapping?.row];
-      const bound = cycle.bindings?.find(b => b.ledgerId === a.id && b.kind === "row" && b.ref.endsWith(`:${mapping?.row}`));
-      return { askId: a.id, ms: Number.isFinite(created) ? Math.max(0, created - Date.parse(a.ts)) : null,
+      const bound = cycle.bindings?.find(b => [a.id, ...(a.observationIds || [])].includes(b.ledgerId) && b.kind === "row" && b.ref.endsWith(`:${mapping?.row}`));
+      return { askId: a.id, observationIds: a.observationIds || [a.id], ms: Number.isFinite(created) ? Math.max(0, created - Date.parse(a.ts)) : null,
         bindingLatencyMs: bound ? Math.max(0, Date.parse(bound.ts) - Date.parse(a.ts)) : null }; }) };
 }

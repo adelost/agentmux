@@ -54,7 +54,7 @@ export function formatAskEntry(entry, { fullReply = false } = {}) {
   const needle = compactText(entry.prompt).slice(0, 70);
   const origin = entry.origin === "agent" ? "agent"
     : entry.origin === "system" ? "system"
-      : "human";
+      : entry.origin === "unknown" ? "unknown" : "human";
   const lines = [
     `${status}  ${ts}  ${entry.key.padEnd(10)}  ${age}  [${origin}]`,
     `    > ${entry.promptPreview}`,
@@ -69,6 +69,8 @@ export function formatAskEntry(entry, { fullReply = false } = {}) {
   }
   if (entry.replySource === "conversation-log") lines.push(`    conversation: ${entry.ledgerId}`);
   else if (entry.ledgerId) lines.push(`    ask: ${entry.ledgerId}`);
+  if (entry.observationIds?.some(id => id !== entry.ledgerId)) lines.push(`    source aliases: ${entry.observationIds.filter(id => id !== entry.ledgerId).join(", ")}`);
+  if (entry.originEvidence) lines.push(`    origin evidence: ${entry.originEvidence.kind} ${entry.originEvidence.path}`);
   if (entry.binding) lines.push(`    binding: ${entry.binding.kind} ${entry.binding.ref} by ${entry.binding.by} @ ${entry.binding.ts}`);
   if (!entry.jsonlFile && entry.sessionFile && entry.replySource !== "conversation-log") {
     lines.push(`    session: ${entry.sessionFile} (no matching completion found)`);

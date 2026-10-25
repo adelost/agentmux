@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { authoredPromptText, isSystemNoiseDirective } from "./system-noise.mjs";
+import { observedAskOrigin } from "./ask-source-evidence.mjs";
 
 const AUTOMATION_SOURCES = new Set([
   "auto-compact",
@@ -74,7 +75,7 @@ const AMUX_TAG_AT_START = new RegExp(`^(?:${AMUX_PANE_TAGS.map(({ tag }) => esca
 /** WHAT: Checks whether a ledger ask is a message a person wrote. WHY: Keeps agents' briefs, wrappers, automation and amux's own notices out of everything that counts or quotes his words. */
 export function isHumanAsk(ask) {
   return HUMAN_ASK_SOURCES.has(ask?.source)
-    && inferAskOrigin({ source: ask.source, sender: ask.sender, prompt: ask.verbatim }) === "human"
+    && observedAskOrigin(ask, inferAskOrigin) === "human"
     && !AMUX_TAG_AT_START.test(authoredPromptText(ask.verbatim));
 }
 

@@ -1,5 +1,6 @@
 import { applyAskBindings, buildAskEntries } from "./ask-history.mjs";
 import { inferAskOrigin } from "./ask-origin.mjs";
+import { observedAskOrigin } from "./ask-source-evidence.mjs";
 import { conversationPaneTurns } from "./dream-conversation.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 
@@ -37,7 +38,8 @@ export function conversationAskEntries(log, { nowMs = Date.now(), waiting, bindi
         turns: [{ ...turn, timestamp: ask.ts, userPrompt: ask.verbatim, isComplete: turn.items.length > 0 }] });
       entries.push({ ...entry, ledgerId: id, ledgerPath: ask.ledgerPath, source: ask.source,
         reply: turn.items.map(item => item.content).join("\n\n"),
-        origin: inferAskOrigin({ source: ask.source, sender: ask.sender, prompt: ask.verbatim }),
+        origin: observedAskOrigin(ask, inferAskOrigin), observationIds: ask.observationIds,
+        originEvidence: ask.originEvidence, nativeEvent: ask.nativeEvent,
         sender: ask.sender, repo: ask.repo || ask.agent, replySource: "conversation-log",
         sessionFile: ask.sessionFile, deliveryPath: ask.deliveryPath, deliveryStatus: ask.deliveryStatus });
     }
@@ -49,7 +51,7 @@ export function conversationAskEntries(log, { nowMs = Date.now(), waiting, bindi
 export function formatConversationGroups(groups, { maxBytes = 65536 } = {}) {
   const render = row => {
     const input = row.event === "ask";
-    const label = input ? `IN ${inferAskOrigin({ source: row.source, sender: row.sender, prompt: row.verbatim })}`
+    const label = input ? `IN ${observedAskOrigin(row, inferAskOrigin)}`
       : `OUT ${row.kind} ${row.status || "sent"}`;
     const header = `${label} ${row.ts} ${row.agent}:${row.pane} id=${row.id}`
       + (row.messageId ? ` Discord=${row.messageId}` : "");

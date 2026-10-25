@@ -38,7 +38,7 @@ export function cmdConversationAsks(flags, positional, ctx) {
   if (agent && !flags["all-repos"]) getAgent(ctx.configPath, agent);
   if (agent && pane != null && !flags["all-repos"]) validateAgentPane(ctx.configPath, agent, pane);
   const configured = new Set(listAgents(ctx.configPath).map(row => row.name));
-  const log = readWindow({ since, agents: agent ? [agent] : null });
+  const log = readWindow({ since, agents: agent ? [agent] : null, provenance: true });
   const entries = conversationAskEntries(log, { bindings: readAskBindings() }).filter(row => (pane == null || row.pane === pane)
     && (flags["all-repos"] || configured.has(row.agent)));
   const overview = !flags.full && !flags.list && !flags.summary && !flags.grep && pane == null && flags.n == null;

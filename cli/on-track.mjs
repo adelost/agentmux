@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -9,9 +9,13 @@ import { captureOnTrackCommand } from "../core/on-track-evidence.mjs";
 import { createOnTrackRuntime } from "../channels/on-track.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { detectSenderFromEnv } from "../core/sender-detect.mjs";
+import { readAskProducers } from "../core/ask-source-evidence.mjs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 /** WHAT: Defines the reviewer evidence format and bounded command capture. WHY: Keeps submissions bound to the fixed checklist and source format. */
 export const ON_TRACK_HELP = `amux on-track configure /absolute/projects.json
+amux on-track register-producers /absolute/producers.json
 amux on-track show PROJECT
 amux on-track submit PROJECT /absolute/receipt.json
 amux on-track capture PROJECT PROBE
@@ -30,18 +34,36 @@ outcomeChanges: [{row,commit,askId,evidence}]. resolved: [{check,row,evidence}].
 FAIL/UNKNOWN require an owned deviation. userOrMoneyImpact:true also notifies the human immediately.
 See docs/ON-TRACK.md. Source integrity is machine checked; natural-language equivalence still requires the reviewer's judgment.`;
 
+function saveConfiguration(path, value) {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+  renameSync(temporary, path);
+}
+
 /** WHAT: Routes the on-track CLI without starting a model or replaying a delivery. WHY: Separates receipt handling from queue submission and reviewer work. */
 export async function cmdOnTrack(args, dependencies = {}) {
   const [action, id, file, ...extra] = args;
   if (!action || ["--help", "-h"].includes(action)) { console.log(ON_TRACK_HELP); return; }
   const state = dependencies.state || onTrackStore();
   if (action === "stats") { const rows = onTrackStatistics(state.get(ON_TRACK_STATE)); console.log(JSON.stringify(rows, null, 2)); return rows; }
+  if (action === "register-producers") {
+    if (!id || file) throw Error("register-producers requires one JSON array file");
+    const input = JSON.parse(readFileSync(id, "utf8")), validated = readAskProducers(id);
+    if (!Array.isArray(input) || input.length !== validated.length) throw Error("producer source/hash/authority did not verify");
+    const path = join(homedir(), ".agentmux", "ask-producers.json");
+    let old = [];
+    try { old = JSON.parse(readFileSync(path, "utf8")); } catch (error) { if (error.code !== "ENOENT") throw error; }
+    if (!Array.isArray(old)) throw Error("existing producer registry unreadable");
+    const merged = [...old.filter(p => !validated.some(next => next.id === p.id)), ...validated];
+    if (new Set(merged.map(p => p.keyPrefix)).size !== merged.length) throw Error("producer namespaces overlap");
+    saveConfiguration(path, merged); console.log(`registered ${validated.length} source-bound producers`); return;
+  }
   if (action === "configure") {
     if (!id || file) throw Error("configure requires one projects.json file");
     const config = validateOnTrackProjects(JSON.parse(readFileSync(id, "utf8")));
     const path = onTrackPaths().config;
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    writeFileSync(path, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+    saveConfiguration(path, config);
     console.log(`configured ${config.map(p => p.id).join(", ")}; schedule runs on bridge heartbeat`); return;
   }
   const projects = dependencies.projects || readOnTrackProjects;

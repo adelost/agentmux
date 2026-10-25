@@ -95,12 +95,12 @@ export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHu
         });
         await escalate(project, cycle, "receipt absent or invalid after 20 minutes");
       }
-      if (!record || now() >= record.nextAt) {
+      if (project.enabled !== false && (!record || now() >= record.nextAt)) {
         if (record) await start(project, now(), record.nextAt);
         else await start(project, now());
       }
       record = get(project.id);
-      if (record.cycle.status === "invalid") await escalate(project, record.cycle, "invalid receipt");
+      if (record?.cycle.status === "invalid") await escalate(project, record.cycle, "invalid receipt");
     }
     await dailySummary();
   }

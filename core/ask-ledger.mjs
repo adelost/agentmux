@@ -23,6 +23,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { parseJsonlText } from "./jsonl-reader.mjs";
 import { authoredPromptText } from "./system-noise.mjs";
 import { askLedgerFiles, dailyLedgerSpan, isDailyLedger, ledgerWritePath } from "./ask-ledger-paths.mjs";
+import { resolveAskSourceEvidence } from "./ask-source-evidence.mjs";
 
 /** WHAT: Defines the on-disk ask row schema. WHY: Keeps future readers from guessing incompatible records. */
 export const ASK_LEDGER_VERSION = 1;
@@ -319,10 +320,9 @@ const byTimeThenId = (left, right) => Date.parse(left.ts) - Date.parse(right.ts)
 
 /**
  * WHAT: Reads the asks and posts in one time window, opening only the files that overlap it.
- * WHY: Gives Dream, asks, revive and timelines one reader of the conversation log; no other module parses the file.
- * coverageStartMs is the first post seen in the opened files: posts are trusted only from there on.
+ * WHY: Keeps Dream, asks, revive and timelines on one bounded conversation reader.
  */
-export function readWindow({ path = defaultAskLedgerPath(), since = null, until = null, agents = null, readFile = null } = {}) {
+export function readWindow({ path = defaultAskLedgerPath(), since = null, until = null, agents = null, readFile = null, provenance = false } = {}) {
   const sinceMs = toMs(since, -Infinity);
   const untilMs = toMs(until, Infinity);
   const wanted = agents ? new Set(agents) : null;
@@ -346,7 +346,8 @@ export function readWindow({ path = defaultAskLedgerPath(), since = null, until 
       else if (isPost) posts.push({ ...row, ledgerPath: span.file });
     }
   }
-  return { asks: coalesceAskLedger(asks), posts: posts.sort(byTimeThenId), coverageStartMs, files };
+  const coalesced = coalesceAskLedger(asks);
+  return { asks: provenance ? resolveAskSourceEvidence(coalesced) : coalesced, posts: posts.sort(byTimeThenId), coverageStartMs, files };
 }
 
 const PERSISTABLE_COMPLETION_STATUSES = new Set(["done", "answered"]);
@@ -399,13 +400,14 @@ export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}
       origin: previous.origin || row.origin || null,
       sender: previous.sender || row.sender || null,
       backfilled: previous.backfilled || row.backfilled || false,
+      observationIds: [...new Set([previous.id, row.id, ...(previous.observationIds || []), ...(row.observationIds || [])])],
       completionStatus: previous.completionStatus || row.completionStatus || null,
       completionReply: previous.completionReply || row.completionReply || null,
       completionAt: previous.completionAt || row.completionAt || null,
       completionSessionFile: previous.completionSessionFile
         || row.completionSessionFile
         || null,
-    } : { ...row });
+    } : { ...row, observationIds: [...new Set([row.id, ...(row.observationIds || [])])] });
   }
 
   const rows = [...unique.values()].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
@@ -430,6 +432,8 @@ export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}
     candidate.sessionId = candidate.sessionId || hook.sessionId;
     candidate.cwd = candidate.cwd || hook.cwd;
     candidate.repo = hook.repo || candidate.repo;
+    candidate.observationIds = [...new Set([...(candidate.observationIds || []), ...(hook.observationIds || []), hook.id])];
+    candidate.observations = [...(candidate.observations || []), { id: hook.id, ts: hook.ts, sessionFile: hook.sessionFile }];
     claimed.add(candidate.id);
   }
   return [...deliveries, ...standaloneHooks].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
