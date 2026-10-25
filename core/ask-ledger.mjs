@@ -407,7 +407,7 @@ export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}
       completionSessionFile: previous.completionSessionFile
         || row.completionSessionFile
         || null,
-    } : { ...row, observationIds: [...new Set([row.id, ...(row.observationIds || [])])] });
+    } : { ...row });
   }
 
   const rows = [...unique.values()].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
@@ -432,7 +432,7 @@ export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}
     candidate.sessionId = candidate.sessionId || hook.sessionId;
     candidate.cwd = candidate.cwd || hook.cwd;
     candidate.repo = hook.repo || candidate.repo;
-    candidate.observationIds = [...new Set([...(candidate.observationIds || []), ...(hook.observationIds || []), hook.id])];
+    candidate.observationIds = [...new Set([candidate.id, ...(candidate.observationIds || []), ...(hook.observationIds || []), hook.id])];
     candidate.observations = [...(candidate.observations || []), { id: hook.id, ts: hook.ts, sessionFile: hook.sessionFile }];
     claimed.add(candidate.id);
   }
