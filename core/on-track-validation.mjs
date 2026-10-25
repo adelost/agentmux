@@ -45,9 +45,16 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
     else if (!deviations.some(existing => existing.check === d.check && existing.row === d.row)) deviations.push(d);
   }
   const mappings = receipt?.asks || [];
+  if (cycle.c1ScopeVersion === 2 && isPass("C1") === false && checks.find(c => c.id === "C1")?.result === "UNKNOWN"
+    && !cycle.c1SourceErrors?.length) add("C1", "UNKNOWN requires an unreadable original source; missing orders are FAIL");
   for (const ask of cycle.asks || []) {
     const mapping = mappings.find(m => m.askId === ask.id), row = rows[mapping?.row];
-    if (mapping?.disposition && mapping.disposition === ask.disposition?.kind && mapping.bindingRef === ask.disposition.binding.ref && mapping.reason) continue;
+    if (cycle.c1ScopeVersion === 2 && mapping?.disposition === "answered") {
+      if (!mapping.reason || !ask.replies?.some(p => p.id === mapping.replyId) || !verify(mapping.evidence)) add("C1", `answer link missing or unrelated: ${ask.id}`);
+      continue;
+    }
+    if (cycle.c1ScopeVersion === 2 && mapping?.disposition && !["row", "missing"].includes(mapping.disposition)) add("C1", `invalid disposition: ${ask.id}`);
+    if (cycle.c1ScopeVersion !== 2 && mapping?.disposition && mapping.disposition === ask.disposition?.kind && mapping.bindingRef === ask.disposition.binding.ref && mapping.reason) continue;
     if (ask.originUncertain && (isPass("C1") || !owned("C1", ask.id))) add("C1", `source origin unknown: ${ask.id}`);
     if (mapping?.row === null && mapping.reason && !isPass("C1") && owned("C1", ask.id) && verify(mapping.evidence)) continue;
     if (row && isPass("C1") && (!row.ownerId || /^(unknown|okän[dt]|saknas|tbd|n\/a|[-—?])$/iu.test(row.estimate))) add("C1", `owner or estimate unknown/ambiguous: ${ask.id}`);
@@ -59,7 +66,7 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
   for (const [id, old] of Object.entries(cycle.previous?.outcomes || {})) {
     if (rows[id]?.outcome === old) continue;
     const change = receipt.outcomeChanges?.find(c => c.row === id);
-    const ask = cycle.asks.find(a => a.id === change?.askId && Date.parse(a.ts) > (cycle.previous.at || 0));
+    const ask = (cycle.approvalAsks || cycle.asks).find(a => a.id === change?.askId && Date.parse(a.ts) > (cycle.previous.at || 0));
     if ((!ask || !verify(change?.evidence)) && (isPass("C2") || !owned("C2", id))) add("C2", `outcome changed or row removed without human source: ${id}`);
   }
   if (cycle.outcomeHistory) {
@@ -67,7 +74,7 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
     if (cycle.outcomeHistory.errors?.length && (isPass("C2") || !owned("C2", "history"))) add("C2", "ambiguous historical TASKS source; report UNKNOWN with an owner for history");
     for (const actual of cycle.outcomeHistory.changes) {
       const change = receipt.outcomeChanges?.find(c => c.row === actual.row && c.commit === actual.sha);
-      const ask = cycle.asks.find(a => a.id === change?.askId && Date.parse(a.ts) <= actual.at);
+      const ask = (cycle.approvalAsks || cycle.asks).find(a => a.id === change?.askId && Date.parse(a.ts) <= actual.at);
       if ((!ask || !verify(change?.evidence)) && (isPass("C2") || !owned("C2", actual.row))) add("C2", `unapproved historical outcome change ${actual.row}@${actual.sha}`);
     }
   }

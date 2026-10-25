@@ -330,11 +330,12 @@ export function readWindow({ path = defaultAskLedgerPath(), since = null, until 
   const asks = [];
   const posts = [];
   const files = [];
+  const sourceErrors = [];
   let coverageStartMs = Infinity;
   for (const span of ledgerSpans(path)) {
     if (span.lastMs < sinceMs || span.firstMs > untilMs) continue;
     let text = "";
-    try { text = load(span.file); } catch { continue; }
+    try { text = load(span.file); } catch (error) { sourceErrors.push({ path: span.file, error: error.message }); continue; }
     files.push(span.file);
     for (const row of parseJsonlText(String(text || ""))) {
       if (row?.version !== ASK_LEDGER_VERSION) continue;
@@ -347,7 +348,7 @@ export function readWindow({ path = defaultAskLedgerPath(), since = null, until 
     }
   }
   const coalesced = coalesceAskLedger(asks);
-  return { asks: provenance ? resolveAskSourceEvidence(coalesced) : coalesced, posts: posts.sort(byTimeThenId), coverageStartMs, files };
+  return { asks: provenance ? resolveAskSourceEvidence(coalesced) : coalesced, posts: posts.sort(byTimeThenId), coverageStartMs, files, sourceErrors };
 }
 
 const PERSISTABLE_COMPLETION_STATUSES = new Set(["done", "answered"]);

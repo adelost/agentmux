@@ -24,10 +24,13 @@ Their existing owner must name the reviewer, routing agents and main live paths.
 Set `enabled:false` when preparing a handover. Activation uses the same validated
 configuration with `enabled:true`, after the prior review schedule's terminal
 handoff. An unrelated billing or dispatcher wake may remain active.
-Routing includes all human asks to the declared agents, plus human asks already
-bound to this repository. Ambiguous messages remain in the frozen input. This
-conservative scope is visible, not an invented project classifier. Ask identity
-and origin reuse the ask-ledger readers; row timing reuses existing ask bindings.
+After lsrc:0's25Oct C1 correction, only original human Discord/voice orders count.
+Provider hooks, engine mirrors, cron, peer relays and machine notices do not.
+Declared project panels, project terms or actual repository bindings select the
+project. Another project's binding stays with its own reviewer. Cutkit's terms
+include cut, Cutkit, export, Bumbi and the Modal wrapper. Exact routing data is
+visible in registration; general-dispatch messages need project text or binding.
+Ask identity reuses the canonical source reader and preserves original aliases.
 No second task database is introduced.
 
 Source classification is shared with normal `amux asks`. Claude scheduled inputs
@@ -36,8 +39,8 @@ Existing external automation can register its reserved queue idempotency prefix,
 producer script, verified SHA-256 and authority pointer with
 `amux on-track register-producers FILE`. The actual queue job must match. Neither
 the prompt's words nor a guessed name make an order disappear. Changed/missing
-producer code loses the registration's evidential force. Ambiguous origins remain
-visible as unknown candidates and require an owned C1 deviation.
+producer code loses the registration's evidential force. Non-original observations
+remain inspectable with `asks --all-sources`; they do not become C1 orders.
 
 Native lookup reads bounded journal tails and retains only matching user events.
 An unavailable older native event remains unknown. Proven provider/backfill and
@@ -102,11 +105,11 @@ native receipt shape needs a small read-only adapter in its own registered probe
 until then it reports UNKNOWN. Copying a timestamp into the review is insufficient.
 This does not authorise a new paid journey every hour.
 
-Every frozen ask-ID needs a disposition. A non-order or another project's task
-can be excluded only through an existing explicit close/other-repository row
-binding frozen by AMUX, with its exact binding reference and a reason. An
-unmapped real task uses `row:null`, source evidence and an owned C1 FAIL/UNKNOWN;
-it cannot be hidden behind PASS. Missing historical binding targets remain in scope.
+Every frozen original ask-ID has exactly one disposition: `row` with TASKS ID,
+`answered` for a question without a requested outcome and a link to its actual
+frozen canonical reply, or `missing` with `row:null` and an owned FAIL. C1 UNKNOWN
+requires a source read failure recorded by AMUX. An unmapped readable order is
+not UNKNOWN. The first broader review remains historical and is not rewritten.
 
 ## Validation, sampling and escalation
 

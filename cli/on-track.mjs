@@ -26,8 +26,10 @@ Hourly schedule, 20 minute receipt deadline, C1-C5. No self-rating.
 Receipt: {project,cycle,at,checks:[{id,result:"PASS|FAIL|UNKNOWN",evidence:[]}],deviations:[{check,row,owner,action}],asks:[],rows:[],live:[],outcomeChanges:[],resolved:[]}
 File evidence: {kind:"file",path:"docs/TASKS.md",sha:"40 hex",line:12,quote:"exact line",at:"ISO"}.
 Command evidence: use capture's returned JSON, including actual exitCode, sha256 and command. Only configured probes run, at explicit capture, never at receipt submission.
-asks: [{askId,row,owner,estimate,outcome,evidence}] for EVERY frozen ask. outcome is TASKS Done when.
-Explicit non-task/other-project dispositions require the frozen existing binding: {askId,disposition,bindingRef,reason}. Missing task: {askId,row:null,reason,evidence} plus owned C1 FAIL/UNKNOWN.
+asks: EVERY original scoped order has disposition row, answered or missing.
+row: {askId,disposition:"row",row,owner,estimate,outcome,evidence}; outcome is TASKS Done when.
+answered: {askId,disposition:"answered",replyId,reason,evidence}; replyId must be a frozen canonical reply.
+missing: {askId,disposition:"missing",row:null,reason,evidence} plus owned C1 FAIL. UNKNOWN only for an unreadable source.
 rows: [{row,evidence,ownerLog,progressAt,waitingSince?,stop?:{kind,evidence},action?}] for EVERY open row. Stop kinds: red,unexpected-value,money-cap,new-cause,human-decision.
 live: [{path,result,at,evidence}] for EVERY configured live path. No new paid hourly run.
 outcomeChanges: [{row,commit,askId,evidence}]. resolved: [{check,row,evidence}].

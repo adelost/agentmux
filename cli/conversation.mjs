@@ -40,7 +40,8 @@ export function cmdConversationAsks(flags, positional, ctx) {
   const configured = new Set(listAgents(ctx.configPath).map(row => row.name));
   const log = readWindow({ since, agents: agent ? [agent] : null, provenance: true });
   const entries = conversationAskEntries(log, { bindings: readAskBindings() }).filter(row => (pane == null || row.pane === pane)
-    && (flags["all-repos"] || configured.has(row.agent)));
+    && (flags["all-repos"] || configured.has(row.agent))
+    && (flags["all-sources"] || (["discord", "voice-pwa", "discord-voice"].includes(row.source) && row.origin === "human")));
   const overview = !flags.full && !flags.list && !flags.summary && !flags.grep && pane == null && flags.n == null;
   const rows = filterAskEntries(entries, { sinceMs: since?.getTime(), grep, openOnly: flags.open,
     humanOnly: !flags["all-sources"], limit: flags.summary || overview ? null : flags.n || 40 });

@@ -2,8 +2,9 @@ import { homedir } from "node:os";
 import { join, isAbsolute, dirname } from "node:path";
 import { readFileSync } from "node:fs";
 import { readWindow } from "./ask-ledger.mjs";
-import { automatedCopies, isHumanAsk, inferAskOrigin } from "./ask-origin.mjs";
+import { inferAskOrigin } from "./ask-origin.mjs";
 import { observedAskOrigin } from "./ask-source-evidence.mjs";
+import { onTrackProjectAsk } from "./on-track-scope.mjs";
 import { readAskBindings } from "./ask-bindings.mjs";
 import { onTrackGit, onTrackRows } from "./on-track-evidence.mjs";
 import { createState } from "./state.mjs";
@@ -21,6 +22,8 @@ export function validateOnTrackProjects(projects) {
   for (const p of projects) {
     if (!/^[a-z0-9_-]+$/u.test(p.id) || ids.has(p.id) || !isAbsolute(p.root || "")
       || (p.enabled !== undefined && typeof p.enabled !== "boolean")
+      || (p.askPanels !== undefined && (!Array.isArray(p.askPanels) || !p.askPanels.every(a => /^[\w-]+:\d+$/u.test(a))))
+      || (p.askTerms !== undefined && (!Array.isArray(p.askTerms) || !p.askTerms.every(s => typeof s === "string" && s.trim())))
       || !/^[\w./-]+\.md$/u.test(p.ledger || "") || p.ledger.startsWith("/") || p.ledger.split("/").includes("..")
       || !/^[\w-]+:\d+$/u.test(p.reviewer || "") || !/^[\w-]+:\d+$/u.test(p.dispatcher || "")
       || !Array.isArray(p.askAgents) || !p.askAgents.length || !p.askAgents.every(a => /^[\w-]+$/u.test(a))
@@ -54,32 +57,21 @@ export function snapshotOnTrackProject(project, at, { window = readWindow, bindi
     }
     return roots.get(dir);
   };
-  const inScope = ask => project.askAgents.includes(ask.agent) || bound.some(b =>
-    [ask.id, ...(ask.observationIds || [])].includes(b.ledgerId) && (b.ref.startsWith(rootPrefix) || commonOfBinding(b) === ownCommon));
-  const copies = automatedCopies(result.asks);
-  const humans = result.asks.filter(ask => isHumanAsk(ask) && !copies.has(ask));
-  const additional = result.asks.filter(ask => ["cli", "unknown", "voice-pwa", "voice", "link", "engine-backfill"].includes(ask.source)
-    && observedAskOrigin(ask, inferAskOrigin) === "human"
-    && isHumanAsk({ ...ask, source: "pane-hook" }));
-  const unknowns = result.asks.filter(ask => observedAskOrigin(ask, inferAskOrigin) === "unknown");
-  const asks = [...new Map([...humans, ...additional, ...unknowns].map(ask => [ask.id, ask])).values()].filter(inScope)
+  const inScope = ask => {
+    const related = bound.filter(b => [ask.id, ...(ask.observationIds || [])].includes(b.ledgerId) && b.kind === "row");
+    return onTrackProjectAsk(project, ask, { sameProject: related.some(b => b.ref.startsWith(rootPrefix) || commonOfBinding(b) === ownCommon),
+      otherProject: related.some(b => commonOfBinding(b) && commonOfBinding(b) !== ownCommon) });
+  };
+  const asks = result.asks.filter(inScope)
     .map(ask => ({ id: ask.id, observationIds: ask.observationIds || [ask.id], nativeEvent: ask.nativeEvent,
       originUncertain: observedAskOrigin(ask, inferAskOrigin) === "unknown",
-      ts: ask.ts, agent: ask.agent, pane: ask.pane, text: ask.verbatim, source: ask.ledgerPath }));
+      ts: ask.ts, agent: ask.agent, pane: ask.pane, text: ask.verbatim, source: ask.source, ledgerPath: ask.ledgerPath,
+      replies: result.posts?.filter(p => p.agent === ask.agent && p.pane === ask.pane && p.kind === "reply" && p.status === "sent"
+        && Date.parse(p.ts) >= Date.parse(ask.ts) && !result.asks.some(next => next.agent === ask.agent && next.pane === ask.pane
+          && Date.parse(next.ts) > Date.parse(ask.ts) && Date.parse(next.ts) < Date.parse(p.ts)))
+        .map(p => ({ id: p.id, at: p.ts, text: p.text, source: p.ledgerPath })) || [] }));
   const excludedAutomation = result.asks.filter(ask => inScope(ask) && ask.originEvidence && observedAskOrigin(ask, inferAskOrigin) === "system")
     .map(ask => ({ id: ask.id, observationIds: ask.observationIds || [ask.id], evidence: ask.originEvidence }));
-  for (const ask of asks) {
-    const binding = bound.findLast(b => ask.observationIds.includes(b.ledgerId));
-    if (binding?.kind === "close") { ask.disposition = { kind: "not-order", binding }; continue; }
-    if (binding?.kind !== "row") continue;
-    const match = /^(.*\.md):([^:]+)$/u.exec(binding.ref);
-    if (!match) continue;
-    try {
-      const dir = dirname(match[1]);
-      if (!roots.has(dir)) roots.set(dir, common(dir));
-      if (roots.get(dir) !== ownCommon) ask.disposition = { kind: "other-project", binding, common: roots.get(dir) };
-    } catch { /* Missing historical target stays in scope, never silently excluded. */ }
-  }
   const tip = onTrackGit(project.root, ["rev-parse", "--verify", "--end-of-options", `${project.ref || "HEAD"}^{commit}`]).trim();
   const since = new Date(at - 86400000).toISOString();
   const base = onTrackGit(project.root, ["rev-list", "-1", `--before=${since}`, tip, "--", project.ledger]).trim();
@@ -104,9 +96,12 @@ export function snapshotOnTrackProject(project, at, { window = readWindow, bindi
     }
     previous = next;
   }
-  return { tip, asks, excludedAutomation, rowFirstSeen, bindings: bound.filter(b => asks.some(a => a.observationIds.includes(b.ledgerId))),
+  return { tip, asks, excludedAutomation, c1SourceErrors: result.sourceErrors || [], c1ScopeVersion: 2, rowFirstSeen, bindings: bound.filter(b => asks.some(a => a.observationIds.includes(b.ledgerId))),
+    approvalAsks: result.asks.filter(ask => ["discord", "voice-pwa", "discord-voice"].includes(ask.source)
+      && observedAskOrigin(ask, inferAskOrigin) === "human").map(ask => ({ id: ask.id, ts: ask.ts, source: ask.source })),
     outcomeHistory: { base: base || null, changes, errors: historyErrors, commits: commits.map(line => line.split(" ")[0]) },
-    askScope: { agents: project.askAgents, rule: "all human asks to these routing agents, plus asks already bound to this repository; includes ambiguous messages for reviewer disposition" } };
+    askScope: { agents: project.askAgents, panels: project.askPanels || null, terms: project.askTerms || [],
+      rule: "original human discord/voice only; declared project panels OR project text OR actual project binding; engine mirrors/cron/relays excluded" } };
 }
 
 /** WHAT: Builds the atomic state store for on-track records. WHY: Prevents concurrent CLI and bridge writes from dropping deadlines. */

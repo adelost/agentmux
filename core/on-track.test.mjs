@@ -31,6 +31,25 @@ function fixture({ owner = "lsrc:4", state = "closed" } = {}) {
 }
 
 feature("on-track evidence and omission protection", () => {
+  component("a question without a requested outcome can cite its real posted answer", {
+    given: ["a frozen original question and a canonical reply", () => {
+      const f = fixture(); f.cycle.c1ScopeVersion = 2; f.cycle.c1SourceErrors = [];
+      f.cycle.asks[0].replies = [{ id: "actual-post", text: "The answer" }];
+      f.receipt.asks = [{ askId: "ask-1", disposition: "answered", replyId: "actual-post", reason: "A question with no new requested outcome", evidence: f.evidence }];
+      return f;
+    }],
+    when: ["the receipt links the actual reply", f => validateOnTrackReceipt(f)],
+    then: ["C1 accepts the sourced disposition", r => { expect(r.errors).toEqual([]); expect(r.valid).toBe(true); }],
+  });
+  component("a readable missing order is FAIL rather than UNKNOWN", {
+    given: ["a fully readable original source", () => {
+      const f = fixture(); f.cycle.c1ScopeVersion = 2; f.cycle.c1SourceErrors = [];
+      f.receipt.checks[0].result = "UNKNOWN"; f.receipt.asks = [{ askId: "ask-1", disposition: "missing", row: null, reason: "Task missing", evidence: f.evidence }];
+      f.receipt.deviations = [{ check: "C1", row: "ask-1", owner: "lsrc:3", action: "Map the actual requested outcome" }]; return f;
+    }],
+    when: ["UNKNOWN is used to avoid the missing-task verdict", f => validateOnTrackReceipt(f)],
+    then: ["the receipt is invalid", r => expect(r.errors.join(" ")).toContain("UNKNOWN requires an unreadable")],
+  });
   component("a role annotation does not invent a second owner or invalidate the real owner log", {
     given: ["an actual working TASKS row with an annotated owner", () => {
       const f = fixture({ owner: "lsrc:4 (Opus V)", state: "working" });
