@@ -173,6 +173,42 @@ feature("durable delivery queue", () => {
     }],
   });
 
+  component("writer lease polling preserves the job cache when permissions are already private", {
+    given: ["a terminal-heavy queue with one waiting job and a warmed writer lease", () => {
+      const rootDir = tempRoot(), producer = createDeliveryQueue({ rootDir });
+      for (let index = 0; index < 48; index++) {
+        const job = producer.enqueue({ agentName: "claw", pane: 1, text: `past ${index}` });
+        producer.update(job, { status: "acknowledged", acknowledgedAt: 1000 });
+      }
+      producer.enqueue({ agentName: "claw", pane: 1, text: "waiting for the pane" });
+      let reads = 0;
+      const broker = createDeliveryQueue({ rootDir, onListJobRead: () => { reads++; } });
+      broker.acquireSessionLease("claw", 1).release();
+      broker.list("claw", 1);
+      return { rootDir, broker, producer, reads: () => reads };
+    }],
+    when: ["the broker checks the same held target repeatedly, then another process enqueues", ctx => {
+      const warmReads = ctx.reads();
+      for (let index = 0; index < 12; index++) {
+        ctx.broker.acquireSessionLease("claw", 1).release();
+        ctx.broker.targets();
+        ctx.broker.list("claw", 1);
+      }
+      const polledReads = ctx.reads();
+      ctx.producer.enqueue({ agentName: "claw", pane: 1, text: "new independent input" });
+      const messages = ctx.broker.list("claw", 1).map(job => job.text);
+      return { warmReads, polledReads, messages, changedReads: ctx.reads() };
+    }],
+    then: ["lease churn reads zero old jobs, while real writes still invalidate immediately", (result, ctx) => {
+      try {
+        expect(result.warmReads).toBe(49);
+        expect(result.polledReads).toBe(result.warmReads);
+        expect(result.messages).toContain("new independent input");
+        expect(result.changedReads).toBe(99);
+      } finally { rmSync(ctx.rootDir, { recursive: true, force: true }); }
+    }],
+  });
+
   component("a sender cancellation request is durable and retry-idempotent", {
     given: ["one queued follower and a stable request identity", () => {
       const rootDir = tempRoot();

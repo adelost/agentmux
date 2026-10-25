@@ -50,7 +50,7 @@ const parseJson = (path) => JSON.parse(readFileSync(path, "utf-8"));
 
 function ensurePrivateDir(path) {
   mkdirSync(path, { recursive: true, mode: 0o700 });
-  try { chmodSync(path, 0o700); } catch {}
+  try { if ((statSync(path).mode & 0o7777) !== 0o700) chmodSync(path, 0o700); } catch {} // An unchanged chmod invalidates the job cache through ctime.
 }
 
 function atomicReplace(path, value) {
