@@ -8,6 +8,12 @@ AMUX owns an hourly schedule for each registered project and one named reviewer.
 The existing bridge heartbeat advances these schedules. There is no agent-owned
 reminder, additional polling process, self-rating or release gate.
 
+Approved continuation618ece76/0852a9e7: each project's first post13:00 baseline
+maps24h once and has2h grace. Later C1 windows start at the previous valid
+receipt's verified `coveredUntil`, preserving orders received during grading.
+Missing baseline orders remain owned through C5. Existing cycles and original
+deadlines remain historical; a late baseline conversion records its deadline change.
+
 ## Registration
 
 `amux on-track configure /absolute/projects.json` validates an array like:
@@ -61,6 +67,10 @@ outcomes. A missing baseline or ambiguous historical table is UNKNOWN; the
 original SHA and read error remain in the cycle. C3 reads every open row and the latest
 posted owner log. C4 requires fresh green source evidence for every main live
 path. C5 retains prior deviations until resolved with evidence or owned.
+An exact delivery-id in a row's Source cell supplies a unique automatic mapping.
+C3 excludes Later/parked work and reuses one owner capture per fresh source window.
+A leader-decided queue needs predecessor/gate, an actual authorised decision ID
+and evidence. An estimate never excuses60min without progress or a real stop.
 
 `amux on-track show cutkit` returns the frozen cycle, original asks, Git identities,
 previous deviations, deadline, submitted JSON and validation. Submission is:
@@ -104,6 +114,13 @@ observation must be green and no more than 60 minutes old. A project with anothe
 native receipt shape needs a small read-only adapter in its own registered probe;
 until then it reports UNKNOWN. Copying a timestamp into the review is insufficient.
 This does not authorise a new paid journey every hour.
+`capture PROJECT latest-live` resolves the actual current publication. Huset is
+matched against both currently served bundle hashes; Cutkit uses the deployed
+Worker identity. Anonymous public smoke never implies the four main Cutkit flows.
+`evidence PROJECT RECORD` reads captured output. `capture-answers PROJECT [CURSOR]`
+returns bounded128KiB pages of source IDs/hashes/references; `answer PROJECT ID`
+reopens and verifies full text. One per-cycle derived index avoids rereading the
+entire answer source per page. Failed/truncated original captures are retained.
 
 Every frozen original ask-ID has exactly one disposition: `row` with TASKS ID,
 `answered` for a question without a requested outcome and a link to its actual

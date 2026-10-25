@@ -12,6 +12,7 @@ import { detectSenderFromEnv } from "../core/sender-detect.mjs";
 import { readAskProducers } from "../core/ask-source-evidence.mjs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readIndexedOnTrackAnswer } from "../core/on-track-answer-index.mjs";
 
 /** WHAT: Defines the reviewer evidence format and bounded command capture. WHY: Keeps submissions bound to the fixed checklist and source format. */
 export const ON_TRACK_HELP = `amux on-track configure /absolute/projects.json
@@ -20,8 +21,10 @@ amux on-track show PROJECT
 amux on-track submit PROJECT /absolute/receipt.json
 amux on-track capture PROJECT PROBE
 amux on-track capture-owner PROJECT AGENT:PANE
-amux on-track capture-answers PROJECT  (canonical posted replies, including replies after the input freeze)
+amux on-track capture-answers PROJECT [CURSOR]  (bounded pages; nextCursor is returned)
+amux on-track answer PROJECT ID  (actual full text from its captured source reference)
 amux on-track recover-source PROJECT  (only an unreadable pending baseline; preserves cycle and deadline)
+amux on-track evidence PROJECT RECORD  (read the captured source output)
 amux on-track stats   (also amux done --on-track)
 
 Hourly schedule, normal20min deadline, controller-approved first baseline24h/2h. No self-rating.
@@ -77,6 +80,16 @@ export async function cmdOnTrack(args, dependencies = {}) {
   if (!project || extra.length) throw Error("unknown project or extra arguments");
   const record = state.get(ON_TRACK_STATE)?.projects[id];
   if (action === "show") { if (file) throw Error("show takes only PROJECT"); console.log(JSON.stringify(record || { status: "not-scheduled" }, null, 2)); return record; }
+  if (action === "evidence") {
+    const captured = state.get(ON_TRACK_STATE)?.commands?.[file];
+    if (!captured || captured.project !== id) throw Error("captured evidence not found in this project");
+    console.log(JSON.stringify(captured, null, 2)); return captured;
+  }
+  if (action === "answer") {
+    if (!file || !record?.cycle) throw Error("answer needs a captured answer ID and current cycle");
+    const answer = readIndexedOnTrackAnswer({ root: join(dirname(onTrackPaths().state), "answer-pages"), project: id, cycle: record.cycle, id: file });
+    console.log(JSON.stringify(answer, null, 2)); return answer;
+  }
   if (action === "recover-source") {
     if (file) throw Error("recover-source takes only PROJECT");
     const actor = dependencies.actor || detectSenderFromEnv(process.env, command => execSync(command, { encoding: "utf8", timeout: 2000 }));
@@ -86,7 +99,7 @@ export async function cmdOnTrack(args, dependencies = {}) {
   if (["capture", "capture-owner", "capture-answers"].includes(action)) {
     if (!record?.cycle || (action !== "capture-answers" && !file)) throw Error("capture needs a pending cycle and configured PROBE");
     let selected = project;
-    if (action === "capture-answers") selected = { ...project, probes: { answers: [process.execPath, fileURLToPath(new URL("../bin/on-track-answers.mjs", import.meta.url)), id] } };
+    if (action === "capture-answers") selected = { ...project, probes: { answers: [process.execPath, fileURLToPath(new URL("../bin/on-track-answers.mjs", import.meta.url)), id, ...(file ? [file] : [])] } };
     if (action === "capture-owner") {
       if (!/^[\w-]+:\d+$/u.test(file)) throw Error("invalid owner address");
       selected = { ...project, probes: { owner: [process.execPath, fileURLToPath(new URL("../bin/on-track-owner-log.mjs", import.meta.url)), file] } };
@@ -97,6 +110,7 @@ export async function cmdOnTrack(args, dependencies = {}) {
     const key = prior ? prior[0] : randomUUID();
     if (!prior) state.updateKey(ON_TRACK_STATE, data => { data.commands[key] = result; return data; });
     const evidence = { kind: "command", record: key, at: result.at, command: result.command, exitCode: result.exitCode, sha256: result.sha256 };
+    if (action === "capture-answers") try { const page = JSON.parse(result.stdout); evidence.answerPage = { offset: page.offset, count: page.answers.length, total: page.total, nextCursor: page.nextCursor }; } catch { /* Actual capture failure remains in its exit/error record. */ }
     console.log(JSON.stringify(evidence, null, 2)); return evidence;
   }
   if (action !== "submit" || !file) throw Error(ON_TRACK_HELP);

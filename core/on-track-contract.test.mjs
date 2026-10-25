@@ -7,6 +7,19 @@ import { createOnTrackMonitor, ON_TRACK_STATE } from "./on-track-monitor.mjs";
 import { activeOnTrackRow, onTrackCoveredUntil, leaderQueueStop } from "./on-track-contract.mjs";
 
 feature("approved review contracts preserve coverage and legitimate queues", () => {
+  component("source recovery preserves the baseline identity, deadline and failed input", {
+    when: ["a named maintainer requalifies a pending unreadable baseline", async () => {
+      const state=createState(join(mkdtempSync(join(tmpdir(),"amux-recover-")),"state.json"));let reads=0;
+      const project={id:"huset",reviewer:"claw:0",dispatcher:"claw:0",maintenanceOwners:["claw:5"],root:"/fixture",ledger:"TASKS.md",livePaths:["title"],baselinePolicy:"618ece76",baselineAfter:"2026-10-25T13:00:00Z"};
+      const monitor=createOnTrackMonitor({state,projects:()=>[project],now:()=>Date.parse("2026-10-25T13:24:10Z"),
+        snapshot:()=>{reads++;if(reads===1)throw Error("old source could not be qualified");return{tip:"b".repeat(40),asks:[{id:"actual-original"}]};},send:async()=>({id:"queued"})});
+      await monitor.tick();const before=state.get(ON_TRACK_STATE).projects.huset.cycle;
+      let denied=false;try{await monitor.recoverSource(project,"other:0");}catch{denied=true;}
+      const result=await monitor.recoverSource(project,"claw:5"),after=state.get(ON_TRACK_STATE).projects.huset.cycle;
+      return{before,after,result,denied,reads};
+    }],
+    then:["there is no new cycle, deadline reset or accepted review",r=>{expect(r.denied).toBe(true);expect(r.reads).toBe(2);expect(r.after.id).toBe(r.before.id);expect(r.after.deadline).toBe(r.before.deadline);expect(r.after.review).toBeUndefined();expect(r.after.inputRevisions[0].previousSourceError).toContain("old source");expect(r.result.asks).toBe(1);}],
+  });
   unit("coverage uses the frozen source boundary rather than later receipt acceptance", {
     when: ["a valid review was filed after its source window", () => onTrackCoveredUntil({ lastReview: { valid: true, at: 200 }, cycle: { at: 100, review: { valid: true, at: 200 } } })],
     then: ["the intervening order remains in the next window", at => expect(at).toBe(100)],
