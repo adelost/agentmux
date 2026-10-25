@@ -575,7 +575,7 @@ export function createJsonlWatcher({
   function readerFor(config, name, idx) {
     try {
       const cmd = config?.[name]?.panes?.[idx]?.cmd || "";
-      const alternate = alternateSessionReader(cmd);
+      const alternate = alternateSessionReader(cmd, { observe: true });
       if (alternate) return alternate;
     } catch { /* fall through to claude default */ }
     return { readTurns: readLastTurns, latestMtime: latestJsonlMtime, latestInfo: latestJsonlInfo };
@@ -870,7 +870,7 @@ export function createJsonlWatcher({
         // Dialect-dispatched mtime: codex sessions live under
         // ~/.codex/sessions, not ~/.claude/projects. Without this, codex
         // pane fs writes never show as fresh and typing-indicator stays off.
-        const mtimeMs = latestAlternateMtime(cmd, dir) || latestJsonlMtime(dir);
+        const mtimeMs = latestAlternateMtime(cmd, dir, { observe: true }) || latestJsonlMtime(dir);
         if (!mtimeMs || now - mtimeMs > TYPING_FRESHNESS_MS) continue;
         maybeSendTyping(name, i, config);
       }

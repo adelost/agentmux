@@ -8,6 +8,7 @@
 //   - response_item  (message with role, or tool call)
 import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from "fs";
 import { dirname, join } from "path";
+import { captureCodexSessionCatalog, findJsonlFiles, readSessionMeta } from "./codex-session-catalog.mjs";
 import { createHash } from "crypto";
 import { describeCustomExec, describeToolCall } from "./tool-display.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
@@ -34,28 +35,6 @@ function parseLineWithHash(line, out) {
     e.__hash = hashLine(line);
     out.push(e);
   } catch { /* skip malformed */ }
-}
-
-// Cache session_meta payload by file path. session_meta is the first event
-// in a rollout file and is immutable for the lifetime of the session, so we
-// only re-parse when mtime changes (which it won't for cwd, but invalidates
-// cleanly if the user edits the file e.g. to fix a wrong cwd). Without
-// this, latestSessionFor() reads every jsonl file (potentially 23MB each,
-// hundreds of them) on every poll tick — saturating the bridge at 90% CPU.
-const sessionMetaCache = new Map(); // filePath → { mtimeMs, payload }
-
-/** Walk a directory tree (bounded depth) and return all .jsonl file paths. */
-function findJsonlFiles(dir, depth = 0, acc = []) {
-  if (depth > 4 || !existsSync(dir)) return acc;
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); }
-  catch { return acc; }
-  for (const e of entries) {
-    const path = join(dir, e.name);
-    if (e.isDirectory()) findJsonlFiles(path, depth + 1, acc);
-    else if (e.name.endsWith(".jsonl")) acc.push(path);
-  }
-  return acc;
 }
 
 // A rollout past Node's max string length (~0x1fffffe8 ≈ 512 MB) can't be read
@@ -136,74 +115,6 @@ function parseJsonlText(content) {
   return normalizeCodexUserEvents(events);
 }
 
-// Session_meta lives on line 1 of every rollout. In real codex sessions it
-// includes payload.instructions which can run 21-34KB. Read in 64KB chunks
-// until we hit a newline, capping at 256KB as a sanity ceiling — anything
-// larger would mean the file isn't a codex rollout. With cache hits dominating
-// after the first sweep, the worst-case "scan all 186 sessions" cost is ~12MB
-// of disk reads once, vs the old 290MB per poll-tick.
-const SESSION_META_CHUNK = 64 * 1024;
-const SESSION_META_CAP = 256 * 1024;
-
-/**
- * Read just the session_meta event from a file. session_meta is always the
- * FIRST line in a codex rollout, but its payload.instructions field can push
- * line 1 past 30KB. Read incrementally until we find the newline (or hit cap)
- * instead of mapping the entire (potentially 23MB) file.
- *
- * Cached by (path, mtime) so subsequent polls hit memory unless the file's
- * mtime changes — which the cwd field doesn't, since session_meta is written
- * once at session start and never rewritten.
- */
-function readSessionMeta(filePath) {
-  let mtimeMs;
-  try { mtimeMs = statSync(filePath).mtimeMs; }
-  catch { return null; }
-
-  const cached = sessionMetaCache.get(filePath);
-  if (cached && cached.mtimeMs === mtimeMs) return cached.payload;
-
-  let payload = null;
-  let fd = null;
-  try {
-    fd = openSync(filePath, "r");
-    const chunks = [];
-    let totalRead = 0;
-    let firstLine = null;
-
-    while (totalRead < SESSION_META_CAP) {
-      const buf = Buffer.alloc(SESSION_META_CHUNK);
-      const bytesRead = readSync(fd, buf, 0, SESSION_META_CHUNK, totalRead);
-      if (bytesRead === 0) break; // EOF
-      chunks.push(buf.subarray(0, bytesRead));
-      totalRead += bytesRead;
-
-      // Concat-and-search is O(totalRead) per iteration but bounded by cap;
-      // simpler than tracking newline scan position across chunks.
-      const head = Buffer.concat(chunks).toString("utf-8");
-      const newlineIdx = head.indexOf("\n");
-      if (newlineIdx !== -1) {
-        firstLine = head.slice(0, newlineIdx);
-        break;
-      }
-      if (bytesRead < SESSION_META_CHUNK) break; // partial chunk = EOF, no newline
-    }
-
-    if (firstLine && firstLine.trim()) {
-      try {
-        const event = JSON.parse(firstLine);
-        if (event.type === "session_meta") payload = event.payload;
-      } catch { /* malformed first line — leave payload null */ }
-    }
-  } catch { /* fd open failed, leave payload null */ }
-  finally {
-    if (fd !== null) { try { closeSync(fd); } catch { /* swallow */ } }
-  }
-
-  sessionMetaCache.set(filePath, { mtimeMs, payload });
-  return payload;
-}
-
 // Prefer exact pane/worktree sessions; reject arbitrary descendants unless an on-disk `.git` proves ownership.
 function isPaneWorktreeCwd(paneDir, cwd) {
   if (!String(cwd).startsWith(`${paneDir}/`)) return false;
@@ -217,19 +128,20 @@ function isPaneWorktreeCwd(paneDir, cwd) {
   return false;
 }
 
-function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs(), accept = null } = {}) {
+function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs(), accept = null, sessionCatalog = null } = {}) {
   // Profile 1 remains ~/.codex; profile 2 has its own CODEX_HOME.  Search
   // both so switching accounts does not make the watcher/context layer lose
   // the pane's rollout just because its storage root changed.
-  const files = sessionDirs.flatMap((base) => findJsonlFiles(base, 0, []))
-    .map((path) => ({ path, mtime: statSync(path).mtimeMs }));
+  const files = sessionCatalog || captureCodexSessionCatalog(sessionDirs).files;
 
   const candidates = [];
-  for (const { path, mtime } of files) {
-    const meta = readSessionMeta(path);
+  for (const { path, mtime: capturedMtime, meta } of files) {
     if (meta?.source !== "cli" || meta?.originator !== "codex-tui" || (accept && !accept(meta))) continue;
     const cwd = meta?.cwd;
     if (!cwd) continue;
+    const eligible = paneDir === cwd || paneDir.startsWith(cwd + "/") || String(cwd).startsWith(paneDir + "/");
+    if (!eligible) continue;
+    const mtime = sessionCatalog ? statSync(path).mtimeMs : capturedMtime;
     if (paneDir === cwd) {
       candidates.push({ path, mtime, specificity: cwd.length, direct: true, exact: true });
     } else if (isPaneWorktreeCwd(paneDir, cwd)) {
@@ -589,8 +501,9 @@ function liveSessionCopy(matches) {
  * latestJsonlMtime() helper so the watcher's freshness/grace logic can be
  * dialect-dispatched without if-claude/else-codex sprinkled everywhere.
  */
-export function latestCodexJsonlMtime(paneDir) {
-  const file = latestSessionFor(paneDir);
+/** WHAT: Reads the newest matching rollout time. WHY: Keeps activity observations bound to the resolved session. */
+export function latestCodexJsonlMtime(paneDir, options) {
+  const file = latestSessionFor(paneDir, options);
   if (!file) return null;
   try { return statSync(file).mtimeMs; }
   catch { return null; }
@@ -599,14 +512,11 @@ export function latestCodexJsonlMtime(paneDir) {
 /**
  * Latest matching Codex rollout identity for a pane, or null when none exists.
  *
- * WHAT: Cheap-enough file stamp used before parsing rollout tails.
- * WHY: Watcher polls many panes; unchanged path, mtime, and size means the
- *      append-only rollout has no new mirrorable events, so callers can avoid
- *      the bounded tail read. latestSessionFor() still resolves the matching
- *      rollout; caching that index is a separate optimization.
+ * WHAT: Reads the matching rollout's file stamp.
+ * WHY: Keeps unchanged observations from reparsing full rollout tails.
  */
-export function latestCodexJsonlInfo(paneDir) {
-  const file = latestSessionFor(paneDir);
+export function latestCodexJsonlInfo(paneDir, options) {
+  const file = latestSessionFor(paneDir, options);
   if (!file) return null;
   try {
     const st = statSync(file);
@@ -810,7 +720,7 @@ function codexCompactions(events) {
  */
 export function readLastTurnsCodex(paneDir, opts = {}) {
   const { limit = 3, since = null, grep = null, tailBytes = null, headless = false } = opts;
-  const file = latestSessionFor(paneDir);
+  const file = latestSessionFor(paneDir, { sessionCatalog: opts.sessionCatalog || null });
   if (!file) return null;
 
   const events = opts.dreamHistory ? normalizeCodexUserEvents(readCodexDreamEvents(file, typeof opts.dreamHistory === "object" ? opts.dreamHistory : undefined)) : (tailBytes && !since && !grep)

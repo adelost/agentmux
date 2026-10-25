@@ -5,6 +5,7 @@ import {
   latestCodexJsonlMtime,
   readLastTurnsCodex,
 } from "./codex-jsonl-reader.mjs";
+import { codexObserverReader } from "./codex-observer-reader.mjs";
 import {
   kimiWatchDir,
   latestKimiJsonlInfo,
@@ -28,9 +29,10 @@ export function alternateEngineForCommand(command) {
 }
 
 /** WHAT: Resolves a non-Claude journal reader. WHY: Keeps reader routing out of legacy orchestrator files. */
-export function alternateSessionReader(command) {
+export function alternateSessionReader(command, { observe = false } = {}) {
   const engine = alternateEngineForCommand(command);
   if (engine === "codex") {
+    if (observe) return codexObserverReader;
     return {
       readTurns: readLastTurnsCodex,
       latestMtime: latestCodexJsonlMtime,
@@ -60,8 +62,8 @@ export function readAlternateTurns(command, paneDir, options) {
 }
 
 /** WHAT: Reads non-Claude journal freshness. WHY: Keeps activity overlays aligned with their engine store. */
-export function latestAlternateMtime(command, paneDir) {
-  return alternateSessionReader(command)?.latestMtime(paneDir) || null;
+export function latestAlternateMtime(command, paneDir, options) {
+  return alternateSessionReader(command, options)?.latestMtime(paneDir) || null;
 }
 
 /** WHAT: Resolves alternate journal watch roots. WHY: Keeps Kimi writes separate from Claude project paths. */
