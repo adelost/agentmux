@@ -99,7 +99,7 @@ export function snapshotOnTrackProject(project, at, { window = readWindow, bindi
   return { tip, asks, excludedAutomation, c1SourceErrors: result.sourceErrors || [], c1ScopeVersion: 2, rowFirstSeen, bindings: bound.filter(b => asks.some(a => a.observationIds.includes(b.ledgerId))),
     approvalAsks: result.asks.filter(ask => ["discord", "voice-pwa", "discord-voice"].includes(ask.source)
       && observedAskOrigin(ask, inferAskOrigin) === "human").map(ask => ({ id: ask.id, ts: ask.ts, source: ask.source })),
-    outcomeHistory: { base: base || null, changes, errors: historyErrors, commits: commits.map(line => line.split(" ")[0]) },
+    outcomeHistory: { parserVersion: 2, base: base || null, changes, errors: historyErrors, commits: commits.map(line => line.split(" ")[0]) },
     askScope: { agents: project.askAgents, panels: project.askPanels || null, terms: project.askTerms || [],
       rule: "original human discord/voice only; declared project panels OR project text OR actual project binding; engine mirrors/cron/relays excluded" } };
 }

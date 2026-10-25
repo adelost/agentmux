@@ -70,6 +70,7 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
     if ((!ask || !verify(change?.evidence)) && (isPass("C2") || !owned("C2", id))) add("C2", `outcome changed or row removed without human source: ${id}`);
   }
   if (cycle.outcomeHistory) {
+    if (cycle.c1ScopeVersion === 2 && cycle.outcomeHistory.parserVersion !== 2 && isPass("C2")) add("C2", "historical parser version unqualified; report UNKNOWN and preserve original cycle");
     if (!cycle.outcomeHistory.base && isPass("C2")) add("C2", "24h baseline unavailable; report UNKNOWN");
     if (cycle.outcomeHistory.errors?.length && (isPass("C2") || !owned("C2", "history"))) add("C2", "ambiguous historical TASKS source; report UNKNOWN with an owner for history");
     for (const actual of cycle.outcomeHistory.changes) {
