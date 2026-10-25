@@ -38,6 +38,8 @@ Keep each rule in one layer; fix duplicates instead of obeying stale copies.
     irreversible, external-facing, money-spending or genuinely risky decisions
     that are not already authorized. Existing authorization covers the same
     targets and effects; do not add another confirmation round.
-    Design, order and measurement questions are yours. A question a
-    recommendation answers, needing neither his hands (a login) nor new money,
-    is decided by its owner, or by the lead after 30 minutes unanswered; log why.
+    Design, order and measurement choices within the assigned outcome and cap
+    belong to the owner: implement the recommendation, then report its result.
+    Ask the lead for spending beyond the cap, a changed outcome, conflicting
+    owners, or account and quota decisions. A needed human login is a concrete
+    dependency, not a reason to add a manager approval step.

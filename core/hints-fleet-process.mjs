@@ -9,26 +9,29 @@ Never skip a failing test or bypass a hook with \`--no-verify\`.
 
 ## Kommunikationsdisciplin
 
-1. **Prata bara när (a) en STÖRRE uppgift är KLAR, (b) du behöver
-   feedback/beslut, (c) något blockerar mottagaren, eller (d) en checkpoint
-   uttryckligen har beställts.** Inga "klar med X,
-   fortsätter med Y"-status, inga kvittenser, inga artighetsfraser.
-   Commits + ledger ÄR statuskommunikationen.
-2. **Delade träd fryses i KORTA koordinerade gate-fönster** (en utsedd
-   koordinator äger fönstret), aldrig dagar-långa blanket-fences av en
-   annan panels yta.
-3. No skill names or bracketed labels in replies. Comments explain intent, risks or constraints, not a work diary. Preserve requirement scope and source pointers; never copy human quotations.
-4. **Skriv kort och konkret.** Korta meningar med punkt, punktlista när
-   det hjälper. Stryk utfyllnad, aldrig fakta: kvar står vad som ändrats,
-   beviset och den verkliga begränsningen. Ingen påhittad telegramstil.
-   - Läge. Före: "Status: klart. Verifiering: genomförd. Risk: låg. Nästa
-     steg: inga." Efter: "521 är live som 8ec8be7a. Smoke 5/5, bindningarna
-     oförändrade."
-   - Förklaring. Före: "Kedjan körs i ett eget network namespace med enbart
-     loopback." Efter: "Sandlådan når bara den egna datorn. Inget prov kan
-     nå betaltjänster eller kunddata."
-   - Stopp. Före: tre stycken om vad som inte ingår. Efter: "Stoppat:
-     wrangler är utloggad. Nästa: \`wrangler login\`, sedan samma steg igen."
+Mellan agenter gäller:
+
+1. **Ett jobb per plats.** TASKS-raden visar läget; uppdatera den vid
+   checkpoint. Skriv leveransbevis vid DONE, släpp eller använda pengar i
+   uppgiftens befintliga kvittofil. Skapa inte en kvittofil per meddelande.
+   Meddelanden gäller bara klart, stopp eller beslut.
+2. **Gör meddelandet användbart direkt.** Klart: högst tre rader med
+   ändringen, huvudsiffran och kvittolänken. Stopp: orsak och vad som behövs.
+   Beslut: fråga och rekommendation. Korta texten utan att tappa fakta;
+   mottagaren ska kunna agera utan att öppna länken.
+3. **Ta bort sidospår.** Lista inte sådant som inte gjordes om ingen har
+   frågat. Använd SHA eller länk för interna id i löptext.
+4. **En mottagare.** Skriv till nästa ägare eller den som måste agera,
+   utan kopior för kännedom.
+5. **Ägaren fattar beslut inom målet och det godkända taket.** Genomför
+   förslag inom ramen och rapportera resultatet. Fråga ledaren vid pengar
+   över taket, ändrat mål, ägarkonflikt eller konto- och kvotfrågor.
+6. **Bind mänskliga beställningar direkt.** Mottagaren skapar eller länkar
+   TASKS-raden och skriver beställningens delivery-id i Source-cellen.
+
+Delade träd fryses bara under korta koordinerade gate-fönster med utsedd
+koordinator, aldrig genom en annan panels långvariga blanket-fence.
+No skill names or bracketed labels in replies. Comments explain intent, risks or constraints, not a work diary. Preserve requirement scope and source pointers; never copy human quotations.
 
 ## Staffing and review economics
 
@@ -36,7 +39,7 @@ Never skip a failing test or bypass a hook with \`--no-verify\`.
 - The allocator names READY owners once; owners then build and deliver without a manager round-trip.
 - Do not wake a fleet to look busy; wake only the exact owner of authorised work.
 - Respect actual availability: one active feature per agent, within the project's concurrency limit.
-- TASKS is status; messages are DONE, concrete stops, decisions and requested checkpoints.
+- TASKS owns status and checkpoints; messages are DONE, concrete stops or decisions.
 - Human direction is authoritative; current direct instructions outrank relayed decisions and older rules.
 
 ## Read when triggered

@@ -22,6 +22,8 @@
    delivery failure or idle-capacity gap. Work, decisions, merge and delivery
    need no manager round-trip after allocation and the one brief.
    Explicitly requested human approval still applies.
+   Send DONE, stops or decisions to the one next actor, without FYI copies.
+   Checkpoints update TASKS rather than starting another message round.
 
 3. **Do not wake a fleet to look busy.** A durable task wakes its exact owner;
    dormant panes stay dormant. "Sync/check all panels" means reading status
