@@ -5,6 +5,7 @@ import { readWindow } from "./ask-ledger.mjs";
 import { inferAskOrigin } from "./ask-origin.mjs";
 import { observedAskOrigin } from "./ask-source-evidence.mjs";
 import { onTrackProjectAsk } from "./on-track-scope.mjs";
+import { parseSenderHeader } from "./sender-detect.mjs";
 import { readAskBindings } from "./ask-bindings.mjs";
 import { onTrackGit, onTrackRows } from "./on-track-evidence.mjs";
 import { createState } from "./state.mjs";
@@ -41,9 +42,10 @@ export function readOnTrackProjects(path = onTrackPaths().config) {
 }
 
 /** WHAT: Builds a frozen project ask and TASKS snapshot for one review. WHY: Prevents asks from disappearing between reminder and submission. */
-export function snapshotOnTrackProject(project, at, { window = readWindow, bindings = readAskBindings } = {}) {
+export function snapshotOnTrackProject(project, at, { window = readWindow, bindings = readAskBindings, coveredUntil = null, baseline = false } = {}) {
   const bound = bindings();
-  const result = window({ since: at - 86400000, until: at, provenance: true });
+  const from = !baseline && Number.isFinite(coveredUntil) ? coveredUntil : at - 86400000;
+  const result = window({ since: Math.min(from, at - 86400000), until: at, provenance: true });
   if (!result.files.length) throw Error("ask-ledger coverage unavailable");
   const rootPrefix = `${project.root}/`;
   const common = root => onTrackGit(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).trim();
@@ -62,7 +64,7 @@ export function snapshotOnTrackProject(project, at, { window = readWindow, bindi
     return onTrackProjectAsk(project, ask, { sameProject: related.some(b => b.ref.startsWith(rootPrefix) || commonOfBinding(b) === ownCommon),
       otherProject: related.some(b => commonOfBinding(b) && commonOfBinding(b) !== ownCommon) });
   };
-  const asks = result.asks.filter(inScope)
+  const asks = result.asks.filter(ask => Date.parse(ask.ts) > from && inScope(ask))
     .map(ask => ({ id: ask.id, observationIds: ask.observationIds || [ask.id], nativeEvent: ask.nativeEvent,
       originUncertain: observedAskOrigin(ask, inferAskOrigin) === "unknown",
       ts: ask.ts, agent: ask.agent, pane: ask.pane, text: ask.verbatim, source: ask.source, ledgerPath: ask.ledgerPath,
@@ -73,6 +75,16 @@ export function snapshotOnTrackProject(project, at, { window = readWindow, bindi
   const excludedAutomation = result.asks.filter(ask => inScope(ask) && ask.originEvidence && observedAskOrigin(ask, inferAskOrigin) === "system")
     .map(ask => ({ id: ask.id, observationIds: ask.observationIds || [ask.id], evidence: ask.originEvidence }));
   const tip = onTrackGit(project.root, ["rev-parse", "--verify", "--end-of-options", `${project.ref || "HEAD"}^{commit}`]).trim();
+  const currentRows = onTrackRows(onTrackGit(project.root, ["show", `${tip}:${project.ledger}`]));
+  for (const ask of asks) ask.matchedRows = Object.values(currentRows).filter(row => {
+    const tokens = String(row.source || "").match(/(?:delivery:)?[a-f0-9]{32,64}\b/gu) || [];
+    return ask.observationIds.some(id => tokens.some(token => token.replace(/^delivery:/u, "") === id.replace(/^delivery:/u, "")));
+  }).map(row => row.row);
+  const decisionOwners = project.decisionOwners || [project.dispatcher];
+  const decisions = [...(result.posts || []).filter(p => p.kind === "reply" && p.status === "sent" && decisionOwners.includes(`${p.agent}:${p.pane}`))
+    .map(p => ({ id: p.id, by: `${p.agent}:${p.pane}`, at: p.ts, text: p.text, source: p.ledgerPath })),
+  ...result.asks.filter(a => decisionOwners.includes(parseSenderHeader(a.verbatim)?.key))
+    .map(a => ({ id: a.id, by: parseSenderHeader(a.verbatim).key, at: a.ts, text: a.verbatim, source: a.ledgerPath }))];
   const since = new Date(at - 86400000).toISOString();
   const base = onTrackGit(project.root, ["rev-list", "-1", `--before=${since}`, tip, "--", project.ledger]).trim();
   const commits = onTrackGit(project.root, ["log", "--reverse", "--format=%H %ct", `--since=${since}`, tip, "--", project.ledger]).trim().split("\n").filter(Boolean);
@@ -96,7 +108,7 @@ export function snapshotOnTrackProject(project, at, { window = readWindow, bindi
     }
     previous = next;
   }
-  return { tip, asks, excludedAutomation, c1SourceErrors: result.sourceErrors || [], c1ScopeVersion: 2, rowFirstSeen, bindings: bound.filter(b => asks.some(a => a.observationIds.includes(b.ledgerId))),
+  return { tip, asks, decisions, sourceWindow: { from, until: at }, excludedAutomation, c1SourceErrors: result.sourceErrors || [], c1ScopeVersion: 3, rowFirstSeen, bindings: bound.filter(b => asks.some(a => a.observationIds.includes(b.ledgerId))),
     approvalAsks: result.asks.filter(ask => ["discord", "voice-pwa", "discord-voice"].includes(ask.source)
       && observedAskOrigin(ask, inferAskOrigin) === "human").map(ask => ({ id: ask.id, ts: ask.ts, source: ask.source })),
     outcomeHistory: { parserVersion: 2, base: base || null, changes, errors: historyErrors, commits: commits.map(line => line.split(" ")[0]) },

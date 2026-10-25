@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto";
 import { onTrackFresh, onTrackGit, onTrackRows, onTrackOwner, verifyOnTrackEvidence, verifyOnTrackLive } from "./on-track-evidence.mjs";
+import { activeOnTrackRow, leaderQueueStop } from "./on-track-contract.mjs";
 
 /** WHAT: Defines the fixed review checklist. WHY: Prevents agents from silently replacing the human's review with their own plan. */
 export const ON_TRACK_CHECKS = Object.freeze({
@@ -9,7 +10,6 @@ export const ON_TRACK_CHECKS = Object.freeze({
   C4: "All configured main live paths have green evidence observed within 60 minutes; no new paid hourly run.",
   C5: "Previous deviations are resolved with evidence or have an owner and action.",
 });
-const closed = state => /^(closed|done|dropped|later|stängd|klar|avslutad)\b/iu.test(state);
 const stopKinds = new Set(["red", "unexpected-value", "money-cap", "new-cause", "human-decision"]);
 
 /** WHAT: Checks source integrity, full coverage and one independent PASS sample. WHY: Keeps missing evidence and unknown answers visible as deviations. */
@@ -44,16 +44,21 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
     if (!Object.hasOwn(ON_TRACK_CHECKS, d.check) || !d.row || !onTrackOwner(d.owner) || !d.action) add("deviation", "missing check/row/single owner/action");
     else if (!deviations.some(existing => existing.check === d.check && existing.row === d.row)) deviations.push(d);
   }
-  const mappings = receipt?.asks || [];
-  if (cycle.c1ScopeVersion === 2 && isPass("C1") === false && checks.find(c => c.id === "C1")?.result === "UNKNOWN"
+  const mappings = [...receipt.asks];
+  for (const ask of cycle.asks || []) if (!mappings.some(m => m.askId === ask.id) && ask.matchedRows?.length === 1) {
+    const row = rows[ask.matchedRows[0]];
+    if (row) mappings.push({ askId: ask.id, disposition: "row", row: row.row, owner: row.ownerId || row.owner, estimate: row.estimate,
+      outcome: row.outcome, automatic: true, evidence: { kind: "file", path: project.ledger, sha: cycle.tip, line: row.line, quote: row.quote, at: new Date(at).toISOString() } });
+  }
+  if (cycle.c1ScopeVersion >= 2 && isPass("C1") === false && checks.find(c => c.id === "C1")?.result === "UNKNOWN"
     && !cycle.c1SourceErrors?.length) add("C1", "UNKNOWN requires an unreadable original source; missing orders are FAIL");
   for (const ask of cycle.asks || []) {
     const mapping = mappings.find(m => m.askId === ask.id), row = rows[mapping?.row];
-    if (cycle.c1ScopeVersion === 2 && mapping?.disposition === "answered") {
+    if (cycle.c1ScopeVersion >= 2 && mapping?.disposition === "answered") {
       if (!mapping.reason || !ask.replies?.some(p => p.id === mapping.replyId) || !verify(mapping.evidence)) add("C1", `answer link missing or unrelated: ${ask.id}`);
       continue;
     }
-    if (cycle.c1ScopeVersion === 2 && mapping?.disposition && !["row", "missing"].includes(mapping.disposition)) add("C1", `invalid disposition: ${ask.id}`);
+    if (cycle.c1ScopeVersion >= 2 && mapping?.disposition && !["row", "missing"].includes(mapping.disposition)) add("C1", `invalid disposition: ${ask.id}`);
     if (cycle.c1ScopeVersion !== 2 && mapping?.disposition && mapping.disposition === ask.disposition?.kind && mapping.bindingRef === ask.disposition.binding.ref && mapping.reason) continue;
     if (ask.originUncertain && (isPass("C1") || !owned("C1", ask.id))) add("C1", `source origin unknown: ${ask.id}`);
     if (mapping?.row === null && mapping.reason && !isPass("C1") && owned("C1", ask.id) && verify(mapping.evidence)) continue;
@@ -70,7 +75,7 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
     if ((!ask || !verify(change?.evidence)) && (isPass("C2") || !owned("C2", id))) add("C2", `outcome changed or row removed without human source: ${id}`);
   }
   if (cycle.outcomeHistory) {
-    if (cycle.c1ScopeVersion === 2 && cycle.outcomeHistory.parserVersion !== 2 && isPass("C2")) add("C2", "historical parser version unqualified; report UNKNOWN and preserve original cycle");
+    if (cycle.c1ScopeVersion >= 2 && cycle.outcomeHistory.parserVersion !== 2 && isPass("C2")) add("C2", "historical parser version unqualified; report UNKNOWN and preserve original cycle");
     if (!cycle.outcomeHistory.base && isPass("C2")) add("C2", "24h baseline unavailable; report UNKNOWN");
     if (cycle.outcomeHistory.errors?.length && (isPass("C2") || !owned("C2", "history"))) add("C2", "ambiguous historical TASKS source; report UNKNOWN with an owner for history");
     for (const actual of cycle.outcomeHistory.changes) {
@@ -80,28 +85,30 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
     }
   }
   const tracked = receipt?.rows || [];
-  for (const row of Object.values(rows).filter(r => !closed(r.state))) {
+  for (const row of Object.values(rows).filter(activeOnTrackRow)) {
     const record = tracked.find(r => r.row === row.row);
+    const queued = leaderQueueStop(record?.stop, { project, cycle, rows, row, verify });
+    const stopped = queued || (stopKinds.has(record?.stop?.kind) && verify(record.stop.evidence));
     if (row.ownerId === "human" && record && verify(record.evidence)
       && record.stop?.kind === "human-decision" && verify(record.stop.evidence)) continue;
     if (!record || !verify(record.evidence) || !verify(record.ownerLog)) {
       if (isPass("C3") || !owned("C3", row.row)) add("C3", `missing task/latest-owner-log evidence: ${row.row}`);
       continue;
     }
-    let latest = null;
+    let latest = null, ownerRead = false;
     try {
       const log = JSON.parse(commands[record.ownerLog.record]?.stdout);
-      if (log.owner === row.ownerId) latest = log.latest;
+      if (log.owner === row.ownerId) { latest = log.latest; ownerRead = true; }
     } catch { /* Missing source is an explicit C3 validation error below. */ }
-    if ((!latest || (record.progressAt && record.progressAt !== latest.ts)) && (isPass("C3") || !owned("C3", row.row))) add("C3", `latest owner post not verified: ${row.row}`);
+    if ((!ownerRead || (!latest && !stopped) || (record.progressAt && record.progressAt !== latest?.ts)) && (isPass("C3") || !owned("C3", row.row))) add("C3", `latest owner post not verified: ${row.row}`);
     if (record.waitingSince && (!Number.isFinite(Date.parse(record.waitingSince)) || Date.parse(record.waitingSince) > at)) add("C3", `invalid wait timestamp: ${row.row}`);
-    if (record.waitingSince && (!stopKinds.has(record.stop?.kind) || !verify(record.stop?.evidence))) {
+    if (record.waitingSince && !stopped) {
       if (isPass("C3")) add("C3", `unjustified wait: ${row.row}`);
       const deviation = deviations.find(d => d.check === "C3" && d.row === row.row);
       if (!deviation) add("C3", `unjustified wait needs an assigned deviation owner: ${row.row}`);
       else deviation.waitingSince = record.waitingSince;
     }
-    if (!record.waitingSince && !onTrackFresh(latest?.ts, at) && isPass("C3")) add("C3", `progress time unknown/stale: ${row.row}`);
+    if (!record.waitingSince && !stopped && !onTrackFresh(latest?.ts, at) && isPass("C3")) add("C3", `progress time unknown/stale: ${row.row}`);
   }
   for (const path of project.livePaths) {
     const proof = receipt?.live?.find(p => p.path === path);
@@ -121,7 +128,8 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
       || (recheck && !recheck(chosen, context))) add("sample", `${chosen.id} disagreed on independent read`);
   }
   return { valid: errors.length === 0, errors, deviations, sampled: chosen?.id || null,
-    outcomes: Object.fromEntries(Object.values(rows).map(r => [r.row, r.outcome])), at, reviewed: checks.length,
+    outcomes: Object.fromEntries(Object.values(rows).map(r => [r.row, r.outcome])), at, coveredUntil: cycle.at,
+    sourceWindow: cycle.sourceWindow || { from: cycle.at - 86400000, until: cycle.at }, automaticMappings: mappings.filter(m => m.automatic), reviewed: checks.length,
     askLatencyMs: (cycle.asks || []).map(a => { const mapping = mappings.find(m => m.askId === a.id);
       const created = cycle.rowFirstSeen?.[mapping?.row];
       const bound = cycle.bindings?.find(b => [a.id, ...(a.observationIds || [])].includes(b.ledgerId) && b.kind === "row" && b.ref.endsWith(`:${mapping?.row}`));

@@ -24,7 +24,8 @@ export function onTrackFile(project, path) {
 /** WHAT: Checks a quoted Git line or controller-captured command. WHY: Prevents reviewer-provided hashes from standing in for execution. */
 export function verifyOnTrackEvidence(evidence, { project, cycle, at, commands = {} }) {
   try {
-    if (!onTrackFresh(evidence?.at, at)) return false;
+    const immutableBaselineRead = evidence?.kind === "file" && cycle.baseline && Date.parse(evidence.at) >= cycle.at && Date.parse(evidence.at) <= at && at - Date.parse(evidence.at) <= 7200000;
+    if (!onTrackFresh(evidence?.at, at) && !immutableBaselineRead) return false;
     if (evidence.kind === "file") {
       onTrackFile(project, evidence.path);
       if (!/^[a-f0-9]{40}$/u.test(evidence.sha) || !Number.isSafeInteger(evidence.line) || evidence.line < 1 || !evidence.quote) return false;
@@ -90,7 +91,7 @@ export function onTrackRows(text) {
     if (rows[cells[0]]) throw Error(`duplicate TASKS row ${cells[0]}; source is ambiguous`);
     const field = (...names) => { const pos = names.map(name => headers.indexOf(name)).find(index => index >= 0); return pos === undefined ? "" : cells[pos] || ""; };
     rows[cells[0]] = { row: cells[0], line: index + 1, quote: line, owner: field("owner", "agare"), ownerId: onTrackOwner(field("owner", "agare")), estimate: field("estimate", "budget"),
-      outcome: field("donewhen", "acceptance", "klartnar", "outcome", "vad"), state: field("state", "status", "lage"), title: field("outcome", "task", "title", "vad") };
+      outcome: field("donewhen", "acceptance", "klartnar", "outcome", "vad"), state: field("state", "status", "lage"), title: field("outcome", "task", "title", "vad"), source: field("source") };
   }
   return rows;
 }

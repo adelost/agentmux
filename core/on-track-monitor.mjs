@@ -1,5 +1,6 @@
 import { ON_TRACK_CHECKS, validateOnTrackReceipt } from "./on-track-validation.mjs";
 import { onTrackOwner } from "./on-track-evidence.mjs";
+import { onTrackCoveredUntil } from "./on-track-contract.mjs";
 
 /** WHAT: Names the persisted scheduler state. WHY: Prevents bridge restarts from losing deadlines and uncertain delivery outcomes. */
 export const ON_TRACK_STATE = "on_track_v1";
@@ -8,7 +9,7 @@ const iso = at => new Date(at).toISOString();
 
 /** WHAT: Formats the fixed reviewer request and frozen input identities. WHY: Keeps review deadlines independent of an agent's memory. */
 export function onTrackReminder(project, cycle) {
-  return `On-track ${project.id}, cycle ${cycle.id}. Receipt due ${iso(cycle.deadline)}. Read the actual files and owner logs; no self-rating.\n`
+  return `On-track ${project.id}, cycle ${cycle.id}. ${cycle.baseline ? "First baseline: 24h input, 2h grace. " : ""}Receipt due ${iso(cycle.deadline)}. Read the actual files and owner logs; no self-rating.\n`
     + Object.entries(ON_TRACK_CHECKS).map(([id, text]) => `${id}: ${text}`).join("\n")
     + `\nLive paths: ${project.livePaths.join(", ")}. No new paid run. TASKS ${project.root}/${project.ledger}@${cycle.tip || "UNKNOWN"}.\n`
     + `Read frozen asks and previous deviations: amux on-track show ${project.id}. Evidence/schema: amux on-track --help.\n`
@@ -41,20 +42,25 @@ export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHu
   async function escalate(project, cycle, reason) {
     const text = `On-track deviation ${project.id}, ${cycle.id}: ${reason}. Reviewer ${project.reviewer}; deadline ${iso(cycle.deadline)}. Read amux on-track show ${project.id}. Resolve with an owner/action; no resend or account move.`;
     await deliver(project, cycle, "dispatcher", project.dispatcher, text);
-    await deliver(project, cycle, "reviewer-deviation", project.reviewer, text);
+    if (project.reviewer !== project.dispatcher) await deliver(project, cycle, "reviewer-deviation", project.reviewer, text);
   }
 
   async function start(project, at, scheduledAt = at) {
+    const record = get(project.id), previous = record?.lastReview || null;
+    const baseline = !!project.baselinePolicy && at >= Date.parse(project.baselineAfter)
+      && record?.baselinePolicy !== project.baselinePolicy;
+    const coveredUntil = onTrackCoveredUntil(record, (state.get(ON_TRACK_STATE)?.history || []).filter(c => c.project === project.id));
     let input;
-    try { input = await snapshot(project, at); }
+    try { input = await snapshot(project, at, { coveredUntil, baseline }); }
     catch (error) { input = { tip: null, asks: [], sourceError: error.message }; }
-    const previous = get(project.id)?.lastReview || null;
     const cycle = { ...input, id: `${project.id}:${at}`, at, scheduledAt, missedHours: Math.floor((at - scheduledAt) / HOUR),
-      deadline: at + DEADLINE, previous, deliveries: {}, status: "waiting" };
+      baseline, baselinePolicy: baseline ? project.baselinePolicy : null,
+      deadline: at + (baseline ? 7200000 : DEADLINE), previous, deliveries: {}, status: "waiting" };
     mutate(data => {
       const old = data.projects[project.id];
       if (old?.cycle) data.history.push({ project: project.id, ...old.cycle });
-      data.projects[project.id] = { ...old, config: project, nextAt: scheduledAt + (Math.floor((at - scheduledAt) / HOUR) + 1) * HOUR, cycle };
+      data.projects[project.id] = { ...old, config: project, ...(baseline ? { baselinePolicy: project.baselinePolicy, baselineCycleId: cycle.id } : {}),
+        nextAt: scheduledAt + (Math.floor((at - scheduledAt) / HOUR) + 1) * HOUR, cycle };
     });
     await deliver(project, cycle, "reminder", project.reviewer, onTrackReminder(project, cycle));
     if (input.sourceError) await escalate(project, cycle, `source UNKNOWN: ${input.sourceError}`);
@@ -86,6 +92,28 @@ export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHu
     }
     for (const project of configured) {
       let record = get(project.id);
+      if (record && JSON.stringify(record.config) !== JSON.stringify(project)) {
+        mutate(data => { data.projects[project.id].config = project; }); record = get(project.id);
+      }
+      if (project.baselinePolicy && record?.baselinePolicy !== project.baselinePolicy && record?.cycle
+        && !record.cycle.review && record.cycle.at >= Date.parse(project.baselineAfter)) {
+        const old = record.cycle;
+        let input;
+        try { input = await snapshot(project, old.at, { baseline: true, coveredUntil: null }); }
+        catch (error) { input = { sourceError: error.message }; }
+        mutate(data => {
+          const current = data.projects[project.id];
+          current.cycle.originalInput ||= { ...current.cycle };
+          if (!input.sourceError && input.tip) delete current.cycle.sourceError;
+          Object.assign(current.cycle, input, { baseline: true, baselinePolicy: project.baselinePolicy, deadline: old.at + 7200000 });
+          current.cycle.deadlineChanges ||= [];
+          current.cycle.deadlineChanges.push({ at: now(), from: old.deadline, to: old.at + 7200000, authority: project.baselinePolicy });
+          current.baselinePolicy = project.baselinePolicy; current.baselineCycleId = old.id;
+        });
+        record = get(project.id);
+        await deliver(project, record.cycle, "baseline-amendment", project.reviewer,
+          `On-track baseline approved (${project.baselinePolicy}), cycle ${old.id}. Original times retained; 24h source window, deadline ${iso(record.cycle.deadline)}. Read updated show. No original reminder resent.`);
+      }
       const cycle = record?.cycle;
       if (cycle && !cycle.review && now() >= cycle.deadline) {
         mutate(data => {
@@ -96,7 +124,8 @@ export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHu
         });
         await escalate(project, cycle, "receipt absent or invalid after 20 minutes");
       }
-      if (project.enabled !== false && (!record || now() >= record.nextAt)) {
+      const baselinePending = cycle?.baseline && !cycle.review && now() < cycle.deadline;
+      if (project.enabled !== false && !baselinePending && (!record || now() >= record.nextAt)) {
         if (record) await start(project, now(), record.nextAt);
         else await start(project, now());
       }

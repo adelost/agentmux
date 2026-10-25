@@ -22,7 +22,7 @@ amux on-track capture PROJECT PROBE
 amux on-track capture-owner PROJECT AGENT:PANE
 amux on-track stats   (also amux done --on-track)
 
-Hourly schedule, 20 minute receipt deadline, C1-C5. No self-rating.
+Hourly schedule, normal20min deadline, controller-approved first baseline24h/2h. No self-rating.
 Receipt: {project,cycle,at,checks:[{id,result:"PASS|FAIL|UNKNOWN",evidence:[]}],deviations:[{check,row,owner,action}],asks:[],rows:[],live:[],outcomeChanges:[],resolved:[]}
 File evidence: {kind:"file",path:"docs/TASKS.md",sha:"40 hex",line:12,quote:"exact line",at:"ISO"}.
 Command evidence: use capture's returned JSON, including actual exitCode, sha256 and command. Only configured probes run, at explicit capture, never at receipt submission.
@@ -30,7 +30,9 @@ asks: EVERY original scoped order has disposition row, answered or missing.
 row: {askId,disposition:"row",row,owner,estimate,outcome,evidence}; outcome is TASKS Done when.
 answered: {askId,disposition:"answered",replyId,reason,evidence}; replyId must be a frozen canonical reply.
 missing: {askId,disposition:"missing",row:null,reason,evidence} plus owned C1 FAIL. UNKNOWN only for an unreadable source.
-rows: [{row,evidence,ownerLog,progressAt,waitingSince?,stop?:{kind,evidence},action?}] for EVERY open row. Stop kinds: red,unexpected-value,money-cap,new-cause,human-decision.
+Source delivery IDs are matched automatically when exactly one TASKS row carries the ID. Original receipt mappings remain inspectable.
+rows: [{row,evidence,ownerLog,progressAt,waitingSince?,stop?:{kind,evidence},action?}] for active rows only. Read capture-owner once per owner. Later/parked/terminal rows are excluded.
+Stop kinds: red,unexpected-value,money-cap,new-cause,human-decision,leader-queue. leader-queue needs predecessor OR gate, decisionId from frozen decisions, and evidence; estimates never stop progress.
 live: [{path,result,at,evidence}] for EVERY configured live path. No new paid hourly run.
 outcomeChanges: [{row,commit,askId,evidence}]. resolved: [{check,row,evidence}].
 FAIL/UNKNOWN require an owned deviation. userOrMoneyImpact:true also notifies the human immediately.
@@ -80,9 +82,11 @@ export async function cmdOnTrack(args, dependencies = {}) {
       if (!/^[\w-]+:\d+$/u.test(file)) throw Error("invalid owner address");
       selected = { ...project, probes: { owner: [process.execPath, fileURLToPath(new URL("../bin/on-track-owner-log.mjs", import.meta.url)), file] } };
     }
-    const result = captureOnTrackCommand({ project: selected, cycle: record.cycle, probe: action === "capture-owner" ? "owner" : file });
-    const key = randomUUID();
-    state.updateKey(ON_TRACK_STATE, data => { data.commands[key] = result; return data; });
+    const prior = action === "capture-owner" && Object.entries(state.get(ON_TRACK_STATE).commands || {}).find(([,r]) =>
+      r.project === id && r.cycle === record.cycle.id && r.probe === "owner" && r.command.at(-1) === file && Date.now() - Date.parse(r.at) < 3600000);
+    const result = prior ? prior[1] : captureOnTrackCommand({ project: selected, cycle: record.cycle, probe: action === "capture-owner" ? "owner" : file });
+    const key = prior ? prior[0] : randomUUID();
+    if (!prior) state.updateKey(ON_TRACK_STATE, data => { data.commands[key] = result; return data; });
     const evidence = { kind: "command", record: key, at: result.at, command: result.command, exitCode: result.exitCode, sha256: result.sha256 };
     console.log(JSON.stringify(evidence, null, 2)); return evidence;
   }
