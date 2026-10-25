@@ -15,8 +15,11 @@ export function createCodexRecovery({ state, broker, agent, configPath, notify, 
   return {
     async tick(input) {
       await refreshCodexRefusals(input.result, selectedCodexProfile(state, input.name, input.pane).home);
-      await capacity.tick(input);
-      await limits.tick(input);
+      // Ordinary output needs no recovery writer; a sibling input may hold that lane for a minute.
+      if (input.result?.refusals?.length) {
+        await capacity.tick(input);
+        await limits.tick(input);
+      }
       const request = codexAccountRequest(state, input.name, input.pane);
       if (!input.idleBoundary || !broker?.queue || !request || !["pending", "switched"].includes(request.phase)) return;
       const ctx = { ...context(), agent, state, configPath, deliveryQueue: broker.queue };

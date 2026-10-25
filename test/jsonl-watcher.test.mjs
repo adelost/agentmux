@@ -9,6 +9,7 @@ import { keepClaudeDefaultModel } from "../core/claude-default-model.mjs";
 import { runLockedClaudeModelChange } from "../core/claude-model-command.mjs";
 import { readParkState, shouldBlockSend } from "../core/pane-park.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
+import { createSessionLanes } from "../core/delivery-session-lane.mjs";
 
 // A downgrade pushes to the operator's phone. No test may reach the real Discord.
 vi.mock("../cli/send-notify.mjs", async (importOriginal) => ({
@@ -57,7 +58,7 @@ function mkDiscord({ paceMs = 0, failSends = false } = {}) {
  * the Codex reader's latestSessionFor() picks it up. Mirrors the Claude
  * helper's contract so tests stay parallel-readable.
  */
-function setupCodexWatcher({ codexEvents = [], stateInitial = {}, rolloutName = "rollout-2026-05-10T00-00-00-test.jsonl" } = {}) {
+function setupCodexWatcher({ codexEvents = [], stateInitial = {}, deliveryBroker = null, rolloutName = "rollout-2026-05-10T00-00-00-test.jsonl" } = {}) {
   const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-watcher-codex-test-"));
   const origHome = process.env.HOME;
   process.env.HOME = fakeHome;
@@ -95,6 +96,7 @@ function setupCodexWatcher({ codexEvents = [], stateInitial = {}, rolloutName = 
 
   const watcher = createJsonlWatcher({
     agent,
+    deliveryBroker,
     agentsYamlPath,
     discord,
     state,
@@ -116,7 +118,7 @@ function setupCodexWatcher({ codexEvents = [], stateInitial = {}, rolloutName = 
   };
 }
 
-function setupWatcher({ jsonlLines = [], stateInitial = {}, discordOptions = {} } = {}) {
+function setupWatcher({ jsonlLines = [], stateInitial = {}, discordOptions = {}, deliveryBroker = null } = {}) {
   const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-watcher-test-"));
   const origHome = process.env.HOME;
   process.env.HOME = fakeHome;
@@ -157,6 +159,7 @@ function setupWatcher({ jsonlLines = [], stateInitial = {}, discordOptions = {} 
 
   const watcher = createJsonlWatcher({
     agent,
+    deliveryBroker,
     agentsYamlPath,
     discord,
     state,
@@ -234,6 +237,44 @@ function toolResult(content, ts) {
 }
 
 // --- Tests ----------------------------------------------------------------
+
+feature("watcher: ordinary replies do not wait for a sibling delivery writer (98)", () => {
+  for (const engine of ["claude", "codex"]) unit(`${engine} publishes its completed reply while the session lane is held`, {
+    given: ["a real session lane held by another pane and no provider refusal in the completed journal", async () => {
+      const lanes = createSessionLanes({ queue: { targets: () => [] } });
+      let release;
+      const hold = new Promise(done => { release = done; });
+      const held = lanes.runExclusive("testagent", 1, () => hold);
+      const broker = { runExclusive: vi.fn(lanes.runExclusive), queue: { list: () => [] } };
+      const start = new Date(Date.now() - 2000).toISOString(), end = new Date(Date.now() - 1000).toISOString();
+      const ctx = engine === "claude" ? setupWatcher({ deliveryBroker: broker,
+        jsonlLines: [userTurn("ordinary input", start), assistantText("ordinary complete reply", end, "end_turn")],
+        stateInitial: { watcher_last_posted_ts: { "ch-test": 1 } },
+      }) : setupCodexWatcher({ deliveryBroker: broker, codexEvents: [
+        { type: "event_msg", timestamp: start, payload: { type: "user_message", message: "ordinary input" } },
+        { type: "event_msg", timestamp: end, payload: { type: "token_count", info: {} } },
+        { type: "response_item", timestamp: end, payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "ordinary complete reply" }] } },
+        { type: "event_msg", timestamp: end, payload: { type: "task_complete" } },
+      ], stateInitial: { watcher_last_posted_ts: { "ch-codex": 1 } } });
+      return { ctx, broker, held, release };
+    }],
+    when: ["mirroring before the sibling releases its writer", async fx => {
+      const pending = fx.ctx.watcher.checkPane("testagent", 0, fx.ctx.agentRootDir);
+      await new Promise(setImmediate);
+      const beforeRelease = fx.ctx.discord.sends.filter(post => post.payload === "ordinary complete reply").length;
+      const recoveryWriters = fx.broker.runExclusive.mock.calls.length;
+      fx.release();
+      await fx.held; await pending;
+      return { beforeRelease, recoveryWriters, posts: fx.ctx.discord.sends.filter(post => post.payload === "ordinary complete reply").length };
+    }],
+    then: ["the final reply posts once without requesting a recovery writer", result => {
+      expect(result.beforeRelease).toBe(1);
+      expect(result.recoveryWriters).toBe(0);
+      expect(result.posts).toBe(1);
+    }],
+    cleanup: fx => { fx.release(); fx.ctx.cleanup(); },
+  });
+});
 
 feature("watcher: repeated quota stop after background completions", () => {
   unit("one quota episode mirrors once while every source item is acknowledged", {
