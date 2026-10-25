@@ -1,0 +1,83 @@
+{
+  "row": 94,
+  "runtimeVersion": "1.25.343",
+  "runtimeSourceSha": "aa608d1453bdaede18cd48650efdecae2aaac32b",
+  "installedAt": "2026-10-25T11:50:05.420Z",
+  "firstCommitAt": "2026-10-25T11:58:31+01:00",
+  "commitToInstalledSeconds": 3094.42,
+  "codeOwners": 1,
+  "existingScheduleHandoffOwner": "lsrc:3",
+  "focusedTests": {
+    "files": 13,
+    "passed": 156
+  },
+  "strictLintFindings": 0,
+  "installedFilesVerified": 619,
+  "bridgePid": 226881,
+  "bridgeSourceSha": "aa608d1453bdaede18cd48650efdecae2aaac32b",
+  "firstCycle": {
+    "id": "cutkit:1792927964245",
+    "at": "2026-10-25T11:32:44.245000+00:00",
+    "deadline": "2026-10-25T11:52:44.245000+00:00",
+    "nextAt": "2026-10-25T12:32:44.245000+00:00",
+    "reminder": {
+      "status": "delivered",
+      "at": "2026-10-25T11:32:52.778Z",
+      "key": "cutkit:1792927964245:reminder",
+      "jobId": "c2ac34d0883d0adaa5d026e5dabae94a",
+      "transportStatus": "acknowledged",
+      "acknowledgedAt": 1792928060484
+    },
+    "status": "reviewed",
+    "reviewAt": "2026-10-25T11:46:22.824000+00:00",
+    "valid": true,
+    "checks": [
+      {
+        "id": "C1",
+        "result": "UNKNOWN"
+      },
+      {
+        "id": "C2",
+        "result": "UNKNOWN"
+      },
+      {
+        "id": "C3",
+        "result": "FAIL"
+      },
+      {
+        "id": "C4",
+        "result": "UNKNOWN"
+      },
+      {
+        "id": "C5",
+        "result": "UNKNOWN"
+      }
+    ],
+    "deviations": 380,
+    "sampled": null,
+    "acceptedUnderVersion": "1.25.342",
+    "immutableThrough343": true
+  },
+  "legacyReviewHandoffVerified": true,
+  "billingWakeRetained": true,
+  "routing": [
+    "lsrc",
+    "skyvw"
+  ],
+  "nativeScheduledSourceVerified": true,
+  "producerQueueSourceVerified": true,
+  "originalSourceAliasesRetained": true,
+  "unknownSourcesVisible": true,
+  "modelsInvoked": 0,
+  "paidApiCalls": 0,
+  "evidenceRoot": "/home/adelost/lsrc/.artifacts/amux-on-track-claw5-20261025",
+  "limits": [
+    "Natural-language outcome equivalence remains reviewer judgment",
+    "No PASS in first real receipt; random PASS source recheck exercised in focused tests",
+    "Other projects require their named reviewer/routing registration"
+  ],
+  "processStops": [
+    "Incorrect initial SHA argument refused before install effects; 341 unchanged",
+    "Initial parallel coalescing CPU case exceeded250ms; lazy alias allocation preserves identities and final156/156 plus paired3/3 candidate cases pass"
+  ]
+}
