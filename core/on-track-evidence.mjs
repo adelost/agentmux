@@ -70,7 +70,7 @@ export function captureOnTrackCommand({ project, cycle, probe, now = Date.now() 
     exitCode: result.status, stdout, stderr: result.stderr || "", error: result.error?.message || null, sha256: onTrackHash(stdout) };
 }
 
-const normalized = value => value.toLowerCase().replace(/[^a-z0-9#]/gu, "");
+const normalized = value => value.normalize("NFKD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/[^a-z0-9#]/gu, "");
 /** WHAT: Returns one explicit owner identity from a TASKS owner cell. WHY: Keeps role annotations separate from pane addresses and preserves ambiguous ownership. */
 export function onTrackOwner(value) {
   const addresses = [...new Set(String(value).match(/[\w-]+:\d+/gu) || [])];
@@ -89,8 +89,8 @@ export function onTrackRows(text) {
     if (!/^\d+[a-z]*$/u.test(cells[0] || "") || !headers.length) continue;
     if (rows[cells[0]]) throw Error(`duplicate TASKS row ${cells[0]}; source is ambiguous`);
     const field = (...names) => { const pos = names.map(name => headers.indexOf(name)).find(index => index >= 0); return pos === undefined ? "" : cells[pos] || ""; };
-    rows[cells[0]] = { row: cells[0], line: index + 1, quote: line, owner: field("owner"), ownerId: onTrackOwner(field("owner")), estimate: field("estimate", "budget"),
-      outcome: field("donewhen", "acceptance", "outcome"), state: field("state", "status"), title: field("outcome", "task", "title") };
+    rows[cells[0]] = { row: cells[0], line: index + 1, quote: line, owner: field("owner", "agare"), ownerId: onTrackOwner(field("owner", "agare")), estimate: field("estimate", "budget"),
+      outcome: field("donewhen", "acceptance", "klartnar", "outcome", "vad"), state: field("state", "status", "lage"), title: field("outcome", "task", "title", "vad") };
   }
   return rows;
 }
