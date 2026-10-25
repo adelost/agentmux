@@ -36,7 +36,8 @@ original submissions, command captures and transport receipts live beside it in
 Every reminder contains C1–C5. C1 maps every frozen ask-ID to the actual TASKS
 Done-when, owner and estimate. C2 reads the preceding 24h of TASKS Git history,
 including changes later reverted, and requires a human source for changed
-outcomes. A missing baseline is UNKNOWN. C3 reads every open row and the latest
+outcomes. A missing baseline or ambiguous historical table is UNKNOWN; the
+original SHA and read error remain in the cycle. C3 reads every open row and the latest
 posted owner log. C4 requires fresh green source evidence for every main live
 path. C5 retains prior deviations until resolved with evidence or owned.
 

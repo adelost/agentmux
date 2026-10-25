@@ -8,6 +8,7 @@ import { createOnTrackMonitor } from "./on-track-monitor.mjs";
 import { createState } from "./state.mjs";
 import { onTrackHash } from "./on-track-evidence.mjs";
 import { onTrackStatistics, ON_TRACK_STATE } from "./on-track-monitor.mjs";
+import { snapshotOnTrackProject } from "./on-track-projects.mjs";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "amux-on-track-"));
@@ -30,6 +31,16 @@ function fixture() {
 }
 
 feature("on-track evidence and omission protection", () => {
+  component("two real repeated ask identities remain required while the timer excludes itself", {
+    given: ["a project and two human orders with identical words", fixture],
+    when: ["the canonical ask window is frozen", f => snapshotOnTrackProject({ ...f.project, askAgents: ["lsrc"] }, f.at, {
+      bindings: () => [], window: () => ({ files: ["synthetic-ledger"], asks: [
+        ...["first", "second"].map(id => ({ id, source: "discord", agent: "lsrc", pane: 3, verbatim: "Open film", ts: new Date(f.at - 1000).toISOString() })),
+        { id: "timer", source: "on-track", agent: "lsrc", pane: 3, verbatim: "[from amux on-track]\n\nRead C1-C5", ts: new Date(f.at - 1000).toISOString() },
+      ] }),
+    })],
+    then: ["both human IDs and no timer input remain", r => expect(r.asks.map(a => a.id)).toEqual(["first", "second"])],
+  });
   component("real source evidence can be accepted without sending a green status", {
     given: ["an actual repository and complete receipt", fixture],
     when: ["the complete receipt is checked", f => validateOnTrackReceipt(f)],

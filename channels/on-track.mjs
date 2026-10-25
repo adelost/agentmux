@@ -8,7 +8,7 @@ export function createOnTrackRuntime({ queue, state = onTrackStore(), projects =
   return createOnTrackMonitor({ state, projects, snapshot, now,
     commands: () => state.get(ON_TRACK_STATE)?.commands || {},
     lookup: (key, jobId) => {
-      for (const target of queue.targets()) {
+      for (const target of queue.allTargets()) {
         const job = jobId ? queue.read(target.agentName, target.pane, jobId)
           : queue.list(target.agentName, target.pane).find(candidate => candidate.idempotencyKey === key);
         if (job) return job;
@@ -17,7 +17,7 @@ export function createOnTrackRuntime({ queue, state = onTrackStore(), projects =
     },
     send: async (target, text, idempotencyKey) => {
       const [agentName, pane] = target.split(":");
-      const job = queue.enqueue({ agentName, pane: Number(pane), text, source: "on-track", idempotencyKey });
+      const job = queue.enqueue({ agentName, pane: Number(pane), text: `[from amux on-track]\n\n${text}`, source: "on-track", idempotencyKey });
       return { id: job.id };
     },
     notifyHuman: (text, idempotencyKey) => notify(text, { strictSingleAttempt: true, idempotencyKey, title: "On-track", level: "warning" }),

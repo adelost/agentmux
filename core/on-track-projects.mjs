@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join, isAbsolute, dirname } from "node:path";
 import { readFileSync } from "node:fs";
 import { readWindow } from "./ask-ledger.mjs";
-import { humanAsksOf } from "./ask-origin.mjs";
+import { automatedCopies, isHumanAsk, inferAskOrigin } from "./ask-origin.mjs";
 import { readAskBindings } from "./ask-bindings.mjs";
 import { onTrackGit, onTrackRows } from "./on-track-evidence.mjs";
 import { createState } from "./state.mjs";
@@ -41,7 +41,12 @@ export function snapshotOnTrackProject(project, at, { window = readWindow, bindi
   const result = window({ since: at - 86400000, until: at });
   if (!result.files.length) throw Error("ask-ledger coverage unavailable");
   const rootPrefix = `${project.root}/`;
-  const asks = humanAsksOf(result.asks).filter(ask => project.askAgents.includes(ask.agent)
+  const copies = automatedCopies(result.asks);
+  const humans = result.asks.filter(ask => isHumanAsk(ask) && !copies.has(ask));
+  const additional = result.asks.filter(ask => ["cli", "unknown", "voice-pwa", "voice", "link"].includes(ask.source)
+    && inferAskOrigin({ source: ask.source, sender: ask.sender, prompt: ask.verbatim }) === "human"
+    && isHumanAsk({ ...ask, source: "pane-hook" }));
+  const asks = [...new Map([...humans, ...additional].map(ask => [ask.id, ask])).values()].filter(ask => project.askAgents.includes(ask.agent)
     || bound.some(b => b.ledgerId === ask.id && b.ref.startsWith(rootPrefix)))
     .map(ask => ({ id: ask.id, ts: ask.ts, agent: ask.agent, pane: ask.pane, text: ask.verbatim, source: ask.ledgerPath }));
   const common = root => onTrackGit(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).trim();
@@ -63,21 +68,27 @@ export function snapshotOnTrackProject(project, at, { window = readWindow, bindi
   const base = onTrackGit(project.root, ["rev-list", "-1", `--before=${since}`, tip, "--", project.ledger]).trim();
   const commits = onTrackGit(project.root, ["log", "--reverse", "--format=%H %ct", `--since=${since}`, tip, "--", project.ledger]).trim().split("\n").filter(Boolean);
   if (commits.length > 300) throw Error("TASKS history exceeds bounded 300-commit read; review scope UNKNOWN");
-  let previous = base ? onTrackRows(onTrackGit(project.root, ["show", `${base}:${project.ledger}`])) : {};
+  const historyErrors = [];
+  const historicalRows = sha => {
+    try { return onTrackRows(onTrackGit(project.root, ["show", `${sha}:${project.ledger}`])); }
+    catch (error) { historyErrors.push({ sha, error: error.message }); return null; }
+  };
+  let previous = base ? historicalRows(base) : {};
   const rowFirstSeen = {};
   const changes = [];
   for (const commit of commits) {
     const [sha, seconds] = commit.split(" ");
-    const next = onTrackRows(onTrackGit(project.root, ["show", `${sha}:${project.ledger}`]));
-    for (const row of Object.keys(next)) if (!previous[row] && rowFirstSeen[row] === undefined) rowFirstSeen[row] = Number(seconds) * 1000;
-    for (const [row, value] of Object.entries(previous)) {
+    const next = historicalRows(sha);
+    if (!next) { previous = null; continue; }
+    for (const row of Object.keys(next)) if (previous && !previous[row] && rowFirstSeen[row] === undefined) rowFirstSeen[row] = Number(seconds) * 1000;
+    for (const [row, value] of Object.entries(previous || {})) {
       if (next[row]?.outcome !== value.outcome) changes.push({ row, sha, at: Number(seconds) * 1000,
         before: value.outcome, after: next[row]?.outcome || null });
     }
     previous = next;
   }
   return { tip, asks, rowFirstSeen, bindings: bound.filter(b => asks.some(a => a.id === b.ledgerId)),
-    outcomeHistory: { base: base || null, changes, commits: commits.map(line => line.split(" ")[0]) },
+    outcomeHistory: { base: base || null, changes, errors: historyErrors, commits: commits.map(line => line.split(" ")[0]) },
     askScope: { agents: project.askAgents, rule: "all human asks to these routing agents, plus asks already bound to this repository; includes ambiguous messages for reviewer disposition" } };
 }
 

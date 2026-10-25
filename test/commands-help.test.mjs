@@ -30,12 +30,14 @@ describe("help precedes lifecycle effects", () => {
     root = mkdtempSync(join(tmpdir(), "amux-help-"));
     ctx = { configPath: join(root, "agents.yaml"), sourceConfigPath: join(root, "agentmux.yaml"),
       lastFile: join(root, "last"), bridgeDir: root };
-    writeFileSync(ctx.configPath, "claw:\n  dir: /tmp/fake-claw\n  panes: []\n");
+    writeFileSync(ctx.configPath, "claw:\n  dir: /tmp/fake-claw\n  panes:\n    - cmd: codex\n    - cmd: codex\n    - cmd: codex\n");
     writeFileSync(ctx.sourceConfigPath, "agents: {}\n");
     writeFileSync(join(root, "bridge.pid"), "4242\n");
     vi.stubEnv("PIDFILE", join(root, "bridge.pid"));
     vi.stubEnv("AMUX_FLEET_RESTART_REQUEST", join(root, "restart.json"));
     vi.stubEnv("TMUX", "");
+    vi.stubEnv("AMUX_AGENT_NAME", "");
+    vi.stubEnv("AMUX_PANE", "");
     kill = vi.spyOn(process, "kill").mockReturnValue(true);
     output = vi.spyOn(console, "log").mockImplementation(() => {});
     effects.send.mockResolvedValue({ delivered: true });

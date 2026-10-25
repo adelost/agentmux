@@ -62,6 +62,7 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
   }
   if (cycle.outcomeHistory) {
     if (!cycle.outcomeHistory.base && isPass("C2")) add("C2", "24h baseline unavailable; report UNKNOWN");
+    if (cycle.outcomeHistory.errors?.length && (isPass("C2") || !owned("C2", "history"))) add("C2", "ambiguous historical TASKS source; report UNKNOWN with an owner for history");
     for (const actual of cycle.outcomeHistory.changes) {
       const change = receipt.outcomeChanges?.find(c => c.row === actual.row && c.commit === actual.sha);
       const ask = cycle.asks.find(a => a.id === change?.askId && Date.parse(a.ts) <= actual.at);
