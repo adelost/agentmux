@@ -84,6 +84,7 @@ import {
 } from "./core/tui-stall-recovery.mjs";
 import { eraseKeys, isDeliveryCancelRequested, shouldPastePrompt, submitCheckOrErase, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
+import { deliveryPreparationStage } from "./core/delivery-preparation.mjs";
 import { claudeSafePasteParts, createClaudeComposerGuards } from "./core/claude-composer-guards.mjs";
 import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
 import { assertCodexWorkModel, createCodexCompact, startCodexProcess } from "./core/codex-process-launch.mjs";
@@ -962,10 +963,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    * writes its exact receipt to JSONL. Unknown overlays still fail closed.
    */
   async function waitForCodexPromptReady(agentName, pane) {
-    // Prompt input is transport setup, not agent work. Reusing the generic
-    // ten-minute work timeout here made one stuck composer hold the Discord
-    // channel queue for minutes. Busy Codex panes may accept a steering turn;
-    // the exact JSONL echo remains the delivery proof.
+    // The generic ten-minute work timeout stranded transport on a stuck composer.
+    // Busy Codex accepts steering; only its exact JSONL echo proves delivery.
     const deadline = Date.now() + CODEX_PROMPT_READY_TIMEOUT_MS;
     let lastError = "composer is not ready";
     const driver = { isBusy, capturePane, captureScreen, sendEscape, sendTab, typeLiteral, codexVocabularyDrift };
@@ -1059,11 +1058,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const target = `${agentName}:.${pane}`;
     const notBeforeMs = Date.now();
     if (maintenanceGuard && await t.paneInMode(target)) throw new Error("maintenance-copy-mode-active");
-    if (!maintenanceGuard) await exitCopyMode(target);
+    if (!maintenanceGuard) await deliveryPreparationStage("input:copy-mode", () => exitCopyMode(target));
     const dialect = await livePaneDialectName(agentName, pane);
-    if (dialect === "codex") await assertCodexWorkModel({ state, name: agentName, pane, prompt,
+    if (dialect === "codex") await deliveryPreparationStage("input:model-proof", () => assertCodexWorkModel({ state, name: agentName, pane, prompt,
       configured: agentConfig(agentName).panes?.[pane], screen: () => captureScreen(agentName, pane),
-      previous: () => getContextPercentByDialect(paneDir(agentConfig(agentName).dir, pane), "codex") });
+      previous: () => getContextPercentByDialect(paneDir(agentConfig(agentName).dir, pane), "codex") }));
     if (dialect === "claude") await claudeGuards.requireSettledPaste(agentName, pane, { maintenance: Boolean(maintenanceGuard) });
     if (dialect === "qwen") {
       if (maintenanceGuard) await maintenanceGuard("submit");
@@ -1075,9 +1074,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       return { busyAtSend: Boolean(await isBusy(agentName, pane).catch(() => false)),
         queued: false, exactDraft: true, submitted: true, tuiHint: "structured-input" };
     }
-    let alreadyComposed = await promptAlreadyInComposer(agentName, pane, prompt, {
+    let alreadyComposed = await deliveryPreparationStage("input:composer-read", () => promptAlreadyInComposer(agentName, pane, prompt, {
       ownedDraft: knownDrafted,
-    });
+    }));
     let busyAtSend = false, ownedPaste = null;
     let exactDraft = dialect === "codex" && alreadyComposed;
 
@@ -1100,10 +1099,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (shouldPastePrompt({ knownDrafted, alreadyComposed })) {
       // Normal delivery may recover a draft; unattended maintenance must not clear one.
       if (maintenanceGuard) await maintenanceGuard("paste");
-      else await clearForeignComposerText(agentName, pane, target, prompt, dialect);
+      else await deliveryPreparationStage("input:composer-clear", () => clearForeignComposerText(agentName, pane, target, prompt, dialect));
       if (dialect === "claude") await claudeGuards.refuseToTypeAfterDraft(agentName, pane, target);
       if (dialect === "codex") {
-        const ready = maintenanceGuard ? { busy: false } : await waitForCodexPromptReady(agentName, pane);
+        const ready = maintenanceGuard ? { busy: false } : await deliveryPreparationStage("input:composer-ready", () => waitForCodexPromptReady(agentName, pane));
         busyAtSend = Boolean(ready?.busy);
         // Provisional ownership fences duplicate paste, not proof of an exact draft.
         if (onPasteStarted) await onPasteStarted();
@@ -1127,7 +1126,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
 
     if (dialect === "codex" && !exactDraft) {
-      exactDraft = await waitForExactCodexDraft(agentName, pane, prompt);
+      exactDraft = await deliveryPreparationStage("input:draft-proof", () => waitForExactCodexDraft(agentName, pane, prompt));
       if (!exactDraft) {
         // A short slash command has no JSONL receipt, so a composer whose
         // bytes differ from the intended command must veto Enter here. The
@@ -1571,7 +1570,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   async function sendOnly(agentName, prompt, pane, options = {}) {
-    if (!options.existingOnly) await ensureReady(agentName, pane);
+    if (!options.existingOnly) await deliveryPreparationStage("input:ensure-ready", () => ensureReady(agentName, pane));
     return sendPrompt(agentName, prompt, pane, options);
   }
 

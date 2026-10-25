@@ -40,6 +40,7 @@ import { appendEvent } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
 import { createLiveProgress } from "./live-progress.mjs";
+import { timedWatcherStep } from "../core/watcher-timing.mjs";
 import { compactionNoticeText } from "../core/compaction-notice.mjs";
 import { announceNewPaneEvents } from "../core/pane-notices.mjs";
 import { planQuotaStopMirror } from "../core/watcher-quota-stop.mjs";
@@ -566,12 +567,7 @@ export function createJsonlWatcher({
 
   // --- core check ----------------------------------------------------------
 
-  /**
-   * Determine which jsonl reader to use for a pane.
-   * Codex and Kimi panes are selected by their generated command. Anything
-   * else (claude, claude-2, …) falls through to the Claude reader. Unknown
-   * panes default to Claude — same behavior as before this dispatch.
-   */
+  /** WHAT: Resolves each pane's reader. WHY: Keeps generated non-Claude commands separate from the Claude fallback. */
   function readerFor(config, name, idx) {
     try {
       const cmd = config?.[name]?.panes?.[idx]?.cmd || "";
@@ -591,7 +587,7 @@ export function createJsonlWatcher({
   }
 
   function metric(msg) {
-    if (metricsEnabled) log(`metrics | ${msg}`);
+    if (metricsEnabled || Number(msg.match(/\bms=(\d+)/u)?.[1]) >= 1000) log(`metrics | ${msg}`);
   }
 
   function turnMs(iso) {
@@ -646,7 +642,7 @@ export function createJsonlWatcher({
 
       const dir = paneDir(agentDir, idx);
       const key = paneKey(name, idx);
-      await progress.reconcile(channelId);
+      await timedWatcherStep(`${key} progress`, () => progress.reconcile(channelId), log);
       const { readTurns, latestMtime, latestInfo } = readerFor(config, name, idx);
       const now = Date.now();
       const fileInfo = latestInfo(dir);
@@ -657,7 +653,7 @@ export function createJsonlWatcher({
       const startupAudit = !auditedPanes.has(key);
 
       if (sameFileStamp(cached, fileInfo) && !retryDue && !graceDue) {
-        await codexRecovery.tick({ name, pane: idx, dir, result: cached.recovery, idleBoundary: true });
+        await timedWatcherStep(`${key} recovery-idle`, () => codexRecovery.tick({ name, pane: idx, dir, result: cached.recovery, idleBoundary: true }), log);
         metric(`${key} skip unchanged bytes=0 nextGrace=${cached?.graceDueAtMs || "-"}`);
         return { skipped: "unchanged" };
       }
@@ -670,8 +666,8 @@ export function createJsonlWatcher({
       // advancing past it (belt-and-suspenders on top of id-based dedupe).
       const tailBytes = startupAudit ? STARTUP_AUDIT_TAIL_BYTES : WATCHER_TAIL_BYTES;
       const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes, headless: true });
-      await codexRecovery.tick({ name, pane: idx, dir, result });
-      await progress.reconcile(channelId, result.turns || []);
+      await timedWatcherStep(`${key} recovery`, () => codexRecovery.tick({ name, pane: idx, dir, result }), log);
+      await timedWatcherStep(`${key} progress-read`, () => progress.reconcile(channelId, result?.turns || []), log);
       const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
       const readMs = Date.now() - readStarted;
       const readBytes = estimatedReadBytes(fileInfo, tailBytes);
@@ -701,7 +697,7 @@ export function createJsonlWatcher({
           nowMs: now,
         });
         for (const action of audit.actions) {
-          const posted = await postTurn({ name, idx, channelId, turn: action.turn, config });
+          const posted = await timedWatcherStep(`${key} audit-post`, () => postTurn({ name, idx, channelId, turn: action.turn, config }), log);
           if (!posted?.ok) {
             // Cold Discord cache at startup is the common cause — un-mark so
             // the NEXT poll retries the whole audit instead of losing it to
@@ -743,7 +739,7 @@ export function createJsonlWatcher({
       }
 
       for (const action of planned.actions) {
-        const result = await postTurn({ name, idx, channelId, turn: action.turn, config });
+        const result = await timedWatcherStep(`${key} post`, () => postTurn({ name, idx, channelId, turn: action.turn, config }), log);
         if (!result?.ok) {
           const nextState = applyPostFailure({
             lastPostedMs: lastPostedMs(channelId),

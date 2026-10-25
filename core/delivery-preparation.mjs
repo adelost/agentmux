@@ -32,9 +32,13 @@ export function onUnsentPreparationTimeout(cleanup) {
 export function deliveryPreparationStage(stage, work) {
   assertDeliveryPreparation();
   const scope = preparations.getStore();
+  const began = Date.now();
   const previous = scope?.stage, previousToken = scope?.stageToken, token = {};
   if (scope) { scope.stage = stage; scope.stageToken = token; }
   const finish = () => {
+    if (scope && !scope.closed && Date.now() - began >= 500) {
+      try { scope.onStage?.(stage, Date.now() - began); } catch { /* diagnostics cannot alter delivery */ }
+    }
     if (scope && !scope.closed && scope.stageToken === token) { scope.stage = previous; scope.stageToken = previousToken; }
   };
   try {
@@ -58,8 +62,8 @@ export function preparationAgent(agent) {
 }
 
 /** WHAT: Returns one leased head's bounded preparation result. WHY: Prevents a stalled reader from retaining its lease or writing after its writer ends. */
-export async function withDeliveryPreparation({ timeoutMs = DEFAULT_TIMEOUT_MS, onTimeout }, work) {
-  const scope = { timeoutMs, deadline: performance.now() + timeoutMs, stage: "preflight", closed: false, inputStarted: false, cleanups: [] };
+export async function withDeliveryPreparation({ timeoutMs = DEFAULT_TIMEOUT_MS, onTimeout, onStage }, work) {
+  const scope = { timeoutMs, deadline: performance.now() + timeoutMs, stage: "preflight", closed: false, inputStarted: false, cleanups: [], onStage };
   const timeout = new Promise((_, reject) => {
     scope.timer = setTimeout(() => { scope.closed = true; reject(expired(scope)); }, timeoutMs);
   });

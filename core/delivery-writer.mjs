@@ -10,7 +10,8 @@ export async function withDeliveryWriter({ queue, agentName, pane, log, preparat
     const acquire = queue.acquireSessionLease || queue.acquireTargetLease;
     context.lease = acquire?.(agentName, pane) || null;
     if (acquire && !context.lease) return;
-    return await withDeliveryPreparation({ timeoutMs: preparationTimeoutMs, onTimeout: error => {
+    return await withDeliveryPreparation({ timeoutMs: preparationTimeoutMs,
+      onStage: (stage, elapsedMs) => log(`delivery preparation ${agentName}:${pane} ${context.job?.id || "preflight"}: ${stage} ${elapsedMs}ms`), onTimeout: error => {
       const job = context.job && queue.read(agentName, pane, context.job.id);
       // Never turn a draft, submit fence or an already-terminal result into an unsent retry.
       if (job && ["pending", "delivering", "pasting", "drafted", "submitting", "submitted"].includes(job.status)) {
