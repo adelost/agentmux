@@ -68,7 +68,6 @@ import { cmdSleepWatch } from "./cli/sleep.mjs";
 import { createAudioOutbox } from "./core/audio-outbox.mjs";
 import { DEFAULT_TMUX_SOCKET, DEFAULT_TTS_VOICE, runtimeAgentsPath } from "./core/runtime-defaults.mjs";
 import { ensureRuntimeConfig } from "./core/runtime-config.mjs";
-import { captureBridgeCpu } from "./core/bridge-cpu-capture.mjs";
 // --- Config ---
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -86,7 +85,6 @@ function loadEnv() {
 }
 
 loadEnv();
-if (process.env.AMUX_CAPTURE_CPU === "1") captureBridgeCpu();
 const TOKEN = process.env.DISCORD_TOKEN;
 const AGENTS_YAML = runtimeAgentsPath();
 const AGENTMUX_YAML = configSources.agentmuxYaml.path;
