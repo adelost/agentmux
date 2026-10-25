@@ -7,6 +7,7 @@ import { notifyUser } from "../cli/send-notify.mjs";
 import { startHeartbeat } from "../core/heartbeat.mjs";
 import { readReleaseManifest } from "../core/release-identity.mjs";
 import { createQuotaCompactionEvidence } from "./quota-floor-evidence.mjs";
+import { createOnTrackRuntime } from "./on-track.mjs";
 
 /** WHAT: Builds the floor notice with existing queue, quota and notification transports. WHY: Keeps the heartbeat observer from moving, waking or resending any delivery. */
 export function createQuotaFloorAlertRuntime({ queue, state, configPath, floorPercent,
@@ -36,9 +37,16 @@ export function createQuotaFloorAlertRuntime({ queue, state, configPath, floorPe
 
 /** WHAT: Builds the existing identity heartbeat and accepts its quota observer later. WHY: Keeps initialization order from adding a second timer. */
 export function startQuotaFloorHeartbeat({ packageRoot, hintsVersion }) {
-  let observer = null, version = "unknown";
+  let observer = null, reviews = null, version = "unknown";
   try { version = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).version; } catch {}
   startHeartbeat({ version, sourceSha: readReleaseManifest(packageRoot)?.sourceSha || null,
-    hintsVersion, onTick: () => observer?.tick() });
-  return dependencies => { observer = createQuotaFloorAlertRuntime(dependencies); return observer; };
+    hintsVersion, onTick: async () => {
+      const results = await Promise.allSettled([observer?.tick(), reviews?.tick()]);
+      for (const result of results) if (result.status === "rejected") console.warn(`heartbeat observer failed: ${result.reason?.message}`);
+    } });
+  return dependencies => {
+    observer = createQuotaFloorAlertRuntime(dependencies);
+    reviews = createOnTrackRuntime({ queue: dependencies.queue });
+    return observer;
+  };
 }

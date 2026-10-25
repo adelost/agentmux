@@ -1191,10 +1191,8 @@ function renderSelfBlock(selfKey, widerBuckets, statuses, nowMs) {
 }
 
 async function cmdDone(ctx, flags) {
-  if (flags.help || flags.h) {
-    console.log(`Usage: amux done [--since 2h | --day | --week | --all]\n\nAttention-first fleet overview: needs-you, stalled, working, recently done, and idle.\nThe command is read-only and has no shared checkpoint; default window is 1h.`);
-    return;
-  }
+  if (flags["on-track"]) return (await import("./on-track.mjs")).cmdOnTrack(["stats"]);
+  if (flags.help || flags.h) return console.log(`Usage: amux done [--since 2h | --day | --week | --all | --on-track]\n\nAttention-first fleet overview. --on-track shows durable review statistics. Read-only; default window is 1h.`);
   const nowMs = Date.now();
   let sinceMs = null;
   let sinceSource = "";
@@ -2637,6 +2635,7 @@ const FLAG_SPECS = {
     "by-pane": "boolean",
   },
   done: {
+    "on-track": "boolean",
     since: "string",
     day: "boolean",
     week: "boolean",
@@ -2928,6 +2927,7 @@ export async function dispatch(argv, ctx) {
       return cmdDone(ctx, flags);
     }
 
+    case "on-track": return (await import("./on-track.mjs")).cmdOnTrack(rest);
     case "quiet": return (await import("./quiet.mjs")).cmdQuiet(rest, ctx);
 
     case "compact": {
