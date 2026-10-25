@@ -20,6 +20,8 @@ amux on-track show PROJECT
 amux on-track submit PROJECT /absolute/receipt.json
 amux on-track capture PROJECT PROBE
 amux on-track capture-owner PROJECT AGENT:PANE
+amux on-track capture-answers PROJECT  (canonical posted replies, including replies after the input freeze)
+amux on-track recover-source PROJECT  (only an unreadable pending baseline; preserves cycle and deadline)
 amux on-track stats   (also amux done --on-track)
 
 Hourly schedule, normal20min deadline, controller-approved first baseline24h/2h. No self-rating.
@@ -75,16 +77,23 @@ export async function cmdOnTrack(args, dependencies = {}) {
   if (!project || extra.length) throw Error("unknown project or extra arguments");
   const record = state.get(ON_TRACK_STATE)?.projects[id];
   if (action === "show") { if (file) throw Error("show takes only PROJECT"); console.log(JSON.stringify(record || { status: "not-scheduled" }, null, 2)); return record; }
-  if (action === "capture" || action === "capture-owner") {
-    if (!record?.cycle || !file) throw Error("capture needs a pending cycle and configured PROBE");
+  if (action === "recover-source") {
+    if (file) throw Error("recover-source takes only PROJECT");
+    const actor = dependencies.actor || detectSenderFromEnv(process.env, command => execSync(command, { encoding: "utf8", timeout: 2000 }));
+    const runtime = createOnTrackRuntime({ state, projects, queue: dependencies.queue || createDeliveryQueue(), ...dependencies.runtime });
+    const recovered = await runtime.recoverSource(project, actor); console.log(JSON.stringify(recovered, null, 2)); return recovered;
+  }
+  if (["capture", "capture-owner", "capture-answers"].includes(action)) {
+    if (!record?.cycle || (action !== "capture-answers" && !file)) throw Error("capture needs a pending cycle and configured PROBE");
     let selected = project;
+    if (action === "capture-answers") selected = { ...project, probes: { answers: [process.execPath, fileURLToPath(new URL("../bin/on-track-answers.mjs", import.meta.url)), id] } };
     if (action === "capture-owner") {
       if (!/^[\w-]+:\d+$/u.test(file)) throw Error("invalid owner address");
       selected = { ...project, probes: { owner: [process.execPath, fileURLToPath(new URL("../bin/on-track-owner-log.mjs", import.meta.url)), file] } };
     }
     const prior = action === "capture-owner" && Object.entries(state.get(ON_TRACK_STATE).commands || {}).find(([,r]) =>
       r.project === id && r.cycle === record.cycle.id && r.probe === "owner" && r.command.at(-1) === file && Date.now() - Date.parse(r.at) < 3600000);
-    const result = prior ? prior[1] : captureOnTrackCommand({ project: selected, cycle: record.cycle, probe: action === "capture-owner" ? "owner" : file });
+    const result = prior ? prior[1] : captureOnTrackCommand({ project: selected, cycle: record.cycle, probe: action === "capture-owner" ? "owner" : action === "capture-answers" ? "answers" : file });
     const key = prior ? prior[0] : randomUUID();
     if (!prior) state.updateKey(ON_TRACK_STATE, data => { data.commands[key] = result; return data; });
     const evidence = { kind: "command", record: key, at: result.at, command: result.command, exitCode: result.exitCode, sha256: result.sha256 };

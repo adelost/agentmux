@@ -152,6 +152,21 @@ export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHu
 
   return {
     tick: () => { if (!running) running = tickInner().finally(() => { running = null; }); return running; },
+    async recoverSource(project, actor) {
+      if (![project.reviewer, project.dispatcher, ...(project.maintenanceOwners || [])].includes(actor)) throw Error("source recovery requires the project reviewer, leader or named maintainer");
+      const cycle = get(project.id)?.cycle;
+      if (!cycle?.baseline || cycle.review || !cycle.sourceError) throw Error("source recovery only applies to an unreadable pending baseline");
+      const input = await snapshot(project, cycle.at, { baseline: true, coveredUntil: null });
+      if (input.sourceError || !input.tip) throw Error("baseline source remains unreadable");
+      mutate(data => {
+        const current = data.projects[project.id].cycle;
+        if (current.id !== cycle.id || current.review) throw Error("cycle changed while recovering source");
+        current.inputRevisions ||= [];
+        current.inputRevisions.push({ at: now(), previousTip: current.tip, previousSourceError: current.sourceError, previousAskIds: current.asks?.map(a => a.id), recoveredBy: actor });
+        Object.assign(current, input); delete current.sourceError;
+      });
+      return { cycle: cycle.id, deadline: get(project.id).cycle.deadline, asks: input.asks.length, tip: input.tip };
+    },
     async submit(project, receipt, actor) {
       if (actor !== project.reviewer) throw Error("receipt requires configured reviewer identity");
       const cycle = get(project.id)?.cycle;

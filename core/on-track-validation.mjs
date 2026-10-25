@@ -55,7 +55,11 @@ export function validateOnTrackReceipt({ project, cycle, receipt, at = cycle.at,
   for (const ask of cycle.asks || []) {
     const mapping = mappings.find(m => m.askId === ask.id), row = rows[mapping?.row];
     if (cycle.c1ScopeVersion >= 2 && mapping?.disposition === "answered") {
-      if (!mapping.reason || !ask.replies?.some(p => p.id === mapping.replyId) || !verify(mapping.evidence)) add("C1", `answer link missing or unrelated: ${ask.id}`);
+      let captured = [];
+      try { if (commands[mapping.evidence?.record]?.probe === "answers") captured = JSON.parse(commands[mapping.evidence.record].stdout).answers || []; } catch { /* The source error stays a failed link below. */ }
+      const linked = ask.replies?.some(p => p.id === mapping.replyId) || [...(cycle.replyCatalog || []), ...captured].some(p => p.id === mapping.replyId
+        && p.agent === ask.agent && p.pane === ask.pane && Date.parse(p.at) >= Date.parse(ask.ts));
+      if (!mapping.reason || !linked || !verify(mapping.evidence)) add("C1", `answer link missing or unrelated: ${ask.id}`);
       continue;
     }
     if (cycle.c1ScopeVersion >= 2 && mapping?.disposition && !["row", "missing"].includes(mapping.disposition)) add("C1", `invalid disposition: ${ask.id}`);

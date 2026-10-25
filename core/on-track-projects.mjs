@@ -6,6 +6,7 @@ import { inferAskOrigin } from "./ask-origin.mjs";
 import { observedAskOrigin } from "./ask-source-evidence.mjs";
 import { onTrackProjectAsk } from "./on-track-scope.mjs";
 import { parseSenderHeader } from "./sender-detect.mjs";
+import { readOnTrackLedgerHistory } from "./on-track-ledger-history.mjs";
 import { readAskBindings } from "./ask-bindings.mjs";
 import { onTrackGit, onTrackRows } from "./on-track-evidence.mjs";
 import { createState } from "./state.mjs";
@@ -72,6 +73,9 @@ export function snapshotOnTrackProject(project, at, { window = readWindow, bindi
         && Date.parse(p.ts) >= Date.parse(ask.ts) && !result.asks.some(next => next.agent === ask.agent && next.pane === ask.pane
           && Date.parse(next.ts) > Date.parse(ask.ts) && Date.parse(next.ts) < Date.parse(p.ts)))
         .map(p => ({ id: p.id, at: p.ts, text: p.text, source: p.ledgerPath })) || [] }));
+  const replyCatalog = (result.posts || []).filter(p => ["reply", "file"].includes(p.kind) && p.status === "sent"
+    && asks.some(a => a.agent === p.agent && a.pane === p.pane && Date.parse(p.ts) >= Date.parse(a.ts)))
+    .map(p => ({ id: p.id, at: p.ts, agent: p.agent, pane: p.pane, text: p.text, files: p.files, source: p.ledgerPath }));
   const excludedAutomation = result.asks.filter(ask => inScope(ask) && ask.originEvidence && observedAskOrigin(ask, inferAskOrigin) === "system")
     .map(ask => ({ id: ask.id, observationIds: ask.observationIds || [ask.id], evidence: ask.originEvidence }));
   const tip = onTrackGit(project.root, ["rev-parse", "--verify", "--end-of-options", `${project.ref || "HEAD"}^{commit}`]).trim();
@@ -85,33 +89,11 @@ export function snapshotOnTrackProject(project, at, { window = readWindow, bindi
     .map(p => ({ id: p.id, by: `${p.agent}:${p.pane}`, at: p.ts, text: p.text, source: p.ledgerPath })),
   ...result.asks.filter(a => decisionOwners.includes(parseSenderHeader(a.verbatim)?.key))
     .map(a => ({ id: a.id, by: parseSenderHeader(a.verbatim).key, at: a.ts, text: a.verbatim, source: a.ledgerPath }))];
-  const since = new Date(at - 86400000).toISOString();
-  const base = onTrackGit(project.root, ["rev-list", "-1", `--before=${since}`, tip, "--", project.ledger]).trim();
-  const commits = onTrackGit(project.root, ["log", "--reverse", "--format=%H %ct", `--since=${since}`, tip, "--", project.ledger]).trim().split("\n").filter(Boolean);
-  if (commits.length > 300) throw Error("TASKS history exceeds bounded 300-commit read; review scope UNKNOWN");
-  const historyErrors = [];
-  const historicalRows = sha => {
-    try { return onTrackRows(onTrackGit(project.root, ["show", `${sha}:${project.ledger}`])); }
-    catch (error) { historyErrors.push({ sha, error: error.message }); return null; }
-  };
-  let previous = base ? historicalRows(base) : {};
-  const rowFirstSeen = {};
-  const changes = [];
-  for (const commit of commits) {
-    const [sha, seconds] = commit.split(" ");
-    const next = historicalRows(sha);
-    if (!next) { previous = null; continue; }
-    for (const row of Object.keys(next)) if (previous && !previous[row] && rowFirstSeen[row] === undefined) rowFirstSeen[row] = Number(seconds) * 1000;
-    for (const [row, value] of Object.entries(previous || {})) {
-      if (next[row]?.outcome !== value.outcome) changes.push({ row, sha, at: Number(seconds) * 1000,
-        before: value.outcome, after: next[row]?.outcome || null });
-    }
-    previous = next;
-  }
-  return { tip, asks, decisions, sourceWindow: { from, until: at }, excludedAutomation, c1SourceErrors: result.sourceErrors || [], c1ScopeVersion: 3, rowFirstSeen, bindings: bound.filter(b => asks.some(a => a.observationIds.includes(b.ledgerId))),
+  const { rowFirstSeen, outcomeHistory } = readOnTrackLedgerHistory(project, tip, at);
+  return { tip, asks, replyCatalog, decisions, sourceWindow: { from, until: at }, excludedAutomation, c1SourceErrors: result.sourceErrors || [], c1ScopeVersion: 3, rowFirstSeen, bindings: bound.filter(b => asks.some(a => a.observationIds.includes(b.ledgerId))),
     approvalAsks: result.asks.filter(ask => ["discord", "voice-pwa", "discord-voice"].includes(ask.source)
       && observedAskOrigin(ask, inferAskOrigin) === "human").map(ask => ({ id: ask.id, ts: ask.ts, source: ask.source })),
-    outcomeHistory: { parserVersion: 2, base: base || null, changes, errors: historyErrors, commits: commits.map(line => line.split(" ")[0]) },
+    outcomeHistory,
     askScope: { agents: project.askAgents, panels: project.askPanels || null, terms: project.askTerms || [],
       rule: "original human discord/voice only; declared project panels OR project text OR actual project binding; engine mirrors/cron/relays excluded" } };
 }
