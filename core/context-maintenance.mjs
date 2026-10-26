@@ -29,10 +29,17 @@ const COMPACT_WRITER_LIFETIME_MS = 40 * 60_000;
 const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; } };
 
 /** WHAT: Tells whether the process that began a compact attempt has stopped. WHY: Only then may another pass touch what it typed. */
-function compactWriterGone(record, { now, alive }) {
-  if (record.pid === process.pid) return false;
+function compactWriterGone(record, { now, alive, self = process.pid }) {
+  if (record.pid === self) return false;
   if (record.pid && !alive(record.pid)) return true;
   return now - record.at > COMPACT_WRITER_LIFETIME_MS;
+}
+
+/** WHAT: Reads the compact attempts whose writer is not gone by the compact rule. WHY: Lets the restart gate stop for live work, never for a marker its writer left behind. */
+export function liveCompactAttempts(state, { now = Date.now(), alive = processAlive, self = process.pid } = {}) {
+  return Object.entries(state.get(STATE_KEY, {}))
+    .filter(([, record]) => record.status === "ATTEMPTING" && !compactWriterGone(record, { now, alive, self }))
+    .map(([pane, record]) => ({ pane, pid: record.pid, at: record.at }));
 }
 const compactEvent = e => isCodexCompaction(e)
   || (e?.type === "system" && e.subtype === "compact_boundary");
