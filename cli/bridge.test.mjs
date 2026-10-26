@@ -1,5 +1,5 @@
 import { component, expect, feature } from "bdd-vitest";
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createBridgeLifecycle } from "./bridge.mjs";
@@ -80,6 +80,35 @@ feature("bridge startup housekeeping seam", () => {
       try {
         expect(ctx.calls).toHaveLength(1);
         expect(ctx.calls[0].bridgeLogPath).toBe(ctx.env.AMUX_BRIDGE_LOG);
+      } finally {
+        rmSync(ctx.root, { recursive: true, force: true });
+      }
+    }],
+  });
+});
+
+feature("two launches racing for the bridge (row 103)", () => {
+  component("a launch whose housekeeping overlaps a started bridge leaves that bridge's markers and starts nothing", {
+    given: ["a stopped bridge whose housekeeper lets another launch bring a bridge up", () => {
+      const fixture = bridgeFixture();
+      const spawned = join(fixture.root, "spawned");
+      writeFileSync(join(fixture.bridgeDir, "bin", "start.sh"), `#!/usr/bin/env bash\ntouch "${spawned}"\n`);
+      const startupHousekeeping = async () => {
+        writeFileSync(fixture.env.PIDFILE, `${process.pid}`);
+        writeFileSync(fixture.env.READY_FILE, `${process.pid}`);
+        return { log: { rotated: false, beforeBytes: 0, afterBytes: 0 }, sessions: { scanned: 0, candidates: 0, trimmed: 0, unchanged: 0, failed: 0, reclaimedBytes: 0, retentionDays: 14, dryRun: false, oversized: 0, oversizedBytes: 0 } };
+      };
+      return { ...fixture, spawned, lifecycle: createBridgeLifecycle({ bridgeDir: fixture.bridgeDir, env: fixture.env, startupHousekeeping }) };
+    }],
+    when: ["serve finishes its housekeeping", async (ctx) => {
+      await ctx.lifecycle.serve([], ctx.ctx);
+      return ctx;
+    }],
+    then: ["the running bridge keeps its pid and ready files and no second start.sh ran", (ctx) => {
+      try {
+        expect(readFileSync(ctx.env.PIDFILE, "utf8")).toBe(`${process.pid}`);
+        expect(existsSync(ctx.env.READY_FILE)).toBe(true);
+        expect(existsSync(ctx.spawned)).toBe(false);
       } finally {
         rmSync(ctx.root, { recursive: true, force: true });
       }

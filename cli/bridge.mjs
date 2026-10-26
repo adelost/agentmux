@@ -26,6 +26,7 @@ import {
 } from "../core/bridge-mode.mjs";
 import { formatStartupHousekeeping, runStartupHousekeeping } from "../core/startup-housekeeping.mjs";
 import { isAgentmuxPackageDir } from "../core/bridge-identity.mjs";
+import { clearDeadMarker } from "../core/runtime-markers.mjs";
 
 const LEGACY_BRIDGE_SESSION = "amux";
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -137,10 +138,10 @@ export function createBridgeLifecycle({
     return false;
   }
 
-  /** WHAT: Clears stale pid and readiness markers. WHY: Keeps WSL pid reuse from blocking a fresh launch. */
+  /** WHAT: Clears stale pid and readiness markers. WHY: Keeps a launch from erasing the markers of a bridge that is running. */
   function clearRuntimeState() {
-    try { unlinkSync(pidfile()); } catch {}
-    try { unlinkSync(readyFile()); } catch {}
+    clearDeadMarker(pidfile(), processAlive);
+    clearDeadMarker(readyFile(), processAlive);
   }
 
   /** WHAT: Signals the process named by the pidfile. WHY: Lets start.sh observe a clean child stop before markers are removed. */
@@ -298,6 +299,11 @@ export function createBridgeLifecycle({
       console.log(formatStartupHousekeeping(storage));
     } catch (error) {
       console.warn(`storage: housekeeping failed; bridge startup continues (${error.message})`);
+    }
+    // Housekeeping takes seconds; the watchdog or another launch may have started a bridge meanwhile.
+    if (isAlive()) {
+      console.log("A bridge came up while this launch prepared. Not starting a second one.");
+      return;
     }
     return mode === BRIDGE_MODE_MANUAL ? startForeground(ctx) : startManaged(ctx);
   }

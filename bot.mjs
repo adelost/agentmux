@@ -1,8 +1,8 @@
 // Bot lifecycle: singleton lock, channel management, config, preflight, shutdown.
 // Channel-agnostic. Receives channels array, delegates messaging to them.
 
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
-import { clearOwnMarker } from "./core/runtime-markers.mjs";
+import { readFileSync, writeFileSync, unlinkSync } from "fs";
+import { claimPidFile, clearOwnMarker } from "./core/runtime-markers.mjs";
 import { buildChannelMap } from "./lib.mjs";
 import { createInboundReconciler, formatRecoveredNotice } from "./core/inbound-reconciler.mjs";
 import { resolveConfiguredInboundTarget } from "./core/inbound-target.mjs";
@@ -20,16 +20,12 @@ function clearReadyFile() {
 
 /** WHAT: Tracks the singleton bridge process with a pidfile. WHY: Keeps two Discord consumers from duplicating prompts. */
 function ensureSingleInstance() {
-  if (existsSync(PIDFILE)) {
-    const oldPid = readFileSync(PIDFILE, "utf-8").trim();
-    try {
-      process.kill(Number(oldPid), 0);
-      console.error(`Already running (pid ${oldPid}). Kill it first or remove ${PIDFILE}`);
-      process.exit(1);
-    } catch {}
+  const claim = claimPidFile(PIDFILE);
+  if (!claim.claimed) {
+    console.error(`Another bridge (pid ${claim.holder}) holds ${PIDFILE}; this one exits. Stop it first.`);
+    process.exit(1);
   }
   clearReadyFile();
-  writeFileSync(PIDFILE, String(process.pid));
 }
 
 /** WHAT: Stores the ready process id in its health sentinel. WHY: Keeps supervisors from trusting incomplete startup. */
@@ -236,11 +232,12 @@ export function startBot({
 
   // --- Shutdown ---
 
-  const shutdown = () => {
+  // Node never learns who sent a signal; the log names the signal and the parent so a stop can be matched to its sender's own record.
+  const shutdown = (signal) => {
     shuttingDown = true;
     clearInterval(heartbeat);
     if (reconcileTimer) clearInterval(reconcileTimer);
-    console.log("\nShutting down...");
+    console.log(`\nShutting down (${signal}, pid ${process.pid}, parent ${process.ppid})...`);
     clearOwnMarker(READY_FILE);
     clearOwnMarker(PIDFILE);
     for (const channel of channels) channel.stop();
