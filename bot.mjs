@@ -2,6 +2,7 @@
 // Channel-agnostic. Receives channels array, delegates messaging to them.
 
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
+import { clearOwnMarker } from "./core/runtime-markers.mjs";
 import { buildChannelMap } from "./lib.mjs";
 import { createInboundReconciler, formatRecoveredNotice } from "./core/inbound-reconciler.mjs";
 import { resolveConfiguredInboundTarget } from "./core/inbound-target.mjs";
@@ -227,8 +228,8 @@ export function startBot({
     console.warn(`[heartbeat] channel unhealthy (${failCount}/${MAX_FAILURES})`);
     if (failCount >= MAX_FAILURES) {
       console.error(`[heartbeat] ${MAX_FAILURES} consecutive failures, exiting for restart`);
-      clearReadyFile();
-      try { unlinkSync(PIDFILE); } catch {}
+      clearOwnMarker(READY_FILE);
+      clearOwnMarker(PIDFILE);
       process.exit(1);
     }
   }, HEARTBEAT_INTERVAL);
@@ -240,8 +241,8 @@ export function startBot({
     clearInterval(heartbeat);
     if (reconcileTimer) clearInterval(reconcileTimer);
     console.log("\nShutting down...");
-    clearReadyFile();
-    try { unlinkSync(PIDFILE); } catch {}
+    clearOwnMarker(READY_FILE);
+    clearOwnMarker(PIDFILE);
     for (const channel of channels) channel.stop();
     process.exit(0);
   };
