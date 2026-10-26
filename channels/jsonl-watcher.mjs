@@ -538,7 +538,7 @@ export function createJsonlWatcher({
         const paneCmd = String(config?.[name]?.panes?.[idx]?.cmd || "");
         if (alternateEngineForCommand(paneCmd) !== "kimi") await watchModelChange({ name, idx, channelId, ctx, config })
           .catch((err) => log(`model-watch failed for ${name}:${idx}: ${err.message}`));
-        await discord.send(channelId, jsonlContextFooter(ctx))
+        await discord.send(channelId, jsonlContextFooter(ctx, progress.takeChanged(channelId)))
           .catch((err) => log(`context-footer ${name}:${idx}: ${err.message}`));
       }
     } catch (err) {

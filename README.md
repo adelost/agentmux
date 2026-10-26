@@ -579,6 +579,12 @@ list of pane addresses or Discord channel IDs to restore the old tool rows in
 those channels. `*` restores them everywhere; unset is the concise default.
 Restart the bridge after changing its environment.
 
+In the concise default, the footer under an answer ends with
+`· changed: cut.ts, TASKS.md +3`: the base names of the files the Edit and Write
+steps changed since the previous footer, each once, about 100 characters at most,
+the rest as `+K`. It is left out when no file changed. Files changed through the
+shell (`sed`, `git`, a script) are not listed.
+
 ### Two Codex accounts
 
 Profile 1 is the existing `~/.codex` login. Profile 2 is isolated under

@@ -403,7 +403,7 @@ export function createNativeRuntimeWatcher({
       await discord.send(channelId, { files: groups[index] }, { kind: "file" });
     }
     if (Number.isFinite(agent.context?.percent)) {
-      await discord.send(channelId, nativeContextFooter(agent));
+      await discord.send(channelId, nativeContextFooter(agent, progress.takeChanged(channelId)));
     }
   }
 

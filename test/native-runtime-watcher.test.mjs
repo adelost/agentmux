@@ -152,6 +152,24 @@ describe("native runtime Discord watcher", () => {
     expect(discord.send.mock.calls[1][1]).toBe("_opus-4-8 high · context: 61% (122k)_");
   });
 
+  it("names the files the turn edited in the native footer when tool rows are off (row 100)", async () => {
+    vi.stubEnv("AMUX_TOOL_LINES_CHANNELS", "");
+    try {
+      const stored = {};
+      const state = { get: (key, fallback) => stored[key] ?? fallback, set: (key, value) => { stored[key] = structuredClone(value); } };
+      const discord = { send: vi.fn(async () => {}), sendTyping: vi.fn(async () => {}) };
+      const config = { "skybar-canary": { backend: "native", dir: "/tmp/canary", discord: { "channel-1": 0 }, panes: [{ cmd: "native:claude", engine: "claude" }] } };
+      const edited = events.map(event => event.type !== "assistant" ? event : { ...event, message: { content: [
+        { type: "tool_use", name: "Edit", input: { file_path: "/repo/channels/cut.ts" } },
+        { type: "tool_use", name: "Write", input: { file_path: "/repo/docs/TASKS.md" } },
+        { type: "text", text: "CANARY_OK" }] } });
+      const nativeRuntime = { history: vi.fn(async () => ({ agent: { running: false, model: "claude-opus-4-8", effort: "high", context: { percent: 61.2, usedTokens: 122_400 } }, events: edited })) };
+      const watcher = createNativeRuntimeWatcher({ nativeRuntime, agentsYamlPath: "unused", discord, state, pollMs: 60_000 });
+      await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+      expect(discord.send.mock.calls.map(call => call[1])).toEqual(["CANARY_OK", "_opus-4-8 high · context: 61% (122k) · changed: cut.ts, TASKS.md_"]);
+    } finally { vi.stubEnv("AMUX_TOOL_LINES_CHANNELS", "*"); }
+  });
+
   it("mirrors an assistant-less native failure exactly once", async () => {
     const stored = {};
     const state = {

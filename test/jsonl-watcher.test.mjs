@@ -1297,4 +1297,27 @@ feature("optional work row remains available", () => {
       expect(ctx.discord.sends[1].payload).toBe("SUMMARY: Done.");
     } finally { ctx.cleanup(); } }],
   });
+  unit("the footer after the final reply names the files the turn edited, and the row still disappears (row 100)", {
+    given: ["a live turn with two distinct tools", () => {
+      process.env.AMUX_TOOL_LINES_CHANNELS = "";
+      const at = Date.now() - 10_000, ts = new Date(at).toISOString();
+      const ctx = setupWatcher({ jsonlLines: [userTurn("work", ts), assistantTool("Read", { file_path: "/tmp/cut.ts" }, new Date(at + 100).toISOString()),
+        toolResult("read", new Date().toISOString())], stateInitial: { watcher_last_posted_ts: { "ch-test": at - 1 } } });
+      ctx.agent.getContextPercent.mockReturnValue({ percent: 42, tokens: 120000, model: "test" });
+      return { at, ctx };
+    }],
+    when: ["two partial updates then an end-turn arrive", async fx => {
+      await fx.ctx.watcher.checkPane("testagent", 0, fx.ctx.agentRootDir);
+      fx.ctx.appendJsonl([assistantTool("Edit", { file_path: "/tmp/cut.ts" }, new Date(fx.at + 200).toISOString()), toolResult("written", new Date().toISOString())]);
+      await fx.ctx.watcher.checkPane("testagent", 0, fx.ctx.agentRootDir);
+      fx.ctx.appendJsonl([assistantText("SUMMARY: Done.", new Date(fx.at + 300).toISOString(), "end_turn")]);
+      await fx.ctx.watcher.checkPane("testagent", 0, fx.ctx.agentRootDir); return fx.ctx;
+    }],
+    then: ["the row is deleted, the answer is unchanged and its footer lists cut.ts", ctx => { try {
+      expect(ctx.discord.sends).toHaveLength(3);
+      expect(ctx.discord.deleteMessage).toHaveBeenCalledWith("ch-test", "post-1");
+      expect(ctx.discord.sends[1].payload).toBe("SUMMARY: Done.");
+      expect(ctx.discord.sends[2].payload).toMatch(/context: 42% \(120k\) · changed: cut\.ts_$/u);
+    } finally { ctx.cleanup(); } }],
+  });
 });
