@@ -41,6 +41,7 @@ function markReady() {
 export function startBot({
   channels, agentsYaml, whisperUrl, agent, tts, state, onMessage, inboundStore = null,
   prepareMessage = null, onHumanMessage = warnQuotaOnHumanMessage,
+  onClaimGuardHumanMessage = () => {},
 }) {
   ensureSingleInstance();
 
@@ -143,6 +144,8 @@ export function startBot({
     channel.onMessage((msg) => {
       const handled = inbound.enqueue(msg, channel).catch((err) =>
         console.warn(`inbound delivery failed for #${msg?.channelId || "unknown"}: ${err.message}`));
+      if (!msg?.isBot && getMapping(msg?.channelId)) void Promise.resolve().then(() => onClaimGuardHumanMessage(msg))
+        .catch(error => console.warn(`claim human-release failed: ${error.message}`));
       // The quota warning answers in the channel the human writes in, after his message is handled:
       // it never holds up his delivery, and its post cannot hide the catch-up notice.
       void handled.then((outcome) => (msg?.isBot || !getMapping(msg?.channelId) || outcome?.ignored || outcome?.duplicate

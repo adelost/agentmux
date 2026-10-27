@@ -39,6 +39,7 @@ import { createDriftGuard } from "./channels/drift-guard.mjs";
 import { parseReminderConfig } from "./core/reminder-state.mjs";
 import { createJsonlWatcher } from "./channels/jsonl-watcher.mjs";
 import { createNativeRuntimeWatcher } from "./channels/native-runtime-watcher.mjs";
+import { createClaimGuardRuntime } from "./channels/claim-guard-runtime.mjs";
 import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
 import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
 import { createPermissionWatchdog } from "./channels/permission-watchdog.mjs";
@@ -275,6 +276,7 @@ if (!TOKEN) {
 // to live here fell away with the typed delivery path. The session-start
 // itself still shows in `amux timeline` via the hook's ledger row.
 
+const claimGuard = createClaimGuardRuntime({ discord, broker: deliveryBroker, configPath: AGENTS_YAML });
 // --- Wire up ---
 
 const { getMapping, overrides, channelMap, reloadConfig, ready: bridgeReady } = startBot({
@@ -285,6 +287,7 @@ const { getMapping, overrides, channelMap, reloadConfig, ready: bridgeReady } = 
   tts,
   state: appState,
   inboundStore,
+  onClaimGuardHumanMessage: message => claimGuard?.humanMessage(message),
   prepareMessage: (msg) => attachments.transcribeAhead(msg),
   // onMessage is set below after handlers are created (circular dep)
   onMessage: (...args) => handlers.onMessage(...args),
@@ -388,12 +391,14 @@ const jsonlWatcher = createJsonlWatcher({
   state: appState,
   recorder,
   tts,
+  claimGuard,
 });
 const nativeRuntimeWatcher = createNativeRuntimeWatcher({
   nativeRuntime,
   agentsYamlPath: AGENTS_YAML,
   discord,
   state: appState,
+  claimGuard,
 });
 // Link must not wait for Discord: inbound reconciliation took 3.5 minutes on
 // 2026-09-14 and every phone send got HTTP 502 meanwhile. The broker queue

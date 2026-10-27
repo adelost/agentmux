@@ -2927,6 +2927,7 @@ export async function dispatch(argv, ctx) {
       return cmdDone(ctx, flags);
     }
 
+    case "claims": return (await import("./claims.mjs")).cmdClaims(rest, ctx);
     case "on-track": return (await import("./on-track.mjs")).cmdOnTrack(rest);
     case "quiet": return (await import("./quiet.mjs")).cmdQuiet(rest, ctx);
 
@@ -2936,7 +2937,6 @@ export async function dispatch(argv, ctx) {
     }
 
     case "dream": return cmdDream(ctx, parseDreamArgs(rest));
-
     case "janitor": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.janitor);
       if (positional.length) throw new Error("Usage: amux janitor [--dry] [--days N]");

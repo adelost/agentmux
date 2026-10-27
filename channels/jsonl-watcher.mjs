@@ -1,20 +1,6 @@
-// jsonl-watcher: event-driven mirror of agent replies → bound Discord channels.
-// Replaces the old fan of ad-hoc forwarders (handlers.streamResponse,
-// drift-guard.forwardReplyAsync, resume-hint forwardHintReplyAsync,
-// mirror-loop). One watcher per claude/codex pane, fs.watch on its
-// project dir, polling fallback for WSL 9p reliability, persistent
-// state for restart-resume and dedupe.
-//
-// Stops the user-visible problems we kept hitting:
-//   - drift-guard / resume-hint forwarders timing out → reply lost
-//   - bridge restart mid-streamResponse → reply lost
-//   - voice-PWA outbound never had a Discord mirror at all
-//   - matcher mismatches on ax-meta / TTS / voice prefixes
-//   - tmux fallback shipping pane chrome to Discord
-//
-// All these scenarios converge on "agent wrote turn to jsonl but Discord
-// didn't see it". Watcher reads jsonl directly so it's by definition
-// covering all of them.
+// One persistent JSONL mirror owns completed replies, native typing and recovery.
+// fs.watch plus bounded polling covers WSL missed events; stable item IDs retain
+// restart dedupe. Terminal chrome never becomes reply text.
 import { watch, statSync, existsSync } from "fs";
 import { join } from "path";
 import { splitMessage, extractImageMarkers, validateImagePath, chunkAttachments } from "../lib.mjs";
@@ -105,6 +91,7 @@ export function createJsonlWatcher({
   state,
   recorder = null,
   tts = null,
+  claimGuard = null,
   pollMs = DEFAULT_POLL_MS,
   typingPollMs = DEFAULT_TYPING_POLL_MS,
   postPrefix = "",
@@ -470,13 +457,19 @@ export function createJsonlWatcher({
     const quotaKey = `watcher_quota_episode:${name}:${idx}`;
     const quota = planQuotaStopMirror(turn, state.get(quotaKey, null));
     turn = await progress.update({ channelId, paneKey: `${name}:${idx}`, turn: quota.turn });
-    const { fullText, validFiles, hasNarrative } = renderTurn(turn);
+    let { fullText, validFiles, hasNarrative } = renderTurn(turn);
     if (!fullText && validFiles.length === 0) { state.set(quotaKey, quota.next); return { ok: true }; }
     // "No response requested." is Claude Code answering a harness-injected
     // notification (dead background task, resume bookkeeping) — not the
     // agent talking. Mirroring it reads as a refusal to answer; the real
     // reply arrives as its own turn right after. Skip text AND footer.
     if (isHarnessPlaceholder(fullText) && validFiles.length === 0) return { ok: true };
+    if (claimGuard && turn.isComplete !== false) {
+      const checked = await claimGuard.assess({ paneKey: `${name}:${idx}`, channelId,
+        turnId: `jsonl:${name}:${idx}:${turn.timestamp || turn.endTimestamp}`, prompt: turn.userPrompt, text: fullText, files: validFiles });
+      if (checked.held) return { ok: true };
+      fullText = checked.text;
+    }
 
     const body = postPrefix && fullText ? `${postPrefix}${fullText}` : fullText || "(no text)";
     const chunks = splitMessage(body);

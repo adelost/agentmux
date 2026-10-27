@@ -200,11 +200,13 @@ function renderTurn(turn) {
   };
 }
 
+/** WHAT: Builds the native reply mirror. WHY: Keeps durable turn identity separate from Discord delivery and claim holds. */
 export function createNativeRuntimeWatcher({
   nativeRuntime,
   agentsYamlPath,
   discord,
   state,
+  claimGuard = null,
   notify = notifyUser,
   park = parkPane,
   unpark = unparkPane,
@@ -391,6 +393,12 @@ export function createNativeRuntimeWatcher({
     turn = await progress.update({ channelId, paneKey, turn: { ...turn, isComplete: true } });
     const rendered = renderTurn(turn);
     if (!rendered.text && !rendered.files.length) return;
+    if (claimGuard) {
+      const checked = await claimGuard.assess({ paneKey, channelId, turnId: `native:${paneKey}:${turn.id}`,
+        prompt: turn.user, text: rendered.text, files: rendered.files });
+      if (checked.held) return;
+      rendered.text = checked.text;
+    }
     const chunks = splitMessage(rendered.text || "(no text)");
     const groups = chunkAttachments(rendered.files);
     for (let index = 0; index < chunks.length; index += 1) {

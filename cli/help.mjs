@@ -97,6 +97,7 @@ Usage:
     --summary                     Group matching durable asks by repository
   agent asks bind ID... --row N | --commit SHA | --close REASON  Bind tasks or close non-task asks
   agent quiet --act               Why a pane went quiet, and the one obvious action (the stall-watch cron runs it)
+  agent claims check --since 24h  Measure reply citations; --day YYYY-MM-DD for held-out review, --help for labels
     --replay --since T --until T  Print each quiet episode's class and action, and needs-you before and after; sends nothing
     --hands                       Panes that wait for the operator's hands (a login, a card, a key, hardware)
   agent done                      Attention-first fleet overview (default: last 1h)
