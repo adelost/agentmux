@@ -10,7 +10,7 @@ const DEFAULT_SECONDS = 30;
 const MAX_SECONDS = 120;
 
 /**
- * WHAT: Records a CPU profile when `<dir>/<pid>.request` appears; the file may hold the seconds.
+ * WHAT: Builds a watcher that writes a CPU profile when `<pid>.request` appears; it may hold the seconds.
  * WHY: Names the function that holds a busy event loop instead of guessing from I/O samples.
  */
 export function watchCpuProfileRequests({ dir = join(homedir(), ".agentmux", "profiles"), pid = process.pid,

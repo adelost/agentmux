@@ -3,9 +3,9 @@ fileSize:
     agent.mjs: 1766
     channels/jsonl-watcher.mjs: 887
     cli/commands.mjs: 3138
-    core/codex-jsonl-reader.mjs: 752
+    core/codex-jsonl-reader.mjs: 751
     core/codex-tui.mjs: 546
-    core/context.mjs: 618
+    core/context.mjs: 585
     core/contract-lint.mjs: 640
     core/delivery-broker.mjs: 659
     core/delivery-queue.mjs: 525

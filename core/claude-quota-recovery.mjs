@@ -3,20 +3,14 @@
 import { statSync } from "node:fs";
 import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
 import { parseJsonlWindow } from "./jsonl-reader.mjs";
+import { createStampMemo } from "./stamp-memo.mjs";
 import { activeClaudeLimitReceiptFromEvents, claudeLimitFromText, claudeLimitEventText, claudeLimitNote } from "./claude-limit-evidence.mjs";
 export { activeClaudeLimitReceiptFromEvents, claudeLimitFromText, parseClaudeLimitResetAt, CLAUDE_STOP_BANNER } from "./claude-limit-evidence.mjs";
 
 const DEFAULT_LIMIT_TAIL_BYTES = 8 * 1024 * 1024;
-// A receipt depends only on the journal's bytes, so it is kept per journal stamp:
-// a pane without a limit note read the whole 8 MB window on every quota tick
-// (17 % of the bridge CPU, 2026-10-27).
-const MAX_CACHED_RECEIPTS = 256;
-const receiptsByJournal = new Map(); // path + window → { stamp, receipt }
-
-const journalStamp = (path) => {
-  try { const stat = statSync(path); return `${stat.ino}:${stat.size}:${stat.mtimeMs}`; }
-  catch { return null; }
-};
+// A pane without a limit note read the whole 8 MB window on every quota tick.
+const receiptsByJournal = createStampMemo();
+const statOrNull = (path) => { try { return statSync(path); } catch { return null; } };
 
 /**
  * WHAT: Reads the active limit receipt for one pane cwd from bounded JSONL history.
@@ -28,24 +22,18 @@ export function activeClaudeLimitReceipt(paneDir, {
 } = {}) {
   const identity = latestClaudeSessionIdentity(paneDir, { homeDir });
   if (!identity) return null;
-  const key = `${identity.path}\0${tailBytes}`, stamp = journalStamp(identity.path);
-  const known = receiptsByJournal.get(key);
-  if (stamp && known?.stamp === stamp) return known.receipt;
+  const key = `${identity.path}\0${tailBytes}`, stat = statOrNull(identity.path);
+  const known = receiptsByJournal.get(key, stat);
+  if (known !== undefined) return known;
   const events = parseJsonlWindow(identity.path, {
     initialBytes: Math.min(256 * 1024, tailBytes),
     maxBytes: tailBytes,
     enough: (rows) => rows.some((event) => claudeLimitFromText(claudeLimitEventText(event)) !== null || claudeLimitNote(event)),
   });
-  const receipt = activeClaudeLimitReceiptFromEvents(events, {
+  return receiptsByJournal.set(key, stat, activeClaudeLimitReceiptFromEvents(events, {
     sessionId: identity.sessionId,
     sessionPath: identity.path,
-  });
-  if (stamp) {
-    receiptsByJournal.delete(key);
-    receiptsByJournal.set(key, { stamp, receipt });
-    while (receiptsByJournal.size > MAX_CACHED_RECEIPTS) receiptsByJournal.delete(receiptsByJournal.keys().next().value);
-  }
-  return receipt;
+  }));
 }
 
 // Every plan window must have room, whichever one stopped the pane: a fresh
