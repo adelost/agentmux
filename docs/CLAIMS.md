@@ -20,6 +20,15 @@ Corpus includes canonical `post`, `kind:reply`, `status:sent` rows only, all pan
 
 Qualification requires confirmed seven error groups, ≥5 caught target assertions, both days completely graded, ≤10% false stops on each, different ordered days and identical policy hashes. Do not count another sentence's flag as detecting a known error. lsrc:0 confirmed the27Oct content/time mapping; pre07:06Z key requests violate prior decision, later ones also conflict with code.
 
+Measured27Oct, frozen inputs and labels in the existing claim-guard artifact directory:
+
+| UTC day | Replies | Holds | Share held | False stops in50 reviewed holds |
+| --- | ---: | ---: | ---: | ---: |
+| 27Oct through07:40:55Z | 687 | 426 | 62.01% | 2/50,4% |
+| 26Oct | 2522 | 1511 | 59.91% | 8/50,16% |
+
+The held-out result exceeds10%, so enforcement is unqualified.5/7 known groups caught includes the early two-key decision violation; excluding it yields4/7. The later wrong-code requests under NEXT are missed. Labels are owner judgments; the corpus unit is a canonical Discord post, which may be one chunk of a runtime turn. The installed CLI reproduces the numbers; actual bridge shadow activation still requires its ordinary safe restart.
+
 After a real shadow observation, the owner may save `{algorithm,today,heldOut}` from qualified reports to private `qualification.json` and select enforce through normal environment/reload. That file does not itself change the mode. No automatic model grading, account changes or retries.
 
 ## A held reply
