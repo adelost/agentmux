@@ -13,12 +13,13 @@ export function createClaudeSubmitRescue({
   capturePane,
   holdsOwnPaste = async () => false,
 }) {
-  return async function rescueClaudeSubmit(agentName, pane, target, prompt, { ownedPaste = null } = {}) {
+  // echoCursor is the journal end fixed before the paste: only this send's bytes can prove it landed.
+  return async function rescueClaudeSubmit(agentName, pane, target, prompt, { ownedPaste = null, echoCursor = null } = {}) {
     if (paneDialectName(agentName, pane) !== "claude") return;
     let dir;
     try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { return; }
     const submitted = () => {
-      try { return isPromptInJsonl(dir, prompt) === true; } catch { return false; }
+      try { return isPromptInJsonl(dir, prompt, { cursor: echoCursor }) === true; } catch { return false; }
     };
     await wait(750);
     if (submitted()) return;

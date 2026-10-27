@@ -1050,6 +1050,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (maintenanceGuard && await t.paneInMode(target)) throw new Error("maintenance-copy-mode-active");
     if (!maintenanceGuard) await deliveryPreparationStage("input:copy-mode", () => exitCopyMode(target));
     const dialect = await livePaneDialectName(agentName, pane);
+    // Fixed before the paste, so the submit rescue reads only what Claude appends after it.
+    const claudeEchoCursor = dialect === "claude" && !maintenanceGuard ? await capturePromptEchoCursor(agentName, pane, prompt) : null;
     if (dialect === "codex") await deliveryPreparationStage("input:model-proof", () => assertCodexWorkModel({ state, name: agentName, pane, prompt,
       configured: agentConfig(agentName).panes?.[pane], screen: () => captureScreen(agentName, pane),
       previous: () => getContextPercentByDialect(paneDir(agentConfig(agentName).dir, pane), "codex") }));
@@ -1150,7 +1152,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       onSubmitted,
     });
     if (!maintenanceGuard) await maybeSendCodexSubmitEnter(agentName, pane, target, prompt, { notBeforeMs });
-    if (!maintenanceGuard) await maybeRescueClaudeSubmit(agentName, pane, target, prompt, { ownedPaste });
+    if (!maintenanceGuard) await maybeRescueClaudeSubmit(agentName, pane, target, prompt, { ownedPaste, echoCursor: claudeEchoCursor });
     if (dialect === "kimi") {
       await maybeRescueKimiSubmit(agentName, pane, target, prompt, { notBeforeMs });
     }
