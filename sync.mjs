@@ -409,7 +409,7 @@ export function generateAgentsYaml(
       paneIdx++;
     }
     for (let i = 0; i < (config.geminiCount ?? 0); i++) {
-      const pane = { name: i === 0 ? "gemini" : `gemini-${i + 1}`, cmd: "gemini --yolo --skip-trust", engine: "gemini" };
+      const pane = { name: i === 0 ? "gemini" : `gemini-${i + 1}`, cmd: "agy --dangerously-skip-permissions", engine: "gemini" };
       const label = labelFor(paneIdx);
       if (label) pane.label = label;
       panes.push(pane);

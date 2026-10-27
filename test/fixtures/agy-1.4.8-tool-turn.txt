@@ -1,0 +1,23 @@
+      ▄▀▀▄        Antigravity CLI 1.4.8
+     ▀▀▀▀▀▀       user@example.com (Antigravity Starter Quota)
+    ▀▀▀▀▀▀▀▀      Gemini 3.8 Flash (High)
+   ▄▀▀    ▀▀▄     /tmp/repo
+  ▄▀▀      ▀▀▄
+
+────────────────────────────────────────────────────────────
+> Testvarv AGYPROBE1. Kör shell-kommandot: echo AGY_TOOL_OK
+  Svara sedan med exakt en rad: AGY_REPLY_OK och ingenting mer.
+  Fyllnadsrad för radbrytning: ord0 ord1 ord2 ord3 ord4 ord5 ord6 ord7 ord8 ord9 ord10 ord11 ord12 ord13 ord14 ord15 ord16 ord17 ord18 ord19 ord20 ord21 ord22
+  ord23 ord24 ord25 ord26 ord27 ord28 ord29 ord30 ord31 ord32 ord33 ord34 ord35 ord36 ord37 ord38 ord39 ord40 ord41 ord42 ord43 ord44 ord45 ord46 ord47 ord48
+  ord49 ord50 ord51 ord52 ord53 ord54 ord55 ord56 ord57 ord58 ord59 ord60 ord61 ord62 ord63 ord64 ord65 ord66 ord67 ord68 ord69 ord70 ord71 ord72 ord73 ord74
+  ord75 ord76 ord77 ord78 ord79 ord80 ord81 ord82 ord83 ord84 ord85 ord86 ord87 ord88 ord89 ord90 ord91 ord92 ord93 ord94 ord95 ord96 ord97 ord98 ord99 ord100
+  ord101 ord102 ord103 ord104 ord105 ord106 ord107 ord108 ord109 ord110 ord111 ord112 ord113 ord114 ord115 ord116 ord117 ord118 ord119
+
+● Ran (echo AGY_TOOL_OK) (ctrl+o to expand)
+
+  AGY_REPLY_OK
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                                                          Gemini 3.8 Flash · high

@@ -8,6 +8,9 @@ import {
 
 // --- Data integrity ------------------------------------------------------
 
+// Work footer captured from agy 1.4.8 in tmux, 27 Oct.
+const AGY_WORK_FOOTER = "esc to cancel                                  Gemini 3.8 Flash · high";
+
 feature("dialect data integrity", () => {
   unit("every dialect has the required fields", {
     given: ["ALL_DIALECTS", () => ALL_DIALECTS],
@@ -38,12 +41,13 @@ feature("dialect data integrity", () => {
     given: ["all dialects", () => ALL_DIALECTS],
     when: ["checking each dialect", (ds) => ds.map((d) => ({
       name: d.name,
-      covers: d.busySignals.some((s) => typeof s === "string" && (d.name === "gemini"
-        ? "(esc to cancel, 1s)".includes(s) : "esc to interrup".includes(s) || s.includes("esc to interrup"))),
+      covers: d.busySignals.some((s) => (d.name === "gemini"
+        ? (typeof s === "string" ? AGY_WORK_FOOTER.includes(s) : s.test(AGY_WORK_FOOTER))
+        : typeof s === "string" && ("esc to interrup".includes(s) || s.includes("esc to interrup")))),
     }))],
     then: ["each observed work footer is recognized", (results) => {
       // "esc to interrup" (no trailing t) happens when tmux pane is too narrow
-      // and truncates the UI. Gemini's observed footer instead says "esc to cancel".
+      // and truncates the UI. The agy footer Gemini panes run says "esc to cancel".
       for (const r of results) {
         expect(r.covers, `${r.name} must cover its actual work footer`).toBe(true);
       }

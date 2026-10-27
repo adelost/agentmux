@@ -194,18 +194,16 @@ export const QWEN = {
   ],
 };
 
-// Markers captured from the installed0.65 TUI and an isolated fake shell-tool turn.
-/** WHAT: Defines Gemini's normal interactive CLI. WHY: Keeps screen-only observation separate from Claude and Qwen protocols. */
+// Markers captured from the installed agy 1.4.8 TUI in tmux: idle, busy, a shell-tool turn and resume (27 Oct).
+/** WHAT: Defines the Antigravity CLI (agy) TUI that serves Gemini subscriptions. WHY: Keeps screen-only observation separate from Claude and Qwen protocols. */
 export const GEMINI = {
   name: "gemini", compactReceiptIsAuthoritative: false,
-  promptChar: "*", bullet: "✦", toolResultPrefix: "│",
-  toolCallPattern: /^\s*│\s*[⊷✓✗]\s+Shell\b/u,
-  idleWhenPromptEmpty: false, busySignals: ["(esc to cancel,"],
-  promptPlaceholderRe: /^\*\s+Type your message/u,
-  noise: [/Gemini CLI v[\d.]+/u, /^\s*YOLO Ctrl\+Y/u, /^\s*\*\s+Type your message/u,
-    /^(?:▄{3,}|▀{3,})\s*$/u, /^\s*workspace \(\/directory\)/u,
-    /^\s*\/.*\s{2,}no sandbox\s+Auto\s*$/u, /^\s*\? for shortcuts\s*$/u],
-  modals: [{ id: "google-login", status: "menu", re: /Please visit the following URL to authorize[\s\S]*Enter the authorization code:/u }],
+  promptChar: ">", bullet: "●", toolResultPrefix: "⎿",
+  toolCallPattern: /^\s*●\s+Ran\s+\(/u,
+  idleWhenPromptEmpty: false, busySignals: [/^esc to cancel\b/mu],
+  noise: [/Antigravity CLI \d/u, /\(Antigravity [^)]*Quota\)/u, /^\s*\? for shortcuts/u, /^\s*esc to (?:cancel|dismiss)\b/u,
+    /^\s*▸ Thought for /u, /^\s*[⠁-⣿]\s+Generating/u, /^\s*┃ /u],
+  modals: [{ id: "workspace-trust", status: "menu", re: /Do you trust the contents of this project\?[\s\S]*Yes, I trust this folder/u }],
 };
 
 // --- Registry ------------------------------------------------------------
@@ -240,7 +238,7 @@ export const compactReceiptIsAuthoritative = (dialect) =>
  * WHY: Keeps scrollback parsing from applying another engine's markers.
  */
 export function detectDialect(raw) {
-  if (/\bGemini CLI v[\d.]+/u.test(raw)) return GEMINI;
+  if (/Antigravity CLI \d/u.test(raw)) return GEMINI;
   if (raw.includes(">_ Qwen Code") || /Token Plan\s+\|.*qwen/iu.test(raw)) return QWEN;
   if (raw.includes("Welcome to Kimi Code") || /\bSession\s+session_[0-9a-f-]+/iu.test(raw)) return KIMI;
   // Strong signal: Codex banner somewhere
@@ -276,12 +274,11 @@ export const matchesAnyToolCall = (line) =>
 export const matchesAnyPromptPrefix = (line) =>
   ALL_DIALECTS.some((d) => line.startsWith(d.promptChar + " "));
 
-/** WHAT: Checks literal nonempty user prompt markers. WHY: Keeps asterisk composers and placeholders from breaking turn extraction. */
+/** WHAT: Checks literal nonempty user prompt markers. WHY: Keeps empty composers from starting a turn in extraction. */
 export const matchesAnyPromptWithText = (line) =>
-  ALL_DIALECTS.some((d) => !d.promptPlaceholderRe?.test(line)
-    && new RegExp(`^${d.promptChar.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")} \\S`).test(line));
+  ALL_DIALECTS.some((d) => new RegExp(`^${d.promptChar} \\S`).test(line));
 
-/** Strip any dialect's leading bullet (and following space) from a line. */
+/** WHAT: Returns a line without any dialect's leading response bullet. WHY: Keeps engine glyphs out of mirrored reply text. */
 export const stripBullet = (line) => {
   for (const d of ALL_DIALECTS) {
     if (line.startsWith(d.bullet + " ")) return line.slice(d.bullet.length + 1);

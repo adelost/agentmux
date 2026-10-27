@@ -10,7 +10,6 @@ import { claudeProjectDir } from "../core/claude-paths.mjs";
 import { latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { alternateEngineForCommand, sessionReaderForCommand, alternateWatchDir, latestAlternateMtime } from "../core/alternate-session-reader.mjs";
 import { createGeminiTmuxMirror } from "../core/gemini-tmux-mirror.mjs";
-import { geminiSession } from "../core/gemini-runtime.mjs";
 import { getContextFromPane } from "../core/context.mjs";
 import { jsonlContextFooter } from "../core/context-footer.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
@@ -628,7 +627,7 @@ export function createJsonlWatcher({
       const config = sharedConfig || loadConfig(agentsYamlPath);
       const channelId = channelForPane(config, name, idx);
       if (!channelId) return;
-      if (config[name]?.panes?.[idx]?.engine === "gemini") return geminiMirror.poll({ name, idx, channelId, config, sessionId: geminiSession(state, name, idx)?.sessionId });
+      if (config[name]?.panes?.[idx]?.engine === "gemini") return geminiMirror.poll({ name, idx, channelId, config, dir: paneDir(agentDir, idx) });
 
       const dir = paneDir(agentDir, idx);
       const key = paneKey(name, idx);

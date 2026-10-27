@@ -32,7 +32,7 @@ export const isKimiPaneCommand = (command) => /(?:^|[\/\s])kimi(?:-code)?(?:\s|$
 /** WHAT: Checks whether a pane starts Qwen Code. WHY: Keeps its wrapper path inside Qwen lifecycle handling. */
 export const isQwenPaneCommand = (command) => /(?:^|[\/\s])qwen(?:\s|$)/u.test(String(command || ""));
 /** WHAT: Checks Gemini's normal CLI command. WHY: Keeps its startup outside Claude's account lifecycle. */
-export const isGeminiPaneCommand = (command) => /(?:^|[\/\s])gemini(?:\s|$)/u.test(String(command || ""));
+export const isGeminiPaneCommand = (command) => /(?:^|[\/\s])(?:agy|gemini)(?:\s|$)/u.test(String(command || ""));
 /** WHAT: Checks whether a pane runs a coding agent. WHY: Keeps service panes outside recovery boundaries. */
 export const isCodingPaneCommand = (command) =>
   isClaudePaneCommand(command) || isCodexPaneCommand(command)

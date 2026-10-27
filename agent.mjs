@@ -33,9 +33,9 @@ import {
 } from "./core/codex-jsonl-reader.mjs";
 import { createKimiAgentRuntime, kimiComposerHasCollapsedPaste, kimiJournal } from "./core/kimi-agent-runtime.mjs";
 import { createQwenAgentRuntime, qwenJournal } from "./core/qwen-agent-runtime.mjs";
-import { createGeminiRuntime, geminiSession } from "./core/gemini-runtime.mjs";
+import { createGeminiRuntime } from "./core/gemini-runtime.mjs";
 import { captureGeminiPromptCursor, geminiPromptAccepted } from "./core/gemini-prompt-echo.mjs";
-import { isBusyFromTmux, geminiReplyTurn } from "./core/tmux-busy.mjs";
+import { isBusyFromTmux, geminiReplyTurn, tmuxDialectFor } from "./core/tmux-busy.mjs";
 import { createKimiIngestProbe } from "./core/kimi-ingest-probe.mjs";
 import { createPromptEcho } from "./core/prompt-echo.mjs";
 import { createPaneMemorySnapshot, resolveMemoryResponsePrompt } from "./core/delivery-memory-context.mjs";
@@ -375,9 +375,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (isCodexCmd(wantCmd)) return /^(codex|node)$/.test(currCmd);
     if (isKimiCmd(wantCmd)) return /^(kimi|kimi-code)$/.test(currCmd);
     if (isQwenCmd(wantCmd)) return /^(qwen|node)$/.test(currCmd);
-    if (isGeminiCmd(wantCmd)) return /^(gemini|node)$/.test(currCmd);
+    if (isGeminiCmd(wantCmd)) return /^(agy|gemini|node)$/.test(currCmd);
     if (wantCmd === "bash") return isShellProc(currCmd);
-    return !isShellProc(currCmd) && !/^(claude|codex|kimi|kimi-code|qwen|gemini|node)$/.test(currCmd);
+    return !isShellProc(currCmd) && !/^(claude|codex|kimi|kimi-code|qwen|agy|gemini|node)$/.test(currCmd);
   }
 
   async function removeIdleExtraPanes(name, wantedCount, actualCount) {
@@ -472,7 +472,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // if config says something else. User may have active work there;
       // forcing a slot into a shell would destroy context. Report as a
       // mismatch instead.
-      if (/^(claude|codex|kimi|kimi-code|qwen|gemini|node)$/.test(currCmd)) {
+      if (/^(claude|codex|kimi|kimi-code|qwen|agy|gemini|node)$/.test(currCmd)) {
         summary.mismatches = summary.mismatches || [];
         summary.mismatches.push({ pane: i, has: currCmd, expected: want.name });
         continue;
@@ -766,7 +766,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     // Fallback: tmux parsing (Codex, missing jsonl, no matching prompt yet)
     const raw = await capturePane(agentName, pane, 20);
-    return isBusyFromTmux(raw);
+    return isBusyFromTmux(raw, tmuxDialectFor(raw, paneDialectName(agentName, pane)));
   }
 
   const { maybeRescueKimiSubmit, restartKimi, startKimi, submitKimiPromptNow,
@@ -827,10 +827,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
 
     // Last-resort fallback: tmux parsing.
-    const captured = await capturePane(agentName, pane, 5000);
-    const raw = dialect === "gemini" ? captured.replace(/^ (?=[*>✦](?:\s|$))/gmu, "") : captured;
+    const raw = await capturePane(agentName, pane, 5000);
     const selectedTurn = promptText ? extractTurnByPrompt(raw, promptText) : extractLastTurn(raw);
-    const turn = dialect === "gemini" ? geminiReplyTurn(selectedTurn) : selectedTurn;
+    const turn = dialect === "gemini" ? geminiReplyTurn(selectedTurn, promptText) : selectedTurn;
     const items = extractMixedStream(classifyLines(turn));
 
     // Quality gate: when the last turn is mostly pane-chrome (input box,
@@ -897,7 +896,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   const waitForPromptEcho = createPromptEcho({
     paneDir, agentConfig, paneDialectName, isPromptInJsonl, isPromptInCodexJsonl, kimiJournal, qwenJournal, wait,
-    geminiPromptAccepted: (name, pane, prompt, options) => geminiPromptAccepted(prompt, { ...options, sessionId: geminiSession(state, name, pane)?.sessionId }),
+    geminiPromptAccepted: (name, pane, prompt, options) => geminiPromptAccepted(prompt, { ...options, dir: paneDir(agentConfig(name).dir, pane) }),
   });
 
   /**
@@ -912,7 +911,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (dialect === "codex") return captureCodexPromptEchoCursor(dir, promptText);
     if (dialect === "kimi") return kimiJournal.capturePromptCursor(dir, promptText);
     if (dialect === "qwen") return qwenJournal.capturePromptCursor(dir, promptText);
-    if (dialect === "gemini") return captureGeminiPromptCursor(promptText, { sessionId: geminiSession(state, agentName, pane)?.sessionId });
+    if (dialect === "gemini") return captureGeminiPromptCursor(promptText, { dir });
     return null;
   }
 
