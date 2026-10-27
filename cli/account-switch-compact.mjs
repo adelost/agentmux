@@ -92,7 +92,8 @@ export async function compactBeforeSwitch(ctx, target, {
     return facts && { ...facts, queued: liveQueued(options?.queue ?? queue, pane.agent.name, pane.pane.index, facts.queued) };
   };
   const pass = await run(ctx, {}, {
-    targets: [target], queue, now, observe, mirror: mirrorSwitchCompact, force, retryUnmeasured: target.engine === "claude",
+    targets: [target], queue, now, observe, livePending: (name, pane) => liveQueued(queue, name, pane, undefined) !== 0,
+    mirror: mirrorSwitchCompact, force, retryUnmeasured: target.engine === "claude",
     label: `Compact before account switch (${key})`,
     policy: compactPolicy(policy),
     path: reportDirectory(now()),

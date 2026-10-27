@@ -31,16 +31,18 @@ feature("the compact step of an account switch", () => {
   component("the compact run before a switch sees the same live count", {
     given: ["a pane whose only open jobs the quota floor holds", () => ({ jobs: [floorHeld, { status: "pending" }] })],
     when: ["the switch runs its compact", async ({ jobs }) => {
-      let seen;
+      let seen, pending;
       await compactBeforeSwitch({ deliveryQueue: { list: () => jobs } },
         { agent: { name: "lsrc" }, pane: { index: 0 }, engine: "claude" },
         { run: async (_ctx, _flags, deps) => {
           seen = await deps.observe({}, { agent: { name: "lsrc" }, pane: { index: 0 } }, { queue: deps.queue });
+          pending = await deps.livePending("lsrc", 0);
           return { rows: [] };
         }, observeNightly: async () => ({ queued: jobs.length }) });
-      return seen;
+      return { seen, pending };
     }],
-    then: ["held prompts are not live delivery", (facts) => expect(facts.queued).toBe(0)],
+    then: ["held prompts are not live delivery, before the run or at its last check before Enter",
+      ({ seen, pending }) => { expect(seen.queued).toBe(0); expect(pending).toBe(false); }],
   });
   for (const newWork of [false, true]) {
     component(`a manual compact with missing size ${newWork ? "cannot hide new work" : "can restart an idle pane"}`, {

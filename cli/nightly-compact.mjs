@@ -245,7 +245,8 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
               if (current?.sessionId !== first.sessionId || current?.path !== first.sessionPath
                   || draft == null || draft.replace(/\s/gu, "") !== text.replace(/\s/gu, "")
                   || await ctx.agent.isBusy(name, pane)
-                  || queue.list(name, pane).some((job) => !TERMINAL_DELIVERY_STATES.has(job.status))) {
+                  || (dependencies.livePending ? await dependencies.livePending(name, pane)
+                    : queue.list(name, pane).some((job) => !TERMINAL_DELIVERY_STATES.has(job.status)))) {
                 throw new Error("compact-pre-submit-state-changed");
               }
             },
