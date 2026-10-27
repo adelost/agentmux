@@ -49,6 +49,11 @@ const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024;
 const MAX_OPERATIONAL_WINDOW_BYTES = 8 * 1024 * 1024;
 const MAX_OPERATIONAL_CACHE_FILES = 8;
 const operationalEventsCache = new Map(); // filePath → { mtimeMs, size, events }
+// The busy verdict is a small fact of the rollout's bytes, so it is kept for every
+// pane: the credit guard polls ~32 Codex panes every 10 s, the event cache above
+// holds 8, and each miss re-parsed an 8 MB tail (20 % of the bridge CPU, 2026-10-27).
+const MAX_BUSY_VERDICTS = 256;
+const busyVerdicts = new Map(); // filePath → { size, mtimeMs, busy }
 
 /** Parse all JSON events from a jsonl file, skipping malformed lines. */
 function parseJsonl(filePath) {
@@ -291,13 +296,19 @@ export function codexBusyStateFromEvents(events, { truncated = false } = {}) {
 export function isBusyFromCodexJsonl(paneDir) {
   const file = latestSessionFor(paneDir);
   if (!file) return null;
+  let stat;
+  try { stat = statSync(file); }
+  catch { return null; }
+  const known = busyVerdicts.get(file);
+  if (known && known.size === stat.size && known.mtimeMs === stat.mtimeMs) return known.busy;
 
   const events = parseOperationalJsonl(file);
   if (events.length === 0) return null;
-  let truncated = false;
-  try { truncated = statSync(file).size > MAX_OPERATIONAL_WINDOW_BYTES; }
-  catch { return null; }
-  return codexBusyStateFromEvents(events, { truncated });
+  const busy = codexBusyStateFromEvents(events, { truncated: stat.size > MAX_OPERATIONAL_WINDOW_BYTES });
+  busyVerdicts.delete(file);
+  busyVerdicts.set(file, { size: stat.size, mtimeMs: stat.mtimeMs, busy });
+  while (busyVerdicts.size > MAX_BUSY_VERDICTS) busyVerdicts.delete(busyVerdicts.keys().next().value);
+  return busy;
 }
 
 /** Format a codex function_call into a compact one-liner. */
