@@ -160,6 +160,7 @@ export function startCodexCreditStop({ agent, deliveryBroker, state, configPath,
     queue: deliveryBroker.queue, spentWindows, accountKeyFor: (name, pane) => currentProfile(name, pane).key,
     creditsAllowed, mode, now, record, log: message => console.log(`codex-credit-stop | ${message}`),
   });
+  console.log(`codex-credit-stop | ${creditsAllowed ? "off, paid credits allowed by AMUX_CODEX_CREDITS=allow" : mode}, every ${pollMs / 1000} s`);
   const tick = () => (running ||= guard.tick().finally(() => { running = null; }));
   const timer = setInterval(() => tick().catch(error => console.log(`codex-credit-stop | tick failed: ${error.message}`)), pollMs);
   timer.unref?.();
