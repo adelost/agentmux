@@ -11,7 +11,15 @@ import { createClaimGuard } from "./claim-guard.mjs";
 
 /** WHAT: Builds the shared reply guard for both watchers. WHY: Prevents unqualified enforcement and keeps hold ownership independent of inbound delivery. */
 export function createClaimGuardRuntime({ discord, broker, configPath, dir = join(homedir(), ".agentmux/claim-guard"), env = process.env }) {
-  if (!discord) return null;
+  if (!discord || env.AMUX_CLAIM_GUARD === "off") return null;
+  try { return buildClaimGuard({ discord, broker, configPath, dir, env }); }
+  catch (error) {
+    console.warn(`claim guard disabled: initialization unavailable (${error.message}); human delivery remains enabled`);
+    return null;
+  }
+}
+
+function buildClaimGuard({ discord, broker, configPath, dir, env }) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const record = row => appendFileSync(join(dir, "decisions.jsonl"), `${JSON.stringify(row)}\n`, { mode: 0o600 });
   const state = createState(join(dir, "state.json"));

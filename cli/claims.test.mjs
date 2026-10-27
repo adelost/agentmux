@@ -4,8 +4,16 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdClaims } from "./claims.mjs";
+import { inferAskOrigin, isHumanAsk } from "../core/ask-origin.mjs";
 
 feature("claim measurement keeps actual reply identity and excludes incoming messages", () => {
+  integration("automatic correction prompts are not new human asks", {
+    given: ["one correction observed by both queue and pane hook", () => "[amux claim-guard correction for turn-one]\nHeld: add a source"],
+    when: ["classifying the two real producer shapes", prompt => [
+      inferAskOrigin({ source: "claim-guard", prompt }), isHumanAsk({ source: "pane-hook", verbatim: prompt }),
+    ]],
+    then: ["the prompt remains automation", values => expect(values).toEqual(["system", false])],
+  });
   integration("the normal CLI reads only canonical sent reply rows", {
     given: ["a private tiny mixed ledger", () => {
       const dir = mkdtempSync(join(tmpdir(), "claim-cli-")), path = join(dir, "ledger.jsonl");

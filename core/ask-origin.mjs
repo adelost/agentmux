@@ -12,6 +12,7 @@ const AUTOMATION_SOURCES = new Set([
   "codex-capacity-recovery",
   "codex-limit-recovery",
   "fleet-restart-recovery",
+  "claim-guard",
 ]);
 
 /** WHAT: Labels who originated a prompt. WHY: `amux asks` defaults to human/operator asks without hiding agent traffic irreversibly. */
@@ -63,6 +64,7 @@ export const AMUX_PANE_TAGS = Object.freeze([
   ["[idle-capacity]", "core/idle-capacity-alarm.mjs"],
   ["[quiet]", "core/quiet-plan.mjs"],
   ["[model-watch]", "core/model-watch.mjs"],
+  ["[amux claim-guard correction", "channels/claim-guard-runtime.mjs"],
   ["[pause-compact]", "core/pause-compact.mjs"],
   ["[krasch-recovery]", "core/revive.mjs"],
   ["[stop-all-recovery]", "core/revive.mjs"],

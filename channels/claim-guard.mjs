@@ -10,9 +10,12 @@ export function createClaimGuard({ state, check, mode = () => "shadow", sendHeld
   const humanEpoch = new Map();
   const read = () => state.get(KEY, { pending: {}, turns: {} });
   const save = data => state.set(KEY, data);
-  const note = (event, reply, result = {}) => record({ at: new Date().toISOString(), event,
-    paneKey: reply.paneKey, channelId: reply.channelId, turnId: reply.turnId,
-    textSha256: digest(reply.text), ...result });
+  const note = (event, reply, result = {}) => {
+    try { record({ at: new Date().toISOString(), event,
+      paneKey: reply.paneKey, channelId: reply.channelId, turnId: reply.turnId,
+      textSha256: digest(reply.text), ...result }); }
+    catch (error) { log(`claim decision log unavailable: ${error.message}`); }
+  };
   function drop(pending) {
     try { dropCorrection(pending); } catch (error) { log(`claim correction cancellation: ${error.message}`); }
   }
@@ -37,9 +40,13 @@ export function createClaimGuard({ state, check, mode = () => "shadow", sendHeld
       if (message.isBot) return;
       const channelId = String(message.channelId);
       humanEpoch.set(channelId, (humanEpoch.get(channelId) || 0) + 1);
-      for (const [turnId, pending] of Object.entries(read().pending)) {
-        if (String(pending.channelId) === channelId && pending.status === "held") void release(turnId);
-      }
+      try {
+        for (const [turnId, pending] of Object.entries(read().pending)) {
+          if (String(pending.channelId) === channelId && pending.status === "held") {
+            void release(turnId).catch(error => log(`claim release state unavailable: ${error.message}`));
+          }
+        }
+      } catch (error) { log(`claim hold state unavailable: ${error.message}`); }
     },
     async assess(reply) {
       const selected = mode();
@@ -81,7 +88,7 @@ export function createClaimGuard({ state, check, mode = () => "shadow", sendHeld
       } catch (error) {
         note("correction-error", reply, { error: error.message });
         // The saved original is released, never silently stranded by a failed correction enqueue.
-        void release(reply.turnId);
+        void release(reply.turnId).catch(error => log(`claim release state unavailable: ${error.message}`));
       }
       note("held", reply, { count: pending.count });
       return { held: true };

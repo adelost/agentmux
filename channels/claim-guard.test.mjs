@@ -12,6 +12,15 @@ function fixture(options = {}) {
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
 feature("a claim hold cannot consume human input or repeat a send", () => {
+  component("a decision log failure cannot crash the inbound bridge", {
+    given: ["a full log filesystem", () => {
+      const warnings = []; return { ...fixture({ mode: () => "shadow", record: () => { throw Error("ENOSPC"); }, log: text => warnings.push(text) }), warnings };
+    }],
+    when: ["checking a reply", async f => { const result = await f.guard.assess(reply); await settle(); return { ...f, result }; }],
+    then: ["the unchanged reply passed and the failure is visible", ({ result, warnings }) => {
+      expect(result.text).toBe(reply.text); expect(warnings).toEqual(["claim decision log unavailable: ENOSPC"]);
+    }],
+  });
   component("shadow passes unchanged before a checker settles", {
     given: ["a shadow checker that never resolves", () => fixture({ mode: () => "shadow", check: () => new Promise(() => {}) })],
     when: ["a completed reply arrives", async f => ({ f, result: await f.guard.assess(reply) })],

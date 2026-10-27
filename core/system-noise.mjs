@@ -22,6 +22,7 @@ const NOISE_PATTERNS = [
   /^\[AMUX AUTOMATIC QUOTA RECOVERY\b/i,
   /^\[AMUX AUTOMATIC CRASH RECOVERY\b/i,
   /^\[drift-guard\]/i,
+  /^\[amux claim-guard correction for /u,
   /^Caveat:/,
   // Post-compact continuation preamble injected by the harness, not typed.
   /^This session is being continued from a previous conversation/,
