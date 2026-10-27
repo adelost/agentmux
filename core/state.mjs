@@ -25,6 +25,8 @@ const LOCK_TIMEOUT_MS = 12_000;
 const LOCK_POLL_MS = 10;
 const READ_ATTEMPTS = 5;
 const READ_RETRY_MS = 20;
+// Keep the last saved text for comparison only up to this size; larger stores always save.
+const UNCHANGED_CHECK_MAX_CHARS = 8 * 1024 * 1024;
 
 /** WHAT: Blocks the calling thread for a short pause. WHY: state get/set are synchronous for every caller. */
 const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -71,8 +73,10 @@ const existingMode = (path) => {
   try { return statSync(path).mode & 0o777; } catch { return DEFAULT_MODE; }
 };
 
+const serializeState = (data) => JSON.stringify(data, null, 2) + "\n";
+
 /** WHAT: Replaces the state file in one rename. WHY: Readers see the old or the new file, never a truncated one. */
-const writeStateAtomic = (path, data) => {
+const writeStateAtomic = (path, text) => {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true });
   const mode = existingMode(path);
@@ -80,7 +84,7 @@ const writeStateAtomic = (path, data) => {
   const fd = openSync(temp, "wx", mode);
   try {
     fchmodSync(fd, mode);
-    writeSync(fd, JSON.stringify(data, null, 2) + "\n");
+    writeSync(fd, text);
     fsyncSync(fd);
   } catch (error) {
     closeSync(fd);
@@ -136,6 +140,9 @@ export const createState = (path, {
   // A writer between the stamp and read must remain detectable by the next locked update.
   let lastStamp = fileStamp(path);
   let data = loadState(path, readOptions);
+  // The text this process last saved and the file's stamp right after: an
+  // identical save only costs an fsync and makes every reader reload.
+  let saved = null;
 
   // If the file was replaced or edited externally since our last read or
   // write, refresh the in-memory copy. This is what lets `amux tts` flip a
@@ -154,8 +161,11 @@ export const createState = (path, {
       assertDeliveryPreparation();
       maybeReload(); // under the lock: the newest file, whoever wrote it
       const result = change(data);
-      writeStateAtomic(path, data);
+      const text = serializeState(data);
+      if (saved && saved.stamp === fileStamp(path) && saved.text === text) return result;
+      writeStateAtomic(path, text);
       lastStamp = fileStamp(path);
+      saved = text.length <= UNCHANGED_CHECK_MAX_CHARS ? { stamp: lastStamp, text } : null;
       return result;
     }, lockOptions);
   };

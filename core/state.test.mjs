@@ -1,7 +1,7 @@
 import { unit, feature, expect } from "bdd-vitest";
 import { createState } from "./state.mjs";
 import {
-  closeSync, mkdirSync, openSync, readFileSync, readSync, rmdirSync, statSync, unlinkSync,
+  closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmdirSync, statSync, unlinkSync,
   utimesSync, writeFileSync,
 } from "fs";
 import { join } from "path";
@@ -275,6 +275,25 @@ feature("createState", () => {
     then: ["the mode is still 0600", (_, { path }) => {
       expect(statSync(path).mode & 0o777).toBe(0o600);
       cleanup(path);
+    }],
+  });
+
+  // defect: the bridge replaced its 2.3 MB state file 29 times in 10 s, 18 of them identical (2026-10-27).
+  unit("saving what the file already holds leaves the file in place", {
+    given: ["a state that saved a value, its file held open", () => {
+      const path = tmpPath();
+      const state = createState(path);
+      state.set("panes", { a: 1 });
+      // An open descriptor keeps the inode alive, so a replacement cannot reuse its number.
+      return { path, state, saved: openSync(path, "r") };
+    }],
+    when: ["the same value is set and updated again", ({ path, state }) => {
+      state.set("panes", { a: 1 });
+      state.updateKey("panes", (value) => value);
+      return statSync(path).ino;
+    }],
+    then: ["the path still names the saved file", (inode, { path, saved }) => {
+      try { expect(inode).toBe(fstatSync(saved).ino); } finally { closeSync(saved); cleanup(path); }
     }],
   });
 });
