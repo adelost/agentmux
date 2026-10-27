@@ -35,6 +35,7 @@ import { mergeInboundTarget } from "./core/inbound-target.mjs";
 import { HELP_TEXT } from "./channels/discord-help.mjs";
 import { createAccountSwitchCommand } from "./channels/account-switch-command.mjs";
 import { switchCodexAccount } from "./core/codex-account-switch.mjs";
+import { openWatcherJournal } from "./core/watcher-journal.mjs";
 /**
  * Reconcile every configured agent's live tmux session against the
  * regenerated config. Per-agent failures are isolated: one broken agent
@@ -899,8 +900,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   async function postCatchupNoticeIfNeeded(msg, mapping, pane) {
     try {
       if (!mapping?.dir) return; // mapping is synthetic/unknown, skip
-      const mirrorTimes = state.get("channel_last_mirror_ts", {}) || {};
-      const lastTs = mirrorTimes[msg.channelId] || null;
+      const lastTs = openWatcherJournal({ state }).mirrorTs(msg.channelId);
       const paneDir = panePathFor({ dir: mapping.dir }, pane);
       const result = countTurnsSince(paneDir, lastTs);
       const countLine = renderCatchupLine(result);

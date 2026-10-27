@@ -25,6 +25,7 @@ import { createState } from "./core/state.mjs";
 import { createRecorder } from "./core/recorder.mjs";
 import { createTTS } from "./tts.mjs";
 import { createHandlers } from "./handlers.mjs";
+import { openWatcherJournal } from "./core/watcher-journal.mjs";
 import { startBot } from "./bot.mjs";
 import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
@@ -196,9 +197,7 @@ if (recorder.enabled) console.log(`recorder | enabled → ${resolve(__dir, "test
 // Used by handlers.postCatchupNoticeIfNeeded to detect stale channels
 // (activity in pane that didn't go via Discord — e.g. typed in tmux).
 function stampChannelMirror(channelId) {
-  const prev = appState.get("channel_last_mirror_ts", {}) || {};
-  prev[channelId] = new Date().toISOString();
-  appState.set("channel_last_mirror_ts", prev);
+  openWatcherJournal({ state: appState }).setMirrorTs(channelId, new Date().toISOString()); // one line, not the state file
 }
 
 // Every bridge post is also recorded in the conversation log (docs/CONVERSATION-LOG.md).

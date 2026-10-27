@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 const FILE_NAME = "watcher-journal.jsonl";
 const MAX_BYTES = 2 * 1024 * 1024;
 const POSTED_KEEP = 1_000; // the watcher engine keeps the same number of posted ids
-const MOVED_KEYS = { posted: "watcher_posted_item_ids", work: "watcher_live_progress" };
+const MOVED_KEYS = { posted: "watcher_posted_item_ids", work: "watcher_live_progress", mirror: "channel_last_mirror_ts" };
 const DROPPED_KEYS = ["watcher_changed_files"]; // now kept in memory by live progress
 const journals = new WeakMap(); // state store → journal, shared by every watcher of a process
 
@@ -24,16 +24,17 @@ export function openWatcherJournal({ state, maxBytes = MAX_BYTES, log = console.
 
 function createJournal(state, maxBytes, log) {
   const path = state.path ? join(dirname(state.path), FILE_NAME) : null;
-  const channels = new Map(); // channelId → { work, posted }
-  const entry = (id) => channels.get(id) || channels.set(id, { work: null, posted: [] }).get(id);
+  const channels = new Map(); // channelId → { work, posted, mirror }
+  const entry = (id) => channels.get(id) || channels.set(id, { work: null, posted: [], mirror: null }).get(id);
   const apply = (line) => {
     const current = entry(line.c);
     if ("work" in line) current.work = line.work;
     if (line.posted) current.posted = [...current.posted, ...line.posted].slice(-POSTED_KEEP);
     if (line.postedAll) current.posted = line.postedAll.slice(-POSTED_KEEP);
+    if (line.mirror) current.mirror = line.mirror;
   };
   let size = 0, limit = maxBytes; // a snapshot near the cap must not compact on every append
-  const snapshot = () => [...channels].map(([c, { work, posted }]) => JSON.stringify({ c, work, postedAll: posted })).join("\n") + "\n";
+  const snapshot = () => [...channels].map(([c, { work, posted, mirror }]) => JSON.stringify({ c, work, postedAll: posted, mirror })).join("\n") + "\n";
   const compact = () => {
     if (!path) return;
     const text = snapshot(), temp = `${path}.${process.pid}.tmp`;
@@ -59,17 +60,21 @@ function createJournal(state, maxBytes, log) {
       try { apply(JSON.parse(raw)); }
       catch { log(`watcher journal ${path}: skipped an unreadable line (${raw.length} chars)`); }
     }
-  } else {
-    // First run: carry the records over from the state file, then drop them there once.
-    for (const [c, ids] of Object.entries(state.get(MOVED_KEYS.posted, {}) || {})) if (Array.isArray(ids)) apply({ c, postedAll: ids });
-    for (const [c, row] of Object.entries(state.get(MOVED_KEYS.work, {}) || {})) {
-      if (row?.messageId) apply({ c, work: persistedWork(row) });
-    }
-    compact();
-    for (const key of [...Object.values(MOVED_KEYS), ...DROPPED_KEYS]) {
-      if (state.get(key) === undefined) continue;
-      if (typeof state.remove === "function") state.remove(key); else state.set(key, undefined);
-    }
+  }
+  // A record still in the state file moves here once, filling only what the journal lacks.
+  const leftover = [...Object.values(MOVED_KEYS), ...DROPPED_KEYS].filter((key) => state.get(key) !== undefined);
+  for (const [c, ids] of Object.entries(state.get(MOVED_KEYS.posted, {}) || {})) {
+    if (Array.isArray(ids) && !channels.get(c)?.posted.length) apply({ c, postedAll: ids });
+  }
+  for (const [c, row] of Object.entries(state.get(MOVED_KEYS.work, {}) || {})) {
+    if (row?.messageId && !channels.get(c)?.work) apply({ c, work: persistedWork(row) });
+  }
+  for (const [c, at] of Object.entries(state.get(MOVED_KEYS.mirror, {}) || {})) {
+    if (at && !channels.get(c)?.mirror) apply({ c, mirror: at });
+  }
+  if (leftover.length || (path && !existsSync(path))) compact();
+  for (const key of leftover) {
+    if (typeof state.remove === "function") state.remove(key); else state.set(key, undefined);
   }
 
   return {
@@ -79,6 +84,8 @@ function createJournal(state, maxBytes, log) {
       if (JSON.stringify(channels.get(channelId)?.work || null) !== JSON.stringify(next)) append({ c: channelId, work: next });
     },
     posted: (channelId) => [...(channels.get(channelId)?.posted || [])],
+    mirrorTs: (channelId) => channels.get(channelId)?.mirror || null,
+    setMirrorTs(channelId, at) { if (channels.get(channelId)?.mirror !== at) append({ c: channelId, mirror: at }); },
     setPosted(channelId, ids) {
       const prior = channels.get(channelId)?.posted || [], next = (Array.isArray(ids) ? ids : []).slice(-POSTED_KEEP);
       const known = new Set(prior), added = next.filter((id) => !known.has(id));

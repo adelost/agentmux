@@ -30,6 +30,28 @@ feature("watcher journal", () => {
     }],
   });
 
+  // defect: channel_last_mirror_ts made the state file the busiest writer after 1.25.387 (10 of 16 saves in 10 s).
+  unit("mirror stamps leave the state file even when the journal already exists", {
+    given: ["a journal from an earlier release and a state file with stamps", () => {
+      const ctx = tempState();
+      writeFileSync(join(ctx.dir, "watcher-journal.jsonl"), `${JSON.stringify({ c: "ch", postedAll: ["a"] })}\n`);
+      writeFileSync(ctx.path, JSON.stringify({ channel_last_mirror_ts: { ch: "2026-10-27T22:00:00.000Z" }, other: 1 }));
+      return ctx;
+    }],
+    when: ["the bridge starts and stamps another channel", ({ path }) => {
+      const journal = openWatcherJournal({ state: createState(path) });
+      journal.setMirrorTs("ch2", "2026-10-27T22:30:00.000Z");
+      return openWatcherJournal({ state: createState(path) });
+    }],
+    then: ["both stamps are in the journal and none in the state file", (journal, { dir, path }) => {
+      try {
+        expect([journal.mirrorTs("ch"), journal.mirrorTs("ch2"), journal.posted("ch")])
+          .toEqual(["2026-10-27T22:00:00.000Z", "2026-10-27T22:30:00.000Z", ["a"]]);
+        expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ other: 1 });
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }],
+  });
+
   unit("the journal file stays under its cap and keeps the newest ids", {
     given: ["a journal capped at 4 KB", () => {
       const ctx = tempState(), state = createState(ctx.path);
