@@ -37,6 +37,17 @@ describe("a single live progress row", () => {
   });
 });
 
+describe("the work row and the agent state file", () => {
+  // defect: every tool step saved the row into agentmux-state.json, which was rewritten about once a second (2026-10-27).
+  it("edits the row on each step without writing the agent state", async () => {
+    const f = setup(), args = { channelId: "ch", paneKey: "test:0" }, set = vi.spyOn(f.state, "set");
+    await f.progress.update({ ...args, turn: turn([tool("1")]) });
+    await f.progress.update({ ...args, turn: turn([tool("1"), tool("2")]) });
+    expect(f.discord.editMessage).toHaveBeenCalledWith("ch", "row-1", "Working · 2 steps · last: reading cut.ts");
+    expect(set).not.toHaveBeenCalled();
+  });
+});
+
 describe("a truncated live journal", () => {
   it("reuses the row when the original prompt has left the bounded tail", async () => {
     const f = setup(), args = { channelId: "ch", paneKey: "test:0" };

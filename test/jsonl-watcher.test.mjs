@@ -4,6 +4,7 @@ import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rm
 import { join } from "path";
 import { tmpdir } from "os";
 import { createJsonlWatcher } from "../channels/jsonl-watcher.mjs";
+import { openWatcherJournal } from "../core/watcher-journal.mjs";
 import { buildClaudeLaunchCommand } from "../core/agent-launch-command.mjs";
 import { keepClaudeDefaultModel } from "../core/claude-default-model.mjs";
 import { runLockedClaudeModelChange } from "../core/claude-model-command.mjs";
@@ -286,9 +287,11 @@ feature("watcher: repeated quota stop after background completions", () => {
       assistantText("You've hit your weekly limit · resets Oct 21, 9am (Europe/Stockholm)", "2026-10-18T17:50:21.000Z", "end_turn"),
     ], stateInitial: { watcher_last_posted_ts: { "ch-test": 1 } } })],
     when: ["the watcher audits and mirrors the completed journal", async ctx => { await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir); return ctx; }],
-    then: ["only one stop is delivered and both item ids are receipted", ctx => {
+    then: ["only one stop is delivered and both item ids are receipted in the watcher journal", ctx => {
       expect(ctx.discord.sends.filter(send => String(send.payload?.content || send.payload).includes("You've hit your weekly limit"))).toHaveLength(1);
-      expect(ctx.state._data.watcher_posted_item_ids["ch-test"]).toContain("a-2026-10-18T17:50:21.000Z:0");
+      // Posted ids left the shared state file (2026-10-27: it was rewritten about once a second).
+      expect(ctx.state._data.watcher_posted_item_ids).toBeUndefined(); // before the journal below could migrate it
+      expect(openWatcherJournal({ state: ctx.state }).posted("ch-test")).toContain("a-2026-10-18T17:50:21.000Z:0");
     }], cleanup: ctx => ctx.cleanup(),
   });
 });
@@ -987,7 +990,7 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
     then: ["no historical tool flood occurs and migration is persisted", (ctx) => {
       expect(ctx.discord.sends).toHaveLength(0);
       expect(ctx.state._data.watcher_custom_tools_seeded["ch-codex"]).toBe(true);
-      expect(ctx.state._data.watcher_posted_item_ids["ch-codex"]).toHaveLength(1);
+      expect(openWatcherJournal({ state: ctx.state }).posted("ch-codex")).toHaveLength(1);
       ctx.cleanup();
     }],
   });

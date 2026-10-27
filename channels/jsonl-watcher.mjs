@@ -27,6 +27,7 @@ import { appendEvent } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
 import { createLiveProgress } from "./live-progress.mjs";
+import { openWatcherJournal } from "../core/watcher-journal.mjs";
 import { timedWatcherStep } from "../core/watcher-timing.mjs";
 import { compactionNoticeText } from "../core/compaction-notice.mjs";
 import { announceNewPaneEvents } from "../core/pane-notices.mjs";
@@ -75,7 +76,6 @@ const STATE_KEY_LAST_POSTED = "watcher_last_posted_ts";
 // sliding tail window and dropped final texts. Migration is graceful: the new
 // key starts empty; the separate last-posted cursor still gates by timestamp,
 // so at most the in-flight turn re-posts once on first deploy.
-const STATE_KEY_POSTED_IDS = "watcher_posted_item_ids";
 const STATE_KEY_RETRY_UNTIL = "watcher_retry_until_ts";
 const STATE_KEY_COMPACTION_IDS = "watcher_compaction_ids";
 const STATE_KEY_REFUSAL_IDS = "watcher_refusal_ids";
@@ -103,7 +103,8 @@ export function createJsonlWatcher({
   if (!discord) throw new Error("watcher: discord required");
   if (!state) throw new Error("watcher: state store required");
   /** active fs.watch handles per pane key (`name:idx`). */
-  const progress = createLiveProgress({ discord, state, log });
+  const journal = openWatcherJournal({ state, log }); // posted ids and the work row, out of the state file
+  const progress = createLiveProgress({ discord, state, journal, log });
   const fsWatchers = new Map();
   /** per-channel last-sendTyping ms, throttled via TYPING_THROTTLE_MS. */
   const lastTypingAt = new Map();
@@ -159,17 +160,8 @@ export function createJsonlWatcher({
     state.set(STATE_KEY_LAST_POSTED, map);
   }
 
-  function postedItemIds(channelId) {
-    const map = state.get(STATE_KEY_POSTED_IDS, {}) || {};
-    const v = map[channelId];
-    return Array.isArray(v) ? [...v] : [];
-  }
-
-  function setPostedItemIds(channelId, ids) {
-    const map = state.get(STATE_KEY_POSTED_IDS, {}) || {};
-    map[channelId] = Array.isArray(ids) ? ids : [];
-    state.set(STATE_KEY_POSTED_IDS, map);
-  }
+  const postedItemIds = (channelId) => journal.posted(channelId);
+  const setPostedItemIds = (channelId, ids) => journal.setPosted(channelId, ids);
 
   function retryUntilMs(channelId) {
     const map = state.get(STATE_KEY_RETRY_UNTIL, {}) || {};

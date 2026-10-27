@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { createHash } from "node:crypto";
-const STATE = "watcher_live_progress";
+import { openWatcherJournal } from "../core/watcher-journal.mjs";
 
 /** WHAT: Reads per-channel legacy tool display. WHY: Keeps the concise default reversible without changing provider or delivery policy. */
 export function toolLinesEnabled(channelId, paneKey, env = process.env) {
@@ -18,7 +18,6 @@ const lastStep = item => {
   return /^Search/u.test(label) ? "searching" : /^Run/u.test(label) ? "running a command" : "working";
 };
 
-const CHANGES = "watcher_changed_files";
 const NAME_MAX = 60, CHANGED_MAX = 100, FILES_KEPT = 100, EDITS_KEPT = 200;
 const shortName = path => String(path).split(/[\\/]/u).filter(Boolean).at(-1)?.slice(0, NAME_MAX) || "";
 
@@ -43,11 +42,14 @@ function changedText({ files = [], unnamed = 0 }) {
 }
 
 /** WHAT: Builds one work row per turn, deleted at completion, and tracks changed files for the footer. WHY: Prevents immutable tool updates from becoming hundreds of Discord posts while the answer's footer still says what changed. */
-export function createLiveProgress({ discord, state, env = process.env, log = console.warn }) {
-  const all = () => state.get(STATE, {}) || {};
+export function createLiveProgress({ discord, state, journal = openWatcherJournal({ state }), env = process.env, log = console.warn }) {
+  // Count, latest step and seen ids stay in memory; the journal keeps message and turn, so a restart
+  // can still edit or delete the row and at most restarts the count.
+  const rows = new Map(), changes = new Map();
+  const rowOf = channelId => rows.get(channelId) || (journal.work(channelId) ? { ...journal.work(channelId), count: 0, seen: [] } : null);
   /** The changed files wait per channel, outside the work row, because the row is gone before the final reply and its footer are posted. */
   function noteChanges(channelId, turn, tools) {
-    const rows = state.get(CHANGES, {}) || {}, entry = rows[channelId] || { turnKey: null, seen: [], files: [], unnamed: 0 };
+    const entry = changes.get(channelId) || { turnKey: null, seen: [], files: [], unnamed: 0 };
     const turnKey = turn.headless && entry.turnKey ? entry.turnKey : keyOf(turn);
     const seen = new Set(entry.turnKey === turnKey ? entry.seen : []), files = [...entry.files];
     let unnamed = entry.unnamed, fresh = false;
@@ -57,17 +59,17 @@ export function createLiveProgress({ discord, state, env = process.env, log = co
       fresh = true; seen.add(key); unnamed += changed.unnamed;
       for (const name of changed.names) if (!files.includes(name)) { if (files.length < FILES_KEPT) files.push(name); else unnamed++; }
     }
-    if (fresh) state.set(CHANGES, { ...rows, [channelId]: { turnKey, seen: [...seen].slice(-EDITS_KEPT), files, unnamed } });
+    if (fresh) changes.set(channelId, { turnKey, seen: [...seen].slice(-EDITS_KEPT), files, unnamed });
   }
   /** WHAT: Hands over the files changed since the last footer and forgets them. WHY: Each footer names only what changed since the one before it. */
   function takeChanged(channelId) {
-    const rows = state.get(CHANGES, {}) || {}, entry = rows[channelId], text = entry ? changedText(entry) : "";
-    if (entry && (entry.files.length || entry.unnamed)) state.set(CHANGES, { ...rows, [channelId]: { ...entry, files: [], unnamed: 0 } });
+    const entry = changes.get(channelId), text = entry ? changedText(entry) : "";
+    if (entry && (entry.files.length || entry.unnamed)) changes.set(channelId, { ...entry, files: [], unnamed: 0 });
     return text;
   }
-  const save = (channelId, value) => { const rows = { ...all() }; if (value) rows[channelId] = value; else delete rows[channelId]; state.set(STATE, rows); };
+  const save = (channelId, value) => { if (value) rows.set(channelId, value); else rows.delete(channelId); journal.setWork(channelId, value); };
   async function finish(channelId) {
-    const row = all()[channelId];
+    const row = rowOf(channelId);
     if (!row) return;
     try { await discord.deleteMessage(channelId, row.messageId); }
     catch (error) {
@@ -83,7 +85,7 @@ export function createLiveProgress({ discord, state, env = process.env, log = co
   async function update({ channelId, paneKey, turn }) {
     if (toolLinesEnabled(channelId, paneKey, env)) { await finish(channelId); return turn; }
     noteChanges(channelId, turn, toolItems(turn));
-    let row = all()[channelId];
+    let row = rowOf(channelId);
     const turnKey = turn.headless && row ? row.turnKey : keyOf(turn);
     if (row && row.turnKey !== turnKey) {
       if (await finish(channelId) === false) return { ...turn, items: (turn.items || []).filter(item => item.type !== "tool") };
@@ -115,7 +117,7 @@ export function createLiveProgress({ discord, state, env = process.env, log = co
     return { ...turn, items: (turn.items || []).filter(item => item.type !== "tool") };
   }
   return { update, finish, takeChanged, async reconcile(channelId, turns) {
-    const row = all()[channelId];
+    const row = rowOf(channelId);
     if (row && (row.finishing || (turns && !turns.some(turn => (keyOf(turn) === row.turnKey || turn.headless) && !turn.isComplete && !turn.complete)))) await finish(channelId);
   } };
 }
