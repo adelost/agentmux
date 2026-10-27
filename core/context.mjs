@@ -11,6 +11,7 @@ import { readFileSync, readdirSync, statSync, existsSync, openSync, fstatSync, r
 import { join } from "path";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
+import { readSessionMeta } from "./codex-session-catalog.mjs";
 import { getContextFromKimiJsonl } from "./kimi-jsonl-reader.mjs";
 import { normalizeClaudeEffort, readClaudeFooterModel, readClaudeScreenStatus, readClaudeStatuslineBridge } from "./claude-statusline.mjs";
 /**
@@ -21,22 +22,6 @@ import { normalizeClaudeEffort, readClaudeFooterModel, readClaudeScreenStatus, r
  * was a multi-hundred-ms-per-pane cost in `amux ps`. Falls back to a full
  * read when the file is small or anything fails.
  */
-/** Read only the first `maxBytes` of a file as a string. */
-function readHeadBytes(filePath, maxBytes = 64 * 1024) {
-  let fd;
-  try {
-    fd = openSync(filePath, "r");
-    const size = fstatSync(fd).size;
-    const n = Math.min(size, maxBytes);
-    const buf = Buffer.alloc(n);
-    readSync(fd, buf, 0, n, 0);
-    return buf.toString("utf-8");
-  } catch {
-    try { return readFileSync(filePath, "utf-8"); } catch { return ""; }
-  } finally {
-    if (fd !== undefined) { try { closeSync(fd); } catch {} }
-  }
-}
 
 function readTailLines(filePath, maxBytes = 1024 * 1024) {
   let fd;
@@ -227,28 +212,10 @@ function findCodexJsonlFiles(dir, depth = 0, acc = []) {
   return acc;
 }
 
-function readCodexMeta(filePath) {
-  try {
-    // session_meta is the FIRST event in a codex rollout. This is called for
-    // every session file while resolving which one belongs to a pane, so a
-    // full readFileSync here meant reading hundreds of multi-MB files just to
-    // inspect their first line — the dominant cost in `amux ps`/`done` with a
-    // large ~/.codex/sessions. Read only the head.
-    const head = readHeadBytes(filePath);
-    for (const line of head.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-        if (event.type === "session_meta") return event.payload;
-      } catch {}
-      break;
-    }
-  } catch {}
-  return null;
-}
-
 // Share the index across one status sweep, then refresh for the long-lived
 // bridge. Panel model/compact evidence must never come from an ancestor.
+// Headers come from the catalog's mtime-keyed cache: an uncached refresh read
+// the head of every rollout each second (37 MB/s for 563 files, 2026-10-27).
 let _codexIndex = null;
 let _codexIndexUntil = 0;
 
@@ -263,7 +230,7 @@ function codexSessionIndex() {
   _codexIndex = codexSessionDirs().flatMap((dir) => findCodexJsonlFiles(dir, 0, []))
     .map((path) => ({ path, mtime: statSync(path).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime)
-    .map(({ path, mtime }) => ({ path, mtime, cwd: readCodexMeta(path)?.cwd || null }));
+    .map(({ path, mtime }) => ({ path, mtime, cwd: readSessionMeta(path)?.cwd || null }));
   return _codexIndex;
 }
 
@@ -337,7 +304,7 @@ function getContextFromCodexJsonl(paneDir) {
     turnCtx = headTurnContext(file);
     if (turnCtx) modelSource = "head";
   }
-  return { ...usage, path: file, sessionId: readCodexMeta(file)?.id ?? null, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null,
+  return { ...usage, path: file, sessionId: readSessionMeta(file)?.id ?? null, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null,
     modelSource, lastCompactAt };
 }
 
