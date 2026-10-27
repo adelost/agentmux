@@ -21,6 +21,9 @@ feature("completed factual replies require sources", () => {
     "NEXT: Kontrollera att tjänsten är live.", "Förslag: flytta nyckeln till gatewayn.",
     "Jag ska kontrollera tjänsten.", "Är tjänsten live?", "Antagande: nyckeln saknas.",
     "Inte kontrollerat: tjänsten är live.", "Hej, tack för bilden!",
+    "Nästa plats är det nya släppet.", "Om proven håller är släppet klart.",
+    "Finns ingen gemensam fil startar raden nu med ett prov.", "Båda sparproven är därför oprövade.",
+    "Det räcker därför att deklarera den kopplingen; assertions och produktkod kan vara oförändrade.",
   ]) unit(`does not invent a claim in: ${text}`, {
     given: ["a plan, question or explicit uncertainty", () => text],
     when: ["checking the reply", text => checkReply(text, [])],

@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve, relative, isAbsolute } from "node:path";
+import { resolve, relative, isAbsolute, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const git = (dir, args) => {
@@ -19,7 +19,7 @@ export function createClaimSources(paths = []) {
     const tip = branch && git(root, ["rev-parse", "--verify", `${branch}^{commit}`]);
     return tip ? [{ dir: root, ref: branch, tip }] : [];
   });
-  const cache = new Map();
+  const cache = new Map(), trees = new Map();
   function fileAtTip(path) {
     path = expand(path);
     const candidates = repos.flatMap(repo => {
@@ -29,8 +29,21 @@ export function createClaimSources(paths = []) {
       return bytes === null ? [] : [{ ...repo, path: rel, bytes }];
     });
     if (candidates.length) return candidates;
+    if (!isAbsolute(path)) {
+      const suffix = `/${path.replace(/^\.\//u, "")}`;
+      const matches = repos.flatMap(repo => {
+        if (!trees.has(repo.dir)) trees.set(repo.dir, (git(repo.dir, ["ls-tree", "-r", "--name-only", "-z", repo.tip]) || "").split("\0"));
+        return trees.get(repo.dir).filter(name => name.endsWith(suffix)).map(name => ({ repo, name }));
+      });
+      if (matches.length === 1) {
+        const { repo, name } = matches[0], bytes = git(repo.dir, ["show", `${repo.tip}:${name}`]);
+        if (bytes !== null) return [{ ...repo, path: name, bytes }];
+      }
+    }
     // Absolute paths inside a repository must never fall through to its local working copy.
     if (!isAbsolute(path) || repos.some(repo => !relative(repo.dir, path).startsWith("../"))) return [];
+    // Even an unconfigured Git path must use its origin tip, never a checkout escape.
+    if (git(dirname(path), ["rev-parse", "--show-toplevel"])) return [];
     try { return statSync(path).isFile() ? [{ path, bytes: readFileSync(path, "utf8") }] : []; }
     catch { return []; }
   }

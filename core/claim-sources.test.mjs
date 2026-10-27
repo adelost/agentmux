@@ -1,5 +1,5 @@
 import { expect, feature, integration } from "bdd-vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -13,7 +13,8 @@ feature("citations use remote-default source", () => {
       const git = (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
       git("init", "-b", "main"); git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Test");
       writeFileSync(join(dir, "service.mjs"), "export const ready = true;\n");
-      git("add", "service.mjs"); git("commit", "-m", "remote baseline");
+      mkdirSync(join(dir, "src")); writeFileSync(join(dir, "src/nested.mjs"), "export const nested = true;\n");
+      git("add", "service.mjs", "src/nested.mjs"); git("commit", "-m", "remote baseline");
       const sha = git("rev-parse", "HEAD");
       git("update-ref", "refs/remotes/origin/main", sha);
       git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
@@ -29,9 +30,10 @@ feature("citations use remote-default source", () => {
         checkReply(`Tjänsten är klar, ${sha}.`, sources).verdict,
         checkReply("Tjänsten är klar, deadbeefdeadbeef.", sources).verdict,
         checkReply(`Ingen version finns. \`git grep missing ${sha} -- ./\`, output: 0 träffar.`, sources).verdict,
+        checkReply("Tjänsten är klar, `nested.mjs:1`.", sources).verdict,
       ] };
     }],
-    then: ["only the actual remote file/line, SHA and scoped denial pass", ({ values }) => expect(values).toEqual(["pass", "hold", "hold", "pass", "hold", "hold"])],
+    then: ["only actual remote citations qualify, including one unambiguous filename", ({ values }) => expect(values).toEqual(["pass", "hold", "hold", "pass", "hold", "hold", "pass"])],
     cleanup: ({ dir }) => rmSync(dir, { recursive: true, force: true }),
   });
 });

@@ -36,6 +36,19 @@ const events = [
 ];
 
 describe("native runtime Discord watcher", () => {
+  it("a completed native reply held by the shared guard is not posted or replayed", async () => {
+    const values = {};
+    const state = { get: (k, fallback) => values[k] ?? fallback, set: (k, value) => { values[k] = value; } };
+    const discord = { send: vi.fn(async () => {}) };
+    const config = { canary: { dir: "/tmp/canary", discord: { "channel-1": 0 }, panes: [{ engine: "claude" }] } };
+    const claimGuard = { assess: vi.fn(async () => ({ held: true })) };
+    const watcher = createNativeRuntimeWatcher({ state, discord, agentsYamlPath: "unused", claimGuard,
+      nativeRuntime: { history: async () => ({ agent: { running: false }, events }) } });
+    await watcher.check("canary", 0, config.canary, config);
+    await watcher.check("canary", 0, config.canary, config);
+    expect(discord.send).toHaveBeenCalledTimes(0);
+    expect(claimGuard.assess).toHaveBeenCalledTimes(1);
+  });
   it("groups a completed runtime operation under its stable delivery key", () => {
     const turns = groupNativeTurns(events);
     expect(turns).toEqual([expect.objectContaining({

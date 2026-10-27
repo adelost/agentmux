@@ -12,7 +12,7 @@ const help = `amux claims check --since 24h [--day YYYY-MM-DD] [--output /privat
   [--ledger PATH] [--repo PATH ...]
 Read-only classifier over canonical sent post/reply rows. --day selects a held-out UTC day.
 The report retains original IDs, timestamps, text hashes and a reproducible sample of at most50 holds.
-Human labels: {corpusSha256, labels:[{id,textSha256,falseStop,reason}]}.
+Human labels: {corpusSha256,algorithm,labels:[{id,textSha256,sentencesSha256,falseStop,reason}]}.
 Numbers remain unqualified until both days are graded and the seven groups confirmed.
 No source check executes quoted commands. No configuration is changed.`;
 
@@ -38,12 +38,14 @@ export async function cmdClaims(args, { configPath } = {}) {
     : readWindow({ path: flags.ledger || defaultAskLedgerPath(), since, until });
   if (ledger.sourceErrors.length) throw Error(`Claim corpus unreadable: ${JSON.stringify(ledger.sourceErrors)}`);
   const sources = createClaimSources(repos.length ? repos : claimRepoPaths(configPath));
+  if (frozen?.rows.some(row => row.textSha256 !== claimHash(row.text))) throw Error("Frozen claim text/hash mismatch");
   const seen = new Set();
   const rows = ledger.posts.filter(row => (frozen || row.kind === "reply" && row.status === "sent") && !seen.has(row.id) && seen.add(row.id))
     .map(row => ({ id: row.id, ts: row.ts, agent: row.agent, pane: row.pane, messageId: row.messageId,
       ledgerPath: row.ledgerPath, textSha256: claimHash(row.text), text: row.text, ...checkReply(row.text, sources) }));
   const load = path => path ? JSON.parse(readFileSync(path, "utf8")) : null;
-  const summary = { ...summarizeClaims(rows, { known: load(flags.known), review: load(flags.review) }), day, algorithm: claimAlgorithm() };
+  const algorithm = claimAlgorithm();
+  const summary = { ...summarizeClaims(rows, { known: load(flags.known), review: load(flags.review), algorithm }), day, algorithm };
   const heldOut = load(flags["held-out"]);
   const report = { version: 1, checkedAt: new Date(now).toISOString(), day, window: frozen?.window || { since, until },
     sources: sources.repos, ...summary, eligible: qualifyClaims(summary, heldOut), rows };

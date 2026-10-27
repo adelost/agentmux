@@ -4,12 +4,13 @@ import { createHash } from "node:crypto";
 export const claimHash = text => createHash("sha256").update(text).digest("hex");
 
 /** WHAT: Builds a frozen check summary from human labels. WHY: Prevents missing or stale grading from authorizing enforcement. */
-export function summarizeClaims(rows, { known = null, review = null, seed = "claim-guard-v1" } = {}) {
+export function summarizeClaims(rows, { known = null, review = null, algorithm = null, seed = "claim-guard-v1" } = {}) {
   const holds = rows.filter(row => row.verdict === "hold");
   const corpusSha256 = claimHash(JSON.stringify(rows.map(row => [row.id, row.textSha256])));
   const sample = holds.length <= 50 ? holds : [...holds].sort((a, b) => claimHash(seed + a.id).localeCompare(claimHash(seed + b.id))).slice(0, 50);
-  const labels = review?.corpusSha256 === corpusSha256 ? review.labels || [] : [];
+  const labels = review?.corpusSha256 === corpusSha256 && review.algorithm === algorithm ? review.labels || [] : [];
   const graded = sample.map(row => labels.find(label => label.id === row.id && label.textSha256 === row.textSha256
+    && label.sentencesSha256 === claimHash(JSON.stringify(row.sentences))
     && typeof label.falseStop === "boolean" && label.reason?.trim()));
   const complete = graded.every(Boolean) && Boolean(review) && (sample.length > 0 || review.emptyReviewed === true);
   const caught = target => rows.some(row => row.id === target.id
@@ -22,7 +23,8 @@ export function summarizeClaims(rows, { known = null, review = null, seed = "cla
   }));
   return {
     corpusSha256, total: rows.length, held: holds.length, shareHeld: rows.length ? holds.length / rows.length : 0,
-    sample: sample.map(({ id, textSha256, sentences }) => ({ id, textSha256, sentences })),
+    sample: sample.map(({ id, textSha256, sentences }) => ({ id, textSha256, sentences,
+      sentencesSha256: claimHash(JSON.stringify(sentences)) })),
     reviewed: graded.filter(Boolean).length, reviewComplete: complete,
     falseStops: complete ? graded.filter(label => label.falseStop).length : null,
     falseStopRate: complete ? (graded.filter(label => label.falseStop).length / (sample.length || 1)) : null,

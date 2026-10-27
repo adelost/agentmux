@@ -1,6 +1,6 @@
 # Reply claim guard
 
-Source: [27Oct design](/home/adelost/lsrc/.artifacts/claim-guard-20261027/DESIGN.md), task106. One policy checks completed agent replies in both JSONL and native-runtime mirrors. It never checks incoming human messages.
+Source: [27Oct design](/home/adelost/lsrc/.artifacts/claim-guard-20261027/DESIGN.md), task107. One policy checks completed agent replies in both JSONL and native-runtime mirrors. It never checks incoming human messages.
 
 `AMUX_CLAIM_GUARD=shadow` is the default: post immediately, classify asynchronously and append a private decision to `~/.agentmux/claim-guard/decisions.jsonl`. `off` stops checking. `enforce` requires a matching qualification file; otherwise it remains shadow and logs the refusal. Git/file checks run in one worker thread, with a bounded request lifetime, outside the human-delivery event loop.
 
@@ -16,7 +16,7 @@ amux claims check --day 2026-10-26 --output /private/held-out.json
 amux claims check --input /private/today.json --known /private/confirmed-groups.json --review /private/labels.json --held-out /private/reviewed-held-out.json --output /private/graded-today.json
 ```
 
-Corpus includes canonical `post`, `kind:reply`, `status:sent` rows only, all panes, with exact IDs, timestamps, text and hashes. `--input` rechecks that frozen corpus, so ongoing new replies do not invalidate a review sample. The report's stable pseudorandom sample has every hold when ≤50, otherwise50. Each label names original ID, text hash, `falseStop` and a reason. Grade a false stop only when all flagged sentences are nonclaims or already adequately sourced. A genuinely unsupported assertion makes the reply a true hold, even if other flags are wrong. Retain that sentence-level limitation.
+Corpus includes canonical `post`, `kind:reply`, `status:sent` rows only, all panes, with exact IDs, timestamps, text and hashes. `--input` rechecks that frozen corpus, so ongoing new replies do not invalidate a review sample. The report's stable pseudorandom sample has every hold when ≤50, otherwise50. The review names the corpus/policy hashes; each label names original ID, text hash, flagged-sentence hash, `falseStop` and a reason. Grade a false stop only when all flagged sentences are nonclaims or already adequately sourced. A genuinely unsupported assertion makes the reply a true hold, even if other flags are wrong. Retain that sentence-level limitation.
 
 Qualification requires confirmed seven error groups, ≥5 caught target assertions, both days completely graded, ≤10% false stops on each, different ordered days and identical policy hashes. Do not count another sentence's flag as detecting a known error. lsrc:0 confirmed the27Oct content/time mapping; pre07:06Z key requests violate prior decision, later ones also conflict with code.
 

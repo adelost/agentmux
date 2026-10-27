@@ -1,7 +1,7 @@
 import { createClaimSources } from "./claim-sources.mjs";
 
-const UNCERTAIN = /(?:inte kontrollerat|inte kontrollerad|antagande|assumption|unverified|not checked)/iu;
-const PLAN = /^(?:NEXT|GOAL|LEFT|Förslag|Plan|Rekommendation)\s*:|^(?:jag|vi)\s+(?:ska|kommer att|vill)\b/iu;
+const UNCERTAIN = /(?:inte kontrollerat|inte kontrollerad|antagande|assumption|unverified|not checked|oprövad[et]?|inte (?:prövat|testat|kört)|ej verifierat)/iu;
+const PLAN = /^(?:NEXT|GOAL|LEFT|Förslag|Plan|Rekommendation)\s*:|^(?:Nästa|Next|Om|If)\s|^Finns\s.+\b(?:startar|väntar|ska|kommer)\b|^Det räcker (?:därför |att )|^(?:jag|vi)\s+(?:ska|kommer att|vill)\b/iu;
 const DOMAIN = /(?:kod|fil(?:en|er|erna)?\b|repo|test|prov|kvot|kont[oen]|nyck|token|key|quota|account|service|tjänst|worker|runtime|gateway|live|release|släpp|deploy|version|utcheckning|Quick|export|kostnad|budget|USD|grön|röd|pass|fail|git|käll|server|logg|modell)/iu;
 const ASSERTION = /(?<![\p{L}\d_])(?:är|var|har|hade|finns|saknas|fick|gav|blev|blivit|ligger|kom|tog|gick|kör|visar|visade|kräver|behöver|hittade|kan vara|is|are|was|were|has|have|passed|failed|exists|deployed|returned)(?![\p{L}\d_])/iu;
 const CAUSE = /\b(?:eftersom|orsak|beror på|because|caused)\b/iu;
@@ -40,6 +40,8 @@ function sourcesOf(text, reply) {
   for (const m of text.matchAll(/`([^`\n]+)`/gu)) {
     if (/^(?:amux|ax|git|rg|find|node|npm|npx|python\d?|curl|ls|stat|cat|test|wc)\s/u.test(m[1])) {
       if (OUTPUT.test(reply)) sources.push({ kind: "command", value: m[1] });
+    } else if (/^(?:~\/|\/|\.\.?\/)?[\w@.-]+(?:\/[\w@.-]+)+$/u.test(m[1])) {
+      sources.push({ kind: "path", value: m[1] });
     } else for (const path of m[1].matchAll(pathPattern)) addPath(path);
   }
   // Unquoted file:line and artifact receipts are supported, bare filename words are not sources.

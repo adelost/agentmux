@@ -118,7 +118,7 @@ function setupCodexWatcher({ codexEvents = [], stateInitial = {}, deliveryBroker
   };
 }
 
-function setupWatcher({ jsonlLines = [], stateInitial = {}, discordOptions = {}, deliveryBroker = null } = {}) {
+function setupWatcher({ jsonlLines = [], stateInitial = {}, discordOptions = {}, deliveryBroker = null, claimGuard = null } = {}) {
   const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-watcher-test-"));
   const origHome = process.env.HOME;
   process.env.HOME = fakeHome;
@@ -160,6 +160,7 @@ function setupWatcher({ jsonlLines = [], stateInitial = {}, discordOptions = {},
   const watcher = createJsonlWatcher({
     agent,
     deliveryBroker,
+    claimGuard,
     agentsYamlPath,
     discord,
     state,
@@ -337,6 +338,22 @@ feature("watcher: long agent turn with tool calls posts ALL content", () => {
       expect(text).toContain("Sparat planen");
       ctx.cleanup();
     }],
+  });
+});
+
+feature("watcher: claim hold", () => {
+  unit("holds a completed answer once without posting or replaying its text", {
+    given: ["one terminal unsourced reply", () => setupWatcher({
+      claimGuard: { assess: async () => ({ held: true }) },
+      stateInitial: { watcher_last_posted_ts: { "ch-test": Date.parse("2026-04-30T20:09:00Z") } },
+      jsonlLines: [userTurn("report", "2026-04-30T20:10:00Z"), assistantText("Testerna är gröna.", "2026-04-30T20:10:01Z", "end_turn")],
+    })],
+    when: ["the real watcher reads it twice", async ctx => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir); return ctx;
+    }],
+    then: ["the transport posts no reply", ctx => expect(ctx.discord.sends).toHaveLength(0)],
+    cleanup: ctx => ctx.cleanup(),
   });
 });
 

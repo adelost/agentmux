@@ -11,5 +11,9 @@ export function claimRepoPaths(configPath = runtimeAgentsPath()) {
     const sources = JSON.parse(readFileSync(join(homedir(), ".config/v1d-stats/ledger-sources.json"), "utf8"));
     paths.push(...sources.map(source => source.root));
   } catch (error) { if (error.code !== "ENOENT") throw error; }
+  try {
+    const release = JSON.parse(readFileSync(join(homedir(), ".agentmux/release-receipt.json"), "utf8"));
+    if (release.sourceRepo) paths.push(release.sourceRepo);
+  } catch (error) { if (error.code !== "ENOENT") throw error; }
   return [...new Set(paths.filter(Boolean))];
 }
