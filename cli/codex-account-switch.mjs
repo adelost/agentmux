@@ -252,7 +252,7 @@ export async function runRequestedCodexSwitch(ctx, name, pane, options = {}) {
 /** WHAT: Stores pane/project-scoped operator switches and previews without mutation. WHY: Keeps explicit paid-account intent separate from quota-triggered automatic recovery. */
 export async function switchCodexAccounts(ctx, args, options = {}) {
   const profileId = /^codex:([12])$/u.exec(args[0] || "")?.[1];
-  let name = null, pane = null, all = false, dry = false, continuation = null, json = false, requestId = null, retryBlocked = false, existingBatch = null;
+  let name = null, pane = null, all = false, dry = false, continuation = options.continuation ?? null, json = false, requestId = null, retryBlocked = false, existingBatch = null;
   for (let index = 1; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--all") all = true;

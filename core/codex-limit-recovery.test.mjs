@@ -1,7 +1,7 @@
 import { feature, component, expect } from "bdd-vitest";
 import { createCodexLimitRecovery } from "./codex-limit-recovery.mjs";
 
-function fixture({ continuity = true, sourceUsed = 100, otherUsed = 0, enabled = true, handover = false, currentId = "1" } = {}) {
+function fixture({ continuity = true, sourceUsed = 100, sessionUsed = null, otherUsed = 0, enabled = true, handover = false, currentId = "1" } = {}) {
   const data = {}, sent = [], switched = [], notices = [];
   const state = { get: (key, fallback = {}) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
   data.codex_profile_by_pane = { "lsrc:5": currentId };
@@ -12,7 +12,8 @@ function fixture({ continuity = true, sourceUsed = 100, otherUsed = 0, enabled =
   const result = { jsonlFile: "/x/rollout-019f5181-95b3-7e72-978b-1e74a246a86a.jsonl", lastPrompt: null,
     refusals: [{ id: "limit-1", timestamp: "2026-10-12T07:10:00Z", reason: "You've hit your usage limit. Try again later." }] };
   const readQuota = async profile => ({ ok: true, account: { email: "test@example.com" }, limits: [{ limitId: "codex",
-    windows: [{ windowMinutes: 10080, usedPercent: profile.id === currentId ? sourceUsed : otherUsed }] }] });
+    windows: [{ windowMinutes: 10080, usedPercent: profile.id === currentId ? sourceUsed : otherUsed },
+      ...(sessionUsed === null ? [] : [{ windowMinutes: 300, usedPercent: profile.id === currentId ? sessionUsed : 0 }])] }] });
   const recovery = createCodexLimitRecovery({ state, broker, agent, enabled,
     catalog: [{ id: "1", home: "/one" }, { id: "2", home: "/two" }],
     authenticated: () => true,
@@ -71,6 +72,16 @@ feature("automatic Codex account recovery only after a reached weekly limit", ()
     when: ["observing the provider refusal", async fx => { await fx.run(); return fx; }],
     then: ["the same guarded switch targets1 with one continuation", fx => {
       expect(fx.switched[0]).toMatchObject({ current: { id: "2" }, target: { id: "1" } });
+      expect(fx.sent).toHaveLength(1);
+    }],
+  });
+  // api:0 for lsrc:0, 2026-10-27: a spent 5 h window moves the pane to an account with room, as a spent week does.
+  component("a refusal at a spent 5 h window moves the pane like a spent week", {
+    given: ["the 5 h window reads 100 % with 72 % of the week used, and a spare account", () => fixture({ sourceUsed: 72, sessionUsed: 100 })],
+    when: ["observing the provider refusal", async fx => { await fx.run(); return fx; }],
+    then: ["the guarded switch runs once with one continuation", fx => {
+      expect(fx.switched).toHaveLength(1);
+      expect(fx.switched[0]).toMatchObject({ current: { id: "1" }, target: { id: "2" } });
       expect(fx.sent).toHaveLength(1);
     }],
   });

@@ -163,6 +163,22 @@ describe("Codex operator account switches", () => {
     } finally { fx.clean(); }
   });
 
+  // api:0 for lsrc:0, 2026-10-27: the credit guard moves a pane off a spent 5 h window and hands it the text to continue from.
+  it("moves a pane off a spent 5 h window without a paid compact and delivers the continuation it was given", async () => {
+    const fx = fixture(), quota = fx.options.quota;
+    fx.options.quota = async profile => profile.id === "1"
+      ? { ok: true, account: { email: "first@example.com" }, limits: [{ limitId: "codex",
+        windows: [{ windowMinutes: 10080, usedPercent: 72 }, { windowMinutes: 300, usedPercent: 100 }] }] }
+      : quota(profile);
+    fx.options.compact = async () => { fx.calls.push({ step: "paid-compact" }); return { ok: false, reason: "must not run" }; };
+    try {
+      const result = await switchCodexAccounts(fx.ctx, ["codex:2", "claw", "-p", "0"], { ...fx.options, continuation: "CONTINUE FROM THE STOP" });
+      expect(result.rows[0].status).toBe("switched");
+      expect(fx.calls.some(call => call.step === "paid-compact")).toBe(false);
+      expect(fx.jobs.map(job => job.text).join("\n")).toContain("CONTINUE FROM THE STOP");
+    } finally { fx.clean(); }
+  });
+
   it("reuses a native compact-only rollout whose authored activity was removed", async () => {
     const fx = fixture();
     const path = fx.options.identity().path;

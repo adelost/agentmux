@@ -68,6 +68,25 @@ the floor setting, unless `AMUX_CODEX_CREDITS=allow` is set for the bridge
 owner's own message still goes through. `amux quota` shows the balance beside
 the windows.
 
+The floor holds only new deliveries, so a turn already running when its window
+runs out would go on drawing credits (claw:5, 27 Oct 2026: 61 model calls and
+88.723 credits from 07:56:59Z to 09:01:45Z). The credit guard
+(`channels/codex-credit-stop.mjs`, every 10 s) reads each working Codex pane's
+own journal, where every model call records the windows and the credit balance.
+A spent 5h or week window with credits flowing and no tool call open earns one
+Esc (again after 15 s, three times at most; an approval prompt is left alone).
+The work is stored first. With another Codex account that has room (read fresh:
+5h window at least 20 % left, week under 90 % used) the pane gets an explicit
+account switch that carries the continuation and moves the exact session at its
+next idle boundary, without a paid compact. With none, one `codex-credit-stop`
+job waits and the floor holds it for the reset. An idle pane with a message the
+credit hold keeps back is moved the same way. The spent window is also stored for
+the floor, so new work waits before the 15-minute snapshot shows it. A usage
+refusal at a spent 5h window moves the pane like a spent week. At most one model
+call, the one in flight at the boundary, can still draw credits. The owner's own
+message still passes the floor (lsrc:0, 2026-10-20); the guard stops that turn
+too. `AMUX_CODEX_CREDITS=allow` turns the guard off.
+
 ## Idle capacity
 
 With `AMUX_IDLE_CAPACITY_TARGET=agent:pane` in the bridge environment, the

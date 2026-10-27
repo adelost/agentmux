@@ -31,6 +31,8 @@ import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
 import { codexCreditsAllowed, createPauseCompact, createQuotaParkFacts, createQuotaParkStore, quotaFloorPercent } from "./channels/pause-compact.mjs";
 import { startQuotaStopMover } from "./channels/quota-stop-mover.mjs";
+import { startCodexCreditStop } from "./channels/codex-credit-stop.mjs";
+import { createSpentWindows, withSpentWindows } from "./core/codex-spent-windows.mjs";
 import { createQuotaWindDownMover } from "./channels/quota-wind-down-move.mjs";
 import { readPauseCompactModes } from "./core/pause-compact.mjs";
 import { createLeaderReview, leaderFromConfig } from "./core/leader-review.mjs";
@@ -237,7 +239,7 @@ if (repairedSleeps.length) {
 }
 
 // `amux compact --self` requests, run at the end of the pane's turn or before its next delivery.
-const selfCompactRequests = createSelfCompactStore(), quotaFacts = createQuotaParkFacts(), quotaFloor = { windowsFor: quotaFacts, percent: quotaFloorPercent(), creditsAllowed: codexCreditsAllowed() };
+const spentWindows = createSpentWindows(), selfCompactRequests = createSelfCompactStore(), quotaFacts = withSpentWindows(createQuotaParkFacts(), spentWindows), quotaFloor = { windowsFor: quotaFacts, percent: quotaFloorPercent(), creditsAllowed: codexCreditsAllowed() };
 const contextMaintenance = createBridgeWorkAdmission({
   agent, state: appState, queue: deliveryQueue, configPath: AGENTS_YAML, discord, selfRequests: selfCompactRequests, quotaFacts,
   log: message => console.log(`context-cost | ${message}`),
@@ -340,6 +342,7 @@ autoCompact.start();
 attachQuotaFloorAlert({ queue: deliveryQueue, state: appState,
   configPath: AGENTS_YAML, floorPercent: quotaFloor.percent });
 startQuotaStopMover({ agent, deliveryBroker, state: appState, configPath: AGENTS_YAML, floorPercent: quotaFloor.percent });
+startCodexCreditStop({ agent, deliveryBroker, state: appState, configPath: AGENTS_YAML, tmuxSocket: TMUX_SOCKET, spentWindows, creditsAllowed: quotaFloor.creditsAllowed });
 
 // Drift-guard: periodic reminder to panes that have accumulated many turns
 // without a /compact or prior reminder. Counteracts attention-weight decay

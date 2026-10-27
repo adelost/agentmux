@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
+import { createSpentWindows, withSpentWindows } from "./codex-spent-windows.mjs";
 import { createDeliveryBroker } from "./delivery-broker.mjs";
 import { deliveryStateNotice } from "./delivery-notices.mjs";
 import { composerAgent } from "../test/fixtures/composer-agent.mjs";
@@ -3008,6 +3009,25 @@ feature("the quota floor holds new automatic work on an account near its weekly 
         expect(w.current()).toMatchObject({ status: "pending", costHold: true });
         expect(w.current().lastReason).toBe("wake-refused:quota-floor: Codex A has spent its 5h window until 2026-10-19T22:15:37.000Z;"
           + " a turn now draws paid credits");
+      } finally { w.cleanup(); }
+    }],
+  });
+
+  // The account snapshot lags up to 15 minutes; the running turn's journal showed the window spent at 07:56:59Z.
+  component("a spent window seen in a running turn's journal holds automatic work before the snapshot shows it", {
+    given: ["the snapshot reads the 5 h window at 97 % while claw:1's journal recorded it spent", () => {
+      const at = Date.parse("2026-10-19T19:55:00Z"), spent = createSpentWindows();
+      spent.record("claw:1", { accountKey: "codex:1", window: "session", resetsAt: Date.parse("2026-10-19T22:15:37.000Z") });
+      const snapshot = async () => ({ account: { name: "Codex A", key: "codex:1", provider: "codex" },
+        windows: [{ kind: "session", usedPercent: 97, resetsAt: "2026-10-19T22:15:37.000Z" },
+          { kind: "week", usedPercent: 48, resetsAt: "2026-10-27T14:21:43.000Z" }] });
+      return floorWorld({ floor: { percent: 3, creditsAllowed: false, windowsFor: withSpentWindows(snapshot, spent, () => at) } });
+    }],
+    when: ["the broker serves claw:1", w => w.broker.kickTarget("claw", 1)],
+    then: ["nothing is typed and the brief waits", (_result, w) => {
+      try {
+        expect(w.agent.sends).toEqual([]);
+        expect(w.current()).toMatchObject({ status: "pending", costHold: true });
       } finally { w.cleanup(); }
     }],
   });
