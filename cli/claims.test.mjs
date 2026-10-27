@@ -17,7 +17,7 @@ feature("claim measurement keeps actual reply identity and excludes incoming mes
   integration("the normal CLI reads only canonical sent reply rows", {
     given: ["a private tiny mixed ledger", () => {
       const dir = mkdtempSync(join(tmpdir(), "claim-cli-")), path = join(dir, "ledger.jsonl");
-      const base = { version: 1, ts: "2026-10-27T01:00:00Z", agent: "fixture", pane: 0, text: "Testerna är gröna.", status: "sent" };
+      const base = { version: 1, ts: "2026-10-27T01:00:00Z", agent: "fixture", pane: 0, text: "Tjänsten är live.", status: "sent" };
       writeFileSync(path, [
         { ...base, event: "ask", id: "human", verbatim: "Testerna är gröna." },
         { ...base, event: "post", kind: "reply", id: "original-reply" },

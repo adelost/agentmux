@@ -41,5 +41,11 @@ export function qualifyClaims(today, heldOut) {
     && today.algorithm && heldOut?.algorithm === today.algorithm
     && today.day !== heldOut.day && heldOut.day < today.day
     && today.reviewComplete && heldOut?.reviewComplete
-    && today.falseStopRate <= 0.10 && heldOut.falseStopRate <= 0.10);
+    && today.falseStopRate <= 0.10 && heldOut.falseStopRate <= 0.10
+    && today.shareHeld <= 0.10 && heldOut.shareHeld <= 0.10);
+}
+
+/** WHAT: Builds the independent name summary on the same frozen replies. WHY: Prevents name warnings from inflating factual-claim detection figures. */
+export function summarizeClaimNames(rows, options = {}) {
+  return summarizeClaims(rows.map(row => ({ ...row, ...row.names })), options);
 }

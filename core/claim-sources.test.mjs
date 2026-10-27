@@ -24,16 +24,16 @@ feature("citations use remote-default source", () => {
     when: ["checking through the same public module as the mirror", ({ dir, sha }) => {
       const sources = createClaimSources([dir]);
       return { dir, values: [
-        checkReply("Tjänsten är klar, `service.mjs:1`.", sources).verdict,
-        checkReply("Tjänsten är klar, `service.mjs:50`.", sources).verdict,
-        checkReply("Tjänsten är klar, `local.mjs:1`.", sources).verdict,
-        checkReply(`Tjänsten är klar, ${sha}.`, sources).verdict,
-        checkReply("Tjänsten är klar, deadbeefdeadbeef.", sources).verdict,
-        checkReply(`Ingen version finns. \`git grep missing ${sha} -- ./\`, output: 0 träffar.`, sources).verdict,
-        checkReply("Tjänsten är klar, `nested.mjs:1`.", sources).verdict,
+        checkReply("Tjänsten är live, `service.mjs:1`.", sources).verdict,
+        checkReply("Tjänsten är live, `service.mjs:50`.", sources).verdict,
+        checkReply("Tjänsten är live, `local.mjs:1`.", sources).verdict,
+        checkReply(`Tjänsten är live, ${sha}.`, sources).verdict,
+        checkReply("Tjänsten är live, deadbeefdeadbeef.", sources).verdict,
+        checkReply(`Tjänsten är live. \`git grep missing ${sha} -- ./\`, output: 0 träffar.`, sources).verdict,
+        checkReply("Tjänsten är live, `nested.mjs:1`.", sources).verdict,
       ] };
     }],
-    then: ["only actual remote citations qualify, including one unambiguous filename", ({ values }) => expect(values).toEqual(["pass", "hold", "hold", "pass", "hold", "hold", "pass"])],
+    then: ["only actual remote file-lines qualify, including one unambiguous filename", ({ values }) => expect(values).toEqual(["pass", "hold", "hold", "hold", "hold", "hold", "pass"])],
     cleanup: ({ dir }) => rmSync(dir, { recursive: true, force: true }),
   });
 });

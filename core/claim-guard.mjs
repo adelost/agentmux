@@ -2,11 +2,12 @@ import { createClaimSources } from "./claim-sources.mjs";
 
 const UNCERTAIN = /(?:inte kontrollerat|inte kontrollerad|antagande|assumption|unverified|not checked|oprövad[et]?|inte (?:prövat|testat|kört)|ej verifierat)/iu;
 const PLAN = /^(?:NEXT|GOAL|LEFT|Förslag|Plan|Rekommendation)\s*:|^(?:Nästa|Next|Om|If)\s|^Finns\s.+\b(?:startar|väntar|ska|kommer)\b|^Det räcker (?:därför |att )|^(?:jag|vi)\s+(?:ska|kommer att|vill)\b/iu;
-const DOMAIN = /(?:kod|fil(?:en|er|erna)?\b|repo|test|prov|kvot|kont[oen]|nyck|token|key|quota|account|service|tjänst|worker|runtime|gateway|live|release|släpp|deploy|version|utcheckning|Quick|export|kostnad|budget|USD|grön|röd|pass|fail|git|käll|server|logg|modell)/iu;
-const ASSERTION = /(?<![\p{L}\d_])(?:är|var|har|hade|finns|saknas|fick|gav|blev|blivit|ligger|kom|tog|gick|kör|visar|visade|kräver|behöver|hittade|kan vara|is|are|was|were|has|have|passed|failed|exists|deployed|returned)(?![\p{L}\d_])/iu;
-const CAUSE = /\b(?:eftersom|orsak|beror på|because|caused)\b/iu;
-const DENIAL = /\b(?:ingen|inget|inga|saknas|saknad|finns inte|hittade (?:jag )?inte|does not exist|not found|no (?:file|test|version|key|account))\b/iu;
-const SEARCH = /\b(?:rg|git\s+grep|find)\s/iu;
+const REQUEST = /(?:\b(?:kan|vill|behöver|måste) du\s+(?:köra|godkänna|besluta|välja|lägga|klistra|logga|skicka)|\bdu\s+(?:behöver|måste|ska)\s+(?:köra|godkänna|besluta|välja|lägga|klistra|logga)|\bdu har\b.{0,50}\b(?:nycklar?|token)\b.{0,30}\b(?:lägga|klistra|skicka)|^NEXT:\s*(?:din(?:a)?\b.{0,40}(?:nyck|token)|säg ja|godkänn|besluta|kör\b|klistra)|^(?:Mattias[, :]+)?(?:kör|godkänn|bekräfta|klistra in|lägg in)\b)/iu;
+const STATE = /(?:(?<![\p{L}\d_])(?:är|var|ligger|blev|blivit)\s+(?:(?:nu|redan|fortfarande|inte|ännu|kvar|också|alltså|helt|både)\s+){0,3}(?:live|släppt|driftsatt|rättat|fixat|trasig)|\b(?:har|hade)\s+(?:nu\s+|redan\s+)?(?:släppt|rättat|fixat)|\b(?:släppt|släppte|deployed)\b.{0,70}\blive\b|\b(?:fungerar|drabbar)\b|\b(?:påverkar|trasig|bruten)\b.{0,50}\b(?:användare|users)\b|\bgår (?:inte )?att använda\b|\b(?:is|was)\s+(?:live|deployed|fixed|broken)|\b(?:affects users|works|does not work)\b)/iu;
+const CAUSE = /(?:\borsaken?\s+(?:är|var)|\bberor på(?=\s|[.,:;])|\bkommer från\b|\b(?:root cause is|caused by)\b|\b(?:eftersom|because)\b)/iu;
+const TECHNICAL = /(?:fel(?:et)?\b|bug|kod|klient|läsar|konto|logga|version|runtime|gateway|live|export|cache|worker|token|nyck|service|tjänst)/iu;
+const INVESTIGATION = /^(?:(?:SUMMARY|NOW):\s*)?(?:jag|vi)\s+(?:undersöker|utreder|kontrollerar|väljer|väntar|avstår|föreslår)\b/iu;
+const EVIDENCE_PATH = /(?:\.artifacts\/|(?:receipt|kvitto|logg?|response|saved[-_]?(?:reply|answer)|sparat[-_]?svar)[^/]*\.(?:jsonl?|log|txt|md)|\.log$)/iu;
 const SHA = /\b[a-f\d]{7,40}\b/giu;
 const OUTPUT = /(?:utdata|output|resultat|exit(?:Code)?\s*[:=]|\b\d+\s+(?:träffar|matches|passed|gröna)|```[^`]*```)/iu;
 
@@ -50,23 +51,61 @@ function sourcesOf(text, reply) {
   return sources;
 }
 
-/** WHAT: Checks factual assertions for valid citations. WHY: Keeps CLI and live mirrors on one heuristic without certifying factual truth. */
+function claimClass(unit) {
+  // A request to the human still needs justification when written under NEXT or as a question.
+  if (REQUEST.test(unit)) return "human-request";
+  if (PLAN.test(unit) || UNCERTAIN.test(unit) || INVESTIGATION.test(unit) || unit.endsWith("?")) return null;
+  if (CAUSE.test(unit) && TECHNICAL.test(unit)) return "technical-cause";
+  return STATE.test(unit) ? "operational-state" : null;
+}
+
+function isEvidence(source) {
+  return source.kind === "command" || source.kind === "path" && (source.line || EVIDENCE_PATH.test(source.value))
+    || source.kind === "url" && /(?:\.artifacts\/|\/(?:receipts?|logs?|responses?)\/)/iu.test(source.value);
+}
+
+/** WHAT: Checks the first visible mention of known task IDs and explicit PR/ticket references. WHY: Numbers need a nearby name without treating measurements as tasks. */
+export function checkTaskNames(text, taskNumbers = []) {
+  const known = new Set(taskNumbers), seen = new Set(), bare = [];
+  const mask = match => " ".repeat(match.length);
+  const visible = String(text).replace(/```[\s\S]*?```|https?:\/\/[^\s<>]+|`(?!\d+[a-z]?`)[^`\n]*`/giu, mask)
+    .replace(/(?:[\w.-]+\/)*[\w.-]+\.[a-z]+:\d+(?:-\d+)?|\b[a-f\d]{7,40}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}:\d{2}(?::\d{2})?\b|\b\d+\/\d+\b|\b\d+[.,]\d+\b/giu, mask);
+  for (const match of visible.matchAll(/(?<![\p{L}\d_])#?(\d+[a-z]?)(?![\p{L}\d_])/giu)) {
+    const id = match[1], before = visible.slice(Math.max(0, match.index - 24), match.index);
+    const after = visible.slice(match.index + match[0].length);
+    const explicit = /(?:rad|row|PR|ticket|task|uppgift)\s*[:#]?\s*$/iu.test(before) || match[0].startsWith("#");
+    if (!explicit && (!known.has(id) || !/^\d{3,}[a-z]?$|^\d+[a-z]$/iu.test(id)
+      || /(?:släpp|release|version|build|bundle)\s*#?\s*$/iu.test(before))) continue;
+    if (!explicit && (/^(?:19|20)\d{2}$/u.test(id) || /^\s*(?:%|px\b|USD\b|kr\b|ms\b|s\b|min\b|h\b|MB\b|KB\b|prov\b|tester\b|svar\b|repliker\b|filer\b|commits\b|krediter\b)/iu.test(after))) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const label = /^`?\s*\(([^)\n]+)\)/u.exec(after)?.[1]
+      || /^`?\s*,\s*([^,.;:\n]+)/u.exec(after)?.[1];
+    const words = label?.trim().match(/[\p{L}][\p{L}'’-]*/gu) || [];
+    if (words.length < 2 || words.length > 4) bare.push({ number: id, at: match.index, text: id, why: "task-name-missing" });
+  }
+  return { verdict: bare.length ? "hold" : "pass", sentences: bare, mentions: seen.size };
+}
+
+/** WHAT: Checks only human requests, operational state and technical causes. WHY: Prevents routine facts from bouncing replies back to their authors. */
 export function checkReply(text, repos = []) {
   const resolver = typeof repos?.validate === "function" ? repos : createClaimSources(repos);
   const sentences = [];
   let claims = 0;
-  for (const unit of unitsOf(String(text || ""))) {
-    if (PLAN.test(unit) || UNCERTAIN.test(unit) || unit.endsWith("?")) continue;
-    if (!(CAUSE.test(unit) || (DOMAIN.test(unit) && ASSERTION.test(unit)))) continue;
+  text = String(text || "");
+  const units = unitsOf(text);
+  // A dedicated evidence line belongs to the reply; unrelated citations remain local to their unit.
+  const shared = units.filter(unit => /^(?:Kvitto|Receipt|Logg?|Saved response|Sparat svar)\s*:/iu.test(unit))
+    .flatMap(unit => sourcesOf(unit, text)).filter(isEvidence).filter(source => resolver.validate(source));
+  for (const unit of units) {
+    const category = claimClass(unit);
+    if (!category) continue;
     claims += 1;
-    const sources = sourcesOf(unit, text);
+    const sources = sourcesOf(unit, text).filter(isEvidence);
     const valid = sources.filter(source => resolver.validate(source));
-    if (DENIAL.test(unit)) {
-      const scopedSearch = valid.some(source => source.kind === "command" && SEARCH.test(source.value)
-        && /(?:\/|\bHEAD\b|--tree|--work-tree)/u.test(source.value)
-        && /\b[a-f\d]{7,40}\b/iu.test(unit));
-      if (!scopedSearch) sentences.push({ text: unit, why: "denial-needs-search-tree-and-sha" });
-    } else if (!valid.length) sentences.push({ text: unit, why: sources.length ? "source-invalid-or-output-missing" : "source-missing" });
+    if (!valid.length && !shared.length) sentences.push({ text: unit, category,
+      why: sources.length ? "source-invalid-or-output-missing" : "source-missing" });
   }
-  return { verdict: sentences.length ? "hold" : "pass", sentences, claims };
+  return { verdict: sentences.length ? "hold" : "pass", sentences, claims,
+    names: checkTaskNames(text, resolver.taskNumbers?.() || []) };
 }

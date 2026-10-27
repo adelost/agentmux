@@ -1,40 +1,41 @@
-# Reply claim guard
+# Reply claim and task-name checks
 
-Source: [27Oct design](/home/adelost/lsrc/.artifacts/claim-guard-20261027/DESIGN.md), task107. One policy checks completed agent replies in both JSONL and native-runtime mirrors. It never checks incoming human messages.
+Owner claw:5. Current scope: lsrc:0 delivery:3492a7d90e971a0c87e4e2db0d99cb54,27Oct09:11:59Z, and skyvw:0 delivery:73259b19faa1a13cf70a52e5e7c85d2c,09:15:52Z. These supersede the original broad classifier and the dependency that delayed task names and the state-age guard. Original evidence remains in `/home/adelost/lsrc/.artifacts/claim-guard-20261027/`.
 
-`AMUX_CLAIM_GUARD=shadow` is the default: post immediately, classify asynchronously and append a private decision to `~/.agentmux/claim-guard/decisions.jsonl`. `off` stops checking. `enforce` requires a matching qualification file; otherwise it remains shadow and logs the refusal. Git/file checks run in one worker thread, with a bounded request lifetime, outside the human-delivery event loop.
+## Current policy
 
-`core/claim-guard.mjs` checks present/past software, service, release, account, quota, key, test, existence and cause assertions. Questions, plans, NEXT and explicit uncertainty pass. A citation belongs to its sentence or bullet. Paths/lines use the observed `origin` default tip, never working-copy bytes; commits must resolve. URLs/delivery references establish source presence, not their truth. A denial also needs a search command, tree and SHA. Quoted commands are never executed.
+`core/claim-guard.mjs` checks only requests for Mattias to run a command, supply a key or make a decision; assertions about operational state such as live/deployed/fixed/working/user impact; and technical-cause assertions. Other facts pass. A human request still needs justification under NEXT or when phrased as a question. Plans, investigations and explicit uncertainty are excluded from factual checks.
 
-Limit: reference existence cannot establish that its contents support an assertion, that the branch was freshly fetched, that a cause is correct, or that an action agrees with a human decision. The stale-checkout example has an existing path/line, so this policy does not catch that error. The ancestry comparison is a method error. Key requests under NEXT are plans excluded by the agreed design. Report those misses separately.
+Evidence is a valid file:line at an observed origin default tip, a saved receipt/log/response, or a quoted command with captured output. A bare SHA or ordinary website URL no longer establishes justification. A dedicated Kvitto/Receipt/Log/Sparat svar line covers its reply; an unrelated source on another bullet does not. Quoted commands never execute. Existence establishes neither relevance nor truth.
 
-## Measure
+The independent name check reports first mentions of known ledger IDs and explicit row/PR/ticket references without a nearby name of2–4 words in parentheses or after a comma. Recognized code, URLs, versions and measurements are excluded. Names are logged under `names` and measured separately; they never inflate claim catches or hold a reply through claim enforcement. Ambiguous numbers and local artifact paths remain measured limitations.
 
-```
-amux claims check --since 24h --known /private/confirmed-groups.json --output /private/today.json
-amux claims check --day 2026-10-26 --output /private/held-out.json
-amux claims check --input /private/today.json --known /private/confirmed-groups.json --review /private/labels.json --held-out /private/reviewed-held-out.json --output /private/graded-today.json
-```
+`AMUX_CLAIM_GUARD=shadow` remains the authorized default. Completed replies post immediately; the isolated source worker appends asynchronous decisions in `~/.agentmux/claim-guard/decisions.jsonl`. `off` disables checking. Both reply watchers share the policy. Human input remains independent of checking and checker errors.
 
-Corpus includes canonical `post`, `kind:reply`, `status:sent` rows only, all panes, with exact IDs, timestamps, text and hashes. `--input` rechecks that frozen corpus, so ongoing new replies do not invalidate a review sample. The report's stable pseudorandom sample has every hold when ≤50, otherwise50. The review names the corpus/policy hashes; each label names original ID, text hash, flagged-sentence hash, `falseStop` and a reason. Grade a false stop only when all flagged sentences are nonclaims or already adequately sourced. A genuinely unsupported assertion makes the reply a true hold, even if other flags are wrong. Retain that sentence-level limitation.
+## One final measured round
 
-Qualification requires confirmed seven error groups, ≥5 caught target assertions in both the inclusive and strict variants, both days completely graded, ≤10% false stops on each, different ordered days and identical policy hashes. The strict variant excludes decision-only early key replies. Do not count another sentence's flag as detecting a known error. lsrc:0 confirmed the27Oct content/time mapping and explicitly required both variants before activation (delivery:71d80c41e3c4c5b78f3e3ce9b2157823); pre07:06Z key requests violate prior decision, later ones also conflict with code.
+The original eight false stops on26Oct were grouped before the final round: four plans/investigations, two evidence-path resolution failures, one visual hypothesis and one caution that an observation was not proof. The largest class was addressed by the narrowed policy. There was no further tuning after the final sample review.
 
-Measured27Oct, frozen inputs and labels in the existing claim-guard artifact directory:
+The corpus is unchanged:687 canonical sent reply posts on27Oct and2522 on26Oct. Each policy/day uses the deterministic SHA256 sample rule, at most50 holds. Every selected flag was reviewed manually by the owner; ambiguous full replies were reopened. This is not independent human grading.26Oct was inspected in an earlier round and is no longer unseen validation.
 
-| UTC day | Replies | Holds | Share held | False stops in50 reviewed holds |
+| Check/day | Before held | After held | Before false stops | After false stops |
 | --- | ---: | ---: | ---: | ---: |
-| 27Oct through07:40:55Z | 687 | 426 | 62.01% | 2/50,4% |
-| 26Oct | 2522 | 1511 | 59.91% | 8/50,16% |
+| Claims27Oct |426/687,62.01%|133/687,19.36%|2/50,4%|6/50,12%|
+| Claims26Oct |1511/2522,59.91%|463/2522,18.36%|8/50,16%|16/50,32%|
+| Names27Oct |not built|380/687,55.31%|not measured|7/50,14%|
+| Names26Oct |not built|1555/2522,61.66%|not measured|5/50,10%|
 
-The held-out result exceeds10%, so enforcement is unqualified.5/7 known groups caught includes the early two-key decision violation; excluding it yields4/7. The later wrong-code requests under NEXT are missed. Labels are owner judgments; the corpus unit is a canonical Discord post, which may be one chunk of a runtime turn. The installed CLI reproduces the numbers.
+Known errors belong to27Oct: inclusive catches5/7→4/7; strict catches4/7→4/7. Late key requests are now detected; the general absence-of-tool statement is outside the narrowed policy. Stale-but-existing citations and the ancestry method error remain missed. Another flagged sentence in a reply does not count as catching those errors.
 
-Actual bridge shadow verified27Oct: installed1.25.370/8c7cb365, one permittedUSR2 at08:56:34Z returned in10.603s. The two original pending jobs retained their IDs, statuses and payload hashes immediately after, with no duplicate submission observed. Three actual shadow decisions (one pass, two hold) match whole-turn hashes and unchanged Discord messages fetched with HTTP200. Evidence: `/home/adelost/lsrc/.artifacts/claim-guard-20261027/live-shadow-proof.json` and the existing `DELIVERY-RECEIPT.json`. Enforcement remains off; the task-name and state-age extensions wait for the explicitly required active claim check.
+All activation targets fail: strict catches below5/7, false stops above10%, and hold share above10% on both days. The narrowed sample concentrates false positives while total holds decline. The checks stay in shadow; no third tuning round is authorized. Only lsrc:0 decides future activation. Qualification now requires both days' hold shares≤10%; no qualification file is written.
 
-After a real shadow observation, the owner may save `{algorithm,today,heldOut}` from qualified reports to private `qualification.json` and select enforce through normal environment/reload. That file does not itself change the mode. No automatic model grading, account changes or retries.
+## Reproduce
 
-## A held reply
+```
+amux claims check --input /private/frozen-report.json --known /private/known.json --output /private/rechecked.json
+amux claims check --input /private/frozen-report.json --known /private/known.json --review /private/claim-labels.json --name-review /private/name-labels.json --held-out /private/graded-26oct.json --output /private/graded.json
+```
 
-The hold owner durably stores the original and one corrective request through the ordinary broker. A correction identifies its original turn and never gets held again; it is posted with a missing-source warning if still unsupported. A new human message immediately releases held originals with that warning, independently of inbound delivery. Unsent correction requests use ordinary cancellation; submitted/unknown ones remain protected.
+`--input` preserves IDs, text hashes and the original window while running the live policy. Claim/name labels independently bind corpus, algorithm, text and flag hashes. Final graded reports, labels, grouped causes and the current delivery receipt are in the existing artifact directory; old reports and the1.25.370 live shadow proof remain historical evidence.
 
-Before releasing to Discord the hold records `sending`. A failed/lost send response is `unknown`, and neither restart nor another human message replays it. Discord chunks and attachments retain the normal limits. Pending content and decision logs remain private.
+The transport retains one durable hold/correction per turn, immediate release on human input, cancellation for unsent corrections, and an unknown-send fence preventing replay. Those mechanics do not authorize activation.

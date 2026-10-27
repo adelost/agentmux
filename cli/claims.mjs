@@ -3,7 +3,7 @@ import { readWindow, defaultAskLedgerPath } from "../core/ask-ledger.mjs";
 import { createClaimSources } from "../core/claim-sources.mjs";
 import { checkReply } from "../core/claim-guard.mjs";
 import { claimRepoPaths } from "../core/claim-repos.mjs";
-import { claimHash, summarizeClaims, qualifyClaims } from "../core/claim-corpus.mjs";
+import { claimHash, summarizeClaims, summarizeClaimNames, qualifyClaims } from "../core/claim-corpus.mjs";
 import { claimAlgorithm } from "../core/claim-version.mjs";
 
 const help = `amux claims check --since 24h [--day YYYY-MM-DD] [--output /private/report.json]
@@ -22,7 +22,7 @@ export async function cmdClaims(args, { configPath } = {}) {
   const flags = {}, repos = [];
   for (let i = 1; i < args.length; i++) {
     const key = args[i];
-    if (!["--day", "--since", "--output", "--known", "--review", "--held-out", "--ledger", "--repo", "--input"].includes(key)
+    if (!["--day", "--since", "--output", "--known", "--review", "--name-review", "--held-out", "--ledger", "--repo", "--input"].includes(key)
       || !args[i + 1] || args[i + 1].startsWith("--")) throw Error(`Unknown or incomplete claims option: ${key}`);
     if (key === "--repo") repos.push(args[++i]); else flags[key.slice(2)] = args[++i];
   }
@@ -48,8 +48,10 @@ export async function cmdClaims(args, { configPath } = {}) {
   const summary = { ...summarizeClaims(rows, { known: load(flags.known), review: load(flags.review), algorithm }), day, algorithm };
   const heldOut = load(flags["held-out"]);
   const report = { version: 1, checkedAt: new Date(now).toISOString(), day, window: frozen?.window || { since, until },
-    sources: sources.repos, ...summary, eligible: qualifyClaims(summary, heldOut), rows };
+    sources: sources.repos, ...summary, eligible: qualifyClaims(summary, heldOut),
+    names: summarizeClaimNames(rows, { review: load(flags["name-review"]), algorithm }), rows };
   if (flags.output) writeFileSync(flags.output, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
-  console.log(JSON.stringify({ ...summary, sample: undefined, eligible: report.eligible, output: flags.output || null }, null, 2));
+  console.log(JSON.stringify({ ...summary, sample: undefined, names: { ...report.names, sample: undefined },
+    eligible: report.eligible, output: flags.output || null }, null, 2));
   return report;
 }

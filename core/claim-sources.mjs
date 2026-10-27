@@ -20,6 +20,7 @@ export function createClaimSources(paths = []) {
     return tip ? [{ dir: root, ref: branch, tip }] : [];
   });
   const cache = new Map(), trees = new Map();
+  let taskNumbers = null;
   function fileAtTip(path) {
     path = expand(path);
     const candidates = repos.flatMap(repo => {
@@ -49,6 +50,13 @@ export function createClaimSources(paths = []) {
   }
   return {
     repos: repos.map(({ dir, ref, tip }) => ({ dir, ref, tip })),
+    taskNumbers() {
+      if (!taskNumbers) {
+        taskNumbers = [...new Set(repos.flatMap(repo => ["docs/TASKS.md", "projects/haunt-ux-2026-10-18/TASKS.md"]
+          .flatMap(path => [...(git(repo.dir, ["show", `${repo.tip}:${path}`]) || "").matchAll(/^\|\s*(\d+[a-z]*)\s*\|/gmu)].map(match => match[1]))))];
+      }
+      return taskNumbers;
+    },
     validate(source) {
       const key = JSON.stringify(source);
       if (cache.has(key)) return cache.get(key);

@@ -17,7 +17,7 @@ feature("only qualified two-day evidence enables a claim hold", () => {
   });
   unit("requires independently graded days on the same algorithm", {
     given: ["a passing threshold report", () => ({ day: "2026-10-27", algorithm: "same", knownConfirmed: true,
-      errors: Array(7).fill({}), caught: 5, strictCaught: 5, reviewComplete: true, falseStopRate: 0.1 })],
+      errors: Array(7).fill({}), caught: 5, strictCaught: 5, reviewComplete: true, falseStopRate: 0.1, shareHeld: 0.1 })],
     when: ["qualifying held-out variants", today => [
       qualifyClaims(today, { ...today, day: "2026-10-26" }),
       qualifyClaims(today, { ...today }),
@@ -25,7 +25,9 @@ feature("only qualified two-day evidence enables a claim hold", () => {
       qualifyClaims(today, { ...today, day: "2026-10-26", falseStopRate: 0.11 }),
       qualifyClaims(today, { ...today, day: "2026-10-26", reviewComplete: false }),
       qualifyClaims({ ...today, strictCaught: 4 }, { ...today, day: "2026-10-26" }),
+      qualifyClaims({ ...today, shareHeld: 0.101 }, { ...today, day: "2026-10-26" }),
+      qualifyClaims(today, { ...today, day: "2026-10-26", shareHeld: 0.101 }),
     ]],
-    then: ["only the qualified independent day and both error variants pass", values => expect(values).toEqual([true, false, false, false, false, false])],
+    then: ["only qualified days with both error variants and bounded hold shares pass", values => expect(values).toEqual([true, false, false, false, false, false, false, false])],
   });
 });
