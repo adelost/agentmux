@@ -9,6 +9,7 @@ export function sourceCodingPaneSlots(config) {
     ["codex", codexCount],
     ["kimi", config.kimiCount || 0],
     ["qwen", config.qwenCount || 0],
+    ["gemini", config.geminiCount || 0],
   ]) {
     for (let ordinal = 0; ordinal < count; ordinal++) slots.push({ pane: index++, engine, ordinal });
   }

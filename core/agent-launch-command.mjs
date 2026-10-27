@@ -1,6 +1,7 @@
 // Shell-safe coding-agent launch construction shared by pane lifecycle paths.
 
 import { esc } from "../lib.mjs";
+export { buildGeminiLaunchCommand } from "./gemini-launch.mjs";
 import { resolveClaudeEffort, resolveClaudeModel } from "./claude-model.mjs";
 import { allowedCodexLaunchModel } from "./codex-profiles.mjs";
 import {

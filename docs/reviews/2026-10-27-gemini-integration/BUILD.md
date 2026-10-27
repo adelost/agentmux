@@ -1,5 +1,12 @@
 # Gemini engine build map
 
+Superseded27Oct18:4xZ: api:0 relayed Mattias's immediate two-hour minimal scope.
+This branch preserves the larger observation/journal work only, NOT a release candidate.
+The active minimal build starts from fresh origin/master on feat/gemini-engine-minimal,
+in this same owned worktree. No journals/hooks or broad engine audit ship in that build.
+Last archive state includes two deliberately red maintenance tests and the old
+dialect integrity test's stale interrupt wording; they are not passed or waived.
+
 Spec: `/home/adelost/lsrc/.artifacts/gemini-amux-20261027/PLAN.md`.
 Source: delivery:4d8f6025b303a971e96a9016754a9d67, delegated by api:0.
 Builder: api:6. Branch: `feat/gemini-engine`, base `e5eaf4a9`.

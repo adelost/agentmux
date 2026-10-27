@@ -25,6 +25,9 @@ export const QWEN_AUTONOMOUS_ARGS = Object.freeze([
   "ask_user_question",
 ]);
 
+/** WHAT: Defines Gemini's unattended TUI flags. WHY: Keeps generated descriptors and exact-session startup on the same approval policy. */
+export const GEMINI_AUTONOMOUS_ARGS = Object.freeze(["--approval-mode", "yolo", "--skip-trust"]);
+
 export const CODEX_APP_SERVER_ARGS = Object.freeze([
   "app-server",
   "--stdio",
@@ -68,3 +71,5 @@ export const CODEX_AUTONOMOUS_FLAGS = renderShellArgs(CODEX_AUTONOMOUS_ARGS);
 export const KIMI_AUTONOMOUS_FLAGS = renderShellArgs(KIMI_AUTONOMOUS_ARGS);
 /** WHAT: Formats Qwen autonomous flags. WHY: Keeps generated descriptors and exact-session launches aligned. */
 export const QWEN_AUTONOMOUS_FLAGS = renderShellArgs(QWEN_AUTONOMOUS_ARGS);
+/** WHAT: Formats Gemini autonomous flags. WHY: Keeps every launch surface on the declared approval policy. */
+export const GEMINI_AUTONOMOUS_FLAGS = renderShellArgs(GEMINI_AUTONOMOUS_ARGS);

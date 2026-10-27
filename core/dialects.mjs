@@ -24,6 +24,7 @@ const CLAUDE_COMPLETED_LINE = new RegExp(`^[${CLAUDE_PROGRESS_ICONS}] [A-Z][a-z]
 /** WHAT: Defines the Claude TUI dialect. WHY: Keeps transport acknowledgement separate from compaction completion. */
 export const CLAUDE = {
   name: "claude",
+  supportsCompact: true,
 
   // A consumed slash may answer "Not enough messages to compact". Only the
   // journal boundary/summary proves completion, never the transport ACK.
@@ -81,6 +82,7 @@ export const CLAUDE = {
 /** WHAT: Defines the Codex TUI dialect. WHY: Keeps Codex screen parsing from leaking into engine-neutral code. */
 export const CODEX = {
   name: "codex",
+  supportsCompact: true,
 
   compactReceiptIsAuthoritative: false,
 
@@ -124,6 +126,7 @@ export const CODEX = {
 /** WHAT: Describes Kimi TUI markers. WHY: Keeps parsing independent from Claude and Codex rendering. */
 export const KIMI = {
   name: "kimi",
+  supportsCompact: true,
 
   compactReceiptIsAuthoritative: false,
 
@@ -173,6 +176,7 @@ export const KIMI = {
 /** WHAT: Defines Qwen Code's persistent TUI. WHY: Keeps human-visible rendering separate from structured receipts. */
 export const QWEN = {
   name: "qwen",
+  supportsCompact: true,
   compactReceiptIsAuthoritative: false,
   promptChar: ">",
   bullet: "◆",
@@ -194,10 +198,29 @@ export const QWEN = {
   ],
 };
 
+// Markers captured from isolated0.65 TUI, including a running shell tool.
+/** WHAT: Defines Gemini's persistent TUI and phase-one capabilities. WHY: Keeps its composer and unsupported maintenance separate from other engines. */
+export const GEMINI = {
+  name: "gemini", supportsCompact: false, compactReceiptIsAuthoritative: false,
+  promptChar: "*", bullet: "✦", toolResultPrefix: "│",
+  toolCallPattern: /^\s*│\s*[⊷✓✗]\s+(?:Shell|ReadFile|WriteFile|Edit|SearchText|FindFiles)\b/u,
+  idleWhenPromptEmpty: false, busySignals: ["(esc to cancel,"],
+  clearlineKeys: ["C-u"],
+  noise: [/Gemini CLI v[\d.]+/u, /^\s*YOLO Ctrl\+Y/u, /^\s*\*\s+Type your message/u,
+    /^\s*(?:workspace \(\/directory\)|no sandbox|Auto)\s*$/u],
+  modals: [
+    { id: "google-login", status: "menu", re: /Please visit the following URL to authorize[\s\S]*Enter the authorization code:/u },
+    { id: "theme-picker", status: "menu", re: /Select Theme[\s\S]*Use Enter to select, Tab to configure scope/u },
+  ],
+};
+
 // --- Registry ------------------------------------------------------------
 
 /** WHAT: Defines supported TUI dialects. WHY: Keeps fallback detection aligned with every engine. */
-export const ALL_DIALECTS = [CLAUDE, CODEX, KIMI, QWEN];
+export const ALL_DIALECTS = [CLAUDE, CODEX, KIMI, QWEN, GEMINI];
+
+/** WHAT: Checks an engine's explicit compact capability. WHY: Prevents adding a coding dialect from opting it into unsupported maintenance. */
+export const supportsCompact = dialect => ALL_DIALECTS.find(entry => entry.name === dialect)?.supportsCompact === true;
 
 // A new engine opts OUT by staying off the registry, never in by editing a
 // call site. dialectFor returns null for shell panes, which is what the
@@ -226,6 +249,7 @@ export const compactReceiptIsAuthoritative = (dialect) =>
  * WHY: Keeps scrollback parsing from applying another engine's markers.
  */
 export function detectDialect(raw) {
+  if (/\bGemini CLI v[\d.]+/u.test(raw)) return GEMINI;
   if (raw.includes(">_ Qwen Code") || /Token Plan\s+\|.*qwen/iu.test(raw)) return QWEN;
   if (raw.includes("Welcome to Kimi Code") || /\bSession\s+session_[0-9a-f-]+/iu.test(raw)) return KIMI;
   // Strong signal: Codex banner somewhere
@@ -263,7 +287,7 @@ export const matchesAnyPromptPrefix = (line) =>
 
 /** True if a line starts with any dialect's user prompt (non-empty). */
 export const matchesAnyPromptWithText = (line) =>
-  ALL_DIALECTS.some((d) => new RegExp(`^${d.promptChar} \\S`).test(line));
+  ALL_DIALECTS.some((d) => new RegExp(`^${d.promptChar.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")} \\S`).test(line));
 
 /** Strip any dialect's leading bullet (and following space) from a line. */
 export const stripBullet = (line) => {

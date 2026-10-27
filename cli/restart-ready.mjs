@@ -34,8 +34,8 @@ const TAIL_BYTES = 8 * 1024 * 1024;
 
 /** WHAT: Resolves one configured pane engine. WHY: Keeps restart inventory limited to stateful coding runtimes. */
 export function restartPaneEngine(pane = {}) {
-  if (["claude", "codex", "kimi", "qwen"].includes(pane.engine)) return pane.engine;
-  const match = String(pane.cmd || "").match(/(?:^|[/\s])(claude|codex|kimi(?:-code)?|qwen)(?:\s|$)/u);
+  if (["claude", "codex", "kimi", "qwen", "gemini"].includes(pane.engine)) return pane.engine;
+  const match = String(pane.cmd || "").match(/(?:^|[/\s])(claude|codex|kimi(?:-code)?|qwen|gemini)(?:\s|$)/u);
   if (!match) return null;
   return match[1].startsWith("kimi") ? "kimi" : match[1];
 }

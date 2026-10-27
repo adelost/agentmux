@@ -3,6 +3,7 @@ import { detectDialect } from "./dialects.mjs";
 /** WHAT: Resolves a configured coding engine. WHY: Keeps lifecycle routing from duplicating command recognition. */
 export function commandDialect(command) {
   const value = String(command || "");
+  if (/(?:^|[\/\s])gemini(?:\s|$)/iu.test(value)) return "gemini";
   if (/(?:^|[\/\s])qwen(?:\s|$)/iu.test(value)) return "qwen";
   if (/kimi(?:-code)?/iu.test(value)) return "kimi";
   if (/codex/iu.test(value)) return "codex";

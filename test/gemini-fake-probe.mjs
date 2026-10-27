@@ -21,6 +21,7 @@ const hook = fileURLToPath(new URL("../bin/gemini-hook.mjs", import.meta.url));
 const blockNetwork = fileURLToPath(new URL("fixtures/gemini-no-network.cjs", import.meta.url));
 const executable = process.argv[2] || "/home/adelost/.nvm/versions/node/v22.19.0/bin/gemini";
 const envControl = process.argv.includes("--env-control");
+const toolProof = process.argv.includes("--tool");
 const env = {
   PATH: process.env.PATH, HOME: profileHome, TERM: "xterm-256color", LANG: "C.UTF-8",
   GEMINI_CLI_HOME: profileHome, GEMINI_CLI_NO_RELAUNCH: "1", NO_AUTO_UPDATE: "1",
@@ -47,9 +48,14 @@ writeFileSync(join(root, ".env"), "GOOGLE_API_KEY=synthetic-not-a-real-key\n");
 const responses = join(root, "responses.jsonl");
 const content = text => ({ candidates: [{ content: { role: "model", parts: [{ text }] }, finishReason: "STOP" }],
   usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2, totalTokenCount: 12 } });
+const toolResponse = content("");
+toolResponse.candidates[0].content.parts = [{ functionCall: { name: "run_shell_command", args: {
+  command: `node -e 'setTimeout(() => process.stdout.write("AMUX_GEMINI_TOOL_OK"), 1500)'`,
+  description: "Print the isolated fake-tool marker", } } }];
 writeFileSync(responses, [
   ...Array.from({ length: 30 }, () => ({ method: "countTokens", response: { totalTokens: 10 } })),
   ...Array.from({ length: 30 }, () => ({ method: "generateContent", response: content("{}") })),
+  ...(toolProof ? [{ method: "generateContentStream", response: [toolResponse] }] : []),
   { method: "generateContentStream", response: [content("GEMINI_FAKE_FIRST_OK")] },
 ].map(JSON.stringify).join("\n") + "\n");
 const t = createTmuxAdapter({ socket: join(root, "tmux.sock"),
@@ -115,7 +121,8 @@ try {
   const answerDeadline = performance.now() + 15_000;
   while (performance.now() < answerDeadline) {
     screen = await t.captureScreen(target);
-    if (screen.includes("GEMINI_FAKE_FIRST_OK")) break;
+    if (toolProof && screen.includes("(esc to cancel")) writeFileSync(join(root, "tool-screen.txt"), screen);
+    if (screen.includes("GEMINI_FAKE_FIRST_OK") && readEvents().some(event => event.hook_event_name === "AfterAgent")) break;
     await new Promise(done => setTimeout(done, 250));
   }
   writeFileSync(join(root, "answer-screen.txt"), screen);

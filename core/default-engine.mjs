@@ -15,5 +15,6 @@ export function defaultCodingEngine(options = {}) {
   if (executableAvailable("kimi", options) || executableAvailable("kimi-code", options)
     || (options.exists || existsSync)(homeKimi)) return "kimi";
   if (executableAvailable("qwen", options)) return "qwen";
-  throw new Error("no supported coding engine found (Claude Code, Codex, Kimi Code, or Qwen Code)");
+  if (executableAvailable("gemini", options)) return "gemini";
+  throw new Error("no supported coding engine found (Claude Code, Codex, Kimi Code, Qwen Code, or Gemini CLI)");
 }

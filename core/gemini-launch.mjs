@@ -2,6 +2,7 @@
 import { isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 import { esc } from "../lib.mjs";
+import { GEMINI_AUTONOMOUS_FLAGS } from "./execution-safety.mjs";
 
 /** WHAT: Defines inherited paid-auth routes. WHY: Prevents a subscription pane from discovering another billing path. */
 export const GEMINI_FORBIDDEN_ENV = Object.freeze([
@@ -50,6 +51,7 @@ export function assertGeminiStartPolicy({ profileHome, settings, env } = {}) {
 /** WHAT: Builds the sanitized exact-session TUI command. WHY: Keeps launch and resume on the subscription-only boundary. */
 export function buildGeminiLaunchCommand({
   executable, profileHome, sessionId, resume = false, allowFreshBootstrap = false, model = null,
+  eventPath = null, generation = null, cwd = null, settingsPath = null,
 } = {}) {
   if (!executable || !isAbsolute(executable)) throw new Error("Gemini executable must be absolute");
   if (!profileHome || !isAbsolute(profileHome)) throw new Error("explicit Gemini profile home must be absolute");
@@ -58,7 +60,13 @@ export function buildGeminiLaunchCommand({
   if (model && !/^[a-z0-9][a-z0-9._:/-]{0,159}$/iu.test(String(model))) throw new Error("invalid Gemini model");
   const scrub = GEMINI_FORBIDDEN_ENV.map(name => `-u ${name}`).join(" ");
   const continuity = resume ? "--resume" : "--session-id";
+  const bound = { AMUX_GEMINI_EVENTS: eventPath, AMUX_GEMINI_GENERATION: generation,
+    AMUX_GEMINI_CWD: cwd, AMUX_GEMINI_SESSION_ID: eventPath ? sessionId : null,
+    GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath };
+  const binding = Object.entries(bound).filter(([, value]) => value != null)
+    .map(([name, value]) => `${name}=${quote(value)}`).join(" ");
   return `env ${scrub} GEMINI_CLI_HOME=${quote(profileHome)} GEMINI_CLI_NO_RELAUNCH=1 ` +
-    `${quote(executable)} ${continuity} ${quote(sessionId)} --approval-mode yolo --skip-trust` +
+    (binding ? `${binding} ` : "") +
+    `${quote(executable)} ${continuity} ${quote(sessionId)} ${GEMINI_AUTONOMOUS_FLAGS}` +
     (model ? ` -m ${quote(model)}` : "");
 }
