@@ -69,7 +69,13 @@ Full private evidence and exact replay command:
 `inventory-after-source.json`, `probe-journals.mjs`, `copied-journal-red.log`,
 `final-green.log`, `changed-lint.log`).
 
-Pending: installed release and bridge proof.
+Code is on master as `f2536c394a809fc92c71bf4475b01001eb4eac82`, release
+version1.25.362. Installation and bridge identity are recorded in the same
+private evidence directory's `INDEX.md` and `release-proof.json`.
+The existing normal restart check refused95 nonterminal jobs (94pending,
+one delivering), with no live maintenance. No restart was forced. Activation
+therefore remains BLOCKED until a normal safe restart can be proven; code
+tests and an installed-function replay are not a running bridge exercise.
 The older quota alert
 observer's stale `lastCheckedAt` is a separate unresolved diagnosis; this
 change does not claim to explain or repair that incident.
