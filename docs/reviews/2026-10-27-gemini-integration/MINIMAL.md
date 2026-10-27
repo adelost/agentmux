@@ -45,3 +45,6 @@ superseded by this retarget (api:0, 27 Oct, after Mattias asked api:0 to do it).
 - Live smoke `/tmp/amux-agy-smoke-jwHnS8`: 20.1 s, receipt accepted, screen answer
   `AGY_SMOKE_OK`, mirrored once, restart resumed conversation 3673345c with the
   earlier prompt on screen. Account tier shown by agy: Antigravity Starter Quota.
+- Release 1.25.379 (f636f60b) installed, USR2 20:19:04Z. The first claw:9 delivery
+  was refused with "target CLI did not start" although agy reached its composer:
+  `isEngineProcess` did not list `agy`. Fixed red before green in 1.25.380 (e3d95af2).
