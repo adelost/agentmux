@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -78,6 +78,30 @@ feature("Claude quota-limit receipts", () => {
         limitEventId: "11111111-1111-4111-8111-111111111111",
       });
       rmSync(ctx.homeDir, { recursive: true, force: true });
+    }],
+  });
+
+  // defect: every quota tick re-read up to 8 MB of each Claude journal, 17 % of the bridge CPU (2026-10-27).
+  unit("an unchanged journal keeps its receipt without a new read", {
+    given: ["a journal read once, then changed in place with its stamp kept", () => {
+      const homeDir = mkdtempSync(join(tmpdir(), "amux-quota-receipt-"));
+      const paneDir = join(homeDir, "repo", ".agents", "2");
+      const projectDir = claudeProjectDir(paneDir, homeDir);
+      const sessionPath = join(projectDir, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl");
+      const writtenAt = new Date("2026-10-27T20:00:00Z"); // whole seconds round-trip exactly
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(sessionPath, `${JSON.stringify(limitEvent())}\n`);
+      utimesSync(sessionPath, writtenAt, writtenAt);
+      activeClaudeLimitReceipt(paneDir, { homeDir });
+      // Same length, same mtime: only a new read can see the banner gone.
+      writeFileSync(sessionPath, readFileSync(sessionPath, "utf8").replace("session limit", "session lemit"));
+      utimesSync(sessionPath, writtenAt, writtenAt);
+      return { homeDir, paneDir };
+    }],
+    when: ["the receipt is asked for again", ({ homeDir, paneDir }) => activeClaudeLimitReceipt(paneDir, { homeDir })],
+    then: ["the receipt read before is returned", (receipt, { homeDir }) => {
+      try { expect(receipt).toMatchObject({ limitEventId: "11111111-1111-4111-8111-111111111111" }); }
+      finally { rmSync(homeDir, { recursive: true, force: true }); }
     }],
   });
 
