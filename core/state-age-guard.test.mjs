@@ -9,9 +9,9 @@ feature("ledger age, pane liveness and registration alarms", () => {
   unit("uses2h/24h/72h and blocked24h, with daily row dedup", {
     given: ["rows on each side of the approved boundaries", () => [
       row("1", 2, { priority: "P0" }), row("2", 1.99, { priority: "P0" }),
-      row("3", 24), row("4", 23.99), row("5", 72, { priority: "P2" }),
+      row("3", 24, { state: "working" }), row("4", 23.99, { state: "review" }), row("5", 72, { priority: "P2", state: "working" }),
       row("6", 24, { priority: "P2", state: "BLOCKED by upstream" }),
-      row("7", 100, { state: "Done27Oct" }), row("8", 24, { priority: "" }),
+      row("7", 100, { state: "Done27Oct" }), row("8", 24, { priority: "", state: "working" }),
     ]],
     when: ["planning then repeating the same day", rows => {
       const first = planStateAge({ projects: [project(rows)], now });
@@ -67,8 +67,8 @@ feature("ledger age, pane liveness and registration alarms", () => {
   });
   unit("ambiguous open duplicate IDs remain explicit while closed archive entries do not interfere", {
     given: ["two open duplicates and one open row with a closed archive copy", () => [
-      row("1", 48, { line: 10 }), row("1", 48, { line: 11 }),
-      row("2", 48), row("2", 48, { state: "Done" }),
+      row("1", 100, { line: 10 }), row("1", 100, { line: 11 }),
+      row("2", 100), row("2", 100, { state: "Done" }),
     ]],
     when: ["planning", rows => planStateAge({ projects: [project(rows)], now })],
     then: ["only the unambiguous row routes an alarm", result => {
@@ -76,14 +76,14 @@ feature("ledger age, pane liveness and registration alarms", () => {
       expect(result.unknownClocks).toContainEqual({ project: "cutkit", row: "1", kind: "duplicate-row", lines: [10, 11] });
     }],
   });
-  unit("daily message reservations survive repeated ticks and refuse the tenth recipient effect", {
-    given: ["nine durable recipient identities", () => ({ day: "2026-10-27", messages: Array.from({ length: 9 }, (_, i) => ({ idempotencyKey: String(i) })) })],
+  unit("daily message reservations survive repeated ticks and refuse the thirteenth recipient effect", {
+    given: ["twelve durable recipient identities", () => ({ day: "2026-10-27", messages: Array.from({ length: 12 }, (_, i) => ({ idempotencyKey: String(i) })) })],
     when: ["reserving twice then adding another identity", plan => {
       const first = reserveStateAgeMessages(plan);
-      return { first, repeat: reserveStateAgeMessages(plan, first), overflow: () => reserveStateAgeMessages({ ...plan, messages: [{ idempotencyKey: "tenth" }] }, first) };
+      return { first, repeat: reserveStateAgeMessages(plan, first), overflow: () => reserveStateAgeMessages({ ...plan, messages: [{ idempotencyKey: "thirteenth" }] }, first) };
     }],
-    then: ["repeats do not consume another slot and the tenth is refused", ({ first, repeat, overflow }) => {
-      expect(repeat).toEqual(first); expect(Object.keys(first)).toHaveLength(9); expect(overflow).toThrow("reach10");
+    then: ["repeats do not consume another slot and the thirteenth is refused", ({ first, repeat, overflow }) => {
+      expect(repeat).toEqual(first); expect(Object.keys(first)).toHaveLength(12); expect(overflow).toThrow("exceed12");
     }],
   });
 });

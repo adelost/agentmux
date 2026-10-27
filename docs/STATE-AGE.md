@@ -1,29 +1,33 @@
-# State-age guard
+# State-age guard, Rule v2
 
-Owner claw:5, task109. Sources: skyvw:0 delivery:8e8f4aeec942820a678737c1877bc6db and delivery:73259b19faa1a13cf70a52e5e7c85d2c. Current contract: `/home/adelost/lsrc/.artifacts/state-age-guard-20261027/DESIGN.md`, rules1–7.
+Owner claw:5, task109. Current source: skyvw:0 delivery:ed996c334a2bc70b1a115cb37254248e,27Oct09:53:14Z. The Rule v2 section in `/home/adelost/lsrc/.artifacts/state-age-guard-20261027/DESIGN.md` replaces rules1–4; rules5–7 remain. The earlier whole-line-blame implementation and32/41/80/94message replay are archived evidence, not current policy.
 
-The guard reads configured on-track ledger routes independently of whether their review scheduler is enabled. It never enables that scheduler. Cutkit age alarms route to lsrc:3, as its design specifies. Other configured projects retain their named dispatcher. TASKS remains the task state; the guard stores delivery deduplication and recipient reservations, not another work-state machine.
+## State clock and routing
 
-The source is the observed remote default branch. First-parent Git blame supplies the last whole-line change time, including owner/checkpoint changes. Limits are P0=2h, P1/missing=24h, P2=72h, blocked/waiting=24h. Closed entries do not alert. A staffing annotation supplies no owner; real named owners and the dispatcher receive the same row alarm, at most once per UTC day. Numeric timestamps cannot become pane addresses.
+The guard streams every first-parent ledger revision through Git and tracks the canonical leading State word. Changes to notes, checkpoints, priority and assigned owners cannot refresh that clock. Losing an owner starts the no-owner clock; open unowned rows use the later of that clock and the latest state transition. Real owner identity is distinguished from a staffing annotation. The existing task parser and board ledger path validation are reused.
 
-Current `amux ps --json` uses the same inspections as normal ps. Bounded current-session journal timestamps supply proven idle/working clocks; missing clocks remain unknown. Working rows whose owner is idle/stopped for2h alert even before their line-age limit. A scoped pane working for1h without a working row anywhere in the configured ledgers alerts only its dispatcher. Unknown project membership is not guessed.
+Working/review: P0=2h,P1/missing=24h,P2=72h. Blocked=24h. Open with an owner: P0=2h,P1=72h,P2/lower never. Open without an owner:24h at any priority. Translated state names map to the same meaning. Closed rows do not alarm; ambiguous open duplicate IDs remain explicit and unrouted.
 
-Open duplicate row IDs are reported with their source SHA and lines and left unrouted. A closed archive copy does not hide a unique open row. Historical pane snapshots are unavailable for the requested window, so replay counts below are lower bounds covering row age; rules6/7 have focused behavioral tests and a current ps observation, not invented historical evidence.
+Each recipient gets at most one digest per UTC day. Owners see their five oldest overdue rows and the remaining count. Dispatchers see unowned rows, ten oldest remaining entries and totals. A row waiting on an overdue parent is nested beneath that parent. The live and historical paths use the same digest builder and recipient identity. The initial hourly tick with an eligible alarm sends that day's digest; a newly overdue row later that day cannot create a second message.
 
-## Calibration outcome
+The actual ps observer also provides bounded journal clocks for the retained idle-owner and unregistered-working checks. All board sources are read for registration; two currently lack explicit age-dispatcher routes and remain visible as unrouted, never guessed. Cutkit dispatches to lsrc:3. The review scheduler's disabled setting is never changed.
 
-Replay24Oct00:24Z–27Oct09:24Z, hourly at minute24, no sends:
+## The one v2 replay
 
-| UTC date | Rows flagged | Recipient messages |
+Hourly ticks at minute24 UTC,24Oct00:24–27Oct09:24, no sends:
+
+| UTC date | Rows flagged | Recipient digests |
 | --- | ---: | ---: |
-|24Oct|16|32|
-|25Oct|20|41|
-|26Oct|38|80|
-|27Oct through09:24|43|94|
+|24Oct|7|6|
+|25Oct|3|4|
+|26Oct|28|10|
+|27Oct through09:24|29|11|
 
-Both required historical probes are missed under the specified rules.533c's whole line was refreshed repeatedly; by27Oct09:24 its last change was08:52:02, age0.53h.557a was P2/open with a72h threshold on26Oct; it became blocked27Oct07:35:55, refreshing its line clock. Whole-line blame cannot establish the intended stalled-state intervals for either probe. Exact states, priorities, SHAs and times are retained in `required-probe-evidence.json` beside the task receipt.
+533c is flagged26Oct23:24Z, before its deadline.557a is flagged26Oct14:24Z but first named in a delivered-digest simulation27Oct00:24Z, which misses the required26Oct mention. The dispatcher had already received its26Oct digest before557a crossed24h. The replay records first detection separately from first actual digest mention; no later rows are retroactively added to an earlier message.
 
-Messaging remains disabled: every day's volume exceeds the under10 requirement, both probes fail, historical pane coverage is missing and two historical snapshots contain ambiguous open row IDs. Original limits were preserved; no alerts were sent and no hourly process/timer was started. Changing the state clock or routing/batching semantics requires a revised design from the contract owner.
+All four days stay at≤12 messages. Ten deterministic flagged rows were checked against raw Git State cells, parents and independent patches over their threshold windows:0of10 had a recent State-word change. These are owner checks, not independent human grading. Historical ps snapshots are unavailable; replay figures cover row-age alarms, while rules6/7 have focused tests and a current ps observation.
+
+Three criteria pass and the557a mention criterion fails. Alarms and the hourly watch stay off as instructed; no second v2 tuning round was run. Evidence: `history-v2-graded.json`, `v2-sample-evidence.json`, `v2-sample-review.json` and the existing task receipt under the design's artifact directory.
 
 ## Commands
 
@@ -33,4 +37,4 @@ amux state-age check --project cutkit --output /private/current.json
 amux state-age watch --project cutkit
 ```
 
-`check` and `watch` are read-only by default. `watch` checks immediately and hourly thereafter, without overlapping a slow check. `--send --measurement /private/history.json` requires matching policy/source identity, complete historical pane coverage, the Cutkit probe hits, no ambiguous open IDs and fewer than10 recipient messages on every calibrated day. It currently refuses activation. Durable reservations precede queue effects and a daily tenth recipient effect is refused; queue idempotency preserves unknown/submitted outcomes through retries. A queued job is not a recipient acknowledgement.
+Check/watch default to read-only. Watch checks immediately and hourly without overlapping a slow check. `--send --measurement /private/graded-history.json` requires matching policy/source identity and all four v2 criteria. It refuses the current report. Reservations precede durable queue effects, idempotency preserves submitted/unknown outcomes, and a thirteenth daily recipient identity is refused. Queued is not acknowledged.

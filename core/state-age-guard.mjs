@@ -3,6 +3,17 @@ const TERMINAL = /^(?:done|closed|cancelled|canceled|dropped|retired|incorporate
 const WORKING = /^(?:working|active|doing|in.progress|pågår|arbetar)\b/iu;
 const BLOCKED = /^(?:blocked|blockerad|waiting|väntar|stopp?|hold|paused)\b/iu;
 
+/** WHAT: Resolves the leading state word into its canonical meaning. WHY: Keeps notes and translated spellings from renewing a state clock. */
+export function stateAgeWord(state) {
+  state = String(state || "").trim();
+  if (TERMINAL.test(state)) return "done";
+  if (WORKING.test(state) || /^(?:working|jobbar|pågående|in progress)(?!\p{L})/iu.test(state)) return "working";
+  if (/^(?:review|granskning|granskas|under granskning)\b/iu.test(state)) return "review";
+  if (BLOCKED.test(state) || /^(?:pausad|stoppad|on hold)\b/iu.test(state)) return "blocked";
+  if (/^(?:open|ready|todo|öppen|öppet|öppna|redo|pending)\b/iu.test(state)) return "open";
+  return "unknown";
+}
+
 /** WHAT: Returns actual named row owners. WHY: Prevents staffing annotations from waking an unallocated builder. */
 export function stateAgeOwners(cell) {
   if (/(?:unassigned|staffs|bemannar|utan ägare|no owner|not allocated)/iu.test(cell)) return [];
@@ -10,18 +21,22 @@ export function stateAgeOwners(cell) {
 }
 
 /** WHAT: Checks whether a ledger row remains open. WHY: Keeps historical completion text from suppressing an active row. */
-export const stateAgeOpen = row => !TERMINAL.test(String(row.state || "").trim());
+export const stateAgeOpen = row => stateAgeWord(row.state) !== "done";
 
 /** WHAT: Resolves the approved state-age threshold. WHY: Keeps blocked work on24h even when its priority is P2. */
 export function stateAgeLimit(row) {
-  return (BLOCKED.test(row.state || "") ? 24 : row.priority === "P0" ? 2 : row.priority === "P2" ? 72 : 24) * HOUR;
+  const word = stateAgeWord(row.state), owners = stateAgeOwners(row.owner);
+  if (word === "blocked" || word === "open" && !owners.length) return 24 * HOUR;
+  if (word === "open") return row.priority === "P0" ? 2 * HOUR : !row.priority || row.priority === "P1" ? 72 * HOUR : Infinity;
+  if (["working", "review"].includes(word)) return (row.priority === "P0" ? 2 : !row.priority || row.priority === "P1" ? 24 : 72) * HOUR;
+  return Infinity;
 }
 
 /** WHAT: Builds row and registration alarms from current ledger and pane evidence. WHY: Keeps TASKS as the task state and leaves unknown clocks unasserted. */
 export function planStateAge({ projects, registrationProjects = projects, panes = [], now, seen = new Set() }) {
   if (!Number.isFinite(now)) throw Error("state-age requires an observation time");
   const day = new Date(now).toISOString().slice(0, 10), alarms = [], unknownClocks = [];
-  const registered = new Set(registrationProjects.flatMap(p => p.rows.filter(r => stateAgeOpen(r) && WORKING.test(r.state || ""))
+  const registered = new Set(registrationProjects.flatMap(p => p.rows.filter(r => stateAgeWord(r.state) === "working")
     .flatMap(r => stateAgeOwners(r.owner))));
   for (const project of projects) {
     if (!/^[\w-]+:\d+$/u.test(project.dispatcher)) throw Error(`Missing named dispatcher for ${project.id}`);
@@ -33,7 +48,7 @@ export function planStateAge({ projects, registrationProjects = projects, panes 
       const ageMs = Number.isFinite(row.changedAt) && row.changedAt <= now ? now - row.changedAt : null;
       if (ageMs === null) unknownClocks.push({ project: project.id, row: row.row, kind: "row" });
       else if (ageMs >= limitMs) reasons.push("state-age");
-      if (WORKING.test(row.state || "")) for (const owner of owners) {
+      if (stateAgeWord(row.state) === "working") for (const owner of owners) {
         const pane = panes.find(p => p.key === owner);
         if (!pane || !["idle", "stopped"].includes(pane.status) || !Number.isFinite(pane.idleSince) || pane.idleSince > now) {
           if (!pane || ["idle", "stopped"].includes(pane.status)) unknownClocks.push({ project: project.id, row: row.row, pane: owner, kind: "idle" });
@@ -43,7 +58,10 @@ export function planStateAge({ projects, registrationProjects = projects, panes 
       }
       const key = `${day}:${project.id}:row:${row.row}`;
       if (reasons.length && !seen.has(key)) alarms.push({ key, kind: "row", project: project.id, row: row.row,
-        title: row.title, state: row.state, ageMs, limitMs, reasons, idleOwners, noOwner: !owners.length,
+        title: row.title, state: row.state, stateWord: stateAgeWord(row.state), changedAt: row.changedAt,
+        stateChangedAt: row.stateChangedAt ?? row.changedAt, stateSourceSha: row.stateSourceSha || null,
+        ownerSourceSha: row.ownerSourceSha || null, dependencyText: row.state,
+        ageMs, limitMs, reasons, idleOwners, noOwner: !owners.length,
         recipients: [...new Set([...owners, project.dispatcher])] });
     }
     for (const pane of panes.filter(p => p.status === "working" && project.panes?.includes(p.key) && !registered.has(p.key))) {
@@ -61,11 +79,11 @@ export function planStateAge({ projects, registrationProjects = projects, panes 
   }))) };
 }
 
-/** WHAT: Builds daily recipient reservations before queue effects. WHY: Prevents crashes or repeated ticks from exceeding the9-message daily ceiling. */
+/** WHAT: Builds daily recipient reservations before queue effects. WHY: Prevents crashes or repeated ticks from exceeding the12-message daily ceiling. */
 export function reserveStateAgeMessages(plan, previous = {}) {
   const reservations = Object.fromEntries(Object.entries(previous).filter(([, day]) => day >= plan.day));
   for (const message of plan.messages) reservations[message.idempotencyKey] = plan.day;
-  if (Object.values(reservations).filter(day => day === plan.day).length >= 10) throw Error("State-age activation refused: daily recipient messages would reach10");
+  if (Object.values(reservations).filter(day => day === plan.day).length > 12) throw Error("State-age activation refused: daily recipient messages would exceed12");
   return reservations;
 }
 
