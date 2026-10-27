@@ -1795,6 +1795,7 @@ async function cmdPs(ctx, flags = {}) {
     return { agent: a, panes: enriched };
   }));
 
+  if (flags.json) return (await import("./state-age-panes.mjs")).printStateAgePanes(agentData, ctx);
   if (agentData.length === 0) {
     console.log("No running agents.");
     return;
@@ -2827,7 +2828,7 @@ export async function dispatch(argv, ctx) {
     }
 
     case "ps": {
-      const { flags } = parseFlags(rest, { full: "boolean", f: "boolean" });
+      const { flags } = parseFlags(rest, { full: "boolean", f: "boolean", json: "boolean" });
       return cmdPs(ctx, flags);
     }
 
@@ -2927,7 +2928,6 @@ export async function dispatch(argv, ctx) {
       return cmdDone(ctx, flags);
     }
 
-    case "claims": return (await import("./claims.mjs")).cmdClaims(rest, ctx);
     case "on-track": return (await import("./on-track.mjs")).cmdOnTrack(rest);
     case "quiet": return (await import("./quiet.mjs")).cmdQuiet(rest, ctx);
 

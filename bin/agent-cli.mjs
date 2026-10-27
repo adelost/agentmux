@@ -62,6 +62,8 @@ try {
   else if (argv[0] === "emulator") await (await import("../cli/emulator.mjs")).cmdEmulator(argv.slice(1));
   else if (argv[0] === "prompts") await (await import("../cli/prompts.mjs")).cmdPrompts(argv.slice(1), ctx);
   else if (argv[0] === "work") await (await import("../cli/work.mjs")).cmdWork(argv.slice(1));
+  else if (argv[0] === "claims") await (await import("../cli/claims.mjs")).cmdClaims(argv.slice(1), ctx);
+  else if (argv[0] === "state-age") await (await import("../cli/state-age.mjs")).cmdStateAge(argv.slice(1), ctx);
   else await (await import("../cli/commands.mjs")).dispatch(argv, ctx);
 } catch (err) {
   console.error(`Error: ${err.message}`);
