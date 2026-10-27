@@ -1,7 +1,9 @@
 import { stateAgeMessage } from "./state-age-guard.mjs";
+import { createHash } from "node:crypto";
 
 const id = alarm => `${alarm.project}:${alarm.row || alarm.pane}`;
 const oldest = (a, b) => (b.ageMs || 0) - (a.ageMs || 0) || id(a).localeCompare(id(b));
+const unownedKey = alarm => `state-age-unowned:${id(alarm)}`;
 
 /** WHAT: Builds a dependency forest of overdue rows. WHY: Keeps a waiting child under its overdue parent instead of issuing a separate alarm. */
 export function stateAgeGroups(alarms) {
@@ -25,8 +27,16 @@ export function stateAgeDigests(plan, projects, seen = new Set()) {
   const messages = [], targets = [...new Set(plan.alarms.flatMap(a => a.recipients))];
   const forest = stateAgeGroups(plan.alarms);
   for (const target of targets) {
-    const key = `${plan.day}:recipient:${target}`, idempotencyKey = `state-age-v2:${key}`;
-    if (seen.has(idempotencyKey)) continue;
+    const dispatchProjects = projects.filter(p => p.dispatcher === target);
+    const dailyKey = `state-age-v2:${plan.day}:recipient:${target}`;
+    const freshUnowned = plan.alarms.filter(a => a.noOwner && dispatchProjects.some(p => p.id === a.project) && !seen.has(unownedKey(a)));
+    const hasDailyRows = plan.alarms.some(a => a.recipients.includes(target) && !a.noOwner);
+    const includeDaily = !seen.has(dailyKey) && hasDailyRows;
+    if (!includeDaily && !freshUnowned.length) continue;
+    const unownedReceiptKeys = freshUnowned.map(unownedKey).sort();
+    const batch = createHash("sha256").update(unownedReceiptKeys.join("\n")).digest("hex").slice(0, 16);
+    const key = includeDaily ? `${plan.day}:recipient:${target}` : `${plan.day}:unowned:${target}:${batch}`;
+    const idempotencyKey = includeDaily ? dailyKey : `state-age-v3:${key}`;
     const lines = [`[state-age] ${plan.day}`], mentioned = new Map();
     const render = selected => {
       const included = new Map(), children = new Map();
@@ -46,17 +56,20 @@ export function stateAgeDigests(plan, projects, seen = new Set()) {
       };
       for (const root of (children.get(undefined) || []).sort(oldest)) print(root, 0);
     };
-    const dispatchProjects = projects.filter(p => p.dispatcher === target);
     for (const project of dispatchProjects) {
       const all = plan.alarms.filter(a => a.project === project.id), noOwner = all.filter(a => a.noOwner);
-      lines.push(`${project.id}: utan ägare`); render(noOwner);
-      const remaining = all.filter(a => !mentioned.has(id(a))).sort(oldest);
-      lines.push(`${project.id}: tio äldsta`); render(remaining.slice(0, 10));
-      lines.push(`${all.filter(a => a.kind === "row").length} rader över gränsen, ${noOwner.length} utan ägare, ${all.filter(a => a.kind === "unregistered").length} paneler utanför rad.`);
+      const fresh = freshUnowned.filter(a => a.project === project.id);
+      if (fresh.length) { lines.push(`${project.id}: nya rader utan ägarpanel`); render(fresh); }
+      if (includeDaily) {
+        const remaining = all.filter(a => !a.noOwner && !mentioned.has(id(a))).sort(oldest);
+        lines.push(`${project.id}: tio äldsta`); render(remaining.slice(0, 10));
+        lines.push(`${all.filter(a => a.kind === "row").length} rader över gränsen, ${noOwner.length} utan ägare, ${all.filter(a => a.kind === "unregistered").length} paneler utanför rad.`);
+      }
     }
     const own = plan.alarms.filter(a => a.recipients.includes(target) && !dispatchProjects.some(p => p.id === a.project)).sort(oldest);
-    if (own.length) { lines.push("Dina rader, äldst först"); render(own.slice(0, 5)); if (own.length > 5) lines.push(`och ${own.length - 5} till`); }
+    if (includeDaily && own.length) { lines.push("Dina rader, äldst först"); render(own.slice(0, 5)); if (own.length > 5) lines.push(`och ${own.length - 5} till`); }
     messages.push({ key, idempotencyKey, target, text: lines.join("\n"),
+      unownedReceiptKeys, receiptKeys: [idempotencyKey, ...unownedReceiptKeys],
       mentioned: [...mentioned.values()].filter(a => a.kind === "row").map(a => ({ project: a.project, row: a.row })),
       alarmKeys: [...mentioned.values()].map(a => a.key) });
   }

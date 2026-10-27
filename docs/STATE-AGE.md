@@ -1,6 +1,6 @@
 # State-age guard, Rule v2
 
-Owner claw:5, task109. Current source: skyvw:0 delivery:ed996c334a2bc70b1a115cb37254248e,27Oct09:53:14Z. The Rule v2 section in `/home/adelost/lsrc/.artifacts/state-age-guard-20261027/DESIGN.md` replaces rules1–4; rules5–7 remain. The earlier whole-line-blame implementation and32/41/80/94message replay are archived evidence, not current policy.
+Owner claw:5, task109. Current source: skyvw:0 delivery:299efd1fb2f1427f0011d6965e2097bf,27Oct10:30:30Z, adds the first-flagged unowned-row exception to delivery:ed996c334a2bc70b1a115cb37254248e. The Rule v2 section in `/home/adelost/lsrc/.artifacts/state-age-guard-20261027/DESIGN.md` replaces rules1–4; rules5–7 remain. The earlier whole-line-blame implementation and32/41/80/94message replay are archived evidence, not current policy.
 
 ## State clock and routing
 
@@ -8,26 +8,26 @@ The guard streams every first-parent ledger revision through Git and tracks the 
 
 Working/review: P0=2h,P1/missing=24h,P2=72h. Blocked=24h. Open with an owner: P0=2h,P1=72h,P2/lower never. Open without an owner:24h at any priority. Translated state names map to the same meaning. Closed rows do not alarm; ambiguous open duplicate IDs remain explicit and unrouted.
 
-Each recipient gets at most one digest per UTC day. Owners see their five oldest overdue rows and the remaining count. Dispatchers see unowned rows, ten oldest remaining entries and totals. A row waiting on an overdue parent is nested beneath that parent. The live and historical paths use the same digest builder and recipient identity. The initial hourly tick with an eligible alarm sends that day's digest; a newly overdue row later that day cannot create a second message.
+Owned rows retain one digest per recipient per UTC day. Newly overdue rows without an owner panel go to their dispatcher immediately in that tick, once per row; rows first flagged together are batched into one dispatcher message. Owners see their five oldest overdue rows and the remaining count. Dispatchers see unowned rows, ten oldest remaining entries and totals. A row waiting on an overdue parent is nested beneath that parent. The live and historical paths use the same digest builder and recipient identity. The first hourly tick with owned alarms sends the daily digest. A later tick may add a dispatcher message containing only newly overdue unowned rows. Durable row receipt keys suppress later repetitions, and existing queue metadata recovers those receipts if local bookkeeping was interrupted.
 
 The actual ps observer also provides bounded journal clocks for the retained idle-owner and unregistered-working checks. All board sources are read for registration; two currently lack explicit age-dispatcher routes and remain visible as unrouted, never guessed. Cutkit dispatches to lsrc:3. The review scheduler's disabled setting is never changed.
 
-## The one v2 replay
+## Final replay after the authorized unowned-row correction
 
 Hourly ticks at minute24 UTC,24Oct00:24–27Oct09:24, no sends:
 
 | UTC date | Rows flagged | Recipient digests |
 | --- | ---: | ---: |
 |24Oct|7|6|
-|25Oct|3|4|
-|26Oct|28|10|
+|25Oct|3|5|
+|26Oct|28|12|
 |27Oct through09:24|29|11|
 
-533c is flagged26Oct23:24Z, before its deadline.557a is flagged26Oct14:24Z but first named in a delivered-digest simulation27Oct00:24Z, which misses the required26Oct mention. The dispatcher had already received its26Oct digest before557a crossed24h. The replay records first detection separately from first actual digest mention; no later rows are retroactively added to an earlier message.
+533c remains flagged26Oct23:24Z.557a is detected and named26Oct14:24Z, in the same tick, including dependency nesting. The earlier v2 trial named it27Oct00:24Z; that failure remains in the archived report. Message totals are6/5/12/11 and every day stays within12.
 
-All four days stay at≤12 messages. Ten deterministic flagged rows were checked against raw Git State cells, parents and independent patches over their threshold windows:0of10 had a recent State-word change. These are owner checks, not independent human grading. Historical ps snapshots are unavailable; replay figures cover row-age alarms, while rules6/7 have focused tests and a current ps observation.
+The state clocks and limits were unchanged. The deterministic sampleHash and all ten sample records exactly match the earlier independent raw-Git evidence:0of10 State words changed within their limit. This is owner review of immutable Git evidence, not independent human grading. Historical ps snapshots remain unavailable; rules6/7 retain focused tests and use actual current ps observations.
 
-Three criteria pass and the557a mention criterion fails. Alarms and the hourly watch stay off as instructed; no second v2 tuning round was run. Evidence: `history-v2-graded.json`, `v2-sample-evidence.json`, `v2-sample-review.json` and the existing task receipt under the design's artifact directory.
+All four final replay criteria pass. Evidence: `history-unowned-graded.json`, `unowned-sample-review.json`, `unowned-red.json`, `unowned-final-tests.json` and the existing task receipt. The requested Cutkit timer may now be activated after installed-source verification. Its hourly oneshot fetches Cutkit's origin before reading the default branch, and uses the same qualified report. Actual activation and queued-job receipts live in the delivery receipt; no classifier trial is part of this service.
 
 ## Commands
 
@@ -37,4 +37,4 @@ amux state-age check --project cutkit --output /private/current.json
 amux state-age watch --project cutkit
 ```
 
-Check/watch default to read-only. Watch checks immediately and hourly without overlapping a slow check. `--send --measurement /private/graded-history.json` requires matching policy/source identity and all four v2 criteria. It refuses the current report. Reservations precede durable queue effects, idempotency preserves submitted/unknown outcomes, and a thirteenth daily recipient identity is refused. Queued is not acknowledged.
+Check/watch default to read-only. Watch checks immediately and hourly without overlapping a slow check. `--send --measurement /private/graded-history.json` requires matching policy/source identity and all four replay criteria. The final unowned-row report qualifies. Reservations precede durable queue effects, idempotency preserves submitted/unknown outcomes, and a thirteenth daily recipient identity is refused. Queued is not acknowledged.

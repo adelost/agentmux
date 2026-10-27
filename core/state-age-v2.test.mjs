@@ -30,7 +30,7 @@ feature("state-age v2 clocks, thresholds and bounded recipient digests", () => {
     ] })],
     when: ["building recipient digests then repeating the tick", p => {
       const plan = planStateAge({ projects: [p], now }); const messages = stateAgeDigests(plan, [p]);
-      return { messages, repeat: stateAgeDigests(plan, [p], new Set(messages.map(m => m.idempotencyKey))) };
+      return { messages, repeat: stateAgeDigests(plan, [p], new Set(messages.flatMap(m => m.receiptKeys || [m.idempotencyKey]))) };
     }],
     then: ["both recipients get one message and the waiting child is nested", ({ messages, repeat }) => {
       expect(messages).toHaveLength(2); expect(repeat).toEqual([]);

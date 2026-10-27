@@ -65,7 +65,8 @@ export async function replayStateAge(project, { since, until, panesAt = null }) 
       if (alarm.kind === "row") { day.rows++; firstFlags[alarm.row] ||= new Date(at).toISOString(); } else day.paneAlarms++;
     }
     for (const message of messages) {
-      seen.add(message.idempotencyKey); day.deliveries.push({ ...message, at: new Date(at).toISOString() });
+      for (const key of message.receiptKeys || [message.idempotencyKey]) seen.add(key);
+      day.deliveries.push({ ...message, at: new Date(at).toISOString() });
       day.recipients[message.target] = (day.recipients[message.target] || 0) + 1;
       for (const item of message.mentioned) firstNamed[item.row] ||= new Date(at).toISOString();
     }

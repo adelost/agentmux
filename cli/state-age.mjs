@@ -24,6 +24,18 @@ export function qualifyStateAge(report, project) {
     && (project.id !== "cutkit" || report.firstFlags?.["533c"] <= "2026-10-27T09:24:00.000Z" && report.firstNamed?.["557a"] < "2026-10-27T00:00:00.000Z");
 }
 
+/** WHAT: Reads receipt identities from durable dispatcher jobs. WHY: Prevents a crash between enqueue and local bookkeeping from repeating an unowned-row alert. */
+export function stateAgeQueuedReceipts(queue, projects, stored = []) {
+  const seen = new Set(stored);
+  for (const target of new Set(projects.map(project => project.dispatcher))) {
+    const [agent, pane] = target.split(":");
+    for (const job of queue.list(agent, Number(pane))) if (job.source === "state-age") {
+      for (const key of job.metadata?.receiptKeys || [job.idempotencyKey]) if (typeof key === "string") seen.add(key);
+    }
+  }
+  return seen;
+}
+
 /** WHAT: Checks historical or current rows with optional qualified alarms. WHY: Keeps calibration and durable owner delivery on the same policy. */
 export async function cmdStateAge(args, ctx = {}, injected = {}) {
   if (args.includes("--help") || !["replay", "check", "watch"].includes(args[0])) { console.log(help); return; }
@@ -66,17 +78,18 @@ export async function cmdStateAge(args, ctx = {}, injected = {}) {
     if (flags.send) {
       const calibration = flags.measurement && JSON.parse(readFileSync(flags.measurement, "utf8"));
       if (projects.length !== 1 || !qualifyStateAge(calibration, projects[0])) throw Error("State-age activation refused: incomplete or excessive historical message volume");
-      store.set("reservations", reserveStateAgeMessages(report, store.get("reservations", {})));
       const queue = injected.queue || createDeliveryQueue();
+      const digestKeys = stateAgeQueuedReceipts(queue, snapshots, store.get("deliveredDigests", []));
+      report.messages = stateAgeDigests(report, snapshots, digestKeys);
+      store.set("reservations", reserveStateAgeMessages(report, store.get("reservations", {})));
       for (const message of report.messages) {
         const [agentName, pane] = message.target.split(":");
         const job = queue.enqueue({ agentName, pane: Number(pane), text: message.text,
-          source: "state-age", metadata: { sender: "state-age", digestKey: message.key }, idempotencyKey: message.idempotencyKey });
+          source: "state-age", metadata: { sender: "state-age", digestKey: message.key, receiptKeys: message.receiptKeys }, idempotencyKey: message.idempotencyKey });
+        for (const key of job.metadata?.receiptKeys || [job.idempotencyKey]) digestKeys.add(key);
         report.sent.push({ id: job.id, target: message.target, digestKey: message.key, status: job.status });
       }
-      const digestKeys = new Set(store.get("deliveredDigests", []));
-      for (const message of report.messages) digestKeys.add(message.idempotencyKey);
-      store.set("deliveredDigests", [...digestKeys].filter(key => key.slice(13, 23) >= new Date(now - 7 * 86400000).toISOString().slice(0, 10)));
+      store.set("deliveredDigests", [...digestKeys].filter(key => key.startsWith("state-age-unowned:") || key.slice(13, 23) >= new Date(now - 7 * 86400000).toISOString().slice(0, 10)));
       mkdirSync(root, { recursive: true });
       writeFileSync(join(root, "last-check.json"), JSON.stringify(report, null, 2) + "\n", { mode: 0o600 });
     }

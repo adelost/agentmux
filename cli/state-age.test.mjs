@@ -1,9 +1,19 @@
 import { expect, feature, integration } from "bdd-vitest";
 import { vi } from "vitest";
-import { cmdStateAge, qualifyStateAge } from "./state-age.mjs";
+import { cmdStateAge, qualifyStateAge, stateAgeQueuedReceipts } from "./state-age.mjs";
 import { watchStateAge } from "./state-age-watch.mjs";
 
 feature("state-age historical calibration cannot send or activate incomplete evidence", () => {
+  integration("durable job receipts recover unowned-row dedup after local state is lost", {
+    given: ["an existing submitted dispatcher job and an unrelated CLI job", () => ({ list: () => [
+      { source: "state-age", status: "submitted", idempotencyKey: "batch", metadata: { receiptKeys: ["batch", "state-age-unowned:cutkit:557a"] } },
+      { source: "cli", metadata: { receiptKeys: ["unrelated"] } },
+    ] })],
+    when: ["recovering without changing queue state", queue => stateAgeQueuedReceipts(queue, [{ dispatcher: "lsrc:3" }])],
+    then: ["the submitted alert remains reserved without a resend", keys => {
+      expect([...keys]).toEqual(["batch", "state-age-unowned:cutkit:557a"]);
+    }],
+  });
   integration("watch is hourly, non-overlapping and never starts after a refused initial check", {
     given: ["a controllable clock and slow check", () => ({ interval: vi.fn(() => 42), check: vi.fn().mockResolvedValue({}) })],
     when: ["starting the watch", async f => ({ ...f, timer: await watchStateAge(f.check, { interval: f.interval }) })],
