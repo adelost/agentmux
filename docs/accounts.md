@@ -83,9 +83,19 @@ job waits and the floor holds it for the reset. An idle pane with a message the
 credit hold keeps back is moved the same way. The spent window is also stored for
 the floor, so new work waits before the 15-minute snapshot shows it. A usage
 refusal at a spent 5h window moves the pane like a spent week. At most one model
-call, the one in flight at the boundary, can still draw credits. The owner's own
-message still passes the floor (lsrc:0, 2026-10-20); the guard stops that turn
-too. `AMUX_CODEX_CREDITS=allow` turns the guard off.
+call, the one in flight at the boundary, can still draw credits.
+
+Mattias's own turn is never stopped (lsrc:0, 2026-10-27). His message passes the
+floor, and a turn that any of his plain messages began or steered runs on; so does
+a turn nobody can place (its start lies beyond an 8 MiB look back). The ask ledger
+decides whose a prompt is, since the account switch types its continuation as
+plain text. Every case, stopped or left running, goes to
+`~/.agentmux/codex-credit-stop.jsonl` with the credits at the first spent call,
+at Esc and once the turn is over, and `amux quota` ends with the week's sum. A sum
+over 5 credits in a week builds the hold for his message in delivery-wake; it must
+read the quota without blocking his input (`core/delivery-storage-recovery`).
+`AMUX_CODEX_CREDIT_STOP=off|dry|on` sets the guard (dry logs what it would do),
+`AMUX_CODEX_CREDITS=allow` turns it off.
 
 ## Idle capacity
 

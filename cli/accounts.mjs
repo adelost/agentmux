@@ -6,6 +6,7 @@
 
 import { quotaBoxText } from "../channels/quota-warning.mjs";
 import { formatQuotaSnapshot } from "../core/quota-format.mjs";
+import { creditStopText, readCreditStopWeek } from "../core/codex-credit-log.mjs";
 import { newClaudeLoginProfile, profileLoginInstruction, quotaAccountCatalog, quotaProfile } from "../core/quota-profiles.mjs";
 import { readQuotaSnapshotWithPanes } from "../core/quota-in-use.mjs";
 import { prepareRuntimeProfile, resolveClaudeAccountTarget } from "../core/runtime-account-profiles.mjs";
@@ -49,13 +50,14 @@ export async function runQuotaCommand(args, {
   readSnapshot = readQuotaSnapshotWithPanes,
   output = console.log,
   boxText = quotaBoxText,
+  creditGuard = readCreditStopWeek,
 } = {}) {
   if (args.length === 1 && ["--help", "-h"].includes(args[0])) { output(usage); return { help: true }; }
   const allowed = new Set(["--all", "--json"]);
   const invalid = args.find((arg) => !allowed.has(arg));
   if (invalid) throw new Error(`unknown quota option: ${invalid}`);
   const snapshot = await readSnapshot();
-  output(args.includes("--json") ? JSON.stringify(snapshot, null, 2) : `${boxText(snapshot)}\n\n${formatQuotaSnapshot(snapshot)}`);
+  output(args.includes("--json") ? JSON.stringify(snapshot, null, 2) : `${boxText(snapshot)}\n\n${formatQuotaSnapshot(snapshot)}\n${creditStopText(creditGuard())}`);
   return snapshot;
 }
 

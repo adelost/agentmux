@@ -5,41 +5,51 @@ import { join } from "node:path";
 import { component, expect, feature, unit } from "bdd-vitest";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { createSpentWindows } from "../core/codex-spent-windows.mjs";
+import { inferAskOrigin, isHumanAsk } from "../core/ask-origin.mjs";
 import { createCodexCreditStop } from "./codex-credit-stop.mjs";
 
 // claw:5, 27 Oct 2026: Codex A's 5 h window read 100 % from 07:56:59Z and a turn already running went on for 61 model calls
 // and 88.723 credits, until an operator pressed Esc at 09:01:45Z. Nothing in amux looked at a running turn.
+// lsrc:0 for api:0, 2026-10-27: Mattias's own turn is never stopped; every case is logged with its credits before and after.
 const NOW = Date.parse("2026-10-27T08:00:30Z");
 const RESETS = Math.floor(Date.parse("2026-10-27T12:30:00Z") / 1000);
 const roots = [];
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
 
-const started = (turnId = "turn-1") => ({ type: "event_msg", payload: { type: "task_started", turn_id: turnId } });
+const started = (turnId = "turn-1") => ({ type: "event_msg", timestamp: "2026-10-27T07:34:00.000Z", payload: { type: "task_started", turn_id: turnId } });
+const prompt = message => ({ type: "event_msg", payload: { type: "user_message", message } });
+const BRIEF = "[from claw:0] Build the Kit view.";
 const call = id => ({ type: "response_item", payload: { type: "custom_tool_call", call_id: id } });
 const output = id => ({ type: "response_item", payload: { type: "custom_tool_call_output", call_id: id } });
 const spent = (balance = "55792.99") => ({ type: "event_msg", payload: { type: "token_count", rate_limits: {
   primary: { used_percent: 100, window_minutes: 300, resets_at: RESETS }, secondary: { used_percent: 72, window_minutes: 10_080, resets_at: RESETS + 5 * 86_400 },
   credits: { has_credits: true, unlimited: false, balance } } } });
 
-function fixture({ events = [started(), call("a"), output("a"), spent()], busy = true, creditsAllowed = false, spare = null,
-  screen = "› ", mode = "on" } = {}) {
+// The guard asks the injected judge whose turn it is; the real one reads the ask ledger, which core/ask-origin.mjs defines.
+const ownerOf = ({ prompts }) => (prompts === null || prompts.length === 0 ? null : prompts.some(text => !text.startsWith("[from ")));
+
+function fixture({ events = [started(), prompt(BRIEF), call("a"), output("a"), spent()], deep = null, busy = true, creditsAllowed = false,
+  spare = null, screen = "› ", mode = "on" } = {}) {
   const rootDir = mkdtempSync(join(tmpdir(), "codex-credit-stop-")); roots.push(rootDir);
   const queue = createDeliveryQueue({ rootDir });
-  const state = { events, busy, screen, at: NOW }, interrupts = [], moves = [], lines = [], spentWindows = createSpentWindows();
+  const state = { events, deep, busy, screen, at: NOW, deepReads: 0 };
+  const interrupts = [], moves = [], lines = [], cases = [], spentWindows = createSpentWindows();
   const stop = createCodexCreditStop({
     panes: () => [{ name: "claw", pane: 5, dir: "/pane" }],
     agent: { isBusy: async () => state.busy, captureScreen: async () => state.screen },
     readEvents: () => state.events,
+    readEventsDeep: () => { state.deepReads += 1; return state.deep ?? state.events; },
+    ownerOf,
     interrupt: async (name, pane) => { interrupts.push(`${name}:${pane}`); },
     spare: async () => spare,
     requestMove: async request => { moves.push(request); return { status: "pending" }; },
     accountKeyFor: () => "codex:1", spentWindows,
-    queue, creditsAllowed, mode, now: () => state.at, record: line => lines.push(line), log: () => {},
+    queue, creditsAllowed, mode, now: () => state.at, record: line => lines.push(line), ledger: line => cases.push(line), log: () => {},
   });
-  return { stop, queue, state, interrupts, moves, lines, spentWindows, tick: () => stop.tick() };
+  return { stop, queue, state, interrupts, moves, lines, cases, spentWindows, tick: () => stop.tick() };
 }
 
-feature("a Codex turn never goes on drawing paid credits once its account's window is spent", () => {
+feature("a Codex agent turn never goes on drawing paid credits once its account's window is spent", () => {
   component("a running turn is interrupted at the first call after the window read 100 %", {
     given: ["claw:5 working, its last model call read primary 100 % with credits flowing and no tool open", () => fixture()],
     when: ["the guard ticks", async fx => { await fx.tick(); return fx; }],
@@ -52,11 +62,11 @@ feature("a Codex turn never goes on drawing paid credits once its account's wind
   });
   component("it waits for an open tool call and interrupts right after its output", {
     given: ["claw:5 with a tool call still running after the 100 % reading", () =>
-      fixture({ events: [started(), spent(), call("slow")] })],
+      fixture({ events: [started(), prompt(BRIEF), spent(), call("slow")] })],
     when: ["the guard ticks, the tool answers, the guard ticks again", async fx => {
       await fx.tick();
       const waited = fx.interrupts.length;
-      fx.state.events = [started(), spent(), call("slow"), output("slow")];
+      fx.state.events = [started(), prompt(BRIEF), spent(), call("slow"), output("slow")];
       await fx.tick();
       return { fx, waited };
     }],
@@ -79,24 +89,24 @@ feature("a Codex turn never goes on drawing paid credits once its account's wind
     when: ["the guard ticks", async fx => { await fx.tick(); return fx; }],
     then: ["no Esc", fx => { expect(fx.interrupts).toEqual([]); expect(fx.lines).toEqual([]); }],
   });
+  unit("credits the operator allowed explicitly are left alone", {
+    given: ["AMUX_CODEX_CREDITS=allow", () => fixture({ creditsAllowed: true })],
+    when: ["the guard ticks", async fx => { await fx.tick(); return fx; }],
+    then: ["no Esc", fx => { expect(fx.interrupts).toEqual([]); }],
+  });
   component("in dry mode the guard says what it would do and does nothing", {
     given: ["claw:5 on a spent window, a spare account, AMUX_CODEX_CREDIT_STOP=dry", () => fixture({ mode: "dry", spare: { profileId: "2", name: "Codex W" } })],
     when: ["the guard ticks twice", async fx => { await fx.tick(); await fx.tick(); return fx; }],
-    then: ["one would-interrupt line, no Esc, no move, no job, nothing stored for the floor", fx => {
+    then: ["one would-interrupt line, no Esc, no move, no job, nothing stored for the floor or the log", fx => {
       expect(fx.lines.map(line => line.outcome)).toEqual(["would-interrupt"]);
       expect(fx.interrupts).toEqual([]); expect(fx.moves).toEqual([]); expect(fx.queue.list("claw", 5)).toEqual([]);
-      expect(fx.spentWindows.forPane("claw:5")).toEqual([]);
+      expect(fx.spentWindows.forPane("claw:5")).toEqual([]); expect(fx.cases).toEqual([]);
     }],
   });
   unit("with the guard off nothing is read", {
     given: ["AMUX_CODEX_CREDIT_STOP=off", () => fixture({ mode: "off" })],
     when: ["the guard ticks", async fx => { await fx.tick(); return fx; }],
     then: ["no line, no Esc", fx => { expect(fx.lines).toEqual([]); expect(fx.interrupts).toEqual([]); }],
-  });
-  unit("credits the operator allowed explicitly are left alone", {
-    given: ["AMUX_CODEX_CREDITS=allow", () => fixture({ creditsAllowed: true })],
-    when: ["the guard ticks", async fx => { await fx.tick(); return fx; }],
-    then: ["no Esc", fx => { expect(fx.interrupts).toEqual([]); }],
   });
   unit("a permission prompt is not answered with Esc", {
     given: ["claw:5 waiting on an approval", () => fixture({ screen: "Allow command?  1. Yes, proceed\n 2. No, and tell Codex what to do differently (esc)" })],
@@ -107,11 +117,84 @@ feature("a Codex turn never goes on drawing paid credits once its account's wind
     given: ["claw:5 interrupted in turn-1, then working in turn-2 with a spent reading", () => fixture()],
     when: ["the guard ticks, the pane starts turn-2 and ticks again", async fx => {
       await fx.tick();
-      fx.state.events = [started("turn-2"), spent("55700.00")]; fx.state.at += 60_000;
+      fx.state.events = [started("turn-2"), prompt(BRIEF), spent("55700.00")]; fx.state.at += 60_000;
       await fx.tick();
       return fx;
     }],
     then: ["two Esc", fx => { expect(fx.interrupts).toEqual(["claw:5", "claw:5"]); }],
+  });
+});
+
+feature("Mattias's own turn is never stopped, and what it draws is logged", () => {
+  component("a turn he began, or steered with a plain message, runs on", {
+    given: ["claw:5 working on his message on a spent window", () => fixture({ events: [started(), prompt("Hur går det med Kit?"), call("a"), output("a"), spent()] })],
+    when: ["the guard ticks twice", async fx => { await fx.tick(); await fx.tick(); return fx; }],
+    then: ["no Esc, the window is still stored for the floor, and one owner-turn case is logged", fx => {
+      expect(fx.interrupts).toEqual([]);
+      expect(fx.spentWindows.forPane("claw:5")).toHaveLength(1);
+      expect(fx.cases).toEqual([expect.objectContaining({ kind: "owner-turn", pane: "claw:5", window: "session", balanceBefore: 55792.99, creditsDrawn: 0 })]);
+    }],
+  });
+  unit("the account switch's and the guard's own texts are automation, never his words", {
+    given: ["a switch continuation, the guard's continuation and a plain message", () => ({
+      switched: "Ditt konto byttes på Mattias uttryckliga ja. Fortsätt där du var.", guard: "[AMUX CODEX CREDIT STOP] Your turn was interrupted: the 5h window",
+      plain: "Hur går det med Kit?" })],
+    when: ["classifying them", ({ switched, guard, plain }) => ({
+      switched: inferAskOrigin({ source: "codex-account-switch", prompt: switched }),
+      queuedGuard: inferAskOrigin({ source: "codex-credit-stop", prompt: guard }),
+      guardHuman: isHumanAsk({ source: "pane-hook", verbatim: guard }), plainHuman: isHumanAsk({ source: "pane-hook", verbatim: plain }) })],
+    then: ["the first two are system, the plain message is a person's", result =>
+      expect(result).toEqual({ switched: "system", queuedGuard: "system", guardHuman: false, plainHuman: true })],
+  });
+  component("a turn whose start cannot be found is treated as his, and the log says it is unknown", {
+    given: ["a long turn: the start is outside both the tail and the deep read", () =>
+      fixture({ events: [call("a"), output("a"), spent()], deep: [call("a"), output("a"), spent()] })],
+    when: ["the guard ticks twice", async fx => { await fx.tick(); await fx.tick(); return fx; }],
+    then: ["no Esc, the deep read ran once, one case with the owner unknown", fx => {
+      expect(fx.interrupts).toEqual([]); expect(fx.state.deepReads).toBe(1);
+      expect(fx.cases).toEqual([expect.objectContaining({ kind: "owner-turn", ownerTurn: "unknown" })]);
+    }],
+  });
+  component("a long agent turn is found by the deep read and stopped like any other", {
+    given: ["the tail has no start, the deep read shows an agent's brief began the turn", () =>
+      fixture({ events: [call("a"), output("a"), spent()], deep: [started("turn-9"), prompt(BRIEF), call("a"), output("a"), spent()] })],
+    when: ["the guard ticks twice", async fx => { await fx.tick(); await fx.tick(); return fx; }],
+    then: ["Esc once and the deep read once", fx => { expect(fx.interrupts).toEqual(["claw:5"]); expect(fx.state.deepReads).toBe(1); }],
+  });
+});
+
+feature("every case is logged with the credits before and after", () => {
+  component("an Esc case logs the balance at the first spent call, at Esc and, once the turn is over, after it", {
+    given: ["claw:5 whose window read 100 % at 55792.99 and whose latest call read 55788.78", () =>
+      fixture({ events: [started(), prompt(BRIEF), spent("55792.99"), call("a"), output("a"), spent("55788.78")] })],
+    when: ["the guard presses Esc, the turn ends after one more call, the pane is idle", async fx => {
+      await fx.tick();
+      fx.state.busy = false; fx.state.at += 20_000;
+      fx.state.events = [started(), prompt(BRIEF), spent("55792.99"), call("a"), output("a"), spent("55788.78"), spent("55787.30")];
+      await fx.tick();
+      return fx;
+    }],
+    then: ["an esc line (before 55792.99, now 55788.78, drawn 4.21) and a settled line (after 55787.3, drawn 5.69)", fx => {
+      expect(fx.cases).toEqual([
+        expect.objectContaining({ kind: "esc", pane: "claw:5", at: new Date(NOW).toISOString(), balanceBefore: 55792.99, balanceNow: 55788.78, creditsDrawn: 4.21 }),
+        expect.objectContaining({ kind: "settled", balanceBefore: 55792.99, balanceAfter: 55787.3, creditsDrawn: 5.69 }),
+      ]);
+      expect(fx.cases[1].case).toBe(fx.cases[0].case);
+    }],
+  });
+  component("an owner turn is settled the same way when it ends", {
+    given: ["his turn, running on a spent window", () => fixture({ events: [started(), prompt("Hur går det?"), spent("55792.99"), spent("55790.00")] })],
+    when: ["the guard ticks, the turn ends and the pane is idle", async fx => {
+      await fx.tick();
+      fx.state.busy = false; fx.state.at += 120_000;
+      fx.state.events = [started(), prompt("Hur går det?"), spent("55792.99"), spent("55790.00"), spent("55781.50")];
+      await fx.tick();
+      return fx;
+    }],
+    then: ["settled at 11.49 credits drawn", fx => {
+      expect(fx.cases.map(line => line.kind)).toEqual(["owner-turn", "settled"]);
+      expect(fx.cases[1]).toMatchObject({ balanceAfter: 55781.5, creditsDrawn: 11.49 });
+    }],
   });
 });
 

@@ -36,6 +36,17 @@ feature("account subscription CLI", () => {
     }],
   });
 
+  // lsrc:0 for api:0, 2026-10-27: the credit guard's week is read in amux quota, beside the credit balance.
+  unit("amux quota ends with what the Codex credit guard did in the last seven days", {
+    given: ["a snapshot and a guard log with one stopped turn that drew 1.2 credits", () => {
+      const lines = [];
+      return { lines, readSnapshot: async () => ({ schemaVersion: 2, accounts: [], claude: { ok: false, error: "x" }, codex: { ok: false, error: "y" }, kimi: { ok: false, error: "z" } }),
+        boxText: () => "BOX", creditGuard: () => ({ stopped: 1, ownerTurns: 0, credits: 1.2 }), output: line => lines.push(line) };
+    }],
+    when: ["running the plain view", async ctx => { await runQuotaCommand([], ctx); return ctx.lines[0]; }],
+    then: ["the last line says so", text => expect(text.split("\n").at(-1)).toBe("Codex credit guard, 7 days: 1 stopped, 0 owner turns left running, 1.2 credits drawn")],
+  });
+
   unit("prints a provider-scoped login instruction without credentials", {
     given: ["one isolated Claude profile", () => {
       const lines = [];
