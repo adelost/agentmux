@@ -50,7 +50,7 @@ This is a stored-session inventory, not a historical failure rate or proof
 that all those panes are running. No pane was woken by the inventory.
 
 Five new regressions fail before the repair (59 other scenarios pass).
-The final twelve focused files pass253 scenarios; strict changed-file lint
+The final thirteen focused files pass254 scenarios; strict changed-file lint
 has zero findings. Nightly fixtures now point their observation at their
 actual temporary journal, instead of the unrelated `/exact.jsonl`; the
 existing no-second-call expectations are unchanged.
@@ -72,10 +72,49 @@ Full private evidence and exact replay command:
 Code is on master as `f2536c394a809fc92c71bf4475b01001eb4eac82`, release
 version1.25.362. Installation and bridge identity are recorded in the same
 private evidence directory's `INDEX.md` and `release-proof.json`.
-The existing normal restart check refused95 nonterminal jobs (94pending,
-one delivering), with no live maintenance. No restart was forced. Activation
-therefore remains BLOCKED until a normal safe restart can be proven; code
-tests and an installed-function replay are not a running bridge exercise.
+
+## Full local behavior regression
+
+`channels/auto-compact-account-transfer.test.mjs` uses the production
+journal-transfer implementation, durable state and queue, context reader,
+automatic poller, pause policy, maintenance and native compact verification.
+It observes commands submitted through the composer and resulting context
+tokens. Only the terminal/model boundary is simulated; no provider is called.
+
+An unchanged transferred session receives zero compact commands. After its
+next completed task at433,932 tokens, exactly one `/compact` is submitted,
+its native boundary is verified and the next context reading is40,000.
+Constructing another poller over the same state does not repeat the command.
+
+Temporarily reverting only the maintenance repair makes this same test fail:
+the submitted-command list is empty instead of containing `/compact`.
+Restoring the repair makes it pass. Logs: `transfer-poll-red.log` and
+`transfer-poll-green.log` in the existing evidence directory. The later
+test/proof commit changes no installed production code.
+
+## Activation
+
+The earlier conservative check refused all95 queued jobs, including those
+waiting without submission. Mattias then explicitly requested the normal
+bridge restart at27 October05:18:05Z,
+delivery:9c7859b284ee57dc4e323de6b5114d6e.
+
+Immediately before the requested restart, all97 open jobs were proven
+pending, without submitted/draft/unknown fences, and no maintenance writer
+was live. One normal `amux restart` signal was sent; no `--all` was used.
+The new bridge is ready, pid4102814, version1.25.362, exact installed source
+`726df821b85ae4a06bc7de51002f234fbe385f63`, started05:26:00.496Z.
+All97 queued identities and payload hashes survived. Claw:6 still displays
+the blank fresh conversation. The quota observer updates again after the
+restart, including a check at05:30:12.890Z; its earlier stalled update's
+original cause remains unresolved.
+
+The process comparison did find five Claude shell replacements: api:0,
+api:2, claw:0, claw:1 and claw:2. Their SessionStart events say resume and
+retain exactly the previous UUIDs. The exact startup/recovery trigger was
+not attributed; this is not a claim that every pane process stayed unchanged.
+Details and pre/post queue proof: `restart-before.json`, `restart-after.json`.
+No production compact was forced as a test.
 The older quota alert
 observer's stale `lastCheckedAt` is a separate unresolved diagnosis; this
 change does not claim to explain or repair that incident.
