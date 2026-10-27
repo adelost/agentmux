@@ -70,6 +70,18 @@ feature("account subscription CLI", () => {
     }],
   });
 
+  unit("plain quota includes today's unique shadow-flagged reply count on one line", {
+    given: ["a fixed shadow measurement and ordinary quota output", () => ({ lines: [],
+      readSnapshot: async () => ({ schemaVersion: 2, accounts: [], claude: { ok: false }, codex: { ok: false }, kimi: { ok: false } }),
+      boxText: () => "BOX", creditGuard: () => ({ stopped: 0, ownerTurns: 0, credits: 0 }),
+      claimShadowLine: () => "Skuggmätning idag (UTC): 7 flaggade svar" })],
+    when: ["reading the normal quota view", async f => { await runQuotaCommand([], { ...f, output: text => f.lines.push(text) }); return f.lines[0]; }],
+    then: ["one measurement line is present and the existing credit summary remains last", text => {
+      expect(text.split("\n").filter(line => line === "Skuggmätning idag (UTC): 7 flaggade svar")).toHaveLength(1);
+      expect(text.split("\n").at(-1)).toContain("Codex credit guard");
+    }],
+  });
+
   unit("login accepts a login dir, its email or a new login name", {
     given: ["slots plus the wetterlind login dir", () => {
       const lines = [];

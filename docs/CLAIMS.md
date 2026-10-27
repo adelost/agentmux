@@ -39,3 +39,9 @@ amux claims check --input /private/frozen-report.json --known /private/known.jso
 `--input` preserves IDs, text hashes and the original window while running the live policy. Claim/name labels independently bind corpus, algorithm, text and flag hashes. Final graded reports, labels, grouped causes and the current delivery receipt are in the existing artifact directory; old reports and the1.25.370 live shadow proof remain historical evidence.
 
 The transport retains one durable hold/correction per turn, immediate release on human input, cancellation for unsent corrections, and an unknown-send fence preventing replay. Those mechanics do not authorize activation.
+
+## Shadow counter and deferred classifier trial
+
+lsrc:0 delivery:2b243dda0a0f21f13b0503f841df70a2,27Oct10:29:38Z closes heuristic tuning. Plain `amux quota` shows one line with actual unique shadow-held turns recorded today in UTC. Duplicate turn decisions, name-only warnings and other event types do not count. JSON quota output is unchanged. Missing or malformed measurement data is not reported as a verified zero.
+
+Task111 is unassigned P3: a future Haiku trial through api.v1d.io, product bench, on300 replies from the same frozen corpus, with a hard total0.50USD ceiling. It cannot start until the gateway has ANTHROPIC_KEY and lsrc:0 gives a new explicit start instruction. No API calls or spending are authorized now.
