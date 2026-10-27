@@ -342,7 +342,7 @@ autoCompact.start();
 attachQuotaFloorAlert({ queue: deliveryQueue, state: appState,
   configPath: AGENTS_YAML, floorPercent: quotaFloor.percent });
 startQuotaStopMover({ agent, deliveryBroker, state: appState, configPath: AGENTS_YAML, floorPercent: quotaFloor.percent });
-startCodexCreditStop({ agent, deliveryBroker, state: appState, configPath: AGENTS_YAML, tmuxSocket: TMUX_SOCKET, spentWindows, creditsAllowed: quotaFloor.creditsAllowed });
+startCodexCreditStop({ agent, deliveryBroker, state: appState, configPath: AGENTS_YAML, tmuxSocket: TMUX_SOCKET, spentWindows, creditsAllowed: quotaFloor.creditsAllowed, notify: (name, pane, text) => discord.send(findChannelForPane(AGENTS_YAML, name, pane), text) });
 
 // Drift-guard: periodic reminder to panes that have accumulated many turns
 // without a /compact or prior reminder. Counteracts attention-weight decay

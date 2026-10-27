@@ -29,11 +29,11 @@ const spent = (balance = "55792.99") => ({ type: "event_msg", payload: { type: "
 const ownerOf = ({ prompts }) => (prompts === null || prompts.length === 0 ? null : prompts.some(text => !text.startsWith("[from ")));
 
 function fixture({ events = [started(), prompt(BRIEF), call("a"), output("a"), spent()], deep = null, busy = true, creditsAllowed = false,
-  spare = null, screen = "› ", mode = "on" } = {}) {
+  spare = null, screen = "› ", mode = "on", failFirstNotice = false } = {}) {
   const rootDir = mkdtempSync(join(tmpdir(), "codex-credit-stop-")); roots.push(rootDir);
   const queue = createDeliveryQueue({ rootDir });
-  const state = { events, deep, busy, screen, at: NOW, deepReads: 0 };
-  const interrupts = [], moves = [], lines = [], cases = [], spentWindows = createSpentWindows();
+  const state = { events, deep, busy, screen, at: NOW, deepReads: 0, noticeTries: 0 };
+  const interrupts = [], moves = [], lines = [], cases = [], notices = [], spentWindows = createSpentWindows();
   const stop = createCodexCreditStop({
     panes: () => [{ name: "claw", pane: 5, dir: "/pane" }],
     agent: { isBusy: async () => state.busy, captureScreen: async () => state.screen },
@@ -44,9 +44,14 @@ function fixture({ events = [started(), prompt(BRIEF), call("a"), output("a"), s
     spare: async () => spare,
     requestMove: async request => { moves.push(request); return { status: "pending" }; },
     accountKeyFor: () => "codex:1", spentWindows,
-    queue, creditsAllowed, mode, now: () => state.at, record: line => lines.push(line), ledger: line => cases.push(line), log: () => {},
+    queue, creditsAllowed, mode, now: () => state.at, record: line => lines.push(line), ledger: line => cases.push(line),
+    notify: async (name, pane, text) => {
+      state.noticeTries += 1;
+      if (failFirstNotice && state.noticeTries === 1) throw new Error("discord down");
+      notices.push({ pane: `${name}:${pane}`, text });
+    }, log: () => {},
   });
-  return { stop, queue, state, interrupts, moves, lines, cases, spentWindows, tick: () => stop.tick() };
+  return { stop, queue, state, interrupts, moves, lines, cases, notices, spentWindows, tick: () => stop.tick() };
 }
 
 feature("a Codex agent turn never goes on drawing paid credits once its account's window is spent", () => {
@@ -133,6 +138,41 @@ feature("Mattias's own turn is never stopped, and what it draws is logged", () =
       expect(fx.interrupts).toEqual([]);
       expect(fx.spentWindows.forPane("claw:5")).toHaveLength(1);
       expect(fx.cases).toEqual([expect.objectContaining({ kind: "owner-turn", pane: "claw:5", window: "session", balanceBefore: 55792.99, creditsDrawn: 0 })]);
+    }],
+  });
+  // lsrc:0 for api:0, 2026-10-27: no Esc, but he hears at once in the pane's channel and decides himself.
+  component("when his turn first runs on a spent window, the pane's channel says so once, with the credits so far", {
+    given: ["his turn whose calls already drew 4.21 credits since the window read 100 %", () => fixture({
+      events: [started(), prompt("Hur går det med Kit?"), spent("55792.99"), call("a"), output("a"), spent("55788.78")] })],
+    when: ["the guard ticks three times as the turn goes on drawing", async fx => {
+      await fx.tick();
+      fx.state.events = [...fx.state.events, spent("55780.00")]; fx.state.at += 10_000;
+      await fx.tick(); fx.state.at += 10_000; await fx.tick();
+      return fx;
+    }],
+    then: ["one notice, no Esc", fx => {
+      expect(fx.notices).toEqual([{ pane: "claw:5", text: "claw:5 drar credits nu (4,21 hittills)" }]);
+      expect(fx.interrupts).toEqual([]);
+    }],
+  });
+  unit("a turn nobody can place is announced the same way, an agent's turn and a dry run are not", {
+    given: ["an unplaced turn, an agent's turn and a dry run", () => ({
+      unplaced: fixture({ events: [call("a"), output("a"), spent()], deep: [call("a"), output("a"), spent()] }),
+      agent: fixture(), dry: fixture({ events: [started(), prompt("Hur går det?"), spent()], mode: "dry" }) })],
+    when: ["each guard ticks", async ({ unplaced, agent, dry }) => {
+      for (const fx of [unplaced, agent, dry]) await fx.tick();
+      return { unplaced, agent, dry };
+    }],
+    then: ["only the unplaced turn is announced", ({ unplaced, agent, dry }) => {
+      expect(unplaced.notices).toEqual([{ pane: "claw:5", text: "claw:5 drar credits nu (0 hittills)" }]);
+      expect(agent.notices).toEqual([]); expect(dry.notices).toEqual([]);
+    }],
+  });
+  unit("a notice that cannot be sent is retried at the next tick and never stops the turn", {
+    given: ["his turn and a channel that fails once", () => fixture({ events: [started(), prompt("Hur går det?"), spent()], failFirstNotice: true })],
+    when: ["the first send fails, the second works", async fx => { await fx.tick(); await fx.tick(); await fx.tick(); return fx; }],
+    then: ["tried twice, announced once, no Esc", fx => {
+      expect(fx.state.noticeTries).toBe(2); expect(fx.notices).toHaveLength(1); expect(fx.interrupts).toEqual([]);
     }],
   });
   unit("the account switch's and the guard's own texts are automation, never his words", {

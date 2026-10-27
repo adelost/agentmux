@@ -91,7 +91,9 @@ a turn nobody can place (its start lies beyond an 8 MiB look back). The ask ledg
 decides whose a prompt is, since the account switch types its continuation as
 plain text. Every case, stopped or left running, goes to
 `~/.agentmux/codex-credit-stop.jsonl` with the credits at the first spent call,
-at Esc and once the turn is over, and `amux quota` ends with the week's sum. A sum
+at Esc and once the turn is over, and `amux quota` ends with the week's sum.
+When his turn makes its first call on a spent window, the pane's channel hears at
+once "<pane> drar credits nu (<n> hittills)"; there is no Esc, and he decides. A sum
 over 5 credits in a week builds the hold for his message in delivery-wake; it must
 read the quota without blocking his input (`core/delivery-storage-recovery`).
 `AMUX_CODEX_CREDIT_STOP=off|dry|on` sets the guard (dry logs what it would do),

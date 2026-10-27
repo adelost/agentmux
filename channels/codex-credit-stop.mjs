@@ -55,7 +55,8 @@ export function creditStopContinuation({ window, resetsAt, moved }) {
 
 /** WHAT: Builds the guard that stops working Codex turns on a spent window. WHY: Keeps a running turn from drawing paid credits. */
 export function createCodexCreditStop({ panes, agent, readEvents, readEventsDeep = readEvents, ownerOf, interrupt, spare, requestMove, queue,
-  spentWindows, accountKeyFor, creditsAllowed = false, mode = "on", now = Date.now, record = () => {}, ledger = () => {}, log = () => {} }) {
+  spentWindows, accountKeyFor, creditsAllowed = false, mode = "on", now = Date.now, record = () => {}, ledger = () => {}, notify = async () => {},
+  log = () => {} }) {
   const episodes = new Map(), heldMoves = new Map(), longTurns = new Map(), openCases = new Map(), dry = mode === "dry";
   const line = (paneKey, evidence, fields) => ({ at: new Date(now()).toISOString(), pane: paneKey, cell: "codex-credit-stop",
     window: evidence?.window, resetsAt: evidence && new Date(evidence.resetsAt).toISOString(), balance: evidence?.balance, ...fields });
@@ -128,6 +129,14 @@ export function createCodexCreditStop({ panes, agent, readEvents, readEventsDeep
         record(line(paneKey, evidence, { outcome: "owner-turn-continues", detail: episode.owner === null ? "nobody can place the turn" : "his turn is never stopped" }));
         episode.logged = true;
       }
+      // No Esc, but he hears at once and decides himself (lsrc:0 for api:0, 2026-10-27); a failed send is tried again at the next tick.
+      if (!episode.announced && !dry) {
+        const drawn = credits(evidence.balanceAtFirstSpent, evidence.balance) ?? 0;
+        try {
+          await notify(name, pane, `${paneKey} drar credits nu (${String(Number(drawn.toFixed(2))).replace(".", ",")} hittills)`);
+          episode.announced = true;
+        } catch (error) { log(`${paneKey} credit notice not sent: ${error.message}`); }
+      }
       return "owner-turn-continues";
     }
     if (evidence.toolOpen) {
@@ -193,7 +202,7 @@ const engineOf = definition => definition.engine || accountEngineForCommand(defi
 /** WHAT: Builds and schedules the bridge's credit guard on its Codex panes. WHY: Keeps its wiring out of the bridge entry. */
 export function startCodexCreditStop({ agent, deliveryBroker, state, configPath, tmuxSocket = DEFAULT_TMUX_SOCKET, spentWindows,
   creditsAllowed, mode = readCodexCreditStopMode(), pollMs = 10_000, now = Date.now, record = recordPauseCompactLine,
-  ledger = appendCreditStopLine }) {
+  ledger = appendCreditStopLine, notify }) {
   let context = null, running = null;
   // Panes on one spent account ask for a spare together; one fresh reading answers them all.
   const spares = new Map();
@@ -221,7 +230,7 @@ export function startCodexCreditStop({ agent, deliveryBroker, state, configPath,
       { ...tmuxContext(), deliveryQueue: deliveryBroker.queue }, [`codex:${profileId}`, name, "-p", String(pane)],
       { continuation, output: () => {} }),
     queue: deliveryBroker.queue, spentWindows, accountKeyFor: (name, pane) => currentProfile(name, pane).key,
-    creditsAllowed, mode, now, record, ledger, log: message => console.log(`codex-credit-stop | ${message}`),
+    creditsAllowed, mode, now, record, ledger, notify, log: message => console.log(`codex-credit-stop | ${message}`),
   });
   console.log(`codex-credit-stop | ${creditsAllowed ? "off, paid credits allowed by AMUX_CODEX_CREDITS=allow" : mode}, every ${pollMs / 1000} s`);
   const tick = () => (running ||= guard.tick().finally(() => { running = null; }));
