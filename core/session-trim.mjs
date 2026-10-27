@@ -5,7 +5,7 @@
 
 import {
   closeSync, existsSync, fsyncSync, mkdirSync, openSync,
-  readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync, writeSync,
+  readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
@@ -199,6 +199,8 @@ export function trimCheckpointedSession(path, {
     unlinkSync(temporary);
     return { path, provider: strategy.provider, status: "protected", reason: "changed-during-trim" };
   }
+  // Latest-session lookups order rollouts by mtime, so the trim keeps the last activity time.
+  utimesSync(temporary, before.atime, before.mtime);
   appendSessionHousekeepingAudit({
     operation: "replace", phase: "intent", path, bytes: before.size,
     reason: "provider-checkpoint-trim", provider: strategy.provider,

@@ -92,6 +92,22 @@ feature("checkpoint-aware provider session trim", () => {
     }],
   });
 
+  // 27 Oct 21:21Z: trimmed old rollouts looked newest, so claw:5's compact verified against the wrong session.
+  component("a trimmed rollout keeps its last-activity time", {
+    given: ["a stable compacted rollout last written an hour ago", () => fixture("codex", [
+      JSON.stringify({ timestamp: "t0", type: "session_meta", payload: { id: "019f5d43-9b4b-7e42-b8bd-9de61683501b", cwd: "/work" } }),
+      JSON.stringify({ timestamp: "t1", type: "response_item", payload: { text: "discard-me".repeat(200) } }),
+      JSON.stringify({ timestamp: "t2", type: "compacted", payload: { message: "", replacement_history: [{ type: "message", content: "keep-summary" }] } }),
+    ])],
+    when: ["trimming it", (ctx) => trimCheckpointedSession(ctx.path, { nowMs: NOW, liveIds: EMPTY_IDS, refreshLiveIds: refreshEmpty })],
+    then: ["its modification time is still the old activity, not the trim", (result, ctx) => {
+      try {
+        expect(result).toMatchObject({ status: "trimmed" });
+        expect(statSync(ctx.path).mtimeMs).toBe(OLD.getTime());
+      } finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
+
   unit("active, changing, and not-yet-compacted sessions fail closed", {
     given: ["three unsafe Claude journals", () => ({
       active: fixture("claude", [JSON.stringify({ type: "permission-mode" }), JSON.stringify({ type: "system", subtype: "compact_boundary" })]),
