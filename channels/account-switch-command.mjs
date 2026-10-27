@@ -7,15 +7,22 @@
 // inte byta i onödan.. pga cache miss").
 
 import { resolveNotifyUserId } from "../cli/send-notify.mjs";
-import { accountName } from "../core/account-names.mjs";
+import { withAccountEntries } from "../core/account-names.mjs";
+import { accountEntries } from "../core/quota-profiles.mjs";
+import { readClaudeProfileIdentity } from "../core/claude-account-quota.mjs";
+import { resolveClaudeAccountTarget, runtimeProfileCatalog } from "../core/runtime-account-profiles.mjs";
 
 /** DTO: State key for the plans shown per target. */
 export const SWITCH_PLAN_STATE_KEY = "account_switch_plans_v1";
 /** DTO: How long a shown plan can be confirmed. */
 export const SWITCH_CONFIRM_MAX_AGE_MS = 10 * 60_000;
 const DISCORD_LIMIT = 1900;
-// The login he types names the account the way the quota box does, "wetterlind" as Claude W.
-const targetName = (target) => accountName({ provider: "claude", account: { email: target }, profile: { id: target } });
+// Slots and directory names can outlive their login; quota's account entries own the visible name.
+const targetName = (target, env) => {
+  const profile = resolveClaudeAccountTarget(target, runtimeProfileCatalog("claude", env));
+  const account = profile ? readClaudeProfileIdentity(profile) : { email: target };
+  return withAccountEntries([{ provider: "claude", profile, account }], accountEntries(env).entries)[0].name;
+};
 
 /** WHAT: Parses `/byt` arguments into target and confirm. WHY: Keeps a confirm explicit: exactly "<target> ok". */
 export function parseSwitchArgs(args) {
@@ -46,7 +53,7 @@ const planReply = (target, plan, lead) => {
  * WHY: Keeps a Discord switch from moving any pane before Mattias has seen and confirmed its plan.
  */
 export function createAccountSwitchCommand({
-  runtime, state,
+  runtime, state, env = process.env,
   rotate = async (...args) => (await import("../cli/account-rotation.mjs")).rotateClaudeFleet(...args),
   operatorId = () => resolveNotifyUserId(),
   now = Date.now, maxAgeMs = SWITCH_CONFIRM_MAX_AGE_MS,
@@ -84,7 +91,7 @@ export function createAccountSwitchCommand({
     const plan = await run(target, true);
     const pending = plans()[key];
     if (!confirm || !pending || now() - pending.at > maxAgeMs || pending.signature !== planSignature(plan.result)) {
-      const lead = !confirm ? `Plan to switch to **${targetName(target)}**:`
+      const lead = !confirm ? `Plan to switch to **${targetName(target, env)}**:`
         : !pending || now() - pending.at > maxAgeMs ? "The plan was not shown in the last 10 minutes. Here it is now:"
           : "The plan has changed since you saw it. Here is the new one:";
       remember(key, plan);
@@ -92,8 +99,8 @@ export function createAccountSwitchCommand({
       return;
     }
     forget(key);
-    await msg.reply(`Switching to **${targetName(target)}** now. Large active panes are compacted first.`);
+    await msg.reply(`Switching to **${targetName(target, env)}** now. Large active panes are compacted first.`);
     const done = await run(target, false);
-    await msg.reply([`Result of the switch to **${targetName(target)}**:`, fenced(done.lines)].join("\n"));
+    await msg.reply([`Result of the switch to **${targetName(target, env)}**:`, fenced(done.lines)].join("\n"));
   };
 }

@@ -1,17 +1,21 @@
-import { feature, unit, expect } from "bdd-vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { feature, unit, component, expect } from "bdd-vitest";
 import { createAccountSwitchCommand, parseSwitchArgs } from "./account-switch-command.mjs";
 
 const OPERATOR = "111";
 const rows = (status) => [{ key: "api:0", status }, { key: "lsrc:0", status: "would-compact-then-restart" }];
 
 // One bridge: a memory state, a clock and a rotation whose dry plan the test can change.
-const bridge = ({ planStatus = "would-running" } = {}) => {
+const bridge = ({ planStatus = "would-running", env } = {}) => {
   const data = {}, calls = [], replies = [];
   const world = { clock: 0, planStatus };
   const command = createAccountSwitchCommand({
     state: { get: (key, fallback) => (key in data ? data[key] : fallback), set: (key, value) => { data[key] = value; } },
     runtime: () => ({ agent: {}, deliveryQueue: {} }),
     operatorId: () => OPERATOR,
+    env,
     now: () => world.clock,
     rotate: async (_ctx, target, { dry }, { output }) => {
       calls.push({ target, dry });
@@ -25,6 +29,34 @@ const bridge = ({ planStatus = "would-running" } = {}) => {
 const realRuns = (ctx) => ctx.calls.filter((call) => !call.dry);
 
 feature("Discord /byt account switch", () => {
+  component("defect: Attrois keeps its saved Claude S name through preview and confirmation", {
+    given: ["a login in a historically named directory and its saved account names", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-byt-name-"));
+      const home = join(root, "adelost"), labels = join(root, "profiles.json");
+      mkdirSync(home);
+      writeFileSync(join(home, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "attrois@example.test" } }));
+      writeFileSync(labels, JSON.stringify({ version: 2, slots: { "claude:2": { home } },
+        accounts: { "claude:attrois": { name: "Claude S" }, "claude:adelost": { name: "Claude A" } } }));
+      return { root, ...bridge({ env: { AMUX_ACCOUNT_LABELS_FILE: labels,
+        AMUX_ACCOUNT_PROFILES_DIR: root, AMUX_CLAUDE_PROFILE_2_HOME: home } }) };
+    }],
+    when: ["previewing login, email and slot, then confirming the login", async (ctx) => {
+      for (const target of ["attrois", "attrois@example.test", "2"]) await ctx.say(target);
+      ctx.previewRuns = realRuns(ctx).length;
+      await ctx.say("attrois ok");
+      return ctx;
+    }],
+    then: ["all five replies name Claude S and previews never switch", (ctx) => {
+      expect(ctx.previewRuns).toBe(0);
+      expect(ctx.replies.map((reply) => reply.split("\n")[0])).toEqual([
+        "Plan to switch to **Claude S**:", "Plan to switch to **Claude S**:", "Plan to switch to **Claude S**:",
+        "Switching to **Claude S** now. Large active panes are compacted first.", "Result of the switch to **Claude S**:",
+      ]);
+      expect(realRuns(ctx)).toEqual([{ target: "attrois", dry: false }]);
+    }],
+    cleanup: (ctx) => rmSync(ctx.root, { recursive: true, force: true }),
+  });
+
   unit("parses exactly <target> or <target> ok", {
     when: ["parsing forms", () => ["wetterlind", "wetterlind ok", "wetterlind OK", "", "a b c"].map(parseSwitchArgs)],
     then: ["only those two shapes are accepted", (parsed) => expect(parsed).toEqual([
