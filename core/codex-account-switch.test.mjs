@@ -28,7 +28,7 @@ feature("manual and automatic Codex account transitions share continuity verific
     when: ["the account switch refuses before changing anything", async fx => ({ fx, result: await switchCodexAccount(fx.options) })],
     then: ["the account is unchanged and the message names the safe next step", ({ fx, result }) => {
       expect(result.kind).toBe("failed");
-      expect(result.error).toBe("Account unchanged: the pane's model and session could not be confirmed. Check /status. For an empty pane, exit it and pick the account before a fresh Sol start. Save work in progress first.");
+      expect(result.error).toBe("Account unchanged: the pane's model and session could not be confirmed. Check /status. For an empty pane, exit it and pick the account before a fresh Terra start. Save work in progress first.");
       expect(result.error).not.toMatch(/[åäöÅÄÖ\u2014]/u);
       expect(fx.calls).toHaveLength(0);
       expect(fx.data).toEqual({});

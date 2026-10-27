@@ -38,16 +38,20 @@ function parseContext(value) {
   };
 }
 
+const EFFORTS = "minimal|low|medium|high|xhigh|max|ultra";
+// Codex 0.164 shows "GPT-6.1 Terra" with a space but "GPT-6.1-Sol" with a hyphen.
+const VISIBLE_MODEL_RE = new RegExp(`^(Luna Reserve|gpt-[\\d.]+ (?!(?:${EFFORTS})\\b)[a-z]+\\b|[^\\s(]+)`, "i");
+
 /** WHAT: Resolves a visible Codex model label to its wire id. WHY: Separates display text from model identity. */
 function visibleModel(value) {
   const raw = String(value || "").trim();
-  const token = raw.match(/^(Luna Reserve|[^\s(]+)/i)?.[1] || raw;
-  const lower = token.toLowerCase();
+  const token = raw.match(VISIBLE_MODEL_RE)?.[1] || raw;
+  const lower = token.toLowerCase().replace(" ", "-");
   return {
     raw,
     token,
-    id: lower === "luna reserve" ? "gpt-reserve"
-      : /^gpt-[\w.-]+$/i.test(token) ? lower
+    id: lower === "luna-reserve" ? "gpt-reserve"
+      : /^gpt-[\w.-]+$/i.test(lower) ? lower
         : token || null,
   };
 }
@@ -132,7 +136,7 @@ export function parseCodexStatus(text) {
   return status;
 }
 
-const MODEL_FOOTER_RE = /^\s*(?:•\s+)?(gpt-[\w.-]+|Luna Reserve)\s+(minimal|low|medium|high|xhigh|max|ultra)\s+·\s+.+$/i;
+const MODEL_FOOTER_RE = new RegExp(`^\\s*(?:•\\s+)?(gpt-[\\w.-]+(?: [a-z]+)??|Luna Reserve)\\s+(${EFFORTS})\\s+·\\s+.+$`, "i");
 
 function tokenCount(value) {
   const match = String(value || "").match(/^(\d+(?:\.\d+)?)\s*([km])?$/i);

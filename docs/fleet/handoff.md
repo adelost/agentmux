@@ -46,10 +46,10 @@
    Do not route mechanical builds to Claude subagents instead of available
    authorized builders. A model role creates no separate merge owner: the
    feature owner keeps delivery under the repo's required proof.
-   Codex models (Mattias, 2026-09-20, 2026-10-11): default `gpt-6.1-sol`,
+   Codex models (Mattias, 2026-10-11, 2026-10-27): default `gpt-6.1-terra`,
    never Astra; Claude and Kimi keep theirs; a pane's choice survives restart.
-   Change models only via Discord `/model sol` or `amux model PROJECT -p N
-   sol` (raw `/model` refused); dormant panes switch at their next work
+   Change models only via Discord `/model terra` or `amux model PROJECT -p N
+   terra` (raw `/model` refused); dormant panes switch at their next work
    prompt, never by a fleet wake-up. Read model and tokens from the exact
    pane; quota is paid capacity. Account moves require a reached weekly limit or a verified wind-down compact,
    verified room and the exact session. An operator-requested Codex switch also skips

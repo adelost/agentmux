@@ -24,12 +24,15 @@ import { CODEX_EXTERNAL_NAVIGATION_RULES } from "./execution-safety.mjs";
 export const CODEX_PROFILE_STATE_KEY = "codex_profile_by_pane";
 export const CODEX_MODEL_STATE_KEY = "codex_model_by_pane";
 
-// Mattias 2026-10-11: "viktigt att ingen utav de där använder Astra just nu,
-// utan att det är GPT 6.1 Sol". "sol" names the fleet's Sol.
+// Mattias 2026-10-11: no pane runs Astra. Mattias 2026-10-27 (voice to api:0):
+// every Codex pane runs GPT-6.1 Terra instead of Sol.
+/** WHAT: Resolves the model every Codex pane runs by default. WHY: Keeps launch, new sessions and account recovery on one model. */
+export const FLEET_CODEX_MODEL = "gpt-6.1-terra";
 const CODEX_MODEL_ALIASES = Object.freeze({
   astra: "gpt-6-astra",
   "gpt-6": "gpt-6-astra",
   sol: "gpt-6.1-sol",
+  terra: FLEET_CODEX_MODEL,
   "gpt-5.6": "gpt-5.6-sol",
 });
 
@@ -41,9 +44,9 @@ export function resolveCodexModelName(requested) {
 
 /** WHAT: Checks a Codex launch against Mattias's current model policy. WHY: Prevents old Astra selections from starting through wake, retry or account recovery. */
 export function allowedCodexLaunchModel(requested) {
-  const model = resolveCodexModelName(requested || "sol");
+  const model = resolveCodexModelName(requested || FLEET_CODEX_MODEL);
   return /^gpt-6-astra(?:-|$)/u.test(model)
-    ? { ok: false, reason: "Mattias's model rule forbids Astra. Use GPT-6.1 Sol; if the old session cannot compact, use amux model AGENT -p N sol xhigh --new-session." }
+    ? { ok: false, reason: "Mattias's model rule forbids Astra. Use GPT-6.1 Terra; if the old session cannot compact, use amux model AGENT -p N terra xhigh --new-session." }
     : { ok: true, model };
 }
 

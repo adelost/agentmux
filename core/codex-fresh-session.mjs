@@ -1,12 +1,12 @@
-import { selectedCodexProfile, setCodexModelOverride } from "./codex-profiles.mjs";
+import { FLEET_CODEX_MODEL, selectedCodexProfile, setCodexModelOverride } from "./codex-profiles.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { driveCodexStatus } from "./codex-status.mjs";
 import { unparkPane } from "./pane-park.mjs";
 
-/** WHAT: Builds an explicitly requested new Sol session on one idle pane. WHY: Keeps unavailable historical models from forcing paid compact retries or silent context replacement. */
+/** WHAT: Builds an explicitly requested new fleet-model session on one idle pane. WHY: Keeps unavailable historical models from forcing paid compact retries or silent context replacement. */
 export async function startFreshCodexSession({ agent, state, queue, name, pane, targetModel, targetEffort,
   statusDriver = driveCodexStatus, unpark = unparkPane }) {
-  if (targetModel !== "gpt-6.1-sol" || targetEffort !== "xhigh") throw new Error("--new-session requires sol xhigh");
+  if (targetModel !== FLEET_CODEX_MODEL || targetEffort !== "xhigh") throw new Error("--new-session requires terra xhigh");
   const lease = queue.acquireSessionLease(name, pane);
   if (!lease) throw new Error("new session blocked: a delivery holds this session");
   try {
@@ -19,13 +19,13 @@ export async function startFreshCodexSession({ agent, state, queue, name, pane, 
     const verified = await statusDriver({ agent, name, pane });
     const native = verified.status;
     if (!verified.ok || native.model?.id !== targetModel || native.model?.effort !== targetEffort || !native.session
-        || native.session === old?.sessionId) throw new Error("new Sol session did not verify its model, effort and fresh identity");
+        || native.session === old?.sessionId) throw new Error("new session did not verify its model, effort and fresh identity");
     setCodexModelOverride(state, name, pane, targetModel, targetEffort);
     const sessions = state.get("codex_session_by_pane_profile_v1", {});
     state.set("codex_session_by_pane_profile_v1", { ...sessions, [key]: { ...sessions[key], pane: key, profileId: profile.id,
       sessionId: native.session, status: "ready", model: targetModel, effort: targetEffort,
       modelTransitionBlocked: null, supersededSessionId: old?.sessionId || sessions[key]?.supersededSessionId || null } });
-    unpark({ session: name, pane, detail: `explicit verified new Sol session ${native.session}` });
+    unpark({ session: name, pane, detail: `explicit verified new session ${native.session}` });
     return { model: targetModel, effort: targetEffort, sessionId: native.session };
   } finally { lease.release(); }
 }

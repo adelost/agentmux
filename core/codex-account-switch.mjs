@@ -47,7 +47,7 @@ export async function switchCodexAccount({ agent, state, name, pane, current, ta
     : previousOverride || (context?.model ? { model: context.model, effort: context.effort ?? null } : null);
   if ((continuity || freshHandover) && (!beforeStatus.ok || !effective?.model || !beforeDirectory
       || !beforeStatus.status.session || (continuity && beforeStatus.status.session !== continuity.sessionId))) {
-    return { kind: "failed", error: "Account unchanged: the pane's model and session could not be confirmed. Check /status. For an empty pane, exit it and pick the account before a fresh Sol start. Save work in progress first." };
+    return { kind: "failed", error: "Account unchanged: the pane's model and session could not be confirmed. Check /status. For an empty pane, exit it and pick the account before a fresh Terra start. Save work in progress first." };
   }
   setCodexProfile(state, name, pane, target.id);
   if (effective?.model) setCodexModelOverride(state, name, pane, effective.model, effective.effort);

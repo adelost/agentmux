@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
 import { feature, unit, expect } from "bdd-vitest";
-import { driveCodexStatus, formatCodexStatus, parseCodexStatus } from "./codex-status.mjs";
+import { driveCodexStatus, formatCodexStatus, parseCodexPaneReading, parseCodexStatus } from "./codex-status.mjs";
+
+// Real Codex 0.164.0 screen, 27 Oct: Terra's display name has a space, Sol's a hyphen.
+const TERRA_SCREEN = readFileSync(new URL("../test/fixtures/codex-0.164-terra-status.txt", import.meta.url), "utf-8");
 
 const STATUS = `
 /status
@@ -137,6 +141,29 @@ feature("driveCodexStatus", () => {
     })],
     then: ["it times out instead of returning stale account data", (result) => {
       expect(result).toMatchObject({ ok: false, stage: "parse" });
+    }],
+  });
+});
+
+feature("Codex display names with a space", () => {
+  unit("the status box names GPT-6.1 Terra by its wire id", {
+    when: ["parsing the real Terra status box", () => parseCodexStatus(TERRA_SCREEN)],
+    then: ["the model is gpt-6.1-terra at xhigh", (status) => {
+      expect(status.model).toMatchObject({ id: "gpt-6.1-terra", effort: "xhigh", summaries: "auto" });
+    }],
+  });
+
+  unit("the footer names GPT-6.1 Terra by its wire id", {
+    when: ["reading the real Terra pane", () => parseCodexPaneReading(TERRA_SCREEN)],
+    then: ["the selection is gpt-6.1-terra at xhigh", (reading) => {
+      expect(reading.selected).toEqual({ model: "gpt-6.1-terra", effort: "xhigh", source: "codex-footer" });
+    }],
+  });
+
+  unit("an effort after the version is not read as a variant", {
+    when: ["reading an old footer without a variant", () => parseCodexPaneReading("› x\n  gpt-5.4 xhigh · ~/repo")],
+    then: ["the model stays gpt-5.4", (reading) => {
+      expect(reading.selected).toEqual({ model: "gpt-5.4", effort: "xhigh", source: "codex-footer" });
     }],
   });
 });

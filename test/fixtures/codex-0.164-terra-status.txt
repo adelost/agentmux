@@ -1,0 +1,37 @@
+/status
+
+  >_ OpenAI Codex (v0.164.0)
+
+  Visit https://chatgpt.com/settings/usage for up-to-date
+  information on rate limits and credits
+
+  Model:               GPT-6.1 Terra (reasoning xhigh, summaries auto)
+  Model provider:      openai
+  Directory:           /tmp/repo
+  Permissions:         Full Access
+  Agents.md:           ~/.codex/AGENTS.md
+  Account:             user@example.com (Plus)
+  Collaboration mode:  Default
+  Session:             01a17f76-0000-7000-8000-000000000001
+
+  Context window:      100% left (0 used / 872K)
+  5h limit:            [███████████████████░] 95% left (resets 03:25 on 28 Oct)
+  Weekly limit:        [░░░░░░░░░░░░░░░░░░░░] 0% left (resets 07:08 on 2 Nov)
+  Credits:             55696 credits
+
+
+
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  GPT-6.1 Terra xhigh · /tmp/repo
+  ? for shortcuts                                                                                                                      ⚠ 1 warning · f2 to view

@@ -10,7 +10,7 @@ export const HELP_TEXT = [
   "`/quota`: shared account quota per account, and which panes run on it",
   "`/byt <login|email>`: plan for moving the Claude panes to that account (changes nothing); `/byt <login> ok` switches",
   "`/switch`: toggle this Codex pane between account profiles 1 and 2",
-  "`/model`: show current model; Codex aliases: astra/gpt-6/sol; Claude: fable/opus/sonnet/haiku",
+  "`/model`: show current model; Codex aliases: astra/gpt-6/sol/terra; Claude: fable/opus/sonnet/haiku",
   "`/restore`: restore the model that was active before the latest downgrade",
   "`/dismiss`: dismiss blocking prompt (survey etc.)",
   "`/esc`: interrupt (send Escape)",

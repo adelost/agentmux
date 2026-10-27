@@ -13,7 +13,7 @@ export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaude
   codexModelChanger = runLockedCodexModelChange, codexModels, freshCodexStarter = startFreshCodexSession } = {}) {
   const { flags, positional } = parseFlags(args, { p: "number", help: "boolean", "new-session": "boolean" });
   if (flags.help) {
-    console.log("Usage: amux model AGENT [-p N] MODEL [EFFORT] [--new-session]\nOrdinary changes verify exact-session compact. --new-session starts sol xhigh on a stopped pane, preserves the old journal and does not replay old prompts.");
+    console.log("Usage: amux model AGENT [-p N] MODEL [EFFORT] [--new-session]\nOrdinary changes verify exact-session compact. --new-session starts terra xhigh on a stopped pane, preserves the old journal and does not replay old prompts.");
     return;
   }
   const [name, model, effort] = positional, pane = flags.p ?? 0;

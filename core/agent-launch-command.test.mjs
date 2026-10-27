@@ -32,7 +32,7 @@ feature("Mattias's October 11 Codex launch policy", () => {
     when: ["building the stopped pane's old Astra launch", () => () => buildCodexLaunchCommand({
       profileHome: "/profiles/one", model: "gpt-6-astra", effort: "xhigh",
       resumeSessionId: "11111111-1111-4111-8111-111111111111" })],
-    then: ["the launch names the Sol policy instead of starting Astra", build => expect(build).toThrow(/Mattias.*Sol/u)],
+    then: ["the launch names the Terra policy instead of starting Astra", build => expect(build).toThrow(/Mattias.*Terra/u)],
   });
 });
 

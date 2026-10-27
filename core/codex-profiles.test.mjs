@@ -13,6 +13,7 @@ import {
   prepareCodexProfile,
   resolveCatalogCodexModel,
   resolveCodexModelName,
+  allowedCodexLaunchModel,
   resolveCodexProfile,
   selectedCodexProfile,
   setCodexModelOverride,
@@ -120,10 +121,21 @@ feature("pane-local model overrides", () => {
     }],
   });
 
-  unit("the Sol shortcut resolves back to the fleet default", {
+  unit("the Sol shortcut still resolves to GPT-6.1 Sol", {
     given: ["the short Sol name", () => "sol"],
     when: ["resolving it", resolveCodexModelName],
-    then: ["it selects GPT-6.1 Sol, the fleet default since 2026-10-11", (model) => expect(model).toBe("gpt-6.1-sol")],
+    then: ["it selects GPT-6.1 Sol", (model) => expect(model).toBe("gpt-6.1-sol")],
+  });
+
+  unit("the Terra shortcut resolves to the fleet model", {
+    given: ["the short Terra name", () => "terra"],
+    when: ["resolving it", resolveCodexModelName],
+    then: ["it selects GPT-6.1 Terra, the fleet model since 2026-10-27", (model) => expect(model).toBe("gpt-6.1-terra")],
+  });
+
+  unit("a launch without a model starts the fleet model", {
+    when: ["checking an empty request", () => allowedCodexLaunchModel(null)],
+    then: ["GPT-6.1 Terra is launched", (policy) => expect(policy).toEqual({ ok: true, model: "gpt-6.1-terra" })],
   });
 
   unit("model and effort persist without affecting a neighbour", {

@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readWindow } from "./ask-ledger.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
-import { setCodexProfile, setCodexModelOverride } from "./codex-profiles.mjs";
+import { FLEET_CODEX_MODEL, setCodexProfile, setCodexModelOverride } from "./codex-profiles.mjs";
 import { parseCodexPaneReading } from "./codex-status.mjs";
 import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 
@@ -39,7 +39,7 @@ export function prepareCodexAccountHandover({ name, pane, current, target, dir, 
 export async function freshCodexAccount({ agent, state, name, pane, dir, current, target, statusDriver, handover, expectedEmail }) {
   if (!handover.ok) return { kind: "failed", error: handover.reason };
   const selected = parseCodexPaneReading(await agent.captureScreen(name, pane))?.selected;
-  if (selected?.model !== "gpt-6.1-sol" || selected.effort !== "xhigh") return { kind: "failed", error: "fresh account recovery requires observed gpt-6.1-sol xhigh" };
+  if (selected?.model !== FLEET_CODEX_MODEL || selected.effort !== "xhigh") return { kind: "failed", error: `fresh account recovery requires observed ${FLEET_CODEX_MODEL} xhigh` };
   if (await agent.isBusy(name, pane)) return { kind: "failed", error: "pane started working before fresh account recovery" };
   setCodexProfile(state, name, pane, target.id);
   await agent.restartCodex(name, pane, { profile: target, model: selected.model, effort: selected.effort, newSession: true });
