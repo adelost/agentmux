@@ -7,6 +7,7 @@ import { buildGeminiLaunchCommand, createGeminiRuntime } from "./gemini-runtime.
 import { captureGeminiPromptCursor, geminiPromptAccepted } from "./gemini-prompt-echo.mjs";
 import { generateAgentsYaml, parseConfig } from "../sync.mjs";
 import { createAgent } from "../agent.mjs";
+import { isEngineProcess } from "./tui-stall-recovery.mjs";
 
 const conversationId = "a4fade66-23c8-4002-81ea-94d4e2747db3";
 const row = value => `${JSON.stringify(value)}\n`;
@@ -66,6 +67,10 @@ feature("Gemini subscription pane on the Antigravity CLI", () => {
       expect(writes[0]).toContain(`--conversation '${conversationId}'`); expect(result.sessionId).toBe(conversationId);
       expect(state.get("gemini_session_by_pane_v1")["demo:0"]).toEqual({ sessionId: conversationId, dir: "/tmp/repo" });
     }], cleanup: ctx => rmSync(ctx.home, { recursive: true, force: true }),
+  });
+  unit("a running agy process counts as a started engine, so delivery wake accepts it", {
+    when: ["classifying the process tmux reports for a live Gemini pane", () => [isEngineProcess("agy"), isEngineProcess("bash")]],
+    then: ["agy is running, the shell is not", result => expect(result).toEqual([true, false])],
   });
   unit("source config appends Gemini after the four existing engines, before utilities", {
     when: ["generating the mixed pane plan", () => {

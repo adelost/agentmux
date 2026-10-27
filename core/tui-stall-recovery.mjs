@@ -40,7 +40,7 @@ export const isCodingPaneCommand = (command) =>
 /** WHAT: Checks whether a process is an interactive shell. WHY: Keeps restart commands behind a ready PTY. */
 export const isShellProcess = (command) => /^(bash|zsh|sh|fish|dash)$/u.test(String(command || ""));
 /** WHAT: Checks whether a pane's live process is a coding engine. WHY: Keeps running-engine detection one rule for delivery and start guards. */
-export const isEngineProcess = (command) => /^(claude|codex|kimi|kimi-code|qwen|gemini|node)$/u.test(String(command || ""));
+export const isEngineProcess = (command) => /^(claude|codex|kimi|kimi-code|qwen|agy|gemini|node)$/u.test(String(command || ""));
 
 /**
  * WHAT: Builds exact-session Claude and exact-pane recovery operations.
