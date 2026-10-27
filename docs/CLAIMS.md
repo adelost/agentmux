@@ -27,7 +27,9 @@ Measured27Oct, frozen inputs and labels in the existing claim-guard artifact dir
 | 27Oct through07:40:55Z | 687 | 426 | 62.01% | 2/50,4% |
 | 26Oct | 2522 | 1511 | 59.91% | 8/50,16% |
 
-The held-out result exceeds10%, so enforcement is unqualified.5/7 known groups caught includes the early two-key decision violation; excluding it yields4/7. The later wrong-code requests under NEXT are missed. Labels are owner judgments; the corpus unit is a canonical Discord post, which may be one chunk of a runtime turn. The installed CLI reproduces the numbers; actual bridge shadow activation still requires its ordinary safe restart.
+The held-out result exceeds10%, so enforcement is unqualified.5/7 known groups caught includes the early two-key decision violation; excluding it yields4/7. The later wrong-code requests under NEXT are missed. Labels are owner judgments; the corpus unit is a canonical Discord post, which may be one chunk of a runtime turn. The installed CLI reproduces the numbers.
+
+Actual bridge shadow verified27Oct: installed1.25.370/8c7cb365, one permittedUSR2 at08:56:34Z returned in10.603s. The two original pending jobs retained their IDs, statuses and payload hashes immediately after, with no duplicate submission observed. Three actual shadow decisions (one pass, two hold) match whole-turn hashes and unchanged Discord messages fetched with HTTP200. Evidence: `/home/adelost/lsrc/.artifacts/claim-guard-20261027/live-shadow-proof.json` and the existing `DELIVERY-RECEIPT.json`. Enforcement remains off; the task-name and state-age extensions wait for the explicitly required active claim check.
 
 After a real shadow observation, the owner may save `{algorithm,today,heldOut}` from qualified reports to private `qualification.json` and select enforce through normal environment/reload. That file does not itself change the mode. No automatic model grading, account changes or retries.
 
