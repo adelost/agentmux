@@ -18,6 +18,7 @@ export function summarizeClaims(rows, { known = null, review = null, algorithm =
   const errors = (known?.groups || []).map(group => ({
     name: group.name, kind: group.kind || "factual", detectable: group.detectable !== false,
     caught: group.detectable !== false && group.replies.some(caught),
+    strictCaught: group.detectable !== false && group.replies.filter(target => !target.decisionOnly).some(caught),
     variants: [...new Set(group.replies.map(target => target.variant).filter(Boolean))]
       .map(name => ({ name, caught: group.replies.filter(target => target.variant === name).some(caught) })),
   }));
@@ -30,12 +31,13 @@ export function summarizeClaims(rows, { known = null, review = null, algorithm =
     falseStopRate: complete ? (graded.filter(label => label.falseStop).length / (sample.length || 1)) : null,
     knownConfirmed: Boolean(known?.confirmedAt && known?.confirmationSource),
     caught: errors.filter(error => error.caught).length, errors,
+    strictCaught: errors.filter(error => error.strictCaught).length,
   };
 }
 
 /** WHAT: Checks the approved two-day activation thresholds. WHY: Prevents ungraded shadow results from becoming active speech gates. */
 export function qualifyClaims(today, heldOut) {
-  return Boolean(today?.knownConfirmed && today.errors?.length === 7 && today.caught >= 5
+  return Boolean(today?.knownConfirmed && today.errors?.length === 7 && today.caught >= 5 && today.strictCaught >= 5
     && today.algorithm && heldOut?.algorithm === today.algorithm
     && today.day !== heldOut.day && heldOut.day < today.day
     && today.reviewComplete && heldOut?.reviewComplete
