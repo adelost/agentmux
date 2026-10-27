@@ -1,9 +1,9 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 
-/** WHAT: Tells whether one file's bytes start the other's. WHY: An append-only rollout copied to another account stays a prefix of the copy that keeps growing. */
-export function isBytePrefix(older, newer) {
-  const size = statSync(older).size;
-  if (size > statSync(newer).size) return false;
+/** WHAT: Checks whether one file's bytes start the other's. WHY: An append-only rollout copied to another account stays a prefix of the copy that keeps growing. */
+export function isBytePrefix(older, newer, { bytes = statSync(older).size } = {}) {
+  const size = bytes;
+  if (!Number.isSafeInteger(size) || size < 0 || size > statSync(older).size || size > statSync(newer).size) return false;
   const left = openSync(older, "r"), right = openSync(newer, "r");
   const a = Buffer.alloc(64 * 1024), b = Buffer.alloc(64 * 1024);
   try {

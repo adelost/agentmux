@@ -5,7 +5,7 @@ import { isOwnerChannelJob } from "./ask-origin.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice, selfCompactAdmission } from "./self-compact.mjs";
 import { latestConversationActivityMs } from "./pane-activity.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
-import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
+import { captureJsonlAppendCursor, cursorForCopiedJsonl, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "./verified-compact.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { prepareCodexIdle } from "./codex-tui.mjs";
@@ -82,10 +82,13 @@ export function lastContextCompactAt(state, name, pane) {
 export function contextMaintenanceAttempt(state, name, pane, identity = null, now = Date.now()) {
   const record = state?.get?.(STATE_KEY, {})?.[paneKey(name, pane)];
   if (!record || record.status === "NOT_SENT" || (identity && record.sessionId !== identity.sessionId)) return null;
-  const files = Object.keys(record.cursor?.positions || {});
-  if (!files.length || hasWorkAfter(files, record.cursor)) return null;
-  if (record.status !== "VERIFIED" && hasJsonlEventAfterCursor(files, record.cursor, compactEvent)) {
-    const verified = { ...record, status: "VERIFIED" };
+  if (!Object.keys(record.cursor?.positions || {}).length) return null;
+  const cursor = identity?.path ? cursorForCopiedJsonl(record.cursor, identity.path) : record.cursor;
+  if (!cursor) return { ...record, status: "UNKNOWN", reason: "journal-copy-unverified" };
+  const files = Object.keys(cursor.positions);
+  if (hasWorkAfter(files, cursor)) return null;
+  if (record.status !== "VERIFIED" && hasJsonlEventAfterCursor(files, cursor, compactEvent)) {
+    const verified = { ...record, cursor, status: "VERIFIED" };
     write(state, paneKey(name, pane), verified);
     return verified;
   }
@@ -142,7 +145,13 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     } catch { /* the log is evidence, not control */ }
     return mode === "on" && outcome === "compacting" ? early : policy;
   }
-  const canAttempt = (name, pane, sessionId) => Boolean(selfRequests?.read(name, pane)) || !existing(name, pane, sessionId ? { sessionId } : null);
+  const canAttempt = (name, pane, sessionId) => {
+    if (selfRequests?.read(name, pane)) return true;
+    const target = resolveTarget(name, pane);
+    const current = target && identityFor(target.engine, target.dir);
+    const identity = current && (!sessionId || current.sessionId === sessionId) ? current : sessionId ? { sessionId } : null;
+    return !existing(name, pane, identity);
+  };
   const selfRequestSuperseded = request => selfCompactSuperseded(request, { identityFor, queue });
   const finishSelfRequest = (request, ending) => finishSelfCompactRequest(request, ending,
     { store: selfRequests, queue, identityFor, receiptFor: existing });

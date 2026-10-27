@@ -8,6 +8,7 @@
 
 import { closeSync, fstatSync, openSync, readSync, statSync } from "fs";
 import { createHash } from "node:crypto";
+import { isBytePrefix } from "./file-prefix.mjs";
 
 const DEFAULT_MAX_APPEND_BYTES = 8 * 1024 * 1024;
 const DEFAULT_SCAN_CHUNK_BYTES = 256 * 1024;
@@ -33,6 +34,18 @@ export function captureJsonlAppendCursor(kind, files) {
     catch { /* a rotating session may disappear between list and stat */ }
   }
   return { kind, positions };
+}
+
+/** WHAT: Returns a cursor on a byte-identical journal copy. WHY: Account moves keep a session id while subsequent events go to another file. */
+export function cursorForCopiedJsonl(cursor, path) {
+  const entries = Object.entries(cursor?.positions || {});
+  if (Object.hasOwn(cursor?.positions || {}, path)) return cursor;
+  if (entries.length !== 1) return null;
+  const [source, offset] = entries[0];
+  if (!Number.isSafeInteger(offset) || offset < 0) return null;
+  try {
+    return isBytePrefix(source, path, { bytes: offset }) ? { ...cursor, positions: { [path]: offset } } : null;
+  } catch { return null; }
 }
 
 function readAppendedText(file, offset, maxBytes) {

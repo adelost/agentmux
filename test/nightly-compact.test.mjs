@@ -21,7 +21,9 @@ const target = { agent: { name: "claw", backend: "tmux" }, pane: { index: 4 }, e
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "amux-night-budget-"));
   let calls = 0;
-  let observed = facts();
+  const sessionPath = join(root, "session.jsonl");
+  writeFileSync(sessionPath, "");
+  let observed = { ...facts(), sessionPath };
   const queue = createDeliveryQueue({ rootDir: join(root, "queue") });
   const ctx = { agent: { sendOnly: async () => { calls++; } } };
   const deps = { path: join(root, "night.json"), targets: [target], runtimeConfig: {}, queue, now,
@@ -44,7 +46,7 @@ feature("nightly context budget", () => {
         fx.deps.retryUnmeasured = true;
         fx.deps.policy = { ...policy, maxTokens: 80_000, idleMinutes: 0 };
         fx.change({ tokens: size });
-        fx.sessionPath = "/exact.jsonl";
+        fx.sessionPath = join(fx.root, "session.jsonl");
         if (shared) {
           fx.sessionPath = join(fx.root, "session.jsonl");
           writeFileSync(fx.sessionPath, "");

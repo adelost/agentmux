@@ -1,5 +1,5 @@
 import { component, expect, feature } from "bdd-vitest";
-import { appendFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdtempSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { contextMaintenanceAttempt, createContextMaintenance } from "./context-maintenance.mjs";
@@ -146,6 +146,80 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
       } finally { ctx.cleanup(); }
     }],
   });
+  for (const status of ["VERIFIED", "FAILED", "ATTEMPTING"]) {
+    component(`new work in a copied account journal expires the old ${status} fence`, {
+      given: ["an account move retains the session id and copies its compacted history", () => {
+        const ctx = fixture();
+        const old = ctx.identityFor().path, current = join(ctx.resolveTarget().dir, "other-account.jsonl");
+        ctx.append({ type: "session_meta", payload: { id: "one" } });
+        const cursor = captureJsonlAppendCursor("codex-compact-events-v1", [old]);
+        ctx.append({ type: "compacted" });
+        copyFileSync(old, current);
+        ctx.state.set("context_maintenance_by_pane_v1", { "claw:2": { sessionId: "one", cursor, status } });
+        ctx.identityFor = () => ({ sessionId: "one", path: current });
+        appendFileSync(current, JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "later task" } }) + "\n");
+        appendFileSync(current, JSON.stringify({ type: "event_msg", payload: { type: "token_count" } }) + "\n");
+        return ctx;
+      }],
+      when: ["both idle admission and cold maintenance inspect the current journal", ctx => ({
+        canAttempt: createContextMaintenance(ctx).canAttempt("claw", 2, "one"),
+        receipt: contextMaintenanceAttempt(ctx.state, "claw", 2, ctx.identityFor()),
+      })],
+      then: ["later work releases the previous generation's fence", ({ canAttempt, receipt }) => {
+        expect(receipt).toBeNull();
+        expect(canAttempt).toBe(true);
+      }], cleanup: ctx => ctx.cleanup(),
+    });
+  }
+  for (const status of ["FAILED", "ATTEMPTING"]) {
+    component(`an unchanged account copy retains its ${status} attempt fence`, {
+      given: ["a copied journal with no processed work or new compact receipt", () => {
+        const ctx = fixture(), old = ctx.identityFor().path, current = join(ctx.resolveTarget().dir, "copy.jsonl");
+        ctx.append({ type: "session_meta", payload: { id: "one" } });
+        const cursor = captureJsonlAppendCursor("context-maintenance-v1", [old]);
+        copyFileSync(old, current);
+        ctx.state.set("context_maintenance_by_pane_v1", { "claw:2": { sessionId: "one", cursor, status } });
+        ctx.identityFor = () => ({ sessionId: "one", path: current });
+        return ctx;
+      }],
+      when: ["idle and cold admission check the copied journal", ctx => ({
+        canAttempt: createContextMaintenance(ctx).canAttempt("claw", 2, "one"),
+        receipt: contextMaintenanceAttempt(ctx.state, "claw", 2, ctx.identityFor()),
+      })],
+      then: ["changing paths grants no extra paid attempt", ({ canAttempt, receipt }) => {
+        expect(canAttempt).toBe(false); expect(receipt?.status).toBe(status);
+      }], cleanup: ctx => ctx.cleanup(),
+    });
+  }
+  for (const mode of ["unchanged", "refused", "different-prefix", "missing-source"]) {
+    component(`a copied journal with ${mode} evidence cannot spend another compact`, {
+      given: ["a verified receipt and another account path with the same session id", () => {
+        const ctx = fixture();
+        const old = ctx.identityFor().path, current = join(ctx.resolveTarget().dir, "other-account.jsonl");
+        ctx.append({ type: "session_meta", payload: { id: "one" } });
+        const cursor = captureJsonlAppendCursor("codex-compact-events-v1", [old]);
+        ctx.append({ type: "compacted" });
+        copyFileSync(old, current);
+        ctx.state.set("context_maintenance_by_pane_v1", { "claw:2": { sessionId: "one", cursor, status: "VERIFIED" } });
+        ctx.identityFor = () => ({ sessionId: "one", path: current });
+        if (mode === "refused") {
+          appendFileSync(current, JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "refused task" } }) + "\n");
+          appendFileSync(current, JSON.stringify({ type: "event_msg", payload: { type: "task_complete" } }) + "\n");
+        }
+        if (mode === "different-prefix") writeFileSync(current, JSON.stringify({ type: "session_meta", payload: { id: "unrelated" } }) + "\n");
+        if (mode === "missing-source") unlinkSync(old);
+        return ctx;
+      }],
+      when: ["inspecting whether the existing compact is still sufficient", ctx => ({
+        canAttempt: createContextMaintenance(ctx).canAttempt("claw", 2, "one"),
+        receipt: contextMaintenanceAttempt(ctx.state, "claw", 2, ctx.identityFor()),
+      })],
+      then: ["unchanged work retains its receipt and unprovable history holds as unknown", ({ canAttempt, receipt }) => {
+        expect(canAttempt).toBe(false);
+        expect(receipt?.status).toBe(["different-prefix", "missing-source"].includes(mode) ? "UNKNOWN" : "VERIFIED");
+      }], cleanup: ctx => ctx.cleanup(),
+    });
+  }
   component("a cold first message enters an exact session with no work after compact", {
     given: ["the compacted Claude journal has only local command output and bridge metadata", () => {
       const ctx = fixture();

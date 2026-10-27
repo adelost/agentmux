@@ -179,7 +179,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     const previous = readReport(receiptPath, dateKey).panes[key];
     const retryUnmeasured = dependencies.retryUnmeasured === true && target.engine === "claude";
     const sharedOutcome = () => {
-      const record = contextMaintenanceAttempt(ctx.state, target.agent.name, target.pane.index, { sessionId: first.sessionId });
+      const record = contextMaintenanceAttempt(ctx.state, target.agent.name, target.pane.index, { sessionId: first.sessionId, path: first.sessionPath });
       const current = readNightlyCompactAttempt(path, dateKey, key);
       if (retryUnmeasured && isUnmeasuredCompact(current, first) && record?.status === "VERIFIED") return null;
       return sharedNightlyCompactOutcome(record, first);

@@ -337,7 +337,7 @@ function getContextFromCodexJsonl(paneDir) {
     turnCtx = headTurnContext(file);
     if (turnCtx) modelSource = "head";
   }
-  return { ...usage, sessionId: readCodexMeta(file)?.id ?? null, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null,
+  return { ...usage, path: file, sessionId: readCodexMeta(file)?.id ?? null, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null,
     modelSource, lastCompactAt };
 }
 

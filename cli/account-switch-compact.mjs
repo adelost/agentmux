@@ -44,7 +44,7 @@ export async function observeSwitchContext(ctx, entry, {
   const facts = await observe(ctx, target, { queue, now }).catch(() => null);
   if (!facts) return { target, facts: null, compactRefusal: "observation-unavailable", compacted: false };
   const prior = facts.sessionId
-    ? contextMaintenanceAttempt(ctx.state, entry.agentName, entry.pane, { sessionId: facts.sessionId })
+    ? contextMaintenanceAttempt(ctx.state, entry.agentName, entry.pane, { sessionId: facts.sessionId, path: facts.sessionPath })
     : null;
   const previous = readNightlyCompactAttempt(reportDirectory(now()), compactDayKey(now()), `${entry.agentName}:${entry.pane}`);
   const unmeasured = isUnmeasuredCompact(previous, facts);
