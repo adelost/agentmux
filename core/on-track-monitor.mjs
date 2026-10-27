@@ -73,12 +73,12 @@ export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHu
         if (!["queued", "unknown", "attempting"].includes(receipt.status)) continue;
         const job = await lookup(receipt.key, receipt.jobId);
         if (!job) continue;
-        if (receipt.transportStatus === job.status && receipt.jobId === job.id) continue;
+        const status = job.status === "acknowledged" ? "delivered" : ["cancelled", "dead_letter"].includes(job.status) ? "not-delivered" : "queued";
+        // A transport step inside "queued" changes nothing a review reads, and each save rewrites the whole on-track file.
+        if (receipt.status === status && receipt.jobId === job.id) continue;
         mutate(next => {
           const actual = Object.values(next.projects).map(p => p.cycle).find(c => c.id === cycle.id) || next.history.find(c => c.id === cycle.id);
-          actual.deliveries[role] = { ...receipt, jobId: job.id, transportStatus: job.status,
-            status: job.status === "acknowledged" ? "delivered" : ["cancelled", "dead_letter"].includes(job.status) ? "not-delivered" : "queued",
-            acknowledgedAt: job.acknowledgedAt || null };
+          actual.deliveries[role] = { ...receipt, jobId: job.id, transportStatus: job.status, status, acknowledgedAt: job.acknowledgedAt || null };
         });
       }
     }

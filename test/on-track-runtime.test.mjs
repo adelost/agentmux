@@ -51,3 +51,27 @@ feature("normal on-track queue and CLI receipt seam", () => {
     }],
   });
 });
+
+feature("on-track state writes during a delivery", () => {
+  // defect: every transport step of a reminder rewrote the whole on-track state (236 MB, 8 MB/s on 27 Oct).
+  component("transport steps between queued and acknowledged leave the state file alone", {
+    when: ["a reminder passes through its transport steps", async () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-on-track-writes-"));
+      const project = { id: "fixture", root, ledger: "TASKS.md", askAgents: ["fixture"], reviewer: "fixture:0", dispatcher: "fixture:1", livePaths: ["open"] };
+      const state = createState(join(root, "state.json")), queue = createDeliveryQueue({ rootDir: join(root, "queue") });
+      const runtime = createOnTrackRuntime({ state, queue, projects: () => [project], snapshot: () => ({ tip: "abc", asks: [] }) });
+      await runtime.tick();
+      const reminder = queue.list("fixture", 0)[0], updates = vi.spyOn(state, "updateKey");
+      for (const status of ["delivering", "submitted"]) { queue.update(queue.read("fixture", 0, reminder.id), { status }); await runtime.tick(); }
+      const duringTransport = updates.mock.calls.length;
+      queue.update(queue.read("fixture", 0, reminder.id), { status: "acknowledged", acknowledgedAt: Date.now() });
+      await runtime.tick();
+      return { duringTransport, after: updates.mock.calls.length, delivered: state.get(ON_TRACK_STATE).projects.fixture.cycle.deliveries.reminder.status };
+    }],
+    then: ["only the final acknowledgement is written", r => {
+      expect(r.duringTransport).toBe(0);
+      expect(r.after).toBe(1);
+      expect(r.delivered).toBe("delivered");
+    }],
+  });
+});
