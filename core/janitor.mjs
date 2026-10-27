@@ -14,18 +14,19 @@ import {
   appendSessionHousekeepingAudit,
   defaultSessionHousekeepingAuditPath,
 } from "./session-housekeeping-audit.mjs";
+import { codexSessionDirs } from "./codex-profiles.mjs";
 
 const DEFAULT_RETENTION_DAYS = 14;
 const DEFAULT_OVERSIZED_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_LINE_BYTES = 100 * 1024;
 
-/** WHAT: Returns provider session roots covered by housekeeping. WHY: Keeps Claude, Codex, and Kimi retention behavior aligned. */
+/** WHAT: Returns provider session roots covered by housekeeping. WHY: Keeps Claude, every Codex account, and Kimi retention aligned. */
 export function defaultSessionRoots(home = process.env.HOME) {
-  return [
+  return [...new Set([
     join(home, ".claude", "projects"),
-    join(home, ".codex", "sessions"),
+    ...codexSessionDirs({ ...process.env, HOME: home }),
     join(home, ".kimi-code", "sessions"),
-  ];
+  ])];
 }
 
 function sameFile(left, right) {

@@ -26,12 +26,13 @@ const COPY_CHUNK = 4 * MIB;
 export const TRIM_STRATEGIES = Object.freeze([
   Object.freeze({
     provider: "claude",
-    pathPart: "/.claude/projects/",
+    path: /\/\.claude\/projects\//u,
     marker: Buffer.from(',"type":"system","subtype":"compact_boundary"'),
   }),
   Object.freeze({
     provider: "codex",
-    pathPart: "/.codex/sessions/",
+    // Every account: ~/.codex/sessions and ~/.config/agent/codex-profiles/<id>/sessions.
+    path: /\/(?:\.codex|codex-profiles\/[^/]+)\/sessions\//u,
     marker: Buffer.from(',"type":"compacted","payload":{"message":'),
   }),
 ]);
@@ -71,7 +72,7 @@ export function liveNativeSessionIds({ procRoot = "/proc" } = {}) {
 
 function strategyFor(path) {
   const normalized = path.replaceAll("\\", "/");
-  return TRIM_STRATEGIES.find((strategy) => normalized.includes(strategy.pathPart)) || null;
+  return TRIM_STRATEGIES.find((strategy) => strategy.path.test(normalized)) || null;
 }
 
 function sessionIdFor(path) {

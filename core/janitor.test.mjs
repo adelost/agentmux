@@ -152,13 +152,15 @@ feature("trimJsonlBuffer", () => {
 });
 
 feature("trimAgedSessions", () => {
-  unit("covers Claude, Codex, and Kimi session roots", {
+  // Mattias 27 Oct: housekeeping covers every Codex account (codex-profiles/2 held 9.8 GB untrimmed).
+  unit("covers Claude, every Codex account, and Kimi session roots", {
     given: ["an isolated home", () => "/tmp/amux-home"],
     when: ["resolving defaults", (home) => defaultSessionRoots(home)],
     then: ["all provider journals are included", (roots) => {
       expect(roots).toEqual([
         "/tmp/amux-home/.claude/projects",
         "/tmp/amux-home/.codex/sessions",
+        "/tmp/amux-home/.config/agent/codex-profiles/2/sessions",
         "/tmp/amux-home/.kimi-code/sessions",
       ]);
     }],

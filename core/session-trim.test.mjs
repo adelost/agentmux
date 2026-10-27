@@ -11,12 +11,12 @@ const OLD = new Date(NOW - 60 * 60_000);
 const EMPTY_IDS = new Set();
 const refreshEmpty = () => new Set();
 
-function fixture(provider, lines) {
+function fixture(provider, lines, codexHome = [".codex"]) {
   const root = mkdtempSync(join(tmpdir(), "amux-session-trim-"));
   const id = "019f5d43-9b4b-7e42-b8bd-9de61683501b";
   const dir = provider === "claude"
     ? join(root, ".claude", "projects", "-workspace")
-    : join(root, ".codex", "sessions", "2026", "07", "22");
+    : join(root, ...codexHome, "sessions", "2026", "07", "22");
   mkdirSync(dir, { recursive: true });
   const name = provider === "claude" ? `${id}.jsonl` : `rollout-now-${id}.jsonl`;
   const path = join(dir, name);
@@ -53,6 +53,20 @@ feature("checkpoint-aware provider session trim", () => {
         expect(audit.map((row) => row.phase)).toEqual(["intent", "completed"]);
         expect(audit.every((row) => row.operation === "replace" && row.path === ctx.path)).toBe(true);
       } finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
+
+  // defect: a second account's rollouts (codex-profiles/2) were never trimmed, 9.8 GB on 27 Oct.
+  component("a second Codex account's rollout is trimmed like the first", {
+    given: ["a stable compacted rollout under codex-profiles/2", () => fixture("codex", [
+      JSON.stringify({ timestamp: "t0", type: "session_meta", payload: { id: "019f5d43-9b4b-7e42-b8bd-9de61683501b", cwd: "/work" } }),
+      JSON.stringify({ timestamp: "t1", type: "response_item", payload: { text: "discard-me".repeat(200) } }),
+      JSON.stringify({ timestamp: "t2", type: "compacted", payload: { message: "", replacement_history: [{ type: "message", content: "keep-summary" }] } }),
+    ], [".config", "agent", "codex-profiles", "2"])],
+    when: ["trimming it", (ctx) => trimCheckpointedSession(ctx.path, { nowMs: NOW, liveIds: EMPTY_IDS, refreshLiveIds: refreshEmpty })],
+    then: ["it is trimmed as a Codex journal", (result, ctx) => {
+      try { expect(result).toMatchObject({ status: "trimmed", provider: "codex" }); }
+      finally { rmSync(ctx.root, { recursive: true, force: true }); }
     }],
   });
 
