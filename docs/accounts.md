@@ -57,7 +57,8 @@ working pane finishes its turn and the quota park compacts it there; nothing is
 cut off mid-turn. The floor lifts by itself on the first reading with more than
 the floor left, after the reset or a free reset, and parked panes then get the
 same-session recovery prompt. A pane that quota recovery moved to an account
-with room is judged by the account it runs on now.
+with room is judged by the account it runs on now. Messages the floor holds do not stop `accounts rotate`
+from compacting and moving a large pane; they follow it and are delivered on the new account.
 
 A Codex account past a spent 5h or week window keeps working on its paid
 credit balance, and Codex refuses nothing while credits last. amux holds new

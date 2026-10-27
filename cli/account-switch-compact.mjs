@@ -13,6 +13,8 @@ import { nightlyCompactDecision, isUnmeasuredCompact } from "../core/nightly-com
 import { contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
 import { hasEmptyClaudeEpoch } from "../core/claude-empty-epoch.mjs";
+import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
+import { isHeldByPaneQuotaFloor } from "../core/delivery-wake.mjs";
 
 // Statuses whose compact receipt is verified, whatever size the summary landed at, plus
 // Claude's "Not enough messages to compact": no context, so no cache for the switch to lose,
@@ -30,6 +32,19 @@ async function mirrorSwitchCompact(ctx, target, command) {
   if (!receipts?.length) throw new Error("compact-mirror-unverified");
 }
 
+/** WHAT: Counts the pane's open jobs that are live delivery. WHY: A prompt the old account's quota floor holds
+ *  follows the pane to the account with room (account-rotation liveDeliveryCount), so it must not block the compact
+ *  that move needs (lsrc:0 and skyvw:0, 27 Oct: 61 and 1 floor-held prompts kept both on Claude V). Unknown stays null. */
+function liveQueued(queue, agentName, pane, queued) {
+  if (queued === 0 || typeof queue?.list !== "function") return queued;
+  try {
+    const open = queue.list(agentName, pane).filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status));
+    return open.filter((job) => !isHeldByPaneQuotaFloor(job, open)).length;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * WHAT: Reads one pane's context size, idle time and compact admission without waking it.
  * WHY: Keeps the switch plan on the same facts the nightly compact would act on.
@@ -41,8 +56,9 @@ export async function observeSwitchContext(ctx, entry, {
   const targets = await discover(ctx, [entry.agent]).catch(() => []);
   const target = targets.find((candidate) => candidate.pane.index === entry.pane && candidate.engine === "claude");
   if (!target) return { target: null, facts: null, compactRefusal: "compact-target-missing", compacted: false };
-  const facts = await observe(ctx, target, { queue, now }).catch(() => null);
-  if (!facts) return { target, facts: null, compactRefusal: "observation-unavailable", compacted: false };
+  const observed = await observe(ctx, target, { queue, now }).catch(() => null);
+  if (!observed) return { target, facts: null, compactRefusal: "observation-unavailable", compacted: false };
+  const facts = { ...observed, queued: liveQueued(queue, entry.agentName, entry.pane, observed.queued) };
   const prior = facts.sessionId
     ? contextMaintenanceAttempt(ctx.state, entry.agentName, entry.pane, { sessionId: facts.sessionId, path: facts.sessionPath })
     : null;

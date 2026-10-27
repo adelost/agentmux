@@ -9,6 +9,25 @@ const target = { agent: { name: "lsrc" }, pane: { index: 0 } };
 const runReturning = (row) => async () => ({ rows: [{ pane: "lsrc:0", ...row }] });
 
 feature("the compact step of an account switch", () => {
+  // lsrc:0 and skyvw:0, 27 Oct: 61 and 1 prompts held by Claude V's quota floor kept both large contexts from
+  // compacting, so rotate could never move them to an account with room.
+  const floorHeld = { status: "pending", costHold: true, attempts: 41,
+    lastReason: "wake-refused:quota-floor: Claude V has 1 % of its week left (floor 3 %)" };
+  for (const [name, jobs, refusal] of [
+    ["prompts held only by the quota floor do not block it", [floorHeld, { status: "pending" }], null],
+    ["a prompt the floor does not hold still blocks it", [{ status: "pending" }], "delivery-pending-or-unknown"],
+  ]) {
+    component(`the switch compact: ${name}`, {
+      given: ["a large idle Claude pane and its queue", () => ({ jobs, facts: { engine: "claude", backend: "tmux",
+        running: true, sessionId: "s", sessionPath: "/nonexistent/s.jsonl", status: "idle", composerEmpty: true,
+        queued: jobs.length, model: "opus", effort: "high", tokens: 380_000, idleMs: 3_600_000 } })],
+      when: ["the rotation observes the pane", ({ jobs, facts }) => observeSwitchContext(
+        { deliveryQueue: { list: () => jobs }, state: {} }, { agent: {}, agentName: "lsrc", pane: 0 },
+        { discover: async () => [{ engine: "claude", agent: {}, pane: { index: 0 } }], observe: async () => facts,
+          policy: { maxTokens: 150_000 } })],
+      then: ["only live delivery refuses the compact", (context) => expect(context.compactRefusal).toBe(refusal)],
+    });
+  }
   for (const newWork of [false, true]) {
     component(`a manual compact with missing size ${newWork ? "cannot hide new work" : "can restart an idle pane"}`, {
       given: ["a real compact boundary, summary and local command receipts without a new usage block", () => {
