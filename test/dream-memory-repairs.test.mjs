@@ -129,7 +129,7 @@ feature("Dream gives memory warnings an actor without giving the model write aut
         writeFileSync(join(fx.root, fx.file), fx.original + "- A newer verified fact.\n");
         return result(args);
       };
-      await expect(fx.run()).rejects.toThrow("dream-curator-touched-memory"); return fx;
+      await fx.run(); return fx;
     }],
     then: ["the newer authored bytes survive", fx => {
       expect(readFileSync(join(fx.root, fx.file), "utf8")).toBe(fx.original + "- A newer verified fact.\n");

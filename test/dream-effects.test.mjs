@@ -27,10 +27,15 @@ it("accepts native Codex completion with dynamic shell arguments when memory is 
     memPath: join(root, "memory", `${dateKey}.md`), quality: { model: "gpt-6.1-sol", effort: "xhigh" }, identityFor: () => ({ path, sessionId }) }).terminal).toBeTruthy();
 });
 
-it("rejects actual memory modification even when no script reveals the write", () => {
+it("lets the curator change the daily memory", () => {
   const path = join(temporary(), "memory.md");
   writeFileSync(path, "Existing human context.\n");
   const before = readFileSync(path, "utf8");
-  writeFileSync(path, "Overwritten by the curator.\n");
-  expect(judgeDreamMemory(before, readFileSync(path, "utf8"), { ownerTexts: [], memPath: path }).ok).toBe(false);
+  writeFileSync(path, "Rewritten by the curator.\n");
+  expect(judgeDreamMemory(before, readFileSync(path, "utf8")).ok).toBe(true);
+});
+
+it("still refuses a corrupted controller marker", () => {
+  const block = "<!-- amux-dream-summary:2026-10-24 -->\nx\n<!-- /amux-dream-summary:2026-10-24 -->\n";
+  expect(judgeDreamMemory(block, "<!-- amux-dream-summary:2026-10-24 -->\nbroken\n")).toEqual({ ok: false, reason: "dream-marker" });
 });

@@ -44,6 +44,38 @@ feature("memory bank", () => {
     }],
   });
 
+  component("the index MEMORY.md is committed with memory/ and other root files are left alone", {
+    given: ["an edited index, an edited note and an edited root file", () => {
+      const root = repo();
+      writeFileSync(join(root, "MEMORY.md"), "- [old](memory/old.md)\n");
+      git(root, "add", "MEMORY.md");
+      git(root, "commit", "-q", "-m", "index");
+      writeFileSync(join(root, "MEMORY.md"), "- [old](memory/old.md)\n- [care](memory/references/care-2026-10-26.md)\n");
+      writeFileSync(join(root, "memory", "old.md"), "> summary: old, edited\n");
+      writeFileSync(join(root, "notes.txt"), "someone else's work\n");
+      return root;
+    }],
+    when: ["banking", (root) => ({ root, result: bankMemory(root) })],
+    then: ["the index and the note are in one commit; notes.txt is still modified", ({ root, result }) => {
+      expect(result.banked).toBe(2);
+      expect(git(root, "show", "--name-only", "--format=", "HEAD").split("\n").sort()).toEqual(["MEMORY.md", "memory/old.md"]);
+      expect(git(root, "status", "--porcelain")).toBe("M notes.txt");
+    }],
+  });
+
+  component("a lone uncommitted MEMORY.md is banked", {
+    given: ["only the index changed", () => {
+      const root = repo();
+      writeFileSync(join(root, "MEMORY.md"), "- [care](memory/references/care-2026-10-26.md)\n");
+      return root;
+    }],
+    when: ["banking", (root) => ({ root, result: bankMemory(root) })],
+    then: ["the index is committed", ({ root, result }) => {
+      expect(result.banked).toBe(1);
+      expect(git(root, "show", "--name-only", "--format=", "HEAD")).toBe("MEMORY.md");
+    }],
+  });
+
   component("a secret-shaped added line stops the commit and is reported without its value", {
     given: ["a note with a pasted key", () => {
       const root = repo();

@@ -2,32 +2,22 @@ import { readDreamOwnerResult } from "./dream-owner.mjs";
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function terminalReceipt(response, owner, expected) {
-  const source = owner.engine === "codex" ? "codex-jsonl" : "jsonl";
-  const last = response?.items?.at(-1);
-  return response?.source === source && last?.type === "text"
-    && String(last.content || "").trim() === expected;
-}
+/** WHAT: Stores how often the controller looks for the curator's file. WHY: Keeps a wait of hours from flooding the pane or the log. */
+export const DREAM_POLL_MS = 60_000;
 
-/** WHAT: Checks the exact final reply, valid product and idle state. WHY: Prevents commentary from blocking completion or a quoted/screen-only receipt from authorizing it. */
+/** WHAT: Reads the curator's result file once a minute until the deadline. WHY: Keeps the file the only receipt, so a slow night or busy pane never loses a digest. */
 export async function waitForDreamOwnerResult({
-  ctx, owner, prompt, outputPath, dateKey, runId, sourceSha256,
-  attempts = 450, pollMs = 2_000, sleep = wait, getStatus = null,
+  ctx, owner, outputPath, dateKey, runId, sourceSha256, deadlineMs,
+  pollMs = DREAM_POLL_MS, sleep = wait, nowMs = Date.now, getStatus = null,
 }) {
-  const expected = `DREAM_OK ${dateKey} ${runId}`;
-  let last = { ok: false, reason: "dream-output-missing" };
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    last = readDreamOwnerResult(outputPath, dateKey, runId, owner, sourceSha256);
-    if (last.ok) {
-      const busy = await ctx.agent.isBusy(owner.agent, owner.pane).catch(() => true);
-      const response = await ctx.agent.getResponseStreamWithRaw(owner.agent, owner.pane, prompt).catch(() => null);
-      if (!busy && terminalReceipt(response, owner, expected)) return last;
+  for (;;) {
+    const result = readDreamOwnerResult(outputPath, dateKey, runId, owner, sourceSha256);
+    if (result.ok) return result;
+    if (nowMs() >= deadlineMs) {
+      const limited = getStatus && await getStatus(owner).catch(() => "unknown") === "limited"
+        && !await ctx.agent.isBusy(owner.agent, owner.pane).catch(() => true);
+      return { ok: false, reason: limited ? "dream-owner-limited" : result.reason };
     }
-    if (getStatus && await getStatus(owner).catch(() => "unknown") === "limited"
-        && !await ctx.agent.isBusy(owner.agent, owner.pane).catch(() => true)) {
-      return { ok: false, reason: "dream-owner-limited" };
-    }
-    if (attempt + 1 < attempts) await sleep(pollMs);
+    await sleep(pollMs);
   }
-  return { ok: false, reason: last.reason || "dream-owner-response-missing" };
 }

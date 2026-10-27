@@ -8,9 +8,8 @@ it("preserves explicit historical-import authority through the real command rout
   expect(flags).toMatchObject({ recover: "/isolated/original.json", "source-sha256": "a".repeat(64), "import-historical": true, dry: true });
 });
 
-it("routes setup-care as configuration instead of starting a nightly curation", async () => {
-  const flags = await dispatch(["dream", "--setup-care", "--care-root", "/private/fixed", "--care-reference", "memory/references/source.md"], {});
-  expect(flags).toMatchObject({ "setup-care": true, "care-root": "/private/fixed", "care-reference": "memory/references/source.md" });
+it("no longer accepts setup-care, the sandbox configuration", async () => {
+  await expect(dispatch(["dream", "--setup-care"], {})).rejects.toThrow("Unknown dream argument");
 });
 
 it("refuses unknown Dream arguments before invoking the controller", async () => {

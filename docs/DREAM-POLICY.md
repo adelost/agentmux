@@ -99,23 +99,26 @@ Only the selected, exactly receipted product can enter memory.
    channel. Only after Discord acknowledges it is the same instruction sent to
    the pane. The ordinary best-effort mirror is disabled for this send so the
    prompt appears exactly once.
-7. The pane may read today's and yesterday's memory, but writes only an isolated
-   per-run summary file. The prompt treats journal text as untrusted data and
-   forbids delegation or model changes.
-8. Require all three receipts: bounded valid output, exact final journal-text
-   `DREAM_OK` for this run, and idle completion. Earlier working commentary is
-   not part of the final reply; a later action or screen-only match is not a
-   completion receipt. Codex may write model context before the user prompt;
-   accept it only with matching native task-start, context and completion turn
-   IDs. An earlier unrelated context never proves this task's model. Audit
-   tool invocations from the exact original native
-   prompt through its terminal reply, not later independent turns or read
-   results. Refuse curator memory writes, including writes later restored.
-   Preserve current notes outside the Dream block, including inserts and
-   corrections in the middle of the file. The exact protected block must
-   remain unchanged; malformed, duplicated or changed markers refuse commit.
-   New packets pin the block baseline and actual read time alongside the
-   original whole-file hash. Other panes' legitimate edits are not hash conflicts.
+7. The pane writes the result file first, then may also write `memory/`,
+   `MEMORY.md` and `memory/references/` in the workspace with ordinary file
+   tools (Mattias, 27 Oct 2026, via api:0). There is no sandbox and no
+   write audit. The prompt treats journal text as untrusted data and forbids
+   delegation or model changes.
+8. A queued prompt is not a sent prompt. When the send reports a job that is
+   still pending, the controller follows that job in the delivery queue once a
+   minute until it is submitted. The valid result file for this run id is the
+   one receipt: the controller reads it once a minute until 12:00 Stockholm
+   time on the Dream date (at least 15 minutes for a late catch-up) and
+   publishes the moment it is valid. It does not require the final reply
+   `DREAM_OK`, an idle pane, journal proof, a tool-call audit or compact proof
+   after the file exists. At 12:00 a job that never left the queue is removed
+   from it, a job already submitted is left alone, and the failure notice
+   to Discord carries the reason (`dream-owner-prompt-pending` or
+   `dream-output-missing`). Preserve current notes outside the Dream block,
+   including inserts and corrections in the middle of the file. Only a
+   malformed or duplicated controller marker refuses the commit. New packets
+   pin the block baseline and the original whole-file hash; other panes'
+   legitimate edits are not hash conflicts.
 9. The controller publishes the validated result without replacement as a
    read-only `memory/dream/DATE-RUN.md` snapshot, then atomically inserts its
    hash-bound link into the one marked daily Dream block. Only then are pane
@@ -131,8 +134,10 @@ point to lint, never silently discarded. These bytes share the96KiB input
 budget. Warnings alone can justify the one ordinary curator turn; clean lint
 and no new work leave the curator untouched.
 
-The model still writes only its isolated result, not memory or controller
-receipts. It may finish the same result with an optional footer:
+The model writes its result and, from 27 Oct 2026, may write memory files
+directly; the repair path stays safe because it checks exact hashes again before
+any write and refuses a target that changed. It may finish the same result with
+an optional footer:
 
 ````text
 ```amux-memory-repairs
@@ -159,8 +164,7 @@ The controller preserves the raw model product as `.curator.md`, its repair
 plan/outcomes as `.memory-repair.json`, and normalizes the final `.summary.md`
 to human text. Both artifacts remain beside the original Dream input. The
 normalized hash makes crash recovery idempotent without another model turn.
-Curator writes to these controller artifacts are refused by the existing
-tool-write audit. The human product, including unresolved questions, remains
+The human product, including unresolved questions, remains
 subject to the ordinary60-line/12KiB snapshot limit; the curator uses30lines/
 4KiB to reserve space. A missing lesson, such as Isabella's, becomes an
 explicit question to Mattias. Known archive/bank findings retain their existing
@@ -245,22 +249,23 @@ amux dream --recover /absolute/path/DATE-RUN.json --source-sha256 SHA --dry
 
 Removing `--dry` finishes through the normal compare-before-write, atomic block
 and receipt path. It never starts a pane, compacts, sends a prompt, runs nightly
-maintenance or buys another model turn. It requires the original input hash,
-same configured original owner/session/model/effort, valid isolated output and
-the original exact native terminal reply. Today's busy state and later work
-are not evidence against that already completed task. The protected block
-baseline and curator-write audit apply just as in normal commit, unless a
-durable controller commit intent already proves completion.
+maintenance or buys another model turn. It requires the original input hash
+and a valid result file for that run; the owner is read from the input. A
+missing compact record, journal proof, terminal reply or memory snapshot does
+not block it. Only an explicit `--import-historical` still reads the original
+journal. A malformed controller marker blocks the commit unless a durable
+controller commit intent already proves completion.
 A newer activity receipt blocks recovery; a validated same-run result
-is already complete and is not written again.
+is already complete and is not written again. After a non-dry recovery
+the controller runs `amux memory bank`, so the digest, the curator's care files
+and `MEMORY.md` are committed without waiting for the nightly script.
 
 New input packets pin the original workspace and pre-run daily-memory SHA.
 Older packets require `--workspace PATH --memory-sha256 PRE_RUN_SHA`. That hash
 must come from evidence captured before curation, never from hashing whatever
 the memory file contains now. Existing format-two packets without a stored
-block baseline can recover only into an absent Dream block after the original
-native task and curator-write audit succeed. They cannot replace an existing
-block. Older format-one packets keep their whole-file hash fence. Missing
+block baseline can recover only into an absent Dream block. They cannot
+replace an existing block. Older format-one packets keep their whole-file hash fence. Missing
 original evidence means stop. Recovery never fabricates a preimage hash or
 queue acknowledgement and never reruns nightly maintenance. Original unreadable
 sources and maintenance failures remain separate from a recovered digest.
@@ -271,7 +276,8 @@ Nightly `amux memory lint` remains read-only. A verified night first archives
 the day it covered, with the night's summary in that day's stub. Before lint,
 `amux memory archive --apply` moves other finished oversized daily files
 byte-for-byte to `memory/archive/daily/` and leaves a stub; after it, `amux
-memory bank` commits `memory/` locally (secret scan first, never push). Neither
+memory bank` commits `memory/` and the index `MEMORY.md` locally (secret scan
+first, never push). Neither
 uses a model. See [memory](memory.md).
 Automatic `amux memory compact` is retired: it previously used a hidden
 one-shot model process. The command now supports `--dry` for inspection and
@@ -283,9 +289,14 @@ fails closed before touching git or memory if asked to rewrite files.
   judgment from the operator.
 - Waking every pane spends context in every runtime and multiplies failure
   points.
-- Letting the selected model edit the daily memory directly grants more write
-  authority than necessary. Isolated output plus a controller-owned atomic
-  insert is narrower and auditable.
+- Letting the selected model edit the daily Dream block directly would let it
+  corrupt the controller's evidence, so that block stays a controller-owned
+  atomic insert. From 27 Oct 2026 the curator may still write the rest of
+  `memory/`, `MEMORY.md` and `memory/references/`. On 27 Oct 2026 the night
+  failed at 04:21 because a queued prompt counted as sent and the 15-minute
+  wait ended; the prompt entered the pane at 06:28Z. The sandbox, write audit
+  and journal, final-reply and compact proofs could each have refused a
+  finished night as well, so the valid result file is now the receipt.
 - Treating command delivery as proof of compaction risks summarizing stale
   context. The engine journal boundary is the receipt.
 - Silent truncation creates a false receipt. Omitted panes stay explicit and

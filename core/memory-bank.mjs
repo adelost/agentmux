@@ -1,10 +1,11 @@
 // Nightly local commit of the private memory tree. It is the durability actor:
 // notes that only live in the working tree are one bad write away from being
-// lost. It commits memory/ paths only, never touches other staged work in the
-// shared index and never pushes (Mattias 2026-08-04 refused automatic
+// lost. It commits memory/ and the index MEMORY.md only, never touches other
+// staged work in the shared index and never pushes (Mattias 2026-08-04 refused automatic
 // publishing of daily files without a secret review).
 
 import { spawnSync } from "child_process";
+import { existsSync } from "fs";
 import { join } from "path";
 import { tryLockDir } from "./dir-lock.mjs";
 
@@ -58,10 +59,16 @@ export function scanAddedSecrets(diff) {
 
 const isGitRepo = (workspace) => git(workspace, ["rev-parse", "--is-inside-work-tree"], { allowFailure: true }).stdout.trim() === "true";
 
+/** WHAT: Lists the paths banking covers. WHY: Keeps the curator's index lines in MEMORY.md as durable as the notes, without naming a file git has never seen. */
+function bankPaths(workspace) {
+  const index = existsSync(join(workspace, "MEMORY.md")) || git(workspace, ["ls-files", "--", "MEMORY.md"]).stdout.trim();
+  return index ? ["memory/", "MEMORY.md"] : ["memory/"];
+}
+
 /** WHAT: Collects uncommitted memory paths. WHY: Keeps lint and the nightly run on the same durability backlog. */
 export function pendingMemoryPaths(workspace) {
   if (!isGitRepo(workspace)) return null;
-  const out = git(workspace, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "memory/"]).stdout;
+  const out = git(workspace, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...bankPaths(workspace)]).stdout;
   return nulList(out).filter((entry) => /^.. /.test(entry)).map((entry) => entry.slice(3));
 }
 
@@ -72,18 +79,19 @@ export function bankMemory(workspace, { dryRun = false, message } = {}) {
   if (!pending.length) return { workspace, banked: 0, files: [] };
   if (dryRun) return { workspace, dryRun: true, files: pending };
 
+  const paths = bankPaths(workspace);
   const gitDir = git(workspace, ["rev-parse", "--absolute-git-dir"]).stdout.trim();
   const release = tryLockDir(join(gitDir, "amux-memory-bank.lock"), { staleMs: LOCK_STALE_MS });
   if (!release) return { workspace, skipped: "bank-already-running", files: pending };
   try {
-    const before = new Set(nulList(git(workspace, ["diff", "--cached", "--name-only", "-z", "--", "memory/"]).stdout));
-    git(workspace, ["add", "-A", "--", "memory/"]);
-    const staged = nulList(git(workspace, ["diff", "--cached", "--name-only", "-z", "--", "memory/"]).stdout);
+    const before = new Set(nulList(git(workspace, ["diff", "--cached", "--name-only", "-z", "--", ...paths]).stdout));
+    git(workspace, ["add", "-A", "--", ...paths]);
+    const staged = nulList(git(workspace, ["diff", "--cached", "--name-only", "-z", "--", ...paths]).stdout);
     const unstageOurs = () => {
       const ours = staged.filter((path) => !before.has(path));
       if (ours.length) git(workspace, ["reset", "-q", "--", ...ours], { allowFailure: true });
     };
-    const hits = scanAddedSecrets(git(workspace, ["diff", "--cached", "-U0", "--no-color", "--no-ext-diff", "--", "memory/"]).stdout);
+    const hits = scanAddedSecrets(git(workspace, ["diff", "--cached", "-U0", "--no-color", "--no-ext-diff", "--", ...paths]).stdout);
     if (hits.length) {
       unstageOurs();
       return { workspace, skipped: "secret-pattern", hits, files: staged };
@@ -91,7 +99,7 @@ export function bankMemory(workspace, { dryRun = false, message } = {}) {
     if (!staged.length) return { workspace, banked: 0, files: [] };
     const subject = message || `chore(memory): bank ${staged.length} file(s)`;
     try {
-      git(workspace, ["commit", "--only", "-q", "-m", subject, "--", "memory/"]);
+      git(workspace, ["commit", "--only", "-q", "-m", subject, "--", ...paths]);
     } catch (error) {
       unstageOurs();
       throw error;

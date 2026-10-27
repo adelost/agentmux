@@ -7,10 +7,8 @@ export function protectedDreamBlocks(memory) {
   return blocks.map(block => block[0]);
 }
 
-/** WHAT: Checks daily-memory effects during curation. WHY: Prevents curator writes regardless of tool syntax; the controller alone writes the day. */
-export function judgeDreamMemory(before, current) {
-  try {
-    if (JSON.stringify(protectedDreamBlocks(before)) !== JSON.stringify(protectedDreamBlocks(current))) return { ok: false, reason: "dream-marker" };
-  } catch { return { ok: false, reason: "dream-marker" }; }
-  return before === current ? { ok: true } : { ok: false, reason: "curator-wrote" };
+/** WHAT: Checks that the daily memory still parses as controller blocks. WHY: Keeps the curator free to write while a corrupted marker still stops an insert into an ambiguous file. */
+export function judgeDreamMemory(_before, current) {
+  try { protectedDreamBlocks(current); } catch { return { ok: false, reason: "dream-marker" }; }
+  return { ok: true };
 }

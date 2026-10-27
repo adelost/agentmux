@@ -105,7 +105,7 @@ feature("configured Dream owner", () => {
       expect(prompt).toContain("Dream-kuratorn claw:3");
       expect(prompt).toContain(input.sha256);
       expect(prompt).toContain(input.outputPath);
-      expect(prompt).toContain("Ändra INTE någon minnesfil");
+      expect(prompt).not.toContain("Ändra INTE någon minnesfil");
       expect(prompt).toContain("Följ även dagsfilernas relevanta Dream-länkar");
       expect(prompt).toContain("När resultatfilen är durabelt skriven");
       expect(input.memoryFormat).toBe(2);

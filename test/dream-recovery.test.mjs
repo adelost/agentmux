@@ -86,18 +86,17 @@ describe("no-model Dream completion", () => {
     await expect(fx.run({ "import-historical": true })).rejects.toThrow("dream-historical-memory-changed");
     expect(fx.commit).not.toHaveBeenCalled(); expect(readDreamReceipts().panes).toEqual({});
   });
-  it("does not manufacture a missing historical effect snapshot for an old result", async () => {
+  it("recovers a result that has no memory-effect snapshot, compact record or journal proof", async () => {
     const fx = fixture({ effects: false });
-    await expect(fx.run({ dry: true })).rejects.toThrow("dream-memory-effects-unattested");
-    expect(fx.commit).not.toHaveBeenCalled();
-    expect(readFileSync(fx.memPath, "utf8")).toBe(fx.memoryBefore);
+    expect(await fx.run({ dry: true })).toMatchObject({ dryRun: true });
+    expect(fx.getProof).not.toHaveBeenCalled(); expect(fx.commit).not.toHaveBeenCalled();
     expect(fx.ctx.agent.send).not.toHaveBeenCalled();
   });
-  it("refuses an uncommitted memory effect instead of accepting a concurrent writer", async () => {
+  it("accepts a note written to the daily file after the packet instead of refusing the night", async () => {
     const fx = fixture({ memoryFormat: 2 });
     const changed = fx.memoryBefore + "A newer note.\n";
     writeFileSync(fx.memPath, changed);
-    await expect(fx.run({ dry: true })).rejects.toThrow("dream-curator-touched-memory");
+    expect(await fx.run({ dry: true })).toMatchObject({ dryRun: true });
     expect(readFileSync(fx.memPath, "utf8")).toBe(changed);
     expect(fx.commit).not.toHaveBeenCalled();
   });
@@ -160,10 +159,10 @@ describe("no-model Dream completion", () => {
     await expect(fx.run({ "memory-sha256": hash(fx.memoryBefore) })).rejects.toThrow("memory-changed");
     expect(fx.commit).not.toHaveBeenCalled();
   });
-  it("rejects proof from a different original session without advancing cursors", async () => {
-    const fx = fixture();
+  it("rejects an explicit historical import whose proof is from a different original session, without advancing cursors", async () => {
+    const fx = fixture({ effects: false });
     fx.getProof.mockResolvedValue({ sessionId: "replacement", ownerTexts: [] });
-    await expect(fx.run()).rejects.toThrow("session-quality-mismatch");
+    await expect(fx.run({ "import-historical": true })).rejects.toThrow("session-quality-mismatch");
     expect(readFileSync(fx.memPath, "utf8")).toBe(fx.memoryBefore);
     expect(readDreamReceipts().panes).toEqual({});
   });

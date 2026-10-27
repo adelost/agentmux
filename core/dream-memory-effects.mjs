@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, readSync, realpathSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, readlinkSync, readSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 
-const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const inside = (path, root) => path === root || path.startsWith(`${root}${sep}`);
 const indexes = ["MEMORY.md", "USER.md", "SOUL.md", "people.md"];
 const identity = stat => Object.fromEntries(["dev", "ino", "mode", "nlink", "size", "mtimeNs", "ctimeNs"].map(key => [key, String(stat[key])]));
@@ -93,49 +92,8 @@ export function snapshotDreamMemory(roots, { artifactRoot, ignored = [] } = {}) 
   return { version: 1, roots: scope, entries };
 }
 
-const pathsFor = inputPath => ({ input: inputPath, manifest: inputPath.replace(/\.json$/u, ".memory-before.json"), output: inputPath.replace(/\.json$/u, ".summary.md") });
-
 /** WHAT: Returns every changed path in two memory observations. WHY: Keeps missing, restored and newly created files inside the same effect check. */
 export function changedDreamMemory(before, after) {
   return [...new Set([...Object.keys(before.entries), ...Object.keys(after.entries)])]
     .filter(path => JSON.stringify(before.entries[path]) !== JSON.stringify(after.entries[path]));
-}
-
-/** WHAT: Stores the controller's pre-curation snapshot. WHY: Prevents recovery from manufacturing a historical baseline or changing its scope. */
-export function prepareDreamMemoryEffects({ workspace, paneDirs = [], inputPath }) {
-  const paths = pathsFor(resolve(inputPath)), artifactRoot = dirname(paths.input);
-  mkdirSync(artifactRoot, { recursive: true, mode: 0o700 });
-  if (lstatSync(artifactRoot).isSymbolicLink() || realpathSync(artifactRoot) !== artifactRoot) throw new Error("dream-artifact-directory-link");
-  for (const path of Object.values(paths)) {
-    try { lstatSync(path); throw new Error("dream-run-artifact-already-exists"); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
-  }
-  const roots = dreamMemoryRoots(workspace, paneDirs);
-  if (roots.some(root => inside(artifactRoot, root) || inside(root, artifactRoot))) throw new Error("dream-artifact-memory-overlap");
-  const before = snapshotDreamMemory(roots, { artifactRoot, ignored: Object.values(paths) });
-  const bytes = Buffer.from(`${JSON.stringify(before)}\n`);
-  if (bytes.length > 16 * 1024 * 1024) throw new Error("dream-memory-manifest-byte-limit");
-  const fd = openSync(paths.manifest, "wx", 0o400);
-  try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
-  const directory = openSync(artifactRoot, "r");
-  try { fsyncSync(directory); } finally { closeSync(directory); }
-  return { version: 1, sha256: digest(bytes) };
-}
-
-/** WHAT: Checks every protected effect before the controller writes. WHY: Prevents script syntax, legacy fallbacks or result links from granting memory-write authority. */
-export function verifyDreamMemoryEffects({ inputPath, inputSha256, descriptor, workspace, paneDirs = [] }) {
-  if (descriptor?.version !== 1 || !/^[a-f0-9]{64}$/u.test(descriptor.sha256 || "")) throw new Error("dream-memory-effects-unattested");
-  const paths = pathsFor(resolve(inputPath)), artifactRoot = dirname(paths.input);
-  if (realpathSync(artifactRoot) !== artifactRoot) throw new Error("dream-artifact-directory-link");
-  if (digest(readDreamRegular(paths.input, 256 * 1024)) !== inputSha256) throw new Error("dream-input-changed");
-  const bytes = readDreamRegular(paths.manifest, 16 * 1024 * 1024);
-  if (digest(bytes) !== descriptor.sha256) throw new Error("dream-memory-manifest-changed");
-  const before = JSON.parse(bytes);
-  if (before.version !== 1 || !Array.isArray(before.roots) || !before.entries
-      || dreamMemoryRoots(workspace, paneDirs).some(root => !before.roots.includes(root))) throw new Error("dream-memory-scope-changed");
-  const after = snapshotDreamMemory(before.roots, { artifactRoot, ignored: Object.values(paths) });
-  const changed = changedDreamMemory(before, after);
-  if (changed.length) throw new Error(`dream-curator-touched-memory:${changed.slice(0, 3).join(",")}`);
-  readDreamRegular(paths.output, 48 * 1024);
-  return { version: 1, files: Object.keys(after.entries).length, sha256: descriptor.sha256 };
 }
