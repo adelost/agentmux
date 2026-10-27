@@ -83,10 +83,16 @@ export async function observeSwitchContext(ctx, entry, {
  */
 export async function compactBeforeSwitch(ctx, target, {
   queue = ctx.deliveryQueue, now = Date.now, policy = readContextCostPolicy(), run = runNightlyCompact, force = false,
+  observeNightly = observeNightlyPane,
 } = {}) {
   const key = `${target.agent.name}:${target.pane.index}`;
+  // The run re-observes the pane before and after taking its lease; both readings count live delivery only.
+  const observe = async (runCtx, pane, options) => {
+    const facts = await observeNightly(runCtx, pane, options);
+    return facts && { ...facts, queued: liveQueued(options?.queue ?? queue, pane.agent.name, pane.pane.index, facts.queued) };
+  };
   const pass = await run(ctx, {}, {
-    targets: [target], queue, now, mirror: mirrorSwitchCompact, force, retryUnmeasured: target.engine === "claude",
+    targets: [target], queue, now, observe, mirror: mirrorSwitchCompact, force, retryUnmeasured: target.engine === "claude",
     label: `Compact before account switch (${key})`,
     policy: compactPolicy(policy),
     path: reportDirectory(now()),

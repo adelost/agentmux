@@ -28,6 +28,20 @@ feature("the compact step of an account switch", () => {
       then: ["only live delivery refuses the compact", (context) => expect(context.compactRefusal).toBe(refusal)],
     });
   }
+  component("the compact run before a switch sees the same live count", {
+    given: ["a pane whose only open jobs the quota floor holds", () => ({ jobs: [floorHeld, { status: "pending" }] })],
+    when: ["the switch runs its compact", async ({ jobs }) => {
+      let seen;
+      await compactBeforeSwitch({ deliveryQueue: { list: () => jobs } },
+        { agent: { name: "lsrc" }, pane: { index: 0 }, engine: "claude" },
+        { run: async (_ctx, _flags, deps) => {
+          seen = await deps.observe({}, { agent: { name: "lsrc" }, pane: { index: 0 } }, { queue: deps.queue });
+          return { rows: [] };
+        }, observeNightly: async () => ({ queued: jobs.length }) });
+      return seen;
+    }],
+    then: ["held prompts are not live delivery", (facts) => expect(facts.queued).toBe(0)],
+  });
   for (const newWork of [false, true]) {
     component(`a manual compact with missing size ${newWork ? "cannot hide new work" : "can restart an idle pane"}`, {
       given: ["a real compact boundary, summary and local command receipts without a new usage block", () => {
