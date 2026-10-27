@@ -11,7 +11,10 @@ export function createClaimEvaluator(repos, { timeoutMs = 5000 } = {}) {
   }
   return text => new Promise((resolve, reject) => {
     if (!worker) {
-      worker = new Worker(new URL("./claim-worker.mjs", import.meta.url), { workerData: { repos } });
+      // Bridge preloads own services and cannot run in an isolated source checker.
+      worker = new Worker(new URL("./claim-worker.mjs", import.meta.url), {
+        workerData: { repos }, execArgv: [], env: { ...process.env, NODE_OPTIONS: "" },
+      });
       worker.on("message", ({ id, result, error }) => {
         const call = pending.get(id);
         if (!call) return;
