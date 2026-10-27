@@ -2,6 +2,7 @@ import { rewriteModelSlash } from "./claude-model.mjs";
 
 const QWEN_CURSOR_KIND = "qwen-dual-output-v1";
 const CODEX_CURSOR_KIND = "codex-prompt-events-v1";
+const GEMINI_CURSOR_KIND = "gemini-prompt-v1";
 
 /** WHAT: Builds a pre-write journal cursor. WHY: Prevents a Qwen wake from binding a new prompt to an obsolete process generation. */
 export async function captureDeliveryCursor({ agent, job, queue, log, afterWake = false }) {
@@ -11,7 +12,7 @@ export async function captureDeliveryCursor({ agent, job, queue, log, afterWake 
     // A submitted or provisionally pasted job may already have reached its
     // original generation. Its cursor is a fence, never a refresh candidate.
     if (job.submitFenceAt || job.draftOwned || ["submitting", "submitted"].includes(job.status) || job.metadata?.submittedRecoveryAt
-        || (job.echoCursor && ![QWEN_CURSOR_KIND, CODEX_CURSOR_KIND].includes(job.echoCursor.kind))) return job;
+        || (job.echoCursor && ![QWEN_CURSOR_KIND, CODEX_CURSOR_KIND, GEMINI_CURSOR_KIND].includes(job.echoCursor.kind))) return job;
   } else if (job.echoCursor) return job;
 
   const capture = job.kind === "slash"
@@ -31,7 +32,7 @@ export async function captureDeliveryCursor({ agent, job, queue, log, afterWake 
         || JSON.stringify(paths) === JSON.stringify(Object.keys(job.echoCursor.positions || {}).sort())) return job;
     return queue.update(job, { echoCursor: cursor });
   }
-  if (afterWake && job.echoCursor && cursor.kind !== QWEN_CURSOR_KIND) return job;
+  if (afterWake && job.echoCursor && ![QWEN_CURSOR_KIND, GEMINI_CURSOR_KIND].includes(cursor.kind)) return job;
   if (afterWake && job.echoCursor
       && job.echoCursor.generation === cursor.generation
       && job.echoCursor.sessionId === cursor.sessionId) return job;

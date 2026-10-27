@@ -83,17 +83,18 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
     //   - claudeCount: claude-cli panes, indices [0, claudeCount)
     //   - codexCount:  codex-cli panes, indices [claudeCount, panes)
     //   - kimiCount:   Kimi Code panes after Codex
-    //   - qwenCount:   Qwen Code panes appended after existing services/shells
+    //   - qwenCount:   Qwen Code panes after Kimi; Gemini follows Qwen
     //   - panes:       total coding panes, excluding services/shells
     // Discord suffixes make non-Claude engines explicit at a glance.
     const claudeCount = paneCount(
-      config.panes ?? config.claude ?? (config.codex || config.kimi || config.qwen ? 0 : 1),
+      config.panes ?? config.claude ?? (config.codex || config.kimi || config.qwen || config.gemini ? 0 : 1),
       "claude",
       name,
     );
     const codexCount = paneCount(config.codex ?? 0, "codex", name);
     const kimiCount = paneCount(config.kimi ?? 0, "kimi", name);
     const qwenCount = paneCount(config.qwen ?? 0, "qwen", name);
+    const geminiCount = paneCount(config.gemini ?? 0, "gemini", name);
     const kimiModel = config.kimiModel || DEFAULT_KIMI_MODEL;
     if (!KIMI_MODEL_PATTERN.test(kimiModel)) {
       throw new Error(`agentmux.yaml: agent '${name}' has invalid kimiModel '${kimiModel}'`);
@@ -102,14 +103,11 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
     if (!QWEN_MODEL_PATTERN.test(qwenModel)) {
       throw new Error(`agentmux.yaml: agent '${name}' has invalid qwenModel '${qwenModel}'`);
     }
-    const codingPaneCount = claudeCount + codexCount + kimiCount + qwenCount;
-    const legacyCodingCount = claudeCount + codexCount + kimiCount;
-    const qwenPaneStart = legacyCodingCount;
+    const codingPaneCount = claudeCount + codexCount + kimiCount + qwenCount + geminiCount;
     const orchestrator = config.orchestrator;
     if (orchestrator !== undefined
         && (!Number.isSafeInteger(orchestrator) || orchestrator < 0
-          || !(orchestrator < legacyCodingCount
-            || (orchestrator >= qwenPaneStart && orchestrator < qwenPaneStart + qwenCount)))) {
+          || orchestrator >= codingPaneCount)) {
       throw new Error(`agentmux.yaml: agent '${name}' has invalid orchestrator pane`);
     }
     // Panes that lead besides the orchestrator, e.g. a Claude leader beside a Codex orchestrator.
@@ -124,6 +122,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
     if (backend === "native" && qwenCount > 0) {
       throw new Error(`agentmux.yaml: native agent '${name}' cannot define Qwen tmux panes`);
     }
+    if (backend === "native" && geminiCount > 0) throw new Error(`agentmux.yaml: native agent '${name}' cannot define Gemini tmux panes`);
     if (backend === "native" && codingPaneCount < 1) {
       throw new Error(`agentmux.yaml: native agent '${name}' needs at least one Claude or Codex pane`);
     }
@@ -149,6 +148,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
       codexCount,
       kimiCount,
       qwenCount,
+      geminiCount,
       services: config.services ?? [],
       shells: config.shells ?? 0,
       layout: resolveTmuxLayout(config.layout),
@@ -204,7 +204,7 @@ export function classifyAgentChannel(channelName, agentNames, existingNamesLower
     if (!lower.startsWith(prefix)) continue;
     const rest = lower.slice(prefix.length);
     // Match plain `{agent}-{N}` (claude), or an explicit non-Claude suffix.
-    const match = rest.match(/^(\d+)(?:-(codex|kimi|qwen))?$/);
+    const match = rest.match(/^(\d+)(?:-(codex|kimi|qwen|gemini))?$/);
     if (!match) continue;
     const n = parseInt(match[1], 10);
     const dialect = match[2] || "claude";
@@ -403,6 +403,13 @@ export function generateAgentsYaml(
         engine: "qwen",
         model,
       };
+      const label = labelFor(paneIdx);
+      if (label) pane.label = label;
+      panes.push(pane);
+      paneIdx++;
+    }
+    for (let i = 0; i < (config.geminiCount ?? 0); i++) {
+      const pane = { name: i === 0 ? "gemini" : `gemini-${i + 1}`, cmd: "gemini --yolo --skip-trust", engine: "gemini" };
       const label = labelFor(paneIdx);
       if (label) pane.label = label;
       panes.push(pane);

@@ -34,17 +34,18 @@ feature("dialect data integrity", () => {
     }],
   });
 
-  unit("busy signals cover truncated 'esc to interrupt'", {
+  unit("busy signals cover each engine's observed cancel or interrupt footer", {
     given: ["all dialects", () => ALL_DIALECTS],
     when: ["checking each dialect", (ds) => ds.map((d) => ({
       name: d.name,
-      covers: d.busySignals.some((s) => "esc to interrup".includes(s) || s.includes("esc to interrup")),
+      covers: d.busySignals.some((s) => typeof s === "string" && (d.name === "gemini"
+        ? "(esc to cancel, 1s)".includes(s) : "esc to interrup".includes(s) || s.includes("esc to interrup"))),
     }))],
-    then: ["every dialect catches 'esc to interrup' (truncated)", (results) => {
+    then: ["each observed work footer is recognized", (results) => {
       // "esc to interrup" (no trailing t) happens when tmux pane is too narrow
-      // and truncates the UI. Every dialect should catch that substring.
+      // and truncates the UI. Gemini's observed footer instead says "esc to cancel".
       for (const r of results) {
-        expect(r.covers, `${r.name} must cover truncated interrupt`).toBe(true);
+        expect(r.covers, `${r.name} must cover its actual work footer`).toBe(true);
       }
     }],
   });

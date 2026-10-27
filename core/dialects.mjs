@@ -194,10 +194,24 @@ export const QWEN = {
   ],
 };
 
+// Markers captured from the installed0.65 TUI and an isolated fake shell-tool turn.
+/** WHAT: Defines Gemini's normal interactive CLI. WHY: Keeps screen-only observation separate from Claude and Qwen protocols. */
+export const GEMINI = {
+  name: "gemini", compactReceiptIsAuthoritative: false,
+  promptChar: "*", bullet: "✦", toolResultPrefix: "│",
+  toolCallPattern: /^\s*│\s*[⊷✓✗]\s+Shell\b/u,
+  idleWhenPromptEmpty: false, busySignals: ["(esc to cancel,"],
+  promptPlaceholderRe: /^\*\s+Type your message/u,
+  noise: [/Gemini CLI v[\d.]+/u, /^\s*YOLO Ctrl\+Y/u, /^\s*\*\s+Type your message/u,
+    /^(?:▄{3,}|▀{3,})\s*$/u, /^\s*workspace \(\/directory\)/u,
+    /^\s*\/.*\s{2,}no sandbox\s+Auto\s*$/u, /^\s*\? for shortcuts\s*$/u],
+  modals: [{ id: "google-login", status: "menu", re: /Please visit the following URL to authorize[\s\S]*Enter the authorization code:/u }],
+};
+
 // --- Registry ------------------------------------------------------------
 
 /** WHAT: Defines supported TUI dialects. WHY: Keeps fallback detection aligned with every engine. */
-export const ALL_DIALECTS = [CLAUDE, CODEX, KIMI, QWEN];
+export const ALL_DIALECTS = [CLAUDE, CODEX, KIMI, QWEN, GEMINI];
 
 // A new engine opts OUT by staying off the registry, never in by editing a
 // call site. dialectFor returns null for shell panes, which is what the
@@ -226,6 +240,7 @@ export const compactReceiptIsAuthoritative = (dialect) =>
  * WHY: Keeps scrollback parsing from applying another engine's markers.
  */
 export function detectDialect(raw) {
+  if (/\bGemini CLI v[\d.]+/u.test(raw)) return GEMINI;
   if (raw.includes(">_ Qwen Code") || /Token Plan\s+\|.*qwen/iu.test(raw)) return QWEN;
   if (raw.includes("Welcome to Kimi Code") || /\bSession\s+session_[0-9a-f-]+/iu.test(raw)) return KIMI;
   // Strong signal: Codex banner somewhere
@@ -261,9 +276,10 @@ export const matchesAnyToolCall = (line) =>
 export const matchesAnyPromptPrefix = (line) =>
   ALL_DIALECTS.some((d) => line.startsWith(d.promptChar + " "));
 
-/** True if a line starts with any dialect's user prompt (non-empty). */
+/** WHAT: Checks literal nonempty user prompt markers. WHY: Keeps asterisk composers and placeholders from breaking turn extraction. */
 export const matchesAnyPromptWithText = (line) =>
-  ALL_DIALECTS.some((d) => new RegExp(`^${d.promptChar} \\S`).test(line));
+  ALL_DIALECTS.some((d) => !d.promptPlaceholderRe?.test(line)
+    && new RegExp(`^${d.promptChar.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")} \\S`).test(line));
 
 /** Strip any dialect's leading bullet (and following space) from a line. */
 export const stripBullet = (line) => {

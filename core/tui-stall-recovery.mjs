@@ -31,14 +31,16 @@ export const isCodexPaneCommand = (command) => /(?:^|\s)codex(?:\s|$)/u.test(Str
 export const isKimiPaneCommand = (command) => /(?:^|[\/\s])kimi(?:-code)?(?:\s|$)/u.test(String(command || ""));
 /** WHAT: Checks whether a pane starts Qwen Code. WHY: Keeps its wrapper path inside Qwen lifecycle handling. */
 export const isQwenPaneCommand = (command) => /(?:^|[\/\s])qwen(?:\s|$)/u.test(String(command || ""));
+/** WHAT: Checks Gemini's normal CLI command. WHY: Keeps its startup outside Claude's account lifecycle. */
+export const isGeminiPaneCommand = (command) => /(?:^|[\/\s])gemini(?:\s|$)/u.test(String(command || ""));
 /** WHAT: Checks whether a pane runs a coding agent. WHY: Keeps service panes outside recovery boundaries. */
 export const isCodingPaneCommand = (command) =>
   isClaudePaneCommand(command) || isCodexPaneCommand(command)
-  || isKimiPaneCommand(command) || isQwenPaneCommand(command);
+  || isKimiPaneCommand(command) || isQwenPaneCommand(command) || isGeminiPaneCommand(command);
 /** WHAT: Checks whether a process is an interactive shell. WHY: Keeps restart commands behind a ready PTY. */
 export const isShellProcess = (command) => /^(bash|zsh|sh|fish|dash)$/u.test(String(command || ""));
 /** WHAT: Checks whether a pane's live process is a coding engine. WHY: Keeps running-engine detection one rule for delivery and start guards. */
-export const isEngineProcess = (command) => /^(claude|codex|kimi|kimi-code|qwen|node)$/u.test(String(command || ""));
+export const isEngineProcess = (command) => /^(claude|codex|kimi|kimi-code|qwen|gemini|node)$/u.test(String(command || ""));
 
 /**
  * WHAT: Builds exact-session Claude and exact-pane recovery operations.

@@ -6,6 +6,7 @@ import {
   readLastTurnsCodex,
 } from "./codex-jsonl-reader.mjs";
 import { codexObserverReader } from "./codex-observer-reader.mjs";
+import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "./jsonl-reader.mjs";
 import {
   kimiWatchDir,
   latestKimiJsonlInfo,
@@ -55,6 +56,10 @@ export function alternateSessionReader(command, { observe = false } = {}) {
   }
   return null;
 }
+
+/** WHAT: Resolves the existing journal readers with their Claude default. WHY: Keeps watcher routing in one owner when a screen-only engine joins. */
+export const sessionReaderForCommand = command => alternateSessionReader(command, { observe: true })
+  || { readTurns: readLastTurns, latestMtime: latestJsonlMtime, latestInfo: latestJsonlInfo };
 
 /** WHAT: Reads non-Claude turns. WHY: Prevents callers from duplicating engine-specific journal branches. */
 export function readAlternateTurns(command, paneDir, options) {

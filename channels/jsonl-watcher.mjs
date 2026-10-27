@@ -7,8 +7,10 @@ import { splitMessage, extractImageMarkers, validateImagePath, chunkAttachments 
 import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
 import { claudeProjectDir } from "../core/claude-paths.mjs";
-import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
-import { alternateEngineForCommand, alternateSessionReader, alternateWatchDir, latestAlternateMtime } from "../core/alternate-session-reader.mjs";
+import { latestJsonlMtime } from "../core/jsonl-reader.mjs";
+import { alternateEngineForCommand, sessionReaderForCommand, alternateWatchDir, latestAlternateMtime } from "../core/alternate-session-reader.mjs";
+import { createGeminiTmuxMirror } from "../core/gemini-tmux-mirror.mjs";
+import { geminiSession } from "../core/gemini-runtime.mjs";
 import { getContextFromPane } from "../core/context.mjs";
 import { jsonlContextFooter } from "../core/context-footer.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
@@ -119,6 +121,7 @@ export function createJsonlWatcher({
     notify: (text, target) => discord.send(findChannelForPane(agentsYamlPath, target.name, target.pane), text) });
 
   const paneKey = (name, idx) => `${name}:${idx}`;
+  const geminiMirror = createGeminiTmuxMirror({ agent, state, post: request => postTurn(request) });
   const queue = createPaneQueue({
     worker: ({ name, idx, agentDir, sharedConfig }) => processPane(name, idx, agentDir, sharedConfig),
     maxConcurrency: MAX_CONCURRENT_PANES,
@@ -561,14 +564,7 @@ export function createJsonlWatcher({
   // --- core check ----------------------------------------------------------
 
   /** WHAT: Resolves each pane's reader. WHY: Keeps generated non-Claude commands separate from the Claude fallback. */
-  function readerFor(config, name, idx) {
-    try {
-      const cmd = config?.[name]?.panes?.[idx]?.cmd || "";
-      const alternate = alternateSessionReader(cmd, { observe: true });
-      if (alternate) return alternate;
-    } catch { /* fall through to claude default */ }
-    return { readTurns: readLastTurns, latestMtime: latestJsonlMtime, latestInfo: latestJsonlInfo };
-  }
+  const readerFor = (config, name, idx) => sessionReaderForCommand(config?.[name]?.panes?.[idx]?.cmd || "");
 
   function sameFileStamp(a, b) {
     return !!a && !!b && a.path === b.path && a.mtimeMs === b.mtimeMs && a.size === b.size;
@@ -632,6 +628,7 @@ export function createJsonlWatcher({
       const config = sharedConfig || loadConfig(agentsYamlPath);
       const channelId = channelForPane(config, name, idx);
       if (!channelId) return;
+      if (config[name]?.panes?.[idx]?.engine === "gemini") return geminiMirror.poll({ name, idx, channelId, config, sessionId: geminiSession(state, name, idx)?.sessionId });
 
       const dir = paneDir(agentDir, idx);
       const key = paneKey(name, idx);
@@ -828,6 +825,7 @@ export function createJsonlWatcher({
       if (entry.backend === "native") continue;
       for (let i = 0; i < entry.panes.length; i++) {
         const cmd = entry.panes[i]?.cmd || "";
+        if (entry.panes[i]?.engine === "gemini") { enqueuePane(name, i, entry.dir, config); continue; }
         if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?|qwen)(?:\s|$)/u.test(cmd)) continue;
         attachFsWatch(name, i, entry.dir, config);
         enqueuePane(name, i, entry.dir, config);

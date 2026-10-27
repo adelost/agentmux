@@ -14,6 +14,7 @@ export function createPromptEcho({
   isPromptInCodexJsonl,
   kimiJournal,
   qwenJournal,
+  geminiPromptAccepted,
   wait,
 }) {
   /** WHAT: Checks the journal for the exact prompt until timeout. WHY: Prevents screen echoes from becoming delivery receipts. */
@@ -45,6 +46,8 @@ export function createPromptEcho({
         });
       } else if (dialect === "qwen") {
         found = qwenJournal.promptAccepted(dir, promptText, { cursor });
+      } else if (dialect === "gemini") {
+        found = await geminiPromptAccepted(agentName, pane, promptText, { cursor });
       }
       if (found === true) return true;
 
