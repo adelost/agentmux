@@ -1,7 +1,7 @@
 // Config management for agent CLI. Replaces all bash yq calls.
 // Generated runtime view. The user-owned source is ~/.agentmux/agentmux.yaml.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "fs";
 import { dirname } from "path";
 import { randomUUID } from "crypto";
 import yaml from "js-yaml";
@@ -18,18 +18,39 @@ export function ensureConfig(configPath) {
   writeFileSync(configPath, "# Agent configurations\n");
 }
 
-/** Load and parse agents.yaml. Returns {} if missing/empty. */
+// Parsed configs by path, each with the file identity it was parsed from.
+const parsedConfigs = new Map();
+// Bounds staleness when two same-size writes land within one coarse kernel timestamp tick.
+const PARSED_CONFIG_MAX_AGE_MS = 2000;
+
+const fileIdentity = (path) => {
+  const st = statSync(path);
+  return `${st.ino}:${st.size}:${st.mtimeMs}`;
+};
+
+/** WHAT: Returns the parsed agents.yaml, or {} when missing or unreadable, parsing again only after a change.
+ * WHY: Keeps per-call routing from parsing an unchanged file; each caller gets its own copy. */
 export function loadConfig(configPath) {
   try {
-    return yaml.load(readFileSync(configPath, "utf-8")) || {};
+    const identity = fileIdentity(configPath);
+    const held = parsedConfigs.get(configPath);
+    if (held?.identity === identity && performance.now() - held.parsedAt < PARSED_CONFIG_MAX_AGE_MS) {
+      return structuredClone(held.value);
+    }
+    const value = yaml.load(readFileSync(configPath, "utf-8")) || {};
+    parsedConfigs.set(configPath, { identity, value, parsedAt: performance.now() });
+    return structuredClone(value);
   } catch {
+    parsedConfigs.delete(configPath);
     return {};
   }
 }
 
-/** Write config back to YAML. */
+/** WHAT: Saves the config as YAML and drops its parsed copy.
+ * WHY: Prevents a same-tick, same-size save from being served from the old parse. */
 export function saveConfig(configPath, data) {
   mkdirSync(dirname(configPath), { recursive: true });
+  parsedConfigs.delete(configPath);
   writeFileSync(configPath, yaml.dump(data, { lineWidth: -1, quotingType: '"' }));
 }
 
