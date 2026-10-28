@@ -1,7 +1,7 @@
 // WHAT: Reduces artifact folders unchanged for 2 days to their receipts and deletes the rest.
 // WHY: Keeps evidence readable while videos, builds and copies stop filling the SSD that also holds Q:.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
@@ -21,6 +21,7 @@ export const KEEP_MARKER = ".artifact-keep";
 // at any size. Audio and 3D models stay because they may be paid output; the paid music-video folder has a keep marker.
 const SMALL_RECEIPTS = new Set([".md", ".json", ".jsonl", ".ndjson", ".log", ".txt", ".yaml", ".yml", ".csv", ".tsv", ".html"]);
 const ARTIFACT_LINK = /\.artifacts\/([^\s)|`>"'\]]+)/gu;
+const DEFAULT_BRANCHES = ["refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master"];
 const ALWAYS_KEPT = new Set([".mp3", ".wav", ".m4a", ".flac", ".ogg", ".glb", ".gltf", ".fbx", ".obj", ".vrm"]);
 const COPIED_TREES = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__"]);
 
@@ -50,20 +51,41 @@ export function artifactRoots({ root = join(homedir(), "lsrc/.artifacts"), overf
   return [root, ...moved];
 }
 
-/** WHAT: Collects the Markdown files at the root and under docs/ of each ~/lsrc repository. WHY: Keeps the ledgers and designs that link evidence in view. */
-export function repositoryDocs({ lsrc = join(homedir(), "lsrc") } = {}) {
-  if (!existsSync(lsrc)) return [];
-  const markdown = (folder, recursive) => readdirSync(folder, { recursive, withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md")).map((entry) => join(entry.parentPath, entry.name));
-  return folders(lsrc).filter((repo) => !repo.split("/").at(-1).startsWith(".")).flatMap((repo) =>
-    [...markdown(repo, false), ...(existsSync(join(repo, "docs")) ? markdown(join(repo, "docs"), true) : [])]);
+/** WHAT: Names the remote branch a checkout merges into, or nothing for a repository without a remote. WHY: Rows merged from worktrees land there before the main checkout is updated. */
+function defaultBranch(repo) {
+  const refs = new Map(execFileSync("git", ["-C", repo, "for-each-ref", "--format=%(refname) %(symref)", ...DEFAULT_BRANCHES], { encoding: "utf8" })
+    .split("\n").filter(Boolean).map((line) => line.split(" ")));
+  return refs.get(DEFAULT_BRANCHES[0]) || DEFAULT_BRANCHES.slice(1).find((ref) => refs.has(ref));
 }
 
-/** WHAT: Collects the artifact paths documents link to, resolved in every artifact root. WHY: Keeps a ledger's or design's linked file after its folder is pruned. */
+/** WHAT: Reads the lines that mention artifacts in a repository's default-branch Markdown at the root and under docs/. WHY: On 2026-10-28 cutkit's main checkout was 3755 commits behind origin/master. */
+function defaultBranchMentions(repo) {
+  const branch = defaultBranch(repo);
+  if (!branch) return [];
+  const grep = spawnSync("git", ["-C", repo, "grep", "-h", "-I", "-F", "-e", ".artifacts/", branch, "--", ":(glob)*.md", ":(glob)docs/**/*.md"],
+    { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  if (grep.status === 1) return [];
+  if (grep.status !== 0) throw new Error(`git grep ${branch} in ${repo} failed: ${grep.stderr?.trim() || grep.error?.message}`);
+  return [grep.stdout];
+}
+
+/** WHAT: Reads artifact-mentioning lines of each ~/lsrc repository's root and docs/ Markdown, checkout and default branch. WHY: Keeps the ledgers and designs that link evidence in view. */
+export function repositoryDocs({ lsrc = join(homedir(), "lsrc") } = {}) {
+  if (!existsSync(lsrc)) return [];
+  const mentions = (path) => readFileSync(path, "utf8").split("\n").filter((line) => line.includes(".artifacts/")).join("\n");
+  const markdown = (folder, recursive) => readdirSync(folder, { recursive, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md")).map((entry) => mentions(join(entry.parentPath, entry.name)));
+  // A worktree shares its main repository's refs, and an orphaned one has none, so only a .git folder is asked.
+  const mainRepository = (repo) => lstatSync(join(repo, ".git"), { throwIfNoEntry: false })?.isDirectory() ?? false;
+  return folders(lsrc).filter((repo) => !repo.split("/").at(-1).startsWith(".")).flatMap((repo) => [...markdown(repo, false),
+    ...(existsSync(join(repo, "docs")) ? markdown(join(repo, "docs"), true) : []), ...(mainRepository(repo) ? defaultBranchMentions(repo) : [])]);
+}
+
+/** WHAT: Collects the artifact paths document text links to, resolved in every artifact root. WHY: Keeps a ledger's or design's linked file after its folder is pruned. */
 export function linkedArtifacts({ roots, docs }) {
   const linked = new Set();
-  for (const doc of docs) {
-    for (const [, link] of readFileSync(doc, "utf8").matchAll(ARTIFACT_LINK)) {
+  for (const text of docs) {
+    for (const [, link] of text.matchAll(ARTIFACT_LINK)) {
       for (const root of roots) linked.add(join(root, link.replace(/[.,:;]+$/u, "")));
     }
   }

@@ -1,11 +1,12 @@
 // The disk cleanup removes regenerable caches and finished checkouts, and prunes
 // old artifacts to their receipts. These tests cover the deletion boundaries.
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { component, expect, feature, unit } from "bdd-vitest";
-import { artifactRoots, planArtifactRetention, pruneArtifacts } from "./artifact-retention.mjs";
+import { artifactRoots, linkedArtifacts, planArtifactRetention, pruneArtifacts, repositoryDocs } from "./artifact-retention.mjs";
 import { dependencySymlinkConsumers, inspectDependencyCacheEntry, planDependencyCacheRetirement } from "./disk-cache-retention.mjs";
 import { uvPruneVerdict } from "./disk-cleanup.mjs";
 import { cleanupDue, pollDiskGuardOnce } from "./disk-guard.mjs";
@@ -133,15 +134,13 @@ feature("disk cleanup removes only what regenerates and prunes old artifacts to 
     given: ["an old folder with each kind of file and a ledger that links its big image", () => {
       const root = mkdtempSync(join(tmpdir(), "artifacts-")), artifacts = join(root, ".artifacts"), folder = join(artifacts, "row-1");
       mkdirSync(join(folder, "node_modules", "x"), { recursive: true });
-      mkdirSync(join(root, "docs"));
-      writeFileSync(join(root, "docs", "TASKS.md"), "| 1 | done | [chart](.artifacts/row-1/big.png). |\n");
       for (const [name, body] of [["notes.md", "n"], ["shot.png", "p"], ["big.png", Buffer.alloc(1536 * 1024)], ["clip.mp4", "v"], ["song.mp3", "s"],
         ["doll.glb", "g"], ["app.js", "j"], ["node_modules/x/package.json", "{}"]]) writeFileSync(join(folder, name), body);
       return { root, artifacts, folder };
     }],
     when: ["pruning a plan that admits it", ({ root, artifacts }) => {
       const settled = (paths) => Object.fromEntries(paths.map((path) => [path, { bytes: 6, files: 1, newestModifiedMs: Date.now() - 20 * DAY }]));
-      const plan = planArtifactRetention({ roots: [artifacts], docs: [join(root, "docs", "TASKS.md")], references: idle, measure: settled });
+      const plan = planArtifactRetention({ roots: [artifacts], docs: ["| 1 | done | [chart](.artifacts/row-1/big.png). |"], references: idle, measure: settled });
       return pruneArtifacts(plan, { sampleDisk: () => ({ availableBytes: 0 }), references: idle, measure: settled, journalPath: join(root, "journal.jsonl") });
     }],
     then: ["only the evidence remains, with a note saying what went and a journal row", (pruned, { root, folder }) => {
@@ -151,6 +150,24 @@ feature("disk cleanup removes only what regenerates and prunes old artifacts to 
       expect(readFileSync(join(root, "journal.jsonl"), "utf8")).toContain('"mode":"pruned"');
     }],
     cleanup: ({ root }) => rmSync(root, { recursive: true, force: true }),
+  });
+
+  // 2026-10-28: cutkit's main checkout was 3755 commits behind origin/master, so links merged from worktrees went unseen.
+  component("a link merged on the default branch counts while the main checkout lags behind it", {
+    given: ["a repository whose origin/master ledger links an image its older checkout does not", () => {
+      const lsrc = mkdtempSync(join(tmpdir(), "lsrc-")), repo = join(lsrc, "app");
+      mkdirSync(join(repo, "docs"), { recursive: true });
+      const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      git("init", "-b", "master"); git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Test");
+      writeFileSync(join(repo, "docs", "TASKS.md"), "| 1 | working |\n");
+      git("add", "."); git("commit", "-m", "row 1");
+      writeFileSync(join(repo, "docs", "TASKS.md"), "| 1 | done | [after](.artifacts/row-1/after.png) |\n");
+      git("commit", "-am", "row 1 done"); git("update-ref", "refs/remotes/origin/master", "HEAD"); git("reset", "--hard", "HEAD~1");
+      return { lsrc };
+    }],
+    when: ["collecting the linked artifacts", ({ lsrc }) => linkedArtifacts({ roots: [join(lsrc, ".artifacts")], docs: repositoryDocs({ lsrc }) })],
+    then: ["the image on the default branch is linked", (linked, { lsrc }) => expect([...linked]).toEqual([join(lsrc, ".artifacts", "row-1", "after.png")])],
+    cleanup: ({ lsrc }) => rmSync(lsrc, { recursive: true, force: true }),
   });
 
   unit("the guard starts the cleanup once a night and every six hours at 80 % used, and alarms once per high-use episode", {
