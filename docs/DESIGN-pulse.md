@@ -379,7 +379,7 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 | `channels/drift-guard.mjs` | n/a: changes in B2; tests added with B2 |
 | `channels/link-target-models.mjs` | `channels/link-target-models.test.mjs::an unchanged pane is not inspected again`, `channels/link-target-models.test.mjs` |
 | `core/tmux.mjs` | `core/tmux.test.mjs::listAllPanes reads every session's active-window panes in one question`, `core/tmux.test.mjs` |
-| `channels/permission-watchdog.mjs` | `channels/permission-watchdog.test.mjs::captures an idle pane again only after its journal moves or two minutes pass (pulse-10)`, `channels/permission-watchdog.test.mjs` |
+| `channels/permission-watchdog.mjs` | `channels/permission-watchdog.test.mjs::captures an idle pane again only after its journal moves or two minutes pass (pulse-10)`, `channels/permission-watchdog.test.mjs::reads a prompt with the bridge's own agent that has no paneDirectory (defect since 2026-09-15)`, `channels/permission-watchdog.test.mjs` |
 | `core/pulse/pane-snapshot.mjs` | n/a: new in B2; tests added with B2 |
 | `core/pulse/journal-follower.mjs` | n/a: new in B3; tests added with B3 (pulse-7) |
 | `channels/jsonl-watcher.mjs` | n/a: changes in B3; tests added with B3 |
@@ -404,6 +404,7 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 | `channels/link-target-models.test.mjs::an unchanged pane is not inspected again` | pulse-9 | component | 15 | 1 |
 | `channels/link-target-models.test.mjs` | existing | component | 0 | 1 |
 | `channels/permission-watchdog.test.mjs::captures an idle pane again only after its journal moves or two minutes pass (pulse-10)` | pulse-10 | component | 15 | 1 |
+| `channels/permission-watchdog.test.mjs::reads a prompt with the bridge's own agent that has no paneDirectory (defect since 2026-09-15)` | defect: every prompt threw on agent.paneDirectory | component | 10 | 1 |
 | `channels/permission-watchdog.test.mjs` | existing | component | 0 | 1 |
 
 - Budget: 130 min of tests within B0+B1's 6 h. Targeted run with smoke about 36 s.
@@ -442,6 +443,7 @@ None. Every choice above is within the owner's frame: no money, no external part
 
 ## 15. Changes
 
+- v8 2026-10-28 11:10Z: B2b again. 1.25.400 stopped permission-watchdog from 10:59:55 to 11:07Z: its activity stamp called agent.paneDirectory, which the bridge's agent does not have, so every round threw at the first pane (no capture, no heartbeat). 1.25.401 restored the old code. The same call in the default session identity has thrown on every detected prompt since 2026-09-15 (0a92e524): the default decision log has been empty since 2026-09-16. 1.25.402 uses panePathFor in both, with a test on the defaults (red with the production TypeError) and a read-only round against the real fleet before release (83 panes, 619 ms). The watchdog now answers safe rm prompts and alerts as configured. Owners told: Mattias in the status reply.
 - v7 2026-10-28 10:59Z: B2b. permission-watchdog captured every pane every 10 s (415 of 857 questions a minute after B2a). A prompt follows its tool call into the journal, and Claude also fires a permission hook, so a pane is captured while it has an open prompt, within 60 s after its journal stamp or hook event moved, or every 2 min when quiet (pulse-10). A prompt nothing journals is seen at most 2 min late. Link's journal stamp now uses the same per-engine reader as jsonl-watcher, which covers Codex. Owners told: none.
 - v6 2026-10-28 10:50Z: B2a. Link's target models were 669 of 1,594 tmux questions a minute (10:36-10:46Z): two display-messages and a 100-line capture per target every 15 s, plus inspectPane's journal reads. They now read one `list-panes -a` per cycle and inspect a pane again only when its pid, command, dead flag, journal stamp or model config changed, or after 5 min, because a Codex in-session model switch writes no journal Link reads (pulse-9). Owners told: none.
 - v5 2026-10-28 10:33Z: B2 starts by counting who asks. Profiles at 10:19Z (busy 24 %, load 8) and 10:27Z (busy 77 %, load 44) show the cost spread over many watchers (codex-credit-stop, sleep probes, isBusy, inspectPane, drift-guard, jsonl-watcher), not the four named in v1, and every pane gets 25-45 tmux questions a minute, idle or not. Each question now carries its asker (up to three agentmux functions above the adapter, 27 us), and `amux pulse io` lists questions per minute by asker. B2's snapshot is chosen from that list. Owners told: none.
