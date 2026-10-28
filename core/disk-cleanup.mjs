@@ -1,11 +1,12 @@
 // Nightly and high-use root-disk cleanup. Every category plans first and
 // re-checks each item just before acting, so a dry run lists exactly what a
-// real run would remove or move. Artifacts move to Q: and are never deleted.
+// real run would remove. Old artifact folders keep their receipts; the rest is deleted, never moved to Q:,
+// which sits on the same SSD.
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { moveArtifacts, planArtifactOverflow } from "./artifact-overflow.mjs";
+import { planArtifactRetention, pruneArtifacts } from "./artifact-retention.mjs";
 import { applyDependencyCacheRetention, dependencySymlinkConsumers, sampleRootDisk } from "./disk-cache-retention.mjs";
 import { dependencyCacheRepositories, packageCacheCandidates, readProcessArgs, removeIdleCache, uvPruneAllowed } from "./disk-pressure-relief.mjs";
 import { processPathReferences } from "./process-path-references.mjs";
@@ -124,7 +125,7 @@ export function planDockerImages({ lines = dockerLines } = {}) {
   } catch (error) { return { unused: [], runningImages: 0, errors: [{ error: `docker unreadable: ${error.message.split("\n")[0]}` }] }; }
 }
 
-// Order: dependency entries, worktrees, package caches, uv, then artifact moves. Unlinking a cache
+// Order: dependency entries, worktrees, package caches, uv, then artifact pruning. Unlinking a cache
 // entry first lets the worktree removal drop the last link of its files.
 /** WHAT: Dispatches every cleanup category, or only plans it in a dry run. WHY: Keeps the dry run and the real run on one plan; Docker images are only listed. */
 export function runDiskCleanup({ dryRun = true, measure = dryRun, nowMs = Date.now(), home = homedir(),
@@ -148,12 +149,12 @@ export function runDiskCleanup({ dryRun = true, measure = dryRun, nowMs = Date.n
   const cacheActions = step("caches", () => (dryRun ? [] : caches.map(removeIdleCache)));
   const uv = step("uv", () => (dryRun ? uvPruneVerdict({ ps }) : pruneUv({ ps })));
   const docker = planDockerImages();
-  const artifacts = planArtifactOverflow({ nowMs });
-  const moved = step("artifacts", () => (dryRun ? [] : moveArtifacts(artifacts, { nowMs, sampleDisk: sampleRootDisk })));
+  const artifacts = planArtifactRetention({ nowMs });
+  const pruned = step("artifacts", () => (dryRun ? [] : pruneArtifacts(artifacts, { nowMs, sampleDisk: sampleRootDisk })));
   const sizes = measure ? measureTrees([...worktrees.repositories.flatMap(({ retirements }) => retirements.map(({ target }) => target)), ...caches]) : {};
   return { dryRun, at: new Date(nowMs).toISOString(), started, finished: sampleRootDisk(), steps,
     worktrees: { ...worktrees, retired, sizes }, dependencies, caches: { candidates: caches, actions: cacheActions, sizes }, uv, docker,
-    artifacts: { ...artifacts, moved } };
+    artifacts: { ...artifacts, pruned } };
 }
 
 const gb = (bytes) => `${(bytes / 1e9).toFixed(1)} GB`;
@@ -197,10 +198,11 @@ export function formatCleanupRows(result) {
   const docker = result.docker, stoppedOnly = docker.unused.filter(({ stoppedContainers }) => stoppedContainers);
   rows.push(`Docker images no running container uses, for approval only, never automatic: ${docker.unused.length}, ${gb(sum(docker.unused, "bytes"))} listed (shared layers count once per image). ${stoppedOnly.length} still belong to stopped containers (${[...new Set(stoppedOnly.map(({ name }) => name.split("/").at(-1).split(":")[0]))].join(", ")}), which go first; volumes stay${docker.errors.length ? `; ${docker.errors[0].error}` : ""}.`);
   const artifacts = result.artifacts;
-  rows.push(`Artifacts unmodified 14 days, move to ${artifacts.destination}: ${artifacts.candidates.length}, ${gb(artifacts.bytes)}, of which ${gb(sum(artifacts.candidates, "freeableBytes"))} frees on /. Q: free ${artifacts.overflowFreeBytes === null ? "unknown" : gb(artifacts.overflowFreeBytes)}. Kept ${artifacts.skipped.length}: ${heldSummary(artifacts.skipped)}${artifacts.errors.length ? `; held by errors: ${artifacts.errors.map(({ error }) => error).join("; ")}` : ""}.`);
+  const onRoot = artifacts.candidates.filter(({ path }) => !path.startsWith("/mnt/"));
+  rows.push(`Artifact folders unchanged 14 days, prune to receipts: ${artifacts.candidates.length}, ${gb(artifacts.pruneBytes)} to delete, ${gb(sum(onRoot, "pruneBytes"))} of it on / and the rest in the old Q: overflow. Kept whole ${artifacts.skipped.length}: ${heldSummary(artifacts.skipped)}${artifacts.errors.length ? `; held by errors: ${artifacts.errors.map(({ error }) => error).join("; ")}` : ""}.`);
   if (!result.dryRun) {
     const modes = (items) => Object.entries(Object.groupBy(items, ({ mode }) => mode)).map(([mode, list]) => `${list.length} ${mode}`).join(", ") || "none";
-    rows.push(`Done: worktrees ${modes(result.worktrees.retired)}; dependency entries ${modes(result.dependencies.actions)}; caches ${modes(result.caches.actions)}; uv ${result.uv.mode}; artifacts ${modes(result.artifacts.moved)}.`);
+    rows.push(`Done: worktrees ${modes(result.worktrees.retired)}; dependency entries ${modes(result.dependencies.actions)}; caches ${modes(result.caches.actions)}; uv ${result.uv.mode}; artifacts ${modes(result.artifacts.pruned)}.`);
     rows.push(`df / free per row: ${result.steps.map(({ name, before, after }) => `${name} ${gb(before.availableBytes)} to ${gb(after.availableBytes)}`).join(", ")}.`);
   }
   if (result.worktrees.errors.length) rows.push(`Worktree safety errors hold every removal: ${result.worktrees.errors.map((error) => JSON.stringify(error)).join("; ")}`);

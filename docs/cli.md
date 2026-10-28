@@ -530,12 +530,21 @@ with idle I/O, acts in this order:
    `~/.cache/uv` in its maps, cwd or descriptors and no `uv sync`, `uv add`,
    `uv pip` or `pip install` runs. Otherwise uv is skipped: a forced prune on
    2026-10-22 removed an archive that running voice-mode processes mapped.
-5. Folders in `~/lsrc/.artifacts` unmodified for 14 days (newest mtime of
-   any entry), open in no process, and holding no browser profile and no
-   folder this user cannot change move with `rsync -rlt
-   --remove-source-files` to `/mnt/q/wsl-overflow-DATE/<original path>`. Each
-   gets a `MANIFEST.md` row with the command to move it back. Nothing is
-   deleted, and the move stops when Q: lacks room or rsync fails.
+5. Artifact folders in `~/lsrc/.artifacts`, and the copies earlier runs
+   moved to `/mnt/q/wsl-overflow-DATE/`, are pruned to their receipts once
+   unchanged for 14 days (newest mtime of any entry). A folder holding only
+   several folders, such as `release-row`, is judged per child. Kept:
+   documents (`md`, `json`, `log`, `txt`, `yaml`, `csv`, `html` and similar)
+   and images up to 1 MB, and audio and 3D models at any size. Deleted: video,
+   builds, model files such as `.tflite`, archives, every larger file, and
+   copied `node_modules`, `.git` and venv folders. A folder open in a process,
+   holding a browser profile, a folder this user cannot change or an
+   `.artifact-keep` file stays whole; put that marker in folders with paid or
+   hand-picked output. Each pruned folder gets a line in its `PRUNED.md`, and
+   `~/.agentmux/artifact-retention.jsonl` records df before and after.
+   Nothing moves to Q: anymore: the WSL disk is itself a file on Q:, so the
+   move freed nothing on the SSD (sandman:0's call after Mattias left it to
+   sandman:0, 2026-10-28).
 
 Docker images that no running container uses are only listed, for a person
 to approve; the cleanup never removes images, containers or volumes. Each run
