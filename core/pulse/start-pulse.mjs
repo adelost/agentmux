@@ -17,7 +17,7 @@ const WRITE_EVERY_MS = 15_000;
 export function startPulse({ socket, processExec, env = process.env, ioPath = PULSE_IO_PATH,
   log = (line) => console.log(`[pulse] ${line}`), spawnClient } = {}) {
   const counters = createIoCounters();
-  let mode = env.AMUX_PULSE_TRANSPORT || "shadow";
+  let mode = env.AMUX_PULSE_TRANSPORT || "control";
   if (!TRANSPORT_MODES.has(mode)) {
     console.error(`[pulse] AMUX_PULSE_TRANSPORT=${JSON.stringify(mode)} is not exec, shadow or control; using exec`);
     mode = "exec";

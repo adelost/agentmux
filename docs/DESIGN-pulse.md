@@ -351,13 +351,13 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
   | B3 | `core/pulse/journal-follower.mjs` (about 200), `channels/jsonl-watcher.mjs`, `core/progress.mjs` | 6 h |
   | B4 | `channels/permission-watchdog.mjs` captures on needsYou | 2 h |
 
-  Wall time is dominated by the 24 h shadow period after B1 and after B2.
+  Wall time is dominated by the shadow periods after B1 and B2.
 - Agent quota: built on this pane's Claude account. Read `amux quota` before B2.
 
 ## 11. Rollout and rollback
 
 - **B0** ships alone. Switching it off means reverting its commit. There is no data.
-- **B1** ships with `AMUX_PULSE_TRANSPORT` defaulting to `shadow`. After 24 h with 0 unexplained differences, the default becomes `control` in a one-line release. Rollback: `AMUX_PULSE_TRANSPORT=exec` in `~/.agentmux/.env` and `amux restart`.
+- **B1** shipped with `AMUX_PULSE_TRANSPORT` defaulting to `shadow` (1.25.395). The default became `control` in 1.25.397, after 93 min of shadow in which control answered no question wrongly (v4). Rollback: `AMUX_PULSE_TRANSPORT=exec` in `~/.agentmux/.env` and `amux restart`.
 - **B2–B4** each get a per-consumer flag. They keep the same shadow-then-switch order.
 - Switching off never breaks data. Pulse writes only its counter file (`~/.agentmux/pulse-io.json`, rewritten at most every 10 s, under 64 KB) and, in B3, its offset file (under 64 KB). Deleting either resets the counts or offsets.
 - Migrations: none. Texts: `amux pulse --help`. The fleet docs line for `amux pulse io` goes in `docs/fleet/maintenance.md` in B1's release.
@@ -421,7 +421,7 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 | # | Prio | Task | Owner | State | Estimate | Spec | Done when |
 |---|---|---|---|---|---|---|---|
 | 116a | P1 | B0 agentmux.yaml parsed only when it changes | sandman:0 | working | 1h | [Pulse §12](DESIGN-pulse.md#12-tests) | the config test is red before and green after, released, and loadConfig is gone from a 30 s bridge profile |
-| 116b | P1 | B1 control-mode transport for read-only tmux questions, shadow then control, plus `amux pulse io` | sandman:0 | open | 5h | [Pulse §6](DESIGN-pulse.md#6-pseudocode) | 0 process starts for read-only questions in `amux pulse io`, 24 h shadow with 0 unexplained differences, bridge busy below 30 % |
+| 116b | P1 | B1 control-mode transport for read-only tmux questions, shadow then control, plus `amux pulse io` | sandman:0 | open | 5h | [Pulse §6](DESIGN-pulse.md#6-pseudocode) | 0 process starts for read-only questions in `amux pulse io`, shadow with no question control answered wrongly, bridge busy below 30 % |
 | 116c | P1 | B2 shared pane snapshot read by the four watchdogs | sandman:0 | open | 4h | [Pulse §5](DESIGN-pulse.md#5-behaviour-uml) | an idle pane shows 0 tmux questions and 0 starts in 10 min in `amux pulse io` |
 | 116d | P1 | B3 journal follower by offset, woken by fs.watch and hook events | sandman:0 | open | 6h | [Pulse §5](DESIGN-pulse.md#5-behaviour-uml) | an idle journal costs 0 reads in 10 min, and turn ends are seen within 1 s |
 | 116e | P2 | B4 permission watchdog captures only on a needsYou event | sandman:0 | open | 2h | [Pulse §3](DESIGN-pulse.md#3-use-cases) | 0 periodic captures, and a recorded permission prompt is still answered |
@@ -432,6 +432,7 @@ None. Every choice above is within the owner's frame: no money, no external part
 
 ## 15. Changes
 
-- v3 2026-10-28 08:52Z: in shadow, a slow tmux server (exec answers up to about 2 s) made single replies exceed 3 s, and the first rule broke the client four times between 08:35 and 08:37Z, failing every pending question. Now a timeout fails only its own question, like exec, and the client is broken only after 15 s with no reply. A reply already in the pipe after an event-loop stall is read before the timeout counts. Shadow records the kind of each difference and the first differing line. Owners told: none.
+- v4 2026-10-28 10:17Z: B1's default becomes `control` after 93 min of shadow instead of 24 h. 6,185 checks under the day's heaviest load (v1d-stats pushes at 4-7 CPU-min, load up to 35): no control timeout, no late reply, no reconnect. Of 20 differences, 7 were the screen changing between the two reads. In 13, exec returned an empty successful answer where control returned the pane's text, in two clusters (09:12-09:15Z, 09:57Z); not reproduced on a private server, quiet or busy (0 of 14,000). 24 h more shadow would cost about 1.9 M tmux process starts (22 per second). Owners told: none.
+- v3 2026-10-28 08:43Z: in shadow, a slow tmux server (exec answers up to about 2 s) made single replies exceed 3 s, and the first rule broke the client four times between 08:35 and 08:37Z, failing every pending question. Now a timeout fails only its own question, like exec, and the client is broken only after 15 s with no reply. A reply already in the pipe after an event-loop stall is read before the timeout counts. Shadow records the kind of each difference and the first differing line. Owners told: none.
 - v2 2026-10-28 08:22Z: B1 as built. The client attaches to its own session `amux-pulse` with `tmux -N` (never starts a server), because `amux sleep` and the window-size pin read agent sessions' attached clients. A hung client is simulated by freezing the tmux server, since the server writes replies straight to the client's stdout. `amux pulse io` counts per verb and pane in B1; per consumer in B2. Owners told: none.
 - v1 2026-10-28 08:07Z: first version. Measured profile, control-mode probe and the continuum hazard. Owners told: none; sandman:0 builds every step.
