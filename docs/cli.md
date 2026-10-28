@@ -532,7 +532,8 @@ with idle I/O, acts in this order:
    2026-10-22 removed an archive that running voice-mode processes mapped.
 5. Artifact folders in `~/lsrc/.artifacts`, and the copies earlier runs
    moved to `/mnt/q/wsl-overflow-DATE/`, are pruned to their receipts once
-   unchanged for 14 days (newest mtime of any entry). A folder holding only
+   unchanged for 2 days (newest mtime of any entry): bulky evidence is needed
+   only while its row runs (Mattias, 2026-10-28). A folder holding only
    several folders, such as `release-row`, is judged per child. Kept:
    documents (`md`, `json`, `log`, `txt`, `yaml`, `csv`, `html` and similar)
    and images up to 1 MB, and audio and 3D models at any size. Deleted: video,
@@ -543,8 +544,7 @@ with idle I/O, acts in this order:
    hand-picked output. Each pruned folder gets a line in its `PRUNED.md`, and
    `~/.agentmux/artifact-retention.jsonl` records df before and after.
    Nothing moves to Q: anymore: the WSL disk is itself a file on Q:, so the
-   move freed nothing on the SSD (sandman:0's call after Mattias left it to
-   sandman:0, 2026-10-28).
+   move freed nothing on the SSD.
 
 Docker images that no running container uses are only listed, for a person
 to approve; the cleanup never removes images, containers or volumes. Each run

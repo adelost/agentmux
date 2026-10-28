@@ -1,4 +1,4 @@
-// WHAT: Reduces artifact folders unchanged for 14 days to their receipts and deletes the rest.
+// WHAT: Reduces artifact folders unchanged for 2 days to their receipts and deletes the rest.
 // WHY: Keeps evidence readable while videos, builds and copies stop filling the SSD that also holds Q:.
 
 import { execFileSync } from "node:child_process";
@@ -11,6 +11,8 @@ import { measureTrees } from "./tree-usage.mjs";
 const DAY = 86400000;
 const OVERFLOW_ROOT = "/mnt/q";
 const RECEIPT_MAX_BYTES = 1024 * 1024;
+/** WHAT: Names how many days without a change mean a folder's work has stopped. WHY: Keeps bulky evidence only while its row runs. */
+export const RETENTION_DAYS = 2;
 /** WHAT: Names the file that keeps an artifact folder whole. WHY: Keeps paid or hand-picked output out of retention. */
 export const KEEP_MARKER = ".artifact-keep";
 
@@ -84,7 +86,7 @@ function heldReasons(path, tree, holders, { nowMs, days }) {
 }
 
 /** WHAT: Collects artifact folders unchanged for the retention period that hold something to delete. WHY: Keeps the dry run and the deletion on the same candidates. */
-export function planArtifactRetention({ roots = artifactRoots(), nowMs = Date.now(), days = 14, measure = measureTrees,
+export function planArtifactRetention({ roots = artifactRoots(), nowMs = Date.now(), days = RETENTION_DAYS, measure = measureTrees,
   references = processPathReferences } = {}) {
   const units = roots.flatMap(artifactUnits);
   const usage = measure(units), safety = references(units);
@@ -107,15 +109,15 @@ function journal(entry, path) {
 }
 
 /** WHAT: Stores a note in a pruned folder saying what went and why. WHY: Keeps a missing video explainable without the journal. */
-function notePruned(folder, entry) {
+function notePruned(folder, entry, days) {
   const note = join(folder, "PRUNED.md");
-  if (!existsSync(note)) appendFileSync(note, "# Pruned by the agentmux disk cleanup\n\nThe folder was unchanged for 14 days. Kept: documents and images up to 1 MB, audio and 3D models.\n"
+  if (!existsSync(note)) appendFileSync(note, `# Pruned by the agentmux disk cleanup\n\nThe folder was unchanged for ${days} days, so its work had stopped. Kept: documents and images up to 1 MB, audio and 3D models.\n`
     + `A folder holding \`${KEEP_MARKER}\` is never pruned.\n\n`);
   appendFileSync(note, `- ${entry.at.slice(0, 10)}: deleted ${entry.deletedFiles} files plus ${entry.deletedTrees} node_modules, .git or venv folders, ${(entry.deletedBytes / 1e9).toFixed(2)} GB; kept ${entry.keptFiles} files.\n`);
 }
 
 /** WHAT: Dispatches the deletions for planned folders after checking each again. WHY: Keeps a folder that changed or opened since planning whole. */
-export function pruneArtifacts(plan, { nowMs = Date.now(), days = 14, sampleDisk, measure = measureTrees, references = processPathReferences,
+export function pruneArtifacts(plan, { nowMs = Date.now(), days = RETENTION_DAYS, sampleDisk, measure = measureTrees, references = processPathReferences,
   journalPath = join(homedir(), ".agentmux", "artifact-retention.jsonl") } = {}) {
   const results = [];
   if (plan.errors.length) return results;
@@ -131,7 +133,7 @@ export function pruneArtifacts(plan, { nowMs = Date.now(), days = 14, sampleDisk
       for (const tree of doomed.trees) rmSync(tree, { recursive: true, force: true });
       execFileSync("find", [planned.path, "-mindepth", "1", "-depth", "-type", "d", "-empty", "-delete"], { stdio: "ignore" });
       entry.mode = "pruned";
-      notePruned(planned.path, entry);
+      notePruned(planned.path, entry, days);
     } catch (error) { entry.mode = "refused"; entry.error = (error.stderr?.toString().trim() || error.message).slice(0, 500); }
     entry.after = sampleDisk(); entry.freedBytes = entry.after.availableBytes - entry.before.availableBytes;
     journal(entry, journalPath); results.push(entry);

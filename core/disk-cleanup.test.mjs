@@ -100,26 +100,29 @@ feature("disk cleanup removes only what regenerates and prunes old artifacts to 
 
   // 2026-10-22: one folder with root-owned subfolders refused mid-move and stopped the row after 36 of 204 folders.
   component("old artifact folders are planned for pruning, recent, marked, profile or locked ones stay whole and a container's runs count alone", {
-    given: ["old, new, marked, profile and locked folders, a container with an old and a new run, and an old copy in the Q: overflow", () => {
+    given: ["20- and 3-day-old, new, marked, profile and locked folders, a container with an old and a new run, and an old copy in the Q: overflow", () => {
       const root = mkdtempSync(join(tmpdir(), "artifacts-")), artifacts = join(root, ".artifacts"), q = join(root, "q");
       const write = (path, text = "pixels") => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
-      for (const name of ["old", "new", "kept", "locked", "release-row/old-run", "release-row/new-run"]) write(join(artifacts, name, "deep", "clip.mp4"));
+      for (const name of ["old", "stale", "new", "kept", "locked", "release-row/old-run", "release-row/new-run"]) write(join(artifacts, name, "deep", "clip.mp4"));
       write(join(artifacts, "kept", ".artifact-keep"), "paid music video clips");
       write(join(artifacts, "run", "chrome-profile", "Default", "Cookies"), "c");
       write(join(q, "wsl-overflow-2026-10-22", artifacts, "moved", "render.mp4"));
-      const past = new Date(Date.now() - 20 * DAY);
-      const age = (path) => { if (statSync(path).isDirectory()) for (const name of readdirSync(path)) age(join(path, name)); utimesSync(path, past, past); };
+      const age = (path, past = new Date(Date.now() - 20 * DAY)) => {
+        if (statSync(path).isDirectory()) for (const name of readdirSync(path)) age(join(path, name), past);
+        utimesSync(path, past, past);
+      };
+      age(join(artifacts, "stale"), new Date(Date.now() - 3 * DAY));
       for (const name of ["old", "kept", "locked", "run", "release-row/old-run"]) age(join(artifacts, name));
       age(join(q, "wsl-overflow-2026-10-22"));
       chmodSync(join(artifacts, "locked", "deep"), 0o555);
       return { root, artifacts, q };
     }],
     when: ["planning", ({ artifacts, q }) => planArtifactRetention({ roots: artifactRoots({ root: artifacts, overflowRoot: q }), references: idle })],
-    then: ["the old folder, the old run and the old Q: copy are planned; the others say why they stay", (plan, { artifacts, q }) => {
+    then: ["the old and the 3-day-old folder, the old run and the old Q: copy are planned; the others say why they stay", (plan, { artifacts, q }) => {
       const named = (path) => path.replace(join(q, "wsl-overflow-2026-10-22", artifacts), "q:").replace(`${artifacts}/`, "");
-      expect(plan.candidates.map(({ path }) => named(path)).sort()).toEqual(["old", "q:/moved", "release-row/old-run"]);
-      expect(Object.fromEntries(plan.skipped.map(({ path, reasons }) => [named(path), reasons]))).toEqual({ new: ["modified within 14 days"],
-        "release-row/new-run": ["modified within 14 days"], kept: ["marked with .artifact-keep"], run: ["holds a browser profile"],
+      expect(plan.candidates.map(({ path }) => named(path)).sort()).toEqual(["old", "q:/moved", "release-row/old-run", "stale"]);
+      expect(Object.fromEntries(plan.skipped.map(({ path, reasons }) => [named(path), reasons]))).toEqual({ new: ["modified within 2 days"],
+        "release-row/new-run": ["modified within 2 days"], kept: ["marked with .artifact-keep"], run: ["holds a browser profile"],
         locked: ["holds folders this user cannot change"] });
     }],
     cleanup: ({ root, artifacts }) => { chmodSync(join(artifacts, "locked", "deep"), 0o755); rmSync(root, { recursive: true, force: true }); },

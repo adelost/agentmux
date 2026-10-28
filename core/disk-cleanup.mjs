@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { planArtifactRetention, pruneArtifacts } from "./artifact-retention.mjs";
+import { RETENTION_DAYS, planArtifactRetention, pruneArtifacts } from "./artifact-retention.mjs";
 import { applyDependencyCacheRetention, dependencySymlinkConsumers, sampleRootDisk } from "./disk-cache-retention.mjs";
 import { dependencyCacheRepositories, packageCacheCandidates, readProcessArgs, removeIdleCache, uvPruneAllowed } from "./disk-pressure-relief.mjs";
 import { processPathReferences } from "./process-path-references.mjs";
@@ -199,7 +199,7 @@ export function formatCleanupRows(result) {
   rows.push(`Docker images no running container uses, for approval only, never automatic: ${docker.unused.length}, ${gb(sum(docker.unused, "bytes"))} listed (shared layers count once per image). ${stoppedOnly.length} still belong to stopped containers (${[...new Set(stoppedOnly.map(({ name }) => name.split("/").at(-1).split(":")[0]))].join(", ")}), which go first; volumes stay${docker.errors.length ? `; ${docker.errors[0].error}` : ""}.`);
   const artifacts = result.artifacts;
   const onRoot = artifacts.candidates.filter(({ path }) => !path.startsWith("/mnt/"));
-  rows.push(`Artifact folders unchanged 14 days, prune to receipts: ${artifacts.candidates.length}, ${gb(artifacts.pruneBytes)} to delete, ${gb(sum(onRoot, "pruneBytes"))} of it on / and the rest in the old Q: overflow. Kept whole ${artifacts.skipped.length}: ${heldSummary(artifacts.skipped)}${artifacts.errors.length ? `; held by errors: ${artifacts.errors.map(({ error }) => error).join("; ")}` : ""}.`);
+  rows.push(`Artifact folders unchanged ${RETENTION_DAYS} days, prune to receipts: ${artifacts.candidates.length}, ${gb(artifacts.pruneBytes)} to delete, ${gb(sum(onRoot, "pruneBytes"))} of it on / and the rest in the old Q: overflow. Kept whole ${artifacts.skipped.length}: ${heldSummary(artifacts.skipped)}${artifacts.errors.length ? `; held by errors: ${artifacts.errors.map(({ error }) => error).join("; ")}` : ""}.`);
   if (!result.dryRun) {
     const modes = (items) => Object.entries(Object.groupBy(items, ({ mode }) => mode)).map(([mode, list]) => `${list.length} ${mode}`).join(", ") || "none";
     rows.push(`Done: worktrees ${modes(result.worktrees.retired)}; dependency entries ${modes(result.dependencies.actions)}; caches ${modes(result.caches.actions)}; uv ${result.uv.mode}; artifacts ${modes(result.artifacts.pruned)}.`);
