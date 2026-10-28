@@ -25,7 +25,9 @@ const SMALL_RECEIPTS = new Set([".md", ".json", ".jsonl", ".ndjson", ".log", ".t
 const ARTIFACT_LINK = /\.artifacts\/([^\s)|`>"'\]]+)/gu;
 const DEFAULT_BRANCHES = ["refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master"];
 const ALWAYS_KEPT = new Set([".mp3", ".wav", ".m4a", ".flac", ".ogg", ".glb", ".gltf", ".fbx", ".obj", ".vrm"]);
-const COPIED_TREES = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__"]);
+// A git checkout keeps every file and its .git: on 2026-10-28 the worktree step kept 8 dirty or unpushed checkouts in
+// artifact folders, and retention emptied them. Its dependency folders still go, since installs recreate them.
+const COPIED_TREES = new Set(["node_modules", ".venv", "venv", "__pycache__"]);
 
 /** WHAT: Checks whether retention keeps a file. WHY: Separates receipts and possibly paid media from regenerable bulk. */
 export function isKeptFile(name, bytes) {
@@ -105,18 +107,21 @@ export function linkedArtifacts({ roots, docs }) {
 export function prunableEntries(unit, linked = new Set()) {
   const files = [], trees = [];
   let bytes = 0, keptFiles = 0;
-  const pending = [{ path: unit, copied: false }];
+  const pending = [{ path: unit, copied: false, inCheckout: false }];
   while (pending.length) {
-    const { path: folder, copied } = pending.pop();
-    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+    const { path: folder, copied, inCheckout } = pending.pop();
+    const entries = readdirSync(folder, { withFileTypes: true });
+    const checkout = inCheckout || (!copied && entries.some(({ name }) => name === ".git"));
+    for (const entry of entries) {
+      if (entry.name === ".git") continue;
       const path = join(folder, entry.name);
       if (entry.isDirectory()) {
         const tree = !copied && COPIED_TREES.has(entry.name);
         if (tree) trees.push(path);
-        pending.push({ path, copied: copied || tree });
+        pending.push({ path, copied: copied || tree, inCheckout: checkout });
       } else if (entry.isFile()) {
         const size = lstatSync(path).size;
-        if (!copied && (isKeptFile(entry.name, size) || linked.has(path))) keptFiles++;
+        if (!copied && (checkout || isKeptFile(entry.name, size) || linked.has(path))) keptFiles++;
         else { bytes += size; if (!copied) files.push(path); }
       }
     }
@@ -163,9 +168,9 @@ function journal(entry, path) {
 /** WHAT: Stores a note in a pruned folder saying what went and why. WHY: Keeps a missing video explainable without the journal. */
 function notePruned(folder, entry, days) {
   const note = join(folder, "PRUNED.md");
-  if (!existsSync(note)) appendFileSync(note, `# Pruned by the agentmux disk cleanup\n\nThe folder was unchanged for ${days} days, so its work had stopped. Kept: text files up to 1 MB, audio, 3D models and files a repository document or memory note links to.\n`
+  if (!existsSync(note)) appendFileSync(note, `# Pruned by the agentmux disk cleanup\n\nThe folder was unchanged for ${days} days, so its work had stopped. Kept: text files up to 1 MB, audio, 3D models, files a repository document or memory note links to, and every file of a git checkout.\n`
     + `A folder holding \`${KEEP_MARKER}\` is never pruned.\n\n`);
-  appendFileSync(note, `- ${entry.at.slice(0, 10)}: deleted ${entry.deletedFiles} files plus ${entry.deletedTrees} node_modules, .git or venv folders, ${(entry.deletedBytes / 1e9).toFixed(2)} GB; kept ${entry.keptFiles} files.\n`);
+  appendFileSync(note, `- ${entry.at.slice(0, 10)}: deleted ${entry.deletedFiles} files plus ${entry.deletedTrees} node_modules or venv folders, ${(entry.deletedBytes / 1e9).toFixed(2)} GB; kept ${entry.keptFiles} files.\n`);
 }
 
 /** WHAT: Dispatches the deletions for planned folders after checking each again. WHY: Keeps a folder that changed or opened since planning whole. */
@@ -183,7 +188,9 @@ export function pruneArtifacts(plan, { nowMs = Date.now(), days = RETENTION_DAYS
       Object.assign(entry, { deletedBytes: doomed.bytes, deletedFiles: doomed.files.length, deletedTrees: doomed.trees.length, keptFiles: doomed.keptFiles });
       for (const file of doomed.files) rmSync(file, { force: true });
       for (const tree of doomed.trees) rmSync(tree, { recursive: true, force: true });
-      execFileSync("find", [planned.path, "-mindepth", "1", "-depth", "-type", "d", "-empty", "-delete"], { stdio: "ignore" });
+      // Git needs its empty refs folders, so the sweep stays out of .git.
+      execFileSync("find", [planned.path, "-mindepth", "1", "-depth", "-type", "d", "-empty", "-not", "-path", "*/.git", "-not", "-path", "*/.git/*", "-delete"],
+        { stdio: "ignore" });
       entry.mode = "pruned";
       notePruned(planned.path, entry, days);
     } catch (error) { entry.mode = "refused"; entry.error = (error.stderr?.toString().trim() || error.message).slice(0, 500); }

@@ -146,8 +146,30 @@ feature("disk cleanup removes only what regenerates and prunes old artifacts to 
     then: ["only the evidence remains, with a note saying what went and a journal row", (pruned, { root, folder }) => {
       expect(pruned.map(({ mode }) => mode)).toEqual(["pruned"]);
       expect(readdirSync(folder, { recursive: true }).sort()).toEqual(["PRUNED.md", "big.png", "doll.glb", "notes.md", "song.mp3"]);
-      expect(readFileSync(join(folder, "PRUNED.md"), "utf8")).toContain("deleted 3 files plus 1 node_modules, .git or venv folders");
+      expect(readFileSync(join(folder, "PRUNED.md"), "utf8")).toContain("deleted 3 files plus 1 node_modules or venv folders");
       expect(readFileSync(join(root, "journal.jsonl"), "utf8")).toContain('"mode":"pruned"');
+    }],
+    cleanup: ({ root }) => rmSync(root, { recursive: true, force: true }),
+  });
+
+  // 2026-10-28: the worktree step kept 8 dirty or unpushed checkouts inside artifact folders, which retention then emptied.
+  component("a git checkout in an old artifact folder keeps every file and its .git, and loses only its dependency folders", {
+    given: ["an old folder with a video, a linked worktree and a clone", () => {
+      const root = mkdtempSync(join(tmpdir(), "artifacts-")), artifacts = join(root, ".artifacts"), folder = join(artifacts, "row-1");
+      mkdirSync(join(folder, "live-tree", "node_modules", "x"), { recursive: true });
+      mkdirSync(join(folder, "copy", ".git", "refs", "heads"), { recursive: true });
+      for (const [name, body] of [["clip.mp4", "v"], ["live-tree/.git", "gitdir: /repo/.git/worktrees/live-tree\n"], ["live-tree/app.mjs", "edited"],
+        ["live-tree/node_modules/x/package.json", "{}"], ["copy/.git/HEAD", "ref: refs/heads/main\n"], ["copy/main.py", "unpushed"]]) writeFileSync(join(folder, name), body);
+      return { root, artifacts, folder };
+    }],
+    when: ["pruning a plan that admits it", ({ root, artifacts }) => {
+      const settled = (paths) => Object.fromEntries(paths.map((path) => [path, { bytes: 6, files: 1, newestModifiedMs: Date.now() - 20 * DAY }]));
+      const plan = planArtifactRetention({ roots: [artifacts], docs: [], references: idle, measure: settled });
+      return pruneArtifacts(plan, { sampleDisk: () => ({ availableBytes: 0 }), references: idle, measure: settled, journalPath: join(root, "journal.jsonl") });
+    }],
+    then: ["the checkouts' files and .git stay while the video and node_modules go", (pruned, { folder }) => {
+      const kept = ["live-tree/.git", "live-tree/app.mjs", "copy/.git/HEAD", "copy/.git/refs/heads", "copy/main.py"];
+      expect([...kept, "clip.mp4", "live-tree/node_modules"].filter((path) => existsSync(join(folder, path)))).toEqual(kept);
     }],
     cleanup: ({ root }) => rmSync(root, { recursive: true, force: true }),
   });
