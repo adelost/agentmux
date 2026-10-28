@@ -1,4 +1,4 @@
-// Guards pulse-5 (docs/DESIGN-pulse.md): `amux pulse io` shows how the bridge reached tmux, per verb and per pane,
+// Guards pulse-5 (docs/DESIGN-pulse.md): `amux pulse io` shows how the bridge reached tmux, per verb, pane and asker,
 // with the transport state, so the cost of watching panes is readable without a CPU profile.
 
 import { mkdtempSync, rmSync } from "fs";
@@ -6,7 +6,8 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { feature, unit, expect } from "bdd-vitest";
 import { cmdPulse } from "./pulse.mjs";
-import { createIoCounters, saveIoSnapshot } from "../core/pulse/io-counters.mjs";
+import { createIoCounters, formatIoSnapshot, saveIoSnapshot } from "../core/pulse/io-counters.mjs";
+import { createControlTransport } from "../core/pulse/control-transport.mjs";
 
 feature("amux pulse io", () => {
   unit("shows counts per verb and pane", {
@@ -45,5 +46,23 @@ feature("amux pulse io", () => {
     }],
     then: ["it says so instead of showing zeros", (text) => expect(text).toMatch(/no counts yet/u)],
     cleanup: (dir) => rmSync(dir, { recursive: true, force: true }),
+  });
+
+  unit("names who asked each question", {
+    given: ["a transport whose questions come from one watcher function", () => {
+      const counters = createIoCounters();
+      const transport = createControlTransport({ socket: "/tmp/pulse-none.sock", mode: "exec", counters,
+        processExec: async () => ({ stdout: "%1\n", stderr: "" }) });
+      return { counters, transport };
+    }],
+    when: ["the watcher asks three times and the report is printed", async ({ counters, transport }) => {
+      async function watchPanes() { return transport.exec("tmux -S '/tmp/pulse-none.sock' display-message -p -t 'a:.0' '#{pane_id}'"); }
+      for (let i = 0; i < 3; i++) await watchPanes();
+      transport.stop();
+      return formatIoSnapshot(counters.snapshot());
+    }],
+    then: ["the report names the watcher with its three questions", (text) => {
+      expect(text).toMatch(/\s3 {2}watchPanes cli\/pulse\.test\.mjs/u);
+    }],
   });
 });

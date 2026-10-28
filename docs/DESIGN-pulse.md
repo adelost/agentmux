@@ -368,7 +368,7 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 |---|---|
 | `cli/config.mjs` | `cli/config.test.mjs::parses agentmux.yaml again only when it changes` |
 | `core/pulse/control-transport.mjs` | `core/pulse/control-transport.test.mjs::logs a shadow disagreement with both answers`, `core/pulse/control-transport.test.mjs::answers the same as exec`, `core/pulse/control-transport.test.mjs::starts no process for read-only questions`, `core/pulse/control-transport.test.mjs::routes writes and multi-line commands to exec`, `core/pulse/control-transport.test.mjs::matches replies in order under a burst of 200 questions`, `core/pulse/control-transport.test.mjs::a slow reply fails only its own question and keeps the client`, `core/pulse/control-transport.test.mjs::fails pending questions and degrades to exec when the client stops replying`, `core/pulse/control-transport.test.mjs::reconnects after its session is killed`, `core/pulse/control-transport.test.mjs::never starts a tmux server` |
-| `core/pulse/io-counters.mjs` | `core/pulse/control-transport.test.mjs::starts no process for read-only questions`, `cli/pulse.test.mjs::shows counts per verb and pane` |
+| `core/pulse/io-counters.mjs` | `core/pulse/control-transport.test.mjs::starts no process for read-only questions`, `cli/pulse.test.mjs::shows counts per verb and pane`, `cli/pulse.test.mjs::names who asked each question` |
 | `index.mjs` | `core/pulse/control-transport.test.mjs::answers the same as exec`, `core/tmux.test.mjs` |
 | `cli/pulse.mjs` | `cli/pulse.test.mjs::shows counts per verb and pane` |
 | `docs/fleet/maintenance.md` | n/a: documentation |
@@ -392,6 +392,7 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 | `core/pulse/control-transport.test.mjs::fails pending questions and degrades to exec when the client stops replying` | pulse-3, R-1 | component | 20 | 4 |
 | `core/pulse/control-transport.test.mjs::reconnects after its session is killed` | R-5, I-3 | integration | 15 | 5 |
 | `cli/pulse.test.mjs::shows counts per verb and pane` | pulse-5 | unit | 10 | 1 |
+| `cli/pulse.test.mjs::names who asked each question` | pulse-5 | unit | 10 | 1 |
 | `core/pulse/control-transport.test.mjs::never starts a tmux server` | I-3, R-4 | integration | 10 | 2 |
 | `core/pulse/control-transport.test.mjs::logs a shadow disagreement with both answers` | pulse-4 | component | 10 | 1 |
 | `core/tmux.test.mjs` | existing | unit | 0 | 2 |
@@ -432,6 +433,7 @@ None. Every choice above is within the owner's frame: no money, no external part
 
 ## 15. Changes
 
+- v5 2026-10-28 10:40Z: B2 starts by counting who asks. Profiles at 10:19Z (busy 24 %, load 8) and 10:27Z (busy 77 %, load 44) show the cost spread over many watchers (codex-credit-stop, sleep probes, isBusy, inspectPane, drift-guard, jsonl-watcher), not the four named in v1, and every pane gets 25-45 tmux questions a minute, idle or not. Each question now carries its asker (up to three agentmux functions above the adapter, 27 us), and `amux pulse io` lists questions per minute by asker. B2's snapshot is chosen from that list. Owners told: none.
 - v4 2026-10-28 10:17Z: B1's default becomes `control` after 93 min of shadow instead of 24 h. 6,185 checks under the day's heaviest load (v1d-stats pushes at 4-7 CPU-min, load up to 35): no control timeout, no late reply, no reconnect. Of 20 differences, 7 were the screen changing between the two reads. In 13, exec returned an empty successful answer where control returned the pane's text, in two clusters (09:12-09:15Z, 09:57Z); not reproduced on a private server, quiet or busy (0 of 14,000). 24 h more shadow would cost about 1.9 M tmux process starts (22 per second). Owners told: none.
 - v3 2026-10-28 08:43Z: in shadow, a slow tmux server (exec answers up to about 2 s) made single replies exceed 3 s, and the first rule broke the client four times between 08:35 and 08:37Z, failing every pending question. Now a timeout fails only its own question, like exec, and the client is broken only after 15 s with no reply. A reply already in the pipe after an event-loop stall is read before the timeout counts. Shadow records the kind of each difference and the first differing line. Owners told: none.
 - v2 2026-10-28 08:22Z: B1 as built. The client attaches to its own session `amux-pulse` with `tmux -N` (never starts a server), because `amux sleep` and the window-size pin read agent sessions' attached clients. A hung client is simulated by freezing the tmux server, since the server writes replies straight to the client's stdout. `amux pulse io` counts per verb and pane in B1; per consumer in B2. Owners told: none.

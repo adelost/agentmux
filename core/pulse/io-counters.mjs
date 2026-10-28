@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { dirname } from "path";
 
 const MAX_TARGETS = 200;
+const MAX_ASKERS = 100;
 const MAX_DISAGREEMENTS = 20;
 const emptyPaths = () => ({ control: 0, process: 0, degraded: 0, shadow: 0, connect: 0 });
 
@@ -14,6 +15,7 @@ export function createIoCounters({ now = () => Date.now() } = {}) {
   const totals = emptyPaths();
   const byVerb = {};
   const byTarget = {};
+  const byAsker = {};
   const disagreements = [];
   const replies = { count: 0, over1s: 0, maxMs: 0, late: 0 };
   const disagreementKinds = {};
@@ -21,11 +23,12 @@ export function createIoCounters({ now = () => Date.now() } = {}) {
   let transport = { mode: null, state: null, reason: null };
 
   return {
-    record({ path, verb, target }) {
+    record({ path, verb, target, asker }) {
       totals[path] = (totals[path] ?? 0) + 1;
       const verbKey = verb ?? "other";
       (byVerb[verbKey] ??= emptyPaths())[path]++;
       if (target && (byTarget[target] || Object.keys(byTarget).length < MAX_TARGETS)) (byTarget[target] ??= emptyPaths())[path]++;
+      if (asker && (byAsker[asker] || Object.keys(byAsker).length < MAX_ASKERS)) (byAsker[asker] ??= emptyPaths())[path]++;
     },
     setTransport(next) { transport = { ...next, at: now() }; },
     reply({ ms, late }) {
@@ -42,7 +45,7 @@ export function createIoCounters({ now = () => Date.now() } = {}) {
     },
     snapshot() {
       return { v: 1, since, at: now(), transport, totals: { ...totals }, byVerb: structuredClone(byVerb),
-        byTarget: structuredClone(byTarget), replies: { ...replies }, disagreementCount,
+        byTarget: structuredClone(byTarget), byAsker: structuredClone(byAsker), replies: { ...replies }, disagreementCount,
         disagreementKinds: { ...disagreementKinds }, disagreements: [...disagreements] };
     },
   };
@@ -82,6 +85,11 @@ export function formatIoSnapshot(snapshot, { now = Date.now(), top = 15 } = {}) 
   ];
   for (const [verb, row] of Object.entries(snapshot.byVerb).sort((a, b) => (b[1].process + b[1].control) - (a[1].process + a[1].control))) {
     lines.push(`${verb.padEnd(18)}${pad(row.control, 9)}${pad(row.process, 9)}${pad(row.degraded, 10)}${pad(row.shadow, 8)}`);
+  }
+  const asked = Object.entries(snapshot.byAsker ?? {}).sort((a, b) => (b[1].process + b[1].control) - (a[1].process + a[1].control)).slice(0, top);
+  if (asked.length) lines.push("", `${pad("per min", 8)}${pad("client", 9)}${pad("process", 9)}  asked by`);
+  for (const [asker, row] of asked) {
+    lines.push(`${pad(((row.control + row.process + row.degraded) / minutes).toFixed(1), 8)}${pad(row.control, 9)}${pad(row.process, 9)}  ${asker}`);
   }
   lines.push("", `${"pane or session".padEnd(28)}${pad("client", 9)}${pad("process", 9)}`);
   for (const [target, row] of Object.entries(snapshot.byTarget).sort((a, b) => (b[1].process + b[1].control) - (a[1].process + a[1].control)).slice(0, top)) {
