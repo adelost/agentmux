@@ -117,7 +117,7 @@ feature("disk cleanup removes only what regenerates and prunes old artifacts to 
       chmodSync(join(artifacts, "locked", "deep"), 0o555);
       return { root, artifacts, q };
     }],
-    when: ["planning", ({ artifacts, q }) => planArtifactRetention({ roots: artifactRoots({ root: artifacts, overflowRoot: q }), references: idle })],
+    when: ["planning", ({ artifacts, q }) => planArtifactRetention({ roots: artifactRoots({ root: artifacts, overflowRoot: q }), docs: [], references: idle })],
     then: ["the old and the 3-day-old folder, the old run and the old Q: copy are planned; the others say why they stay", (plan, { artifacts, q }) => {
       const named = (path) => path.replace(join(q, "wsl-overflow-2026-10-22", artifacts), "q:").replace(`${artifacts}/`, "");
       expect(plan.candidates.map(({ path }) => named(path)).sort()).toEqual(["old", "q:/moved", "release-row/old-run", "stale"]);
@@ -128,22 +128,25 @@ feature("disk cleanup removes only what regenerates and prunes old artifacts to 
     cleanup: ({ root, artifacts }) => { chmodSync(join(artifacts, "locked", "deep"), 0o755); rmSync(root, { recursive: true, force: true }); },
   });
 
-  component("pruning keeps documents, small screenshots, audio and 3D models and deletes video, builds, big images and copied trees", {
-    given: ["an old folder with each kind of file", () => {
+  // 2026-10-28: evidence is needed only while its row runs; the small images kept were mostly video frames.
+  component("pruning keeps text receipts, linked files, audio and 3D models and deletes video, unlinked images, builds and copied trees", {
+    given: ["an old folder with each kind of file and a ledger that links its big image", () => {
       const root = mkdtempSync(join(tmpdir(), "artifacts-")), artifacts = join(root, ".artifacts"), folder = join(artifacts, "row-1");
       mkdirSync(join(folder, "node_modules", "x"), { recursive: true });
+      mkdirSync(join(root, "docs"));
+      writeFileSync(join(root, "docs", "TASKS.md"), "| 1 | done | [chart](.artifacts/row-1/big.png). |\n");
       for (const [name, body] of [["notes.md", "n"], ["shot.png", "p"], ["big.png", Buffer.alloc(1536 * 1024)], ["clip.mp4", "v"], ["song.mp3", "s"],
         ["doll.glb", "g"], ["app.js", "j"], ["node_modules/x/package.json", "{}"]]) writeFileSync(join(folder, name), body);
       return { root, artifacts, folder };
     }],
     when: ["pruning a plan that admits it", ({ root, artifacts }) => {
       const settled = (paths) => Object.fromEntries(paths.map((path) => [path, { bytes: 6, files: 1, newestModifiedMs: Date.now() - 20 * DAY }]));
-      const plan = planArtifactRetention({ roots: [artifacts], references: idle, measure: settled });
+      const plan = planArtifactRetention({ roots: [artifacts], docs: [join(root, "docs", "TASKS.md")], references: idle, measure: settled });
       return pruneArtifacts(plan, { sampleDisk: () => ({ availableBytes: 0 }), references: idle, measure: settled, journalPath: join(root, "journal.jsonl") });
     }],
     then: ["only the evidence remains, with a note saying what went and a journal row", (pruned, { root, folder }) => {
       expect(pruned.map(({ mode }) => mode)).toEqual(["pruned"]);
-      expect(readdirSync(folder, { recursive: true }).sort()).toEqual(["PRUNED.md", "doll.glb", "notes.md", "shot.png", "song.mp3"]);
+      expect(readdirSync(folder, { recursive: true }).sort()).toEqual(["PRUNED.md", "big.png", "doll.glb", "notes.md", "song.mp3"]);
       expect(readFileSync(join(folder, "PRUNED.md"), "utf8")).toContain("deleted 3 files plus 1 node_modules, .git or venv folders");
       expect(readFileSync(join(root, "journal.jsonl"), "utf8")).toContain('"mode":"pruned"');
     }],

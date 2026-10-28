@@ -534,11 +534,14 @@ with idle I/O, acts in this order:
    moved to `/mnt/q/wsl-overflow-DATE/`, are pruned to their receipts once
    unchanged for 2 days (newest mtime of any entry): bulky evidence is needed
    only while its row runs (Mattias, 2026-10-28). A folder holding only
-   several folders, such as `release-row`, is judged per child. Kept:
-   documents (`md`, `json`, `log`, `txt`, `yaml`, `csv`, `html` and similar)
-   and images up to 1 MB, and audio and 3D models at any size. Deleted: video,
-   builds, model files such as `.tflite`, archives, every larger file, and
-   copied `node_modules`, `.git` and venv folders. A folder open in a process,
+   several folders, such as `release-row`, is judged per child. Kept: text
+   (`md`, `json`, `log`, `txt`, `yaml`, `csv`, `html` and similar) up to 1 MB,
+   audio and 3D models at any size, and any file a Markdown file at the root
+   or under `docs/` of an `~/lsrc` repository links to by its `.artifacts/`
+   path. Deleted: video, unlinked images, builds, model files such as
+   `.tflite`, archives, every larger file, and copied `node_modules`, `.git`
+   and venv folders. Images went on 2026-10-28: the ledgers linked 4 of them,
+   and the small ones kept were mostly video frames, 32 GB in 7 days. A folder open in a process,
    holding a browser profile, a folder this user cannot change or an
    `.artifact-keep` file stays whole; put that marker in folders with paid or
    hand-picked output. Each pruned folder gets a line in its `PRUNED.md`, and
