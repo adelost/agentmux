@@ -5,7 +5,7 @@ import { isOwnerChannelJob } from "./ask-origin.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice, selfCompactAdmission } from "./self-compact.mjs";
 import { latestConversationActivityMs } from "./pane-activity.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
-import { captureJsonlAppendCursor, cursorForCopiedJsonl, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
+import { captureJsonlAppendCursor, cursorAfterLastJsonlEvent, cursorForCopiedJsonl, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "./verified-compact.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { prepareCodexIdle } from "./codex-tui.mjs";
@@ -41,6 +41,8 @@ export function liveCompactAttempts(state, { now = Date.now(), alive = processAl
     .filter(([, record]) => record.status === "ATTEMPTING" && !compactWriterGone(record, { now, alive, self }))
     .map(([pane, record]) => ({ pane, pid: record.pid, at: record.at }));
 }
+// A rewritten journal's last compact is searched this far back from its end (skybar:3: 10 MB after its compact).
+const REANCHOR_MAX_BYTES = 64 * 1024 * 1024;
 const compactEvent = e => isCodexCompaction(e)
   || (e?.type === "system" && e.subtype === "compact_boundary");
 // Claude journals a typed slash command ("/compact", "/model x") as its own
@@ -83,8 +85,13 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null, no
   const record = state?.get?.(STATE_KEY, {})?.[paneKey(name, pane)];
   if (!record || record.status === "NOT_SENT" || (identity && record.sessionId !== identity.sessionId)) return null;
   if (!Object.keys(record.cursor?.positions || {}).length) return null;
-  const cursor = identity?.path ? cursorForCopiedJsonl(record.cursor, identity.path) : record.cursor;
+  // A receipt whose journal was trimmed or rewritten since cannot prove a byte prefix; the compact the session's current
+  // journal holds then anchors it (row 104), stored so the search runs once, and only a journal without one stays unknown.
+  const copied = identity?.path ? cursorForCopiedJsonl(record.cursor, identity.path) : record.cursor;
+  const cursor = copied ?? (identity?.path
+    ? cursorAfterLastJsonlEvent(record.cursor, identity.path, compactEvent, { maxBytes: REANCHOR_MAX_BYTES }) : null);
   if (!cursor) return { ...record, status: "UNKNOWN", reason: "journal-copy-unverified" };
+  if (!copied) write(state, paneKey(name, pane), { ...record, cursor });
   const files = Object.keys(cursor.positions);
   if (hasWorkAfter(files, cursor)) return null;
   if (record.status !== "VERIFIED" && hasJsonlEventAfterCursor(files, cursor, compactEvent)) {

@@ -98,6 +98,30 @@ export function jsonlEventsAfterCursor(files, cursor, { maxBytes = DEFAULT_MAX_A
 }
 
 /**
+ * WHAT: Returns a cursor just after the last complete event the predicate accepts near a journal's end.
+ * WHY: Lets a receipt whose own journal was trimmed or rewritten follow the journal the session writes now.
+ */
+export function cursorAfterLastJsonlEvent(cursor, path, predicate, { maxBytes = DEFAULT_MAX_APPEND_BYTES } = {}) {
+  let fd;
+  try {
+    fd = openSync(path, "r");
+    const size = fstatSync(fd).size, length = Math.min(size, maxBytes), start = size - length;
+    const buffer = Buffer.alloc(length);
+    if (length) readSync(fd, buffer, 0, length, start);
+    // Only lines ending in a newline are complete; a window that starts mid-file drops its first, partial line.
+    for (let end = buffer.lastIndexOf(0x0a); end >= 0;) {
+      const begin = end > 0 ? buffer.lastIndexOf(0x0a, end - 1) + 1 : 0;
+      if (begin === 0 && start > 0) return null;
+      try { if (predicate(JSON.parse(buffer.toString("utf8", begin, end)))) return { ...cursor, positions: { [path]: start + end + 1 } }; }
+      catch { /* a malformed or empty line is no event */ }
+      end = begin - 1;
+    }
+    return null;
+  } catch { return null; }
+  finally { if (fd !== undefined) closeSync(fd); }
+}
+
+/**
  * WHAT: Checks appended JSONL events for one predicate match.
  * WHY: Keeps oversized tool records from hiding later delivery receipts.
  */

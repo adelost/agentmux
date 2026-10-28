@@ -1,5 +1,5 @@
 import { component, expect, feature } from "bdd-vitest";
-import { appendFileSync, copyFileSync, mkdtempSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdtempSync, truncateSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { contextMaintenanceAttempt, createContextMaintenance } from "./context-maintenance.mjs";
@@ -191,6 +191,32 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
       }], cleanup: ctx => ctx.cleanup(),
     });
   }
+  component("a receipt whose journal was trimmed past its cursor follows the compact in the journal the session writes now", {
+    given: ["a verified receipt on a journal the janitor later cut below the receipt's byte position", () => {
+      const ctx = fixture();
+      const old = ctx.identityFor().path, current = join(ctx.resolveTarget().dir, "other-account.jsonl");
+      ctx.append({ type: "session_meta", payload: { id: "one" } });
+      ctx.append({ type: "compacted" });
+      const cursor = captureJsonlAppendCursor("codex-compact-events-v1", [old]);
+      copyFileSync(old, current);
+      truncateSync(old, 10);
+      ctx.state.set("context_maintenance_by_pane_v1", { "claw:2": { sessionId: "one", cursor, status: "VERIFIED" } });
+      ctx.identityFor = () => ({ sessionId: "one", path: current });
+      return { ctx, current };
+    }],
+    when: ["the pane is idle, then works again", ({ ctx, current }) => {
+      const idle = { canAttempt: createContextMaintenance(ctx).canAttempt("claw", 2, "one"),
+        receipt: contextMaintenanceAttempt(ctx.state, "claw", 2, ctx.identityFor()) };
+      appendFileSync(current, JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "later task" } }) + "\n");
+      appendFileSync(current, JSON.stringify({ type: "event_msg", payload: { type: "token_count" } }) + "\n");
+      return { idle, worked: { canAttempt: createContextMaintenance(ctx).canAttempt("claw", 2, "one"),
+        receipt: contextMaintenanceAttempt(ctx.state, "claw", 2, ctx.identityFor()) } };
+    }],
+    then: ["the compact holds while idle and later work releases it", ({ idle, worked }) => {
+      expect(idle.canAttempt).toBe(false); expect(idle.receipt?.status).toBe("VERIFIED");
+      expect(worked.receipt).toBeNull(); expect(worked.canAttempt).toBe(true);
+    }], cleanup: ({ ctx }) => ctx.cleanup(),
+  });
   for (const mode of ["unchanged", "refused", "different-prefix", "missing-source"]) {
     component(`a copied journal with ${mode} evidence cannot spend another compact`, {
       given: ["a verified receipt and another account path with the same session id", () => {
@@ -216,7 +242,8 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
       })],
       then: ["unchanged work retains its receipt and unprovable history holds as unknown", ({ canAttempt, receipt }) => {
         expect(canAttempt).toBe(false);
-        expect(receipt?.status).toBe(["different-prefix", "missing-source"].includes(mode) ? "UNKNOWN" : "VERIFIED");
+        // A missing source no longer leaves the receipt unknown: the copy itself holds the compact (row 104).
+        expect(receipt?.status).toBe(mode === "different-prefix" ? "UNKNOWN" : "VERIFIED");
       }], cleanup: ctx => ctx.cleanup(),
     });
   }
