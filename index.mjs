@@ -71,6 +71,7 @@ import { pinRuntimeExecutable } from "./core/runtime-helper.mjs";
 import { cmdSleepWatch } from "./cli/sleep.mjs";
 import { createAudioOutbox } from "./core/audio-outbox.mjs";
 import { DEFAULT_TMUX_SOCKET, DEFAULT_TTS_VOICE, runtimeAgentsPath } from "./core/runtime-defaults.mjs";
+import { startPulse } from "./core/pulse/start-pulse.mjs";
 import { ensureRuntimeConfig } from "./core/runtime-config.mjs";
 // --- Config ---
 
@@ -134,8 +135,8 @@ for (const failure of startupHints.errors) {
 const exec = promisify(execCb);
 const run = (cmd, timeoutMs = TIMEOUT) =>
   exec(cmd, { timeout: timeoutMs, env: { ...process.env, PATH: SHELL_PATH }, maxBuffer: 1024 * 1024 });
-const tmuxExec = (cmd) =>
-  exec(cmd, { timeout: 3000, env: { ...process.env, PATH: SHELL_PATH } });
+const tmuxExec = startPulse({ socket: TMUX_SOCKET, processExec: (cmd) =>
+  exec(cmd, { timeout: 3000, env: { ...process.env, PATH: SHELL_PATH } }) }).exec;
 
 // Liveness contract for `amux doctor` + bin/bridge-watchdog-cron.sh: a 30s
 // heartbeat with pid + version. Catches what the supervisor cannot see —

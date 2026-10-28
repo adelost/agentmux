@@ -2929,8 +2929,8 @@ export async function dispatch(argv, ctx) {
     }
 
     case "on-track": return (await import("./on-track.mjs")).cmdOnTrack(rest);
+    case "pulse": return (await import("./pulse.mjs")).cmdPulse(rest);
     case "quiet": return (await import("./quiet.mjs")).cmdQuiet(rest, ctx);
-
     case "compact": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.compact);
       return cmdCompact(ctx, flags, positional);
