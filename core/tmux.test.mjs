@@ -16,6 +16,22 @@ function fakeTmux({ stdout = "" } = {}) {
 const PREFIX = `tmux -S '/tmp/amux.sock' `;
 
 feature("tmux adapter: command strings", () => {
+  unit("listAllPanes reads every session's active-window panes in one question", {
+    given: ["an adapter whose tmux lists two sessions and an inactive window", () => fakeTmux({ stdout: [
+      "lsrc|1|4101|0|%1|0|claude|/home/a/lsrc/.agents/0",
+      "lsrc|1|4102|1|%2|1|bash|/home/a/lsrc/.agents/1",
+      "lsrc|0|4103|0|%3|0|vim|/tmp",
+      "ai|1|4201|0|%4|0|node|/home/a/ai|x",
+    ].join("\n") + "\n" })],
+    when: ["listing the fleet", async ({ t, calls }) => ({ rows: await t.listAllPanes(), calls })],
+    then: ["one list-panes -a question, keyed session:pane, inactive windows left out", ({ rows, calls }) => {
+      expect(calls).toEqual([PREFIX + "list-panes -a -F '#{session_name}|#{window_active}|#{pane_pid}|#{pane_index}|#{pane_id}|#{pane_dead}|#{pane_current_command}|#{pane_current_path}'"]);
+      expect([...rows.keys()]).toEqual(["lsrc:0", "lsrc:1", "ai:0"]);
+      expect(rows.get("lsrc:1")).toEqual({ index: 1, id: "%2", dead: true, command: "bash", path: "/home/a/lsrc/.agents/1", pid: 4102 });
+      expect(rows.get("ai:0").path).toBe("/home/a/ai|x");
+    }],
+  });
+
   unit("escapes single quotes in targets", {
     given: ["an adapter with a recording exec", () => fakeTmux()],
     when: ["sending Enter to a quoted target", async ({ t, calls }) => {

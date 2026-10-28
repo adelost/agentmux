@@ -3,6 +3,13 @@
 
 import { inspectPane } from "../cli/inspect-pane.mjs";
 import { paneModelSelection } from "../core/pane-model-state.mjs";
+import { codexModelOverride } from "../core/codex-profiles.mjs";
+import { latestJsonlInfo, panePathFor } from "../core/jsonl-reader.mjs";
+import { latestAlternateMtime } from "../core/alternate-session-reader.mjs";
+import { createTmuxAdapter } from "../core/tmux.mjs";
+
+// A model switched inside a session that writes no journal amux reads here (Codex) shows within this long.
+const RECHECK_MS = 5 * 60_000;
 
 const modelValue = (value) => {
   const model = String(value?.model || "").trim();
@@ -45,6 +52,7 @@ export async function observeLinkTargetModels({
   agent,
   state,
   inspect = inspectPane,
+  paneProcess = (name, pane) => agent.paneProcessState(name, pane),
 } = {}) {
   const fleet = new Map((agents || []).map((entry) => [entry.name, entry]));
   const entries = await Promise.all((targets || []).map(async (target) => {
@@ -56,7 +64,7 @@ export async function observeLinkTargetModels({
     try {
       const process = configuredAgent.backend === "native"
         ? { index: pane, command: "native", dead: false }
-        : { index: pane, ...await agent.paneProcessState(name, pane) };
+        : { index: pane, ...await paneProcess(name, pane) };
       const reading = await inspect({ agent, state }, configuredAgent, process);
       return [target.id, qualifyLinkPaneModel({
         running: reading.modelView?.running,
@@ -73,6 +81,42 @@ export async function observeLinkTargetModels({
     }
   }));
   return new Map(entries.filter(([id, model]) => id && model));
+}
+
+/** WHAT: Returns a pane's journal stamps as inspectPane reads them. WHY: Keeps the reuse rule on the same files. */
+export function paneJournalStamp(configured, pane) {
+  const paneDir = panePathFor(configured, pane);
+  return [latestJsonlInfo(paneDir), latestAlternateMtime(configured.panes?.[pane]?.cmd, paneDir)];
+}
+
+/**
+ * WHAT: Builds Link's model reader that inspects a pane again only after its inputs change.
+ * WHY: Prevents idle panes from costing a capture and two tmux questions every 15 s (pulse-9).
+ */
+export function createLinkTargetModels({
+  agents, agent, state, socket, exec, inspect = inspectPane, journalStamp = paneJournalStamp, now = Date.now,
+  tmux = createTmuxAdapter({ socket, exec }),
+} = {}) {
+  const readings = new Map();
+  return async (targets) => {
+    const rows = await tmux.listAllPanes();
+    const paneProcess = (name, pane) => {
+      const row = rows.get(`${name}:${pane}`);
+      return { command: row?.command ?? null, dead: row?.dead ?? false, pid: row?.pid ?? null };
+    };
+    const reuse = async (ctx, configured, process) => {
+      const key = `${configured.name}:${process.index}`;
+      const stamp = JSON.stringify([process.dead, process.command, process.pid, journalStamp(configured, process.index),
+        configured.panes?.[process.index], configured.claudeModel, configured.codexModel,
+        codexModelOverride(state, configured.name, process.index)]);
+      const held = readings.get(key);
+      if (held?.stamp === stamp && now() - held.at < RECHECK_MS) return held.reading;
+      const reading = await inspect(ctx, configured, process);
+      readings.set(key, { stamp, at: now(), reading });
+      return reading;
+    };
+    return observeLinkTargetModels({ targets, agents: agents(), agent, state, inspect: reuse, paneProcess });
+  };
 }
 
 /** WHAT: Builds targets with available model evidence. WHY: Keeps private and public transport projection identical. */

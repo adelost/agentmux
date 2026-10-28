@@ -106,6 +106,7 @@ Requirements, one testable line each:
 - **pulse-6** An idle pane costs 0 process starts, 0 tmux questions of its own and 0 file reads in 10 min, with all watchdogs on. Source: row 116 criteria
 - **pulse-7** A journal is read only from its saved offset. An idle journal costs 0 reads, and a truncated or replaced journal is reread from 0 with a log line. Source: row 116 criteria
 - **pulse-8** agentmux.yaml is parsed again only when its mtime or size changes. Source: own (profile 2026-10-28 07:59Z, 3.8 %)
+- **pulse-9** Link's target models cost one pane listing per cycle; a pane whose process, journal and model config did not change is not inspected again within 5 min. Source: own (askers 2026-10-28 10:36-10:46Z: Link 669 of 1,594 tmux questions a minute)
 
 ## 4. Architecture
 
@@ -375,7 +376,8 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 | `channels/permission-watchdog.mjs` | n/a: changes in B2 and B4; their tests are added to this table in that step's design delta |
 | `core/tui-stall-recovery.mjs` | n/a: changes in B2; tests added with B2 |
 | `channels/drift-guard.mjs` | n/a: changes in B2; tests added with B2 |
-| `channels/link-target-models.mjs` | n/a: changes in B2; tests added with B2 |
+| `channels/link-target-models.mjs` | `channels/link-target-models.test.mjs::an unchanged pane is not inspected again`, `channels/link-target-models.test.mjs` |
+| `core/tmux.mjs` | `core/tmux.test.mjs::listAllPanes reads every session's active-window panes in one question`, `core/tmux.test.mjs` |
 | `core/pulse/pane-snapshot.mjs` | n/a: new in B2; tests added with B2 |
 | `core/pulse/journal-follower.mjs` | n/a: new in B3; tests added with B3 (pulse-7) |
 | `channels/jsonl-watcher.mjs` | n/a: changes in B3; tests added with B3 |
@@ -396,6 +398,9 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 | `core/pulse/control-transport.test.mjs::never starts a tmux server` | I-3, R-4 | integration | 10 | 2 |
 | `core/pulse/control-transport.test.mjs::logs a shadow disagreement with both answers` | pulse-4 | component | 10 | 1 |
 | `core/tmux.test.mjs` | existing | unit | 0 | 2 |
+| `core/tmux.test.mjs::listAllPanes reads every session's active-window panes in one question` | pulse-9 | unit | 10 | 1 |
+| `channels/link-target-models.test.mjs::an unchanged pane is not inspected again` | pulse-9 | component | 15 | 1 |
+| `channels/link-target-models.test.mjs` | existing | component | 0 | 1 |
 
 - Budget: 130 min of tests within B0+B1's 6 h. Targeted run with smoke about 36 s.
 - Manual evidence for pulse-6 and the live check:
@@ -433,6 +438,7 @@ None. Every choice above is within the owner's frame: no money, no external part
 
 ## 15. Changes
 
+- v6 2026-10-28 11:05Z: B2a. Link's target models were 669 of 1,594 tmux questions a minute (10:36-10:46Z): two display-messages and a 100-line capture per target every 15 s, plus inspectPane's journal reads. They now read one `list-panes -a` per cycle and inspect a pane again only when its pid, command, dead flag, journal stamp or model config changed, or after 5 min, because a Codex in-session model switch writes no journal Link reads (pulse-9). Owners told: none.
 - v5 2026-10-28 10:40Z: B2 starts by counting who asks. Profiles at 10:19Z (busy 24 %, load 8) and 10:27Z (busy 77 %, load 44) show the cost spread over many watchers (codex-credit-stop, sleep probes, isBusy, inspectPane, drift-guard, jsonl-watcher), not the four named in v1, and every pane gets 25-45 tmux questions a minute, idle or not. Each question now carries its asker (up to three agentmux functions above the adapter, 27 us), and `amux pulse io` lists questions per minute by asker. B2's snapshot is chosen from that list. Owners told: none.
 - v4 2026-10-28 10:17Z: B1's default becomes `control` after 93 min of shadow instead of 24 h. 6,185 checks under the day's heaviest load (v1d-stats pushes at 4-7 CPU-min, load up to 35): no control timeout, no late reply, no reconnect. Of 20 differences, 7 were the screen changing between the two reads. In 13, exec returned an empty successful answer where control returned the pane's text, in two clusters (09:12-09:15Z, 09:57Z); not reproduced on a private server, quiet or busy (0 of 14,000). 24 h more shadow would cost about 1.9 M tmux process starts (22 per second). Owners told: none.
 - v3 2026-10-28 08:43Z: in shadow, a slow tmux server (exec answers up to about 2 s) made single replies exceed 3 s, and the first rule broke the client four times between 08:35 and 08:37Z, failing every pending question. Now a timeout fails only its own question, like exec, and the client is broken only after 15 s with no reply. A reply already in the pipe after an event-loop stall is read before the timeout counts. Shadow records the kind of each difference and the first differing line. Owners told: none.

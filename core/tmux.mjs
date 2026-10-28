@@ -20,6 +20,7 @@ import { CLEARLINE_RECIPE, composerKeyWrites } from "./composer-control.mjs";
 import { assertDeliveryPreparation, beginDeliveryInput } from "./delivery-preparation.mjs";
 
 const PANE_ROW_FORMAT = "#{pane_index}|#{pane_id}|#{pane_dead}|#{pane_current_command}|#{pane_current_path}";
+const FLEET_ROW_FORMAT = `#{session_name}|#{window_active}|#{pane_pid}|${PANE_ROW_FORMAT}`;
 
 /** WHAT: Parses list-panes rows strictly. WHY: Keeps a malformed listing from becoming a guessed pane layout. */
 export function parsePaneRows(stdout, name) {
@@ -32,6 +33,22 @@ export function parsePaneRows(stdout, name) {
   });
   if (!rows.length) throw new Error(`list-panes returned no panes for '${name}'`);
   return rows.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * WHAT: Parses a list-panes -a listing into session:pane rows of each session's active window.
+ * WHY: Keeps a malformed row from becoming a guessed pane; agent targets name the active window.
+ */
+export function parseFleetRows(stdout) {
+  const rows = new Map();
+  for (const line of String(stdout || "").split("\n").filter((text) => text.trim())) {
+    const [session, active, pid, ...rest] = line.split("|");
+    if (!session || !/^\d+$/u.test(pid)) throw new Error(`unreadable list-panes -a row: ${JSON.stringify(line)}`);
+    if (active !== "1") continue;
+    const [row] = parsePaneRows(rest.join("|"), session);
+    rows.set(`${session}:${row.index}`, { ...row, pid: Number(pid) });
+  }
+  return rows;
 }
 
 export function createTmuxAdapter({ socket, exec }) {
@@ -161,6 +178,12 @@ export function createTmuxAdapter({ socket, exec }) {
     async paneRows(name) {
       const { stdout } = await raw(`list-panes -t ${q(name)} -F '${PANE_ROW_FORMAT}'`);
       return parsePaneRows(stdout, name);
+    },
+
+    /** Every session's active-window panes in one question, keyed "session:index", each with its pid. */
+    async listAllPanes() {
+      const { stdout } = await raw(`list-panes -a -F '${FLEET_ROW_FORMAT}'`);
+      return parseFleetRows(stdout);
     },
 
     /** One #{...} format value for a pane, trimmed. */
