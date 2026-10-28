@@ -3,6 +3,7 @@ import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync,
   openSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { keepChromeMemoryInRam } from "./chrome-shared-memory.mjs";
 import { applyGradleCacheRetention,sampleRootDisk } from "./disk-cache-retention.mjs";
 import { processPathReferences } from "./process-path-references.mjs";
 
@@ -15,9 +16,10 @@ export function dependencyCacheRepositories(base=join(homedir(),"lsrc")) {
     });
 }
 
-/** WHAT: Dispatches hourly Gradle retention. WHY: Keeps build-cache growth bounded between nightly cleanups; dependency entries retire in the nightly cleanup, after its symlink-consumer scan. */
+// Dependency entries retire in the nightly cleanup instead, after its symlink-consumer scan.
+/** WHAT: Dispatches hourly Gradle retention and the Chrome launcher check. WHY: Bounds build caches and keeps new Chrome downloads off the SSD between nightly cleanups. */
 export function maintainDiskCaches() {
-  return {gradle:applyGradleCacheRetention({dryRun:false})};
+  return {gradle:applyGradleCacheRetention({dryRun:false}),chrome:keepChromeMemoryInRam()};
 }
 
 /** WHAT: Stores one emergency cache action durably. WHY: Keeps actual df deltas separate from estimated directory sizes. */

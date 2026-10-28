@@ -494,9 +494,24 @@ before removal, then records the result. Without the flag it remains read-only.
 the `agentmux-disk-cleanup.service` unit and
 `~/.gradle/init.d/agentmux-disk-retention.gradle`. The timer runs
 `node bin/disk-guard.mjs poll` under a nonblocking lock with a five-minute
-deadline. Every poll reads `df /` and trims Gradle. The first poll after 03:00
+deadline. Every poll reads `df /`, trims Gradle and checks the Chrome launchers
+below. The first poll after 03:00
 each night starts the cleanup unit, and so does a poll at 80 % used or more,
 at most every six hours. Reaching 80 % notifies the human once per episode.
+
+Chrome's shared memory stays in RAM. Playwright adds `--disable-dev-shm-usage`
+to every Chromium launch, which moves that memory to files in `/tmp` that the
+kernel writes to the SSD; on 2026-10-28 one Chrome playing video wrote 66 GB in
+12 minutes. Every poll places a launcher before each Chrome build under
+`~/.cache/ms-playwright` and `~/.cache/puppeteer`. It drops that flag and runs
+the binary, which stays beside it as `<name>.real`. The system Chrome needs root
+once: `sudo dpkg-divert --local --rename --divert /opt/google/chrome/chrome.real
+--add /opt/google/chrome/chrome`, then install `CHROME_LAUNCHER` from
+`core/chrome-shared-memory.mjs` as `/opt/google/chrome/chrome`, mode 755. The
+diversion keeps it across Chrome upgrades. `disk-guard.json` reports every
+build under `maintenance.chrome`. Undo one build with `mv <name>.real <name>`,
+the system Chrome with `sudo rm /opt/google/chrome/chrome && sudo dpkg-divert
+--local --rename --remove /opt/google/chrome/chrome`.
 
 `node bin/disk-cleanup.mjs plan` is the dry run: one line per category with
 count, size and how much of it df would gain. `apply`, which the unit runs
