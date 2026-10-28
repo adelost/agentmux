@@ -1,6 +1,8 @@
 import { ON_TRACK_CHECKS, validateOnTrackReceipt } from "./on-track-validation.mjs";
 import { onTrackOwner } from "./on-track-evidence.mjs";
 import { onTrackCoveredUntil } from "./on-track-contract.mjs";
+import { appendOnTrackArchive, onTrackRetentionDue, retainOnTrackState, ON_TRACK_KEEP_MS } from "./on-track-retention.mjs";
+import { dirname } from "node:path";
 
 /** WHAT: Names the persisted scheduler state. WHY: Prevents bridge restarts from losing deadlines and uncertain delivery outcomes. */
 export const ON_TRACK_STATE = "on_track_v1";
@@ -18,8 +20,14 @@ export function onTrackReminder(project, cycle) {
 
 /** WHAT: Builds one durable logical hourly schedule per configured project. WHY: Prevents missed reviews from disappearing and uncertain sends from repeating. */
 export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHuman = null, now = Date.now,
-  commands = () => ({}), lookup = () => null, validatorIdentity = null, log = message => console.warn(message) }) {
+  commands = () => ({}), lookup = () => null, validatorIdentity = null, log = message => console.warn(message),
+  keepMs = ON_TRACK_KEEP_MS, archive = archived => appendOnTrackArchive(dirname(state.path), archived) }) {
   const mutate = fn => state.updateKey(ON_TRACK_STATE, old => { const data = old || { projects: {}, history: [], commands: {}, daily: {} }; fn(data); return data; });
+  // The archive is written inside the save, before the state shrinks, so a failed append keeps the full records.
+  const retain = () => {
+    const data = state.get(ON_TRACK_STATE);
+    if (data && onTrackRetentionDue(data, now(), keepMs)) mutate(next => archive(retainOnTrackState(next, now(), keepMs)));
+  };
   const get = id => state.get(ON_TRACK_STATE)?.projects[id];
   const findCycle = (data, project, cycle) => data.projects[project.id]?.cycle?.id === cycle.id
     ? data.projects[project.id].cycle : data.history.find(c => c.id === cycle.id);
@@ -132,6 +140,7 @@ export function createOnTrackMonitor({ state, projects, snapshot, send, notifyHu
       record = get(project.id);
       if (record?.cycle.status === "invalid") await escalate(project, record.cycle, "invalid receipt");
     }
+    retain();
     await dailySummary();
   }
 
