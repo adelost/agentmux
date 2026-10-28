@@ -81,6 +81,7 @@ export function createControlTransport({
   counters = null,
   sampleEvery = 20,
   timeoutMs = 3000,
+  deadMs = 15000,
   log = () => {},
   spawnClient = (args) => spawn("tmux", args, { stdio: ["pipe", "pipe", "pipe"] }),
   backoffMs = BACKOFF_MS,
@@ -95,6 +96,7 @@ export function createControlTransport({
   let carry = "";
   let attempts = 0;
   let reconnectTimer = null;
+  let deadTimer = null;
   let sampled = 0;
   let stopped = false;
 
@@ -110,7 +112,9 @@ export function createControlTransport({
   function rejectAll(error) {
     const pending = queue;
     queue = [];
-    for (const job of pending) { clearTimeout(job.timer); job.reject(error); }
+    clearTimeout(deadTimer);
+    deadTimer = null;
+    for (const job of pending) { clearTimeout(job.timer); if (!job.settled) { job.settled = true; job.reject(error); } }
   }
 
   function broken(why) {
@@ -138,6 +142,10 @@ export function createControlTransport({
     const job = queue.shift();
     if (!job) { log(`reply without a question (${ended.lines.length} lines)`); return; }
     clearTimeout(job.timer);
+    scheduleDeadCheck(true);
+    counters?.reply({ verb: job.verb, ms: performance.now() - job.sentAt, late: job.settled });
+    if (job.settled) return; // its caller already got the timeout, like exec's
+    job.settled = true;
     const text = ended.lines.join("\n");
     if (ended.bytes > MAX_REPLY_BYTES) job.reject(failure("stdout maxBuffer length exceeded", { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" }));
     else if (ok) job.resolve({ stdout: ended.lines.length ? `${text}\n` : "", stderr: "" });
@@ -182,12 +190,34 @@ export function createControlTransport({
     attachTimer.unref?.();
   }
 
+  // A reply already waiting in the pipe after an event-loop stall is read before the timeout counts.
+  function expire(job) {
+    setImmediate(() => {
+      if (job.settled) return;
+      job.settled = true;
+      job.reject(failure(`Command failed: tmux ${job.args}\nno reply in ${timeoutMs} ms`, { killed: true, signal: "SIGTERM", code: null }));
+    });
+  }
+
+  function scheduleDeadCheck(restart = false) {
+    if (restart) { clearTimeout(deadTimer); deadTimer = null; }
+    if (deadTimer || !queue.length) return;
+    deadTimer = setTimeout(() => {
+      deadTimer = null;
+      if (!queue.length) return;
+      if (performance.now() - queue[0].sentAt >= deadMs) broken(`no reply for ${deadMs} ms`);
+      else scheduleDeadCheck();
+    }, Math.max(0, queue[0].sentAt + deadMs - performance.now()));
+    deadTimer.unref?.();
+  }
+
   function ask(question) {
     return new Promise((resolve, reject) => {
-      const job = { args: question.args, resolve, reject, timer: null };
-      job.timer = setTimeout(() => broken(`no reply in ${timeoutMs} ms`), timeoutMs);
+      const job = { args: question.args, verb: question.verb, resolve, reject, settled: false, sentAt: performance.now(), timer: null };
+      job.timer = setTimeout(() => expire(job), timeoutMs);
       job.timer.unref?.();
       queue.push(job);
+      scheduleDeadCheck();
       client.stdin.write(`${question.args}\n`);
     });
   }
@@ -198,6 +228,16 @@ export function createControlTransport({
   const sameAnswer = (a, b) => a.status === b.status && (a.status === "fulfilled"
     ? a.value.stdout === b.value.stdout
     : String(a.reason?.stderr || "").trim() === String(b.reason?.stderr || "").trim());
+  const differenceOf = (processOutcome, controlOutcome) => {
+    if (controlOutcome.status === "rejected" && controlOutcome.reason?.killed) return { kind: "control-timeout" };
+    if (processOutcome.status !== controlOutcome.status) return { kind: "outcome" };
+    if (processOutcome.status === "rejected") return { kind: "error-text" };
+    const a = processOutcome.value.stdout.split("\n"), b = controlOutcome.value.stdout.split("\n");
+    const line = a.findIndex((text, i) => text !== b[i]);
+    const at = line < 0 ? a.length : line;
+    return { kind: "stdout", line: at, lines: [a.length, b.length],
+      process: JSON.stringify(a[at] ?? null).slice(0, 120), control: JSON.stringify(b[at] ?? null).slice(0, 120) };
+  };
 
   function shadow(cmd, question) {
     record("process", question);
@@ -206,9 +246,10 @@ export function createControlTransport({
       record("shadow", question);
       Promise.allSettled([answer, ask(question)]).then(([processOutcome, controlOutcome]) => {
         if (sameAnswer(processOutcome, controlOutcome)) return;
-        counters?.disagree({ verb: question.verb, target: question.target,
-          process: answerText(processOutcome), control: answerText(controlOutcome) });
-        log(`shadow disagreement ${question.verb} ${question.target ?? "-"}: exec=${answerText(processOutcome)} control=${answerText(controlOutcome)}`);
+        const difference = differenceOf(processOutcome, controlOutcome);
+        counters?.disagree({ verb: question.verb, target: question.target, ...difference,
+          ...(difference.kind === "stdout" ? {} : { process: answerText(processOutcome), control: answerText(controlOutcome) }) });
+        log(`shadow disagreement ${question.verb} ${question.target ?? "-"} (${difference.kind}${difference.kind === "stdout" ? ` at line ${difference.line} of ${difference.lines.join("/")}` : ""}): exec=${difference.process ?? answerText(processOutcome)} control=${difference.control ?? answerText(controlOutcome)}`);
       });
     }
     return answer;
@@ -232,6 +273,7 @@ export function createControlTransport({
     stop() {
       stopped = true;
       clearTimeout(reconnectTimer);
+      clearTimeout(deadTimer);
       const old = client;
       client = null;
       rejectAll(failure("tmux control transport stopped", { killed: true, signal: "SIGTERM", code: null }));

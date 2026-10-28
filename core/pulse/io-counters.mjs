@@ -15,6 +15,8 @@ export function createIoCounters({ now = () => Date.now() } = {}) {
   const byVerb = {};
   const byTarget = {};
   const disagreements = [];
+  const replies = { count: 0, over1s: 0, maxMs: 0, late: 0 };
+  const disagreementKinds = {};
   let disagreementCount = 0;
   let transport = { mode: null, state: null, reason: null };
 
@@ -26,14 +28,22 @@ export function createIoCounters({ now = () => Date.now() } = {}) {
       if (target && (byTarget[target] || Object.keys(byTarget).length < MAX_TARGETS)) (byTarget[target] ??= emptyPaths())[path]++;
     },
     setTransport(next) { transport = { ...next, at: now() }; },
+    reply({ ms, late }) {
+      replies.count++;
+      if (ms > 1000) replies.over1s++;
+      if (late) replies.late++;
+      replies.maxMs = Math.max(replies.maxMs, Math.round(ms));
+    },
     disagree(row) {
       disagreementCount++;
+      disagreementKinds[row.kind ?? "unknown"] = (disagreementKinds[row.kind ?? "unknown"] ?? 0) + 1;
       disagreements.push({ at: now(), ...row });
       if (disagreements.length > MAX_DISAGREEMENTS) disagreements.shift();
     },
     snapshot() {
       return { v: 1, since, at: now(), transport, totals: { ...totals }, byVerb: structuredClone(byVerb),
-        byTarget: structuredClone(byTarget), disagreementCount, disagreements: [...disagreements] };
+        byTarget: structuredClone(byTarget), replies: { ...replies }, disagreementCount,
+        disagreementKinds: { ...disagreementKinds }, disagreements: [...disagreements] };
     },
   };
 }
@@ -53,6 +63,10 @@ export function readIoSnapshot(path) {
 }
 
 const pad = (value, width) => String(value).padStart(width);
+const kinds = (snapshot) => {
+  const entries = Object.entries(snapshot.disagreementKinds ?? {});
+  return entries.length ? ` (${entries.map(([kind, n]) => `${kind} ${n}`).join(", ")})` : "";
+};
 
 /** WHAT: Formats a snapshot as the `amux pulse io` text. WHY: Keeps one owner for the wording Mattias reads. */
 export function formatIoSnapshot(snapshot, { now = Date.now(), top = 15 } = {}) {
@@ -61,7 +75,8 @@ export function formatIoSnapshot(snapshot, { now = Date.now(), top = 15 } = {}) 
   const t = snapshot.totals;
   const lines = [
     `pulse io · since ${new Date(snapshot.since).toISOString().slice(0, 19)}Z (${minutes} min) · transport ${snapshot.transport.mode} · client ${snapshot.transport.state}${snapshot.transport.reason ? ` (${snapshot.transport.reason})` : ""}`,
-    `tmux questions over the client ${t.control} · process starts ${t.process + t.degraded + t.connect} (degraded ${t.degraded}, client ${t.connect}) · shadow checks ${t.shadow} · disagreements ${snapshot.disagreementCount}`,
+    `tmux questions over the client ${t.control} · process starts ${t.process + t.degraded + t.connect} (degraded ${t.degraded}, client ${t.connect}) · shadow checks ${t.shadow} · disagreements ${snapshot.disagreementCount}${kinds(snapshot)}`,
+    `client replies ${snapshot.replies?.count ?? 0} · over 1 s ${snapshot.replies?.over1s ?? 0} · slowest ${snapshot.replies?.maxMs ?? 0} ms · late replies dropped ${snapshot.replies?.late ?? 0}`,
     "",
     `${"verb".padEnd(18)}${pad("client", 9)}${pad("process", 9)}${pad("degraded", 10)}${pad("shadow", 8)}`,
   ];
@@ -72,6 +87,8 @@ export function formatIoSnapshot(snapshot, { now = Date.now(), top = 15 } = {}) 
   for (const [target, row] of Object.entries(snapshot.byTarget).sort((a, b) => (b[1].process + b[1].control) - (a[1].process + a[1].control)).slice(0, top)) {
     lines.push(`${target.slice(0, 27).padEnd(28)}${pad(row.control, 9)}${pad(row.process, 9)}`);
   }
-  for (const row of snapshot.disagreements.slice(-5)) lines.push(`disagreement ${row.verb} ${row.target ?? "-"}: exec=${row.process} control=${row.control}`);
+  for (const row of snapshot.disagreements.slice(-5)) {
+    lines.push(`disagreement ${row.verb} ${row.target ?? "-"}${row.kind ? ` (${row.kind}${row.kind === "stdout" ? ` at line ${row.line} of ${row.lines.join("/")}` : ""})` : ""}: exec=${row.process} control=${row.control}`);
+  }
   return lines.join("\n");
 }

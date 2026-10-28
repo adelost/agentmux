@@ -123,17 +123,18 @@ feature("Pulse control transport", () => {
 
   component("fails pending questions and degrades to exec when the client stops replying", {
     given: ["a ready transport whose tmux server is then frozen", async () => {
-      const f = await readyTransport();
+      const f = await readyTransport({ deadMs: 1500 });
       // The server writes replies straight to the client's stdout fd, so only a frozen server stops them.
       f.serverPid = Number((await execFileText("tmux", ["-S", f.socket, "display-message", "-p", "#{pid}"])).stdout);
       process.kill(f.serverPid, "SIGSTOP");
       return f;
     }],
-    when: ["one question waits past the limit, the server thaws, then another is asked", async (f) => {
+    when: ["questions wait past the dead limit, the server thaws, then another is asked", async (f) => {
       const t = createTmuxAdapter({ socket: f.socket, exec: f.transport.exec });
       const started = performance.now();
       const first = await settle(t.display("work", "#{pane_id}"));
       const waitedMs = performance.now() - started;
+      await until(() => f.transport.state().state !== "ready", 2500);
       process.kill(f.serverPid, "SIGCONT");
       const second = await t.display("work", "second");
       const reconnected = await until(() => f.transport.state().state === "ready");
@@ -145,6 +146,30 @@ feature("Pulse control transport", () => {
       expect(r.second).toBe("second");
       expect(r.totals.degraded).toBeGreaterThanOrEqual(1);
       expect(r.reconnected).toBe(true);
+    }],
+    cleanup: (f) => f.close(),
+  });
+
+  component("a slow reply fails only its own question and keeps the client", {
+    given: ["a ready transport whose tmux server is frozen for 1.6 s", async () => {
+      const f = await readyTransport({ deadMs: 5000 });
+      f.serverPid = Number((await execFileText("tmux", ["-S", f.socket, "display-message", "-p", "#{pid}"])).stdout);
+      process.kill(f.serverPid, "SIGSTOP");
+      setTimeout(() => process.kill(f.serverPid, "SIGCONT"), 1600);
+      return f;
+    }],
+    when: ["one question waits past the 1 s limit, then later questions are asked", async (f) => {
+      const t = createTmuxAdapter({ socket: f.socket, exec: f.transport.exec });
+      const slow = await settle(t.display("work", "slow"));
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      const after = await Promise.all([t.display("work", "a"), t.display("work", "b")]);
+      return { slow, after, state: f.transport.state().state, totals: f.counters.snapshot().totals };
+    }],
+    then: ["only the slow question failed, its late reply did not shift the others, and the client never reconnected", (r) => {
+      expect(r.slow.ok).toBe(false);
+      expect(r.after).toEqual(["a", "b"]);
+      expect(r.state).toBe("ready");
+      expect(r.totals).toMatchObject({ connect: 1, degraded: 0 });
     }],
     cleanup: (f) => f.close(),
   });
@@ -182,7 +207,7 @@ feature("Pulse control transport", () => {
     }],
     then: ["the caller got the process answer and the difference names both", ({ answer, f }) => {
       expect(answer).toBe("wrong");
-      expect(f.lines.join("\n")).toMatch(/shadow disagreement display-message work: exec=ok "wrong\\n" control=ok "work\\n"/u);
+      expect(f.lines.join("\n")).toMatch(/shadow disagreement display-message work \(stdout at line 0 of 2\/2\): exec="wrong" control="work"/u);
     }],
     cleanup: (f) => f.close(),
   });
