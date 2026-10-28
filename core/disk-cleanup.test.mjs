@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { component, expect, feature, unit } from "bdd-vitest";
-import { artifactRoots, linkedArtifacts, planArtifactRetention, pruneArtifacts, repositoryDocs } from "./artifact-retention.mjs";
+import { artifactRoots, linkedArtifacts, memoryDocs, planArtifactRetention, pruneArtifacts, repositoryDocs } from "./artifact-retention.mjs";
 import { dependencySymlinkConsumers, inspectDependencyCacheEntry, planDependencyCacheRetirement } from "./disk-cache-retention.mjs";
 import { uvPruneVerdict } from "./disk-cleanup.mjs";
 import { cleanupDue, pollDiskGuardOnce } from "./disk-guard.mjs";
@@ -168,6 +168,19 @@ feature("disk cleanup removes only what regenerates and prunes old artifacts to 
     when: ["collecting the linked artifacts", ({ lsrc }) => linkedArtifacts({ roots: [join(lsrc, ".artifacts")], docs: repositoryDocs({ lsrc }) })],
     then: ["the image on the default branch is linked", (linked, { lsrc }) => expect([...linked]).toEqual([join(lsrc, ".artifacts", "row-1", "after.png")])],
     cleanup: ({ lsrc }) => rmSync(lsrc, { recursive: true, force: true }),
+  });
+
+  // 2026-10-28: day notes linked 26 files, 19 of them images, that no repository document linked.
+  component("a file only a memory note links counts as linked", {
+    given: ["a Dream workspace whose archived day note links an image", () => {
+      const workspace = mkdtempSync(join(tmpdir(), "workspace-")), daily = join(workspace, "memory", "archive", "daily");
+      mkdirSync(daily, { recursive: true });
+      writeFileSync(join(daily, "2026-09-24.md"), "- Proposal: ~/lsrc/.artifacts/row-1/proposal.png\n");
+      return { workspace };
+    }],
+    when: ["collecting the linked artifacts", ({ workspace }) => linkedArtifacts({ roots: [join(workspace, ".artifacts")], docs: memoryDocs({ workspace }) })],
+    then: ["the image is linked", (linked, { workspace }) => expect([...linked]).toEqual([join(workspace, ".artifacts", "row-1", "proposal.png")])],
+    cleanup: ({ workspace }) => rmSync(workspace, { recursive: true, force: true }),
   });
 
   unit("the guard starts the cleanup once a night and every six hours at 80 % used, and alarms once per high-use episode", {

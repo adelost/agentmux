@@ -5,6 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
+import { resolveDreamWorkspace } from "./dream.mjs";
 import { processPathReferences } from "./process-path-references.mjs";
 import { measureTrees } from "./tree-usage.mjs";
 
@@ -17,8 +18,9 @@ export const RETENTION_DAYS = 2;
 export const KEEP_MARKER = ".artifact-keep";
 
 // Text up to 1 MB is the receipt. On 2026-10-28 the ledgers linked 117 md and 57 json files in artifacts but 4 images,
-// while the small images kept were mostly video frames, 32 GB in 7 days. A file a repository document links to stays
-// at any size. Audio and 3D models stay because they may be paid output; the paid music-video folder has a keep marker.
+// while the small images kept were mostly video frames, 32 GB in 7 days. A file a repository document or memory note
+// links to stays at any size. Audio and 3D models stay because they may be paid output; the paid music-video folder has
+// a keep marker.
 const SMALL_RECEIPTS = new Set([".md", ".json", ".jsonl", ".ndjson", ".log", ".txt", ".yaml", ".yml", ".csv", ".tsv", ".html"]);
 const ARTIFACT_LINK = /\.artifacts\/([^\s)|`>"'\]]+)/gu;
 const DEFAULT_BRANCHES = ["refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master"];
@@ -69,16 +71,23 @@ function defaultBranchMentions(repo) {
   return [grep.stdout];
 }
 
+const artifactMentions = (path) => readFileSync(path, "utf8").split("\n").filter((line) => line.includes(".artifacts/")).join("\n");
+const markdownMentions = (folder, recursive) => readdirSync(folder, { recursive, withFileTypes: true })
+  .filter((entry) => entry.isFile() && entry.name.endsWith(".md")).map((entry) => artifactMentions(join(entry.parentPath, entry.name)));
+
 /** WHAT: Reads artifact-mentioning lines of each ~/lsrc repository's root and docs/ Markdown, checkout and default branch. WHY: Keeps the ledgers and designs that link evidence in view. */
 export function repositoryDocs({ lsrc = join(homedir(), "lsrc") } = {}) {
   if (!existsSync(lsrc)) return [];
-  const mentions = (path) => readFileSync(path, "utf8").split("\n").filter((line) => line.includes(".artifacts/")).join("\n");
-  const markdown = (folder, recursive) => readdirSync(folder, { recursive, withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md")).map((entry) => mentions(join(entry.parentPath, entry.name)));
   // A worktree shares its main repository's refs, and an orphaned one has none, so only a .git folder is asked.
   const mainRepository = (repo) => lstatSync(join(repo, ".git"), { throwIfNoEntry: false })?.isDirectory() ?? false;
-  return folders(lsrc).filter((repo) => !repo.split("/").at(-1).startsWith(".")).flatMap((repo) => [...markdown(repo, false),
-    ...(existsSync(join(repo, "docs")) ? markdown(join(repo, "docs"), true) : []), ...(mainRepository(repo) ? defaultBranchMentions(repo) : [])]);
+  return folders(lsrc).filter((repo) => !repo.split("/").at(-1).startsWith(".")).flatMap((repo) => [...markdownMentions(repo, false),
+    ...(existsSync(join(repo, "docs")) ? markdownMentions(join(repo, "docs"), true) : []), ...(mainRepository(repo) ? defaultBranchMentions(repo) : [])]);
+}
+
+/** WHAT: Reads artifact-mentioning lines of every Markdown note in the Dream workspace's memory. WHY: Keeps evidence a day note links. */
+export function memoryDocs({ workspace = resolveDreamWorkspace() } = {}) {
+  const memory = join(workspace, "memory");
+  return existsSync(memory) ? markdownMentions(memory, true) : [];
 }
 
 /** WHAT: Collects the artifact paths document text links to, resolved in every artifact root. WHY: Keeps a ledger's or design's linked file after its folder is pruned. */
@@ -129,7 +138,7 @@ function heldReasons(path, tree, holders, { nowMs, days }) {
 }
 
 /** WHAT: Collects artifact folders unchanged for the retention period that hold something to delete. WHY: Keeps the dry run and the deletion on the same candidates. */
-export function planArtifactRetention({ roots = artifactRoots(), docs = repositoryDocs(), nowMs = Date.now(), days = RETENTION_DAYS,
+export function planArtifactRetention({ roots = artifactRoots(), docs = [...repositoryDocs(), ...memoryDocs()], nowMs = Date.now(), days = RETENTION_DAYS,
   measure = measureTrees, references = processPathReferences } = {}) {
   const units = roots.flatMap(artifactUnits), linked = linkedArtifacts({ roots, docs });
   const usage = measure(units), safety = references(units);
@@ -154,7 +163,7 @@ function journal(entry, path) {
 /** WHAT: Stores a note in a pruned folder saying what went and why. WHY: Keeps a missing video explainable without the journal. */
 function notePruned(folder, entry, days) {
   const note = join(folder, "PRUNED.md");
-  if (!existsSync(note)) appendFileSync(note, `# Pruned by the agentmux disk cleanup\n\nThe folder was unchanged for ${days} days, so its work had stopped. Kept: text files up to 1 MB, audio, 3D models and files a repository document links to.\n`
+  if (!existsSync(note)) appendFileSync(note, `# Pruned by the agentmux disk cleanup\n\nThe folder was unchanged for ${days} days, so its work had stopped. Kept: text files up to 1 MB, audio, 3D models and files a repository document or memory note links to.\n`
     + `A folder holding \`${KEEP_MARKER}\` is never pruned.\n\n`);
   appendFileSync(note, `- ${entry.at.slice(0, 10)}: deleted ${entry.deletedFiles} files plus ${entry.deletedTrees} node_modules, .git or venv folders, ${(entry.deletedBytes / 1e9).toFixed(2)} GB; kept ${entry.keptFiles} files.\n`);
 }

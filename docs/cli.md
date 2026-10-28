@@ -539,7 +539,9 @@ with idle I/O, acts in this order:
    audio and 3D models at any size, and any file a Markdown file at the root
    or under `docs/` of an `~/lsrc` repository links to by its `.artifacts/`
    path, read in the checkout and on its remote default branch, since main
-   checkouts lag (cutkit's by 3755 commits on 2026-10-28). Deleted: video, unlinked images, builds, model files such as
+   checkouts lag (cutkit's by 3755 commits on 2026-10-28), or any Markdown
+   note under the Dream workspace's `memory/` links to (day notes linked 19
+   otherwise unlinked images on 2026-10-28). Deleted: video, unlinked images, builds, model files such as
    `.tflite`, archives, every larger file, and copied `node_modules`, `.git`
    and venv folders. Images went on 2026-10-28: the ledgers linked 4 of them,
    and the small ones kept were mostly video frames, 32 GB in 7 days. A folder open in a process,
