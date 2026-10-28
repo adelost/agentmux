@@ -106,6 +106,7 @@ Requirements, one testable line each:
 - **pulse-6** An idle pane costs 0 process starts, 0 tmux questions of its own and 0 file reads in 10 min, with all watchdogs on. Source: row 116 criteria
 - **pulse-7** A journal is read only from its saved offset. An idle journal costs 0 reads, and a truncated or replaced journal is reread from 0 with a log line. Source: row 116 criteria
 - **pulse-8** agentmux.yaml is parsed again only when its mtime or size changes. Source: own (profile 2026-10-28 07:59Z, 3.8 %)
+- **pulse-11** Link, drift-guard and auto-compact read pane processes from one shared `list-panes -a`, at most 2 s old, instead of two questions per pane; drift-guard captures only panes whose engine runs. Source: own (askers 2026-10-28 11:15-11:20Z: drift-guard 170 and auto-compact 91 of 621 a minute)
 - **pulse-10** permission-watchdog captures a pane only while it has an open prompt, within 60 s of its journal or Claude hook moving, or once every 2 min when quiet. Source: own (askers 2026-10-28 10:52-10:55Z: permission-watchdog 415 of 857 tmux questions a minute)
 - **pulse-9** Link's target models cost one pane listing per cycle; a pane whose process, journal and model config did not change is not inspected again within 5 min. Source: own (askers 2026-10-28 10:36-10:46Z: Link 669 of 1,594 tmux questions a minute)
 
@@ -379,6 +380,9 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 | `channels/drift-guard.mjs` | n/a: changes in B2; tests added with B2 |
 | `channels/link-target-models.mjs` | `channels/link-target-models.test.mjs::an unchanged pane is not inspected again`, `channels/link-target-models.test.mjs` |
 | `core/tmux.mjs` | `core/tmux.test.mjs::listAllPanes reads every session's active-window panes in one question`, `core/tmux.test.mjs` |
+| `core/pulse/pane-snapshot.mjs` | `core/pulse/pane-snapshot.test.mjs::watchers within two seconds share one listing` |
+| `channels/drift-guard.mjs` | `channels/drift-guard-listing.test.mjs::reads processes from the shared listing and captures only running engines`, `channels/drift-guard.test.mjs` |
+| `channels/auto-compact.mjs` | `channels/auto-compact.integration.test.mjs::running state comes from the shared pane listing and not two questions per pane (pulse-11)`, `channels/auto-compact.integration.test.mjs` |
 | `channels/permission-watchdog.mjs` | `channels/permission-watchdog.test.mjs::captures an idle pane again only after its journal moves or two minutes pass (pulse-10)`, `channels/permission-watchdog.test.mjs::reads a prompt with the bridge's own agent that has no paneDirectory (defect since 2026-09-15)`, `channels/permission-watchdog.test.mjs` |
 | `core/pulse/pane-snapshot.mjs` | n/a: new in B2; tests added with B2 |
 | `core/pulse/journal-follower.mjs` | n/a: new in B3; tests added with B3 (pulse-7) |
@@ -406,6 +410,11 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 | `channels/permission-watchdog.test.mjs::captures an idle pane again only after its journal moves or two minutes pass (pulse-10)` | pulse-10 | component | 15 | 1 |
 | `channels/permission-watchdog.test.mjs::reads a prompt with the bridge's own agent that has no paneDirectory (defect since 2026-09-15)` | defect: every prompt threw on agent.paneDirectory | component | 10 | 1 |
 | `channels/permission-watchdog.test.mjs` | existing | component | 0 | 1 |
+| `core/pulse/pane-snapshot.test.mjs::watchers within two seconds share one listing` | pulse-11 | unit | 10 | 1 |
+| `channels/drift-guard-listing.test.mjs::reads processes from the shared listing and captures only running engines` | pulse-11 | component | 20 | 1 |
+| `channels/drift-guard.test.mjs` | existing | unit | 0 | 1 |
+| `channels/auto-compact.integration.test.mjs::running state comes from the shared pane listing and not two questions per pane (pulse-11)` | pulse-11 | component | 10 | 1 |
+| `channels/auto-compact.integration.test.mjs` | existing | component | 0 | 3 |
 
 - Budget: 130 min of tests within B0+B1's 6 h. Targeted run with smoke about 36 s.
 - Manual evidence for pulse-6 and the live check:
@@ -443,6 +452,7 @@ None. Every choice above is within the owner's frame: no money, no external part
 
 ## 15. Changes
 
+- v9 2026-10-28 11:27Z: B2c. Pulse owns one shared `list-panes -a`, at most 2 s old (`core/pulse/pane-snapshot.mjs`). Link, drift-guard and auto-compact read pane processes from it instead of two questions per pane, and drift-guard captures only panes whose engine runs (pulse-11). Before release: the listing and paneProcessState agreed on all 83 panes, and a drift-guard round against the real fleet with temp state finished (1,044 ms, 16 captures, 0 per-pane process questions). The 11:24Z profile shows tmux questions no longer among the bridge's top costs (busy 30 % at load 7, 0.41 cores); the rest is spread over context-maintenance, codex-credit-stop and other per-round work. Owners told: none.
 - v8 2026-10-28 11:10Z: B2b again. 1.25.400 stopped permission-watchdog from 10:59:55 to 11:07Z: its activity stamp called agent.paneDirectory, which the bridge's agent does not have, so every round threw at the first pane (no capture, no heartbeat). 1.25.401 restored the old code. The same call in the default session identity has thrown on every detected prompt since 2026-09-15 (0a92e524): the default decision log has been empty since 2026-09-16. 1.25.402 uses panePathFor in both, with a test on the defaults (red with the production TypeError) and a read-only round against the real fleet before release (83 panes, 619 ms). The watchdog now answers safe rm prompts and alerts as configured. Owners told: Mattias in the status reply.
 - v7 2026-10-28 10:59Z: B2b. permission-watchdog captured every pane every 10 s (415 of 857 questions a minute after B2a). A prompt follows its tool call into the journal, and Claude also fires a permission hook, so a pane is captured while it has an open prompt, within 60 s after its journal stamp or hook event moved, or every 2 min when quiet (pulse-10). A prompt nothing journals is seen at most 2 min late. Link's journal stamp now uses the same per-engine reader as jsonl-watcher, which covers Codex. Owners told: none.
 - v6 2026-10-28 10:50Z: B2a. Link's target models were 669 of 1,594 tmux questions a minute (10:36-10:46Z): two display-messages and a 100-line capture per target every 15 s, plus inspectPane's journal reads. They now read one `list-panes -a` per cycle and inspect a pane again only when its pid, command, dead flag, journal stamp or model config changed, or after 5 min, because a Codex in-session model switch writes no journal Link reads (pulse-9). Owners told: none.

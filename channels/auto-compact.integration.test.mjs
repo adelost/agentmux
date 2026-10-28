@@ -63,7 +63,7 @@ const CONTENT = {
 
 // Build the injected deps. `state.content` is read fresh each capture so a
 // test can simulate a compact succeeding (context drops) mid-run.
-function harness({ height = 50, content = CONTENT.full100, maxTokens = DEFAULT_CONFIG.maxTokens, running = true } = {}) {
+function harness({ height = 50, content = CONTENT.full100, maxTokens = DEFAULT_CONFIG.maxTokens, running = true, fleetPanes = undefined } = {}) {
   const { path, dir } = writeYaml();
   const state = { content, fires: 0, rootDir: dir };
   const agent = {
@@ -78,7 +78,7 @@ function harness({ height = 50, content = CONTENT.full100, maxTokens = DEFAULT_C
   const discord = { send: async () => {} };
   const config = { ...DEFAULT_CONFIG, maxTokens, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
   const ac = createAutoCompact({
-    agent, agentsYamlPath: path, discord, tmux, config, log: () => {},
+    agent, agentsYamlPath: path, discord, tmux, config, log: () => {}, fleetPanes,
   });
   return { ac, state, agent };
 }
@@ -192,6 +192,17 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     given: ["normal-height pane, context always reads 100%", () => harness({ content: CONTENT.full100 })],
     when: ["running 8 poll ticks", async ({ ac, state }) => { await ticks(ac, 8); return state; }],
     then: ["exactly one /compact sent, then suppressed forever", (state) => {
+      expect(state.fires).toBe(1);
+    }],
+  });
+
+  unit("running state comes from the shared pane listing and not two questions per pane (pulse-11)", {
+    given: ["a listing that shows the pane running and no per-pane observer", () => {
+      const fleetPanes = { panes: async () => new Map([["test:0", { index: 0, id: "%1", command: "claude", dead: false, path: "/w", pid: 7 }]]) };
+      const fx = harness({ content: CONTENT.full100, fleetPanes }); delete fx.agent.paneProcessState; return fx;
+    }],
+    when: ["running 8 poll ticks", async ({ ac, state }) => { await ticks(ac, 8); return state; }],
+    then: ["the pane counts as running: exactly one /compact, as with the per-pane observer", (state) => {
       expect(state.fires).toBe(1);
     }],
   });

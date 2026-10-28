@@ -5,6 +5,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { createControlTransport, TRANSPORT_MODES } from "./control-transport.mjs";
 import { createIoCounters, saveIoSnapshot } from "./io-counters.mjs";
+import { createPaneSnapshot } from "./pane-snapshot.mjs";
 
 /** WHAT: Names the counter file `amux pulse io` reads. WHY: Keeps the bridge and the CLI on one path. */
 export const PULSE_IO_PATH = join(homedir(), ".agentmux", "pulse-io.json");
@@ -33,5 +34,6 @@ export function startPulse({ socket, processExec, env = process.env, ioPath = PU
     catch (error) { log(`counter file not written: ${error.message}`); }
   }, WRITE_EVERY_MS);
   writer.unref?.();
-  return { exec: transport.exec, transport, counters, stop: () => { clearInterval(writer); transport.stop(); } };
+  const fleet = createPaneSnapshot({ socket, exec: transport.exec });
+  return { exec: transport.exec, fleet, transport, counters, stop: () => { clearInterval(writer); transport.stop(); } };
 }

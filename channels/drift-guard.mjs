@@ -24,6 +24,7 @@ import {
   recordReminderDelivery,
 } from "../core/reminder-state.mjs";
 import { readParkState } from "../core/pane-park.mjs";
+import { processStateOf } from "../core/pulse/pane-snapshot.mjs";
 
 /** WHAT: Schedules the bridge's idle-pane reminder checks. WHY: Keeps delivery receipts separate from activity and scheduling decisions. */
 export function createDriftGuard({
@@ -32,6 +33,7 @@ export function createDriftGuard({
   agentsYamlPath,
   discord,
   config,
+  fleetPanes = null,
   log = (msg) => console.log(`drift-guard | ${msg}`),
 }) {
   let intervalId = null;
@@ -99,6 +101,8 @@ export function createDriftGuard({
 
     const now = Date.now();
     let stateChanged = false;
+    // One shared listing per round instead of two process questions per pane (pulse-11).
+    const listing = fleetPanes ? await fleetPanes.panes() : null;
 
     for (const a of agents) {
       if (a.backend === "native") continue;
@@ -111,10 +115,11 @@ export function createDriftGuard({
         if (!state[paneKey]) state[paneKey] = { lastReminderTsMs: null, lastCompactTsMs: null };
         const paneState = state[paneKey];
 
+        const runtimeState = listing ? processStateOf(listing.get(paneKey))
+          : typeof agent.paneProcessState === "function" ? await agent.paneProcessState(a.name, i).catch(() => null) : null;
+        if (!runtimeState?.running || runtimeState.dead || runtimeState.shell) continue;
         const status = await paneStatus(a, i);
-        const runtimeState = typeof agent.paneProcessState === "function"
-          ? await agent.paneProcessState(a.name, i).catch(() => null) : null;
-        if (status !== "idle" || !runtimeState?.running || runtimeState.dead || runtimeState.shell) continue;
+        if (status !== "idle") continue;
 
         const paneDir = panePathFor(a, i);
 

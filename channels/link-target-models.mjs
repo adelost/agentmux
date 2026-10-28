@@ -6,7 +6,6 @@ import { paneModelSelection } from "../core/pane-model-state.mjs";
 import { codexModelOverride } from "../core/codex-profiles.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { sessionReaderForCommand } from "../core/alternate-session-reader.mjs";
-import { createTmuxAdapter } from "../core/tmux.mjs";
 
 // A model change that moves neither the pane's process nor its journal still shows within this long.
 const RECHECK_MS = 5 * 60_000;
@@ -93,12 +92,11 @@ export function paneJournalStamp(configured, pane) {
  * WHY: Prevents idle panes from costing a capture and two tmux questions every 15 s (pulse-9).
  */
 export function createLinkTargetModels({
-  agents, agent, state, socket, exec, inspect = inspectPane, journalStamp = paneJournalStamp, now = Date.now,
-  tmux = createTmuxAdapter({ socket, exec }),
+  agents, agent, state, fleetPanes, inspect = inspectPane, journalStamp = paneJournalStamp, now = Date.now,
 } = {}) {
   const readings = new Map();
   return async (targets) => {
-    const rows = await tmux.listAllPanes();
+    const rows = await fleetPanes.panes();
     const paneProcess = (name, pane) => {
       const row = rows.get(`${name}:${pane}`);
       return { command: row?.command ?? null, dead: row?.dead ?? false, pid: row?.pid ?? null };

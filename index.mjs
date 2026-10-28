@@ -135,8 +135,8 @@ for (const failure of startupHints.errors) {
 const exec = promisify(execCb);
 const run = (cmd, timeoutMs = TIMEOUT) =>
   exec(cmd, { timeout: timeoutMs, env: { ...process.env, PATH: SHELL_PATH }, maxBuffer: 1024 * 1024 });
-const tmuxExec = startPulse({ socket: TMUX_SOCKET, processExec: (cmd) =>
-  exec(cmd, { timeout: 3000, env: { ...process.env, PATH: SHELL_PATH } }) }).exec;
+const { exec: tmuxExec, fleet: fleetPanes } = startPulse({ socket: TMUX_SOCKET, processExec: (cmd) =>
+  exec(cmd, { timeout: 3000, env: { ...process.env, PATH: SHELL_PATH } }) });
 
 // Liveness contract for `amux doctor` + bin/bridge-watchdog-cron.sh: a 30s
 // heartbeat with pid + version. Catches what the supervisor cannot see —
@@ -164,7 +164,7 @@ const tmuxAgent = createAgent({
 const nativeRuntime = createNativeRuntimeClient({ configPath: AGENTS_YAML });
 const agent = createAgentRouter({ tmuxAgent, nativeRuntime });
 const linkTargetModels = createLinkTargetModels({
-  agents: () => listAgents(AGENTS_YAML), agent, state: appState, socket: TMUX_SOCKET, exec: tmuxExec,
+  agents: () => listAgents(AGENTS_YAML), agent, state: appState, fleetPanes,
 });
 const validateDeliveryTarget = (agentName, pane) =>
   validateAgentPane(AGENTS_YAML, agentName, pane);
@@ -329,7 +329,7 @@ const autoCompact = createAutoCompact({
   agent,
   deliveryBroker,
   agentsYamlPath: AGENTS_YAML,
-  discord,
+  discord, fleetPanes,
   tmux: (cmd) => tmuxExec(`tmux -S '${TMUX_SOCKET}' ${cmd}`),
   config: autoCompactConfig,
   contextMaintenance,
@@ -353,7 +353,7 @@ const driftGuard = createDriftGuard({
   agent,
   deliveryBroker,
   agentsYamlPath: AGENTS_YAML,
-  discord,
+  discord, fleetPanes,
   config: driftGuardConfig,
 });
 driftGuard.start();

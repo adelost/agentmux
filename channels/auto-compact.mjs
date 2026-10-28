@@ -29,6 +29,7 @@ import { formatLimitedAlert } from "../core/quota-format.mjs";
 import { parseQuotaRecoveryConfig } from "./quota-recovery.mjs";
 import { enteredLimited, nextLimitedMemory, seedLimitedFromLedger } from "./limited-latch.mjs";
 import { createCompactHeldNotice } from './compact-held-notice.mjs';
+import { processStateOf } from '../core/pulse/pane-snapshot.mjs';
 
 // Panes that have warnings pending (paneKey → { warned_at: ms }).
 // Panes currently mid-compact (paneKey string).
@@ -45,6 +46,7 @@ export function createAutoCompact({
   config,
   contextMaintenance = null,
   pauseCompact = null,
+  fleetPanes = null,
   log = (msg) => console.log(`auto-compact | ${msg}`),
 }) {
   const warnings = new Map();
@@ -330,6 +332,10 @@ export function createAutoCompact({
     }
 
     const now = Date.now();
+    // One shared listing per round instead of two process questions per pane (pulse-11).
+    const listing = fleetPanes ? await fleetPanes.panes() : null;
+    const running = async (name, pane) => listing ? processStateOf(listing.get(`${name}:${pane}`)).running
+      : typeof agent.paneProcessState === "function" && (await agent.paneProcessState(name, pane).catch(() => null))?.running === true;
 
     for (const a of agents) {
       // The native runtime owns its exact token counters, idle clock and
@@ -345,7 +351,7 @@ export function createAutoCompact({
         if (!["claude", "codex"].includes(paneDialect(a, i))) continue;
         // A shell may retain old context/quota text. No warning or paid
         // maintenance is eligible without a currently running engine.
-        if (typeof agent.paneProcessState !== "function" || (await agent.paneProcessState(a.name, i).catch(() => null))?.running !== true) {
+        if (!await running(a.name, i)) {
           warnings.delete(paneKey);
           compactFloors.delete(paneKey);
           continue;
