@@ -24,7 +24,7 @@ const PROMPT = `
 const UNSAFE = PROMPT.replace('Q=/mnt/q/Chathelper-traningsdata-2026-09-10/GEMMA-4-TEST/TRANINGSDATA; ', "");
 const IDLE = "● Bash\n  done\n\n❯ ";
 
-function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null }) {
+function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null, activityOf = () => "unchanged" }) {
   const decisions = [];
   const snapshots = [];
   const beats = [];
@@ -46,13 +46,28 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
     recordDecision: (line) => decisions.push(JSON.parse(line)),
     publishOpenPrompts: (text) => snapshots.push(JSON.parse(text)),
     beat: (metrics) => beats.push(metrics),
-    captureTimeoutMs: 50,
+    captureTimeoutMs: 50, activityOf,
     log: () => {}, now: () => t,
   });
   return { wd, agent, discord, notifyUser, decisions, snapshots, beats, advance: (ms) => { t += ms; } };
 }
 
 describe("permission watchdog", () => {
+  it("captures an idle pane again only after its journal moves or two minutes pass (pulse-10)", async () => {
+    const world = { stamp: "j1" };
+    const h = harness({ screens: {}, activityOf: () => world.stamp });
+    const capturesOfPane0 = () => h.agent.capturePane.mock.calls.filter(([, pane]) => pane === 0).length;
+    const captured = [];
+    for (let at = 0; at <= 260_000; at += 10_000) {
+      if (at === 200_000) world.stamp = "j2";
+      const before = capturesOfPane0();
+      await h.wd.tick();
+      if (capturesOfPane0() > before) captured.push(at / 1000);
+      h.advance(10_000);
+    }
+    expect(captured).toEqual([0, 10, 20, 30, 40, 50, 170, 200, 210, 220, 230, 240, 250]);
+  });
+
   it("answers the safe rm prompt once after the short answer delay, not after two minutes", async () => {
     const h = harness({ screens: { 0: PROMPT } });
     expect(await h.wd.tick()).toEqual([]);

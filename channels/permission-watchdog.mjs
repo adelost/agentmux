@@ -8,6 +8,8 @@ import {
 } from "../core/permission-watchdog.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
+import { sessionReaderForCommand } from "../core/alternate-session-reader.mjs";
+import { latestPaneStatesCached } from "../core/events.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
@@ -79,6 +81,14 @@ export function createPermissionWatchdog({
     const paneDir = agent.paneDirectory(agentConfig.dir, paneIdx);
     return latestClaudeSessionIdentity(paneDir)?.sessionId || null;
   },
+  // A prompt follows its tool call into the journal (and a Claude hook), so these stamps say when a capture can matter.
+  activityOf = (agentConfig, paneIdx) => {
+    const paneDir = agent.paneDirectory(agentConfig.dir, paneIdx);
+    const journal = sessionReaderForCommand(agentConfig.panes?.[paneIdx]?.cmd || "").latestInfo(paneDir);
+    return JSON.stringify([journal, latestPaneStatesCached().get(`${agentConfig.name}:${paneIdx}`)?.ts ?? null]);
+  },
+  activeMs = 60_000,
+  quietRecheckMs = 120_000,
 }) {
   // Safe rm prompts are answered after config.answerAgeMs, every other prompt
   // alerts the human after config.promptAgeMs.
@@ -87,6 +97,21 @@ export function createPermissionWatchdog({
   let publishedPrompts = null;
   let ticking = false;
   let lastBeatAt = -Infinity;
+  const activity = new Map();
+
+  /**
+   * WHAT: Checks whether a pane needs a capture this round: an open prompt, recent journal or hook activity, or a quiet
+   * pane's two-minute recheck. WHY: Prevents idle panes from costing a capture every 10 s (pulse-10).
+   */
+  function captureDue(agentConfig, paneIdx, at) {
+    const paneKey = `${agentConfig.name}:${paneIdx}`;
+    const stamp = activityOf(agentConfig, paneIdx);
+    const last = activity.get(paneKey);
+    const changedAt = !last || last.stamp !== stamp ? at : last.changedAt;
+    const due = seen.has(paneKey) || at - changedAt < activeMs || !last || at - last.capturedAt >= quietRecheckMs;
+    activity.set(paneKey, { stamp, changedAt, capturedAt: due ? at : last.capturedAt });
+    return due;
+  }
 
   // A pane whose capture never returns must not hold every other pane's prompt:
   // on 2026-09-29 no round had finished since the bridge restarted the day before.
@@ -243,9 +268,10 @@ export function createPermissionWatchdog({
         if (a.backend === "native") continue;
         const panes = Array.isArray(a.panes) ? a.panes : [];
         for (let i = 0; i < panes.length; i++) {
+          panesRead += 1;
+          if (!captureDue(a, i, at)) continue;
           const r = await inspectPane(a, i, at);
           if (r) results.push(r);
-          panesRead += 1;
         }
       }
       publishOpen(at);

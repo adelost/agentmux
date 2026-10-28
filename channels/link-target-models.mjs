@@ -4,11 +4,11 @@
 import { inspectPane } from "../cli/inspect-pane.mjs";
 import { paneModelSelection } from "../core/pane-model-state.mjs";
 import { codexModelOverride } from "../core/codex-profiles.mjs";
-import { latestJsonlInfo, panePathFor } from "../core/jsonl-reader.mjs";
-import { latestAlternateMtime } from "../core/alternate-session-reader.mjs";
+import { panePathFor } from "../core/jsonl-reader.mjs";
+import { sessionReaderForCommand } from "../core/alternate-session-reader.mjs";
 import { createTmuxAdapter } from "../core/tmux.mjs";
 
-// A model switched inside a session that writes no journal amux reads here (Codex) shows within this long.
+// A model change that moves neither the pane's process nor its journal still shows within this long.
 const RECHECK_MS = 5 * 60_000;
 
 const modelValue = (value) => {
@@ -85,8 +85,7 @@ export async function observeLinkTargetModels({
 
 /** WHAT: Returns a pane's journal stamps as inspectPane reads them. WHY: Keeps the reuse rule on the same files. */
 export function paneJournalStamp(configured, pane) {
-  const paneDir = panePathFor(configured, pane);
-  return [latestJsonlInfo(paneDir), latestAlternateMtime(configured.panes?.[pane]?.cmd, paneDir)];
+  return sessionReaderForCommand(configured.panes?.[pane]?.cmd || "").latestInfo(panePathFor(configured, pane));
 }
 
 /**
