@@ -2,7 +2,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { feature, unit, component, expect } from "bdd-vitest";
-import { createAccountSwitchCommand, parseSwitchArgs } from "./account-switch-command.mjs";
+import { bridgeRotationRuntime, createAccountSwitchCommand, parseSwitchArgs } from "./account-switch-command.mjs";
+import { observeSwitchContext } from "../cli/account-switch-compact.mjs";
+import { accountSwitchPlan } from "../policies/account-switch-cost.mjs";
 
 const OPERATOR = "111";
 const rows = (status) => [{ key: "api:0", status }, { key: "lsrc:0", status: "would-compact-then-restart" }];
@@ -116,5 +118,29 @@ feature("Discord /byt account switch", () => {
       expect(realRuns(ctx)).toEqual([]);
       expect(ctx.replies.at(-1)).toBe("Only the operator can confirm an account switch.");
     }],
+  });
+});
+
+// Night of 28 to 29 Oct: the bridge's quota stop mover held every idle pane on the spent Claude S as context-unknown,
+// 421 times for ai:0 from 05:20Z alone, while `amux accounts rotate --dry` planned the same panes. The bridge's
+// rotation context had no tmux, so the switch plan found no pane to measure.
+feature("the bridge's rotations see an idle pane's context", () => {
+  component("an idle Claude pane gets a move plan through the bridge's rotation context, not context-unknown", {
+    given: ["the bridge's agent, queue and state, and tmux listing lsrc's idle Claude pane", () => {
+      const runtime = bridgeRotationRuntime({ agent: { isNativeTarget: () => false },
+        deliveryBroker: { queue: { list: () => [] } }, state: { get: () => undefined }, configPath: "/nonexistent/agents.yaml" },
+      { createContext: () => ({ tmux: async () => ({ stdout: "0|200x50|claude|0\n" }) }) });
+      return { runtime };
+    }],
+    when: ["the switch plan observes lsrc:0", async ({ runtime }) => {
+      const lsrc = { name: "lsrc", backend: "tmux", dir: "/nonexistent/lsrc", panes: [{ cmd: "claude" }] };
+      const context = await observeSwitchContext(runtime(), { agent: lsrc, agentName: "lsrc", pane: 0 }, {
+        observe: async () => ({ engine: "claude", backend: "tmux", running: true, sessionId: null, sessionPath: null,
+          status: "idle", composerEmpty: true, queued: 0, tokens: 20_000, idleMs: 10 * 60_000 }) });
+      return accountSwitchPlan({ mode: "running", facts: context.facts, compactRefusal: context.compactRefusal,
+        compacted: context.compacted });
+    }],
+    then: ["the small warm context restarts on the account with room", plan =>
+      expect(plan).toMatchObject({ action: "RESTART", cell: "context-small" })],
   });
 });

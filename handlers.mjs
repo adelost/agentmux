@@ -33,7 +33,7 @@ import { queueFleetRestart } from "./core/fleet-restart.mjs";
 import { normalizeClaudeModelName } from "./core/claude-model.mjs";
 import { mergeInboundTarget } from "./core/inbound-target.mjs";
 import { HELP_TEXT } from "./channels/discord-help.mjs";
-import { createAccountSwitchCommand } from "./channels/account-switch-command.mjs";
+import { bridgeRotationRuntime, createAccountSwitchCommand } from "./channels/account-switch-command.mjs";
 import { switchCodexAccount } from "./core/codex-account-switch.mjs";
 import { openWatcherJournal } from "./core/watcher-journal.mjs";
 /**
@@ -318,8 +318,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     "/quota": async (msg) => {
       await msg.reply(quotaBoxText(await readQuotaSnapshotWithPanes()));
     },
-    "/byt": createAccountSwitchCommand({ state, runtime: () => deliveryBroker?.queue
-      && { agent, deliveryQueue: deliveryBroker.queue, state, configPath: agentsYamlPath } }),
+    "/byt": createAccountSwitchCommand({ state,
+      runtime: bridgeRotationRuntime({ agent, deliveryBroker, state, configPath: agentsYamlPath }) }),
 
     "/peek": async (msg, mapping, pane) => {
       if (isNativePane(mapping, pane)) {

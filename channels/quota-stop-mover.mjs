@@ -10,6 +10,7 @@
 import { accountWindows, nearLimit, QUOTA_PARK_POLICY, quotaFloorHold } from "../core/quota-park.mjs";
 import { readQuotaSnapshotWithPanes } from "../core/quota-in-use.mjs";
 import { moveTarget, quotaObservedAt } from "../core/quota-wind-down.mjs";
+import { bridgeRotationRuntime } from "./account-switch-command.mjs";
 import { recordPauseCompactLine } from "./pause-compact.mjs";
 import { parseQuotaWarningConfig } from "./quota-warning.mjs";
 
@@ -78,7 +79,7 @@ export function createQuotaStopMover({ runtime, readSnapshot, rotate, floorPerce
 /** WHAT: Builds and schedules the bridge's stop mover on the /byt rotation context. WHY: Keeps its wiring out of the bridge entry. */
 export function startQuotaStopMover({ agent, deliveryBroker, state, configPath, floorPercent }) {
   const mover = createQuotaStopMover({
-    runtime: () => deliveryBroker?.queue && { agent, deliveryQueue: deliveryBroker.queue, state, configPath },
+    runtime: bridgeRotationRuntime({ agent, deliveryBroker, state, configPath }),
     readSnapshot: () => readQuotaSnapshotWithPanes(),
     rotate: async (...args) => (await import("../cli/account-rotation.mjs")).rotateClaudeFleet(...args),
     floorPercent, reservePercent: parseQuotaWarningConfig().reservePercent, mode: readQuotaStopMoveMode(),

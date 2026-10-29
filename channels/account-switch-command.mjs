@@ -7,10 +7,24 @@
 // inte byta i onödan.. pga cache miss").
 
 import { resolveNotifyUserId } from "../cli/send-notify.mjs";
+import { createTmuxContext } from "../cli/tmux.mjs";
+import { DEFAULT_TMUX_SOCKET } from "../core/runtime-defaults.mjs";
 import { withAccountEntries } from "../core/account-names.mjs";
 import { accountEntries } from "../core/quota-profiles.mjs";
 import { readClaudeProfileIdentity } from "../core/claude-account-quota.mjs";
 import { resolveClaudeAccountTarget, runtimeProfileCatalog } from "../core/runtime-account-profiles.mjs";
+
+/**
+ * WHAT: Returns the context getter the bridge's account rotations run in, /byt and the quota stop mover.
+ * WHY: Gives the switch plan tmux to list panes; without it every idle pane read as context-unknown.
+ */
+export function bridgeRotationRuntime({ agent, deliveryBroker, state, configPath,
+  tmuxSocket = process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET }, { createContext = createTmuxContext } = {}) {
+  let context = null;
+  return () => deliveryBroker?.queue && (context ||= {
+    ...createContext(tmuxSocket, configPath), agent, deliveryQueue: deliveryBroker.queue, state, configPath,
+  });
+}
 
 /** DTO: State key for the plans shown per target. */
 export const SWITCH_PLAN_STATE_KEY = "account_switch_plans_v1";
