@@ -26,6 +26,9 @@ const HANDS = Object.freeze([
   ["test", [/i\s+din\s+webbläsare/, /ditt\s+eget\s+test/, /testa\s+själv/]],
 ].map(([what, words]) => [what, words.map((word) => free(word.source))]));
 
+// The pane's own word that nothing is needed from him outranks a hands word elsewhere in its reply.
+const NOTHING_FROM_HIM = [/ingen\s+åtgärd\s+(?:\S+\s+)?från\s+dig/iu, /no\s+action\s+(?:\S+\s+)?from\s+you/iu];
+
 // A GOAL line restates the request; it never asks for anything.
 const GOAL_LINE = /^[\s>*_`#-]*GOAL:/u;
 // A summary, a goal or a completion line reports, so it never holds a decision (design v4: a SUMMARY that explained a
@@ -71,6 +74,7 @@ function waitingLines(reply) {
 const lastLineMatching = (lines, words) => lines.findLast((line) => words.some((word) => word.test(line))) ?? null;
 
 function handsIn(lines) {
+  if (lines.some((line) => NOTHING_FROM_HIM.some((words) => words.test(line)))) return null;
   const line = lastLineMatching(lines.filter((candidate) => !GOAL_LINE.test(candidate)), HANDS.flatMap(([, words]) => words));
   if (!line) return null;
   const [what] = HANDS.find(([, words]) => words.some((word) => word.test(line)));

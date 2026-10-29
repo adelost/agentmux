@@ -72,6 +72,17 @@ feature("quiet: why a pane went quiet", () => {
     }],
   });
 
+  // 29 Oct: a status that reported what his phone picture showed, and ended saying no action was needed from him, went on
+  // the hands list at 00:40Z; the pane's wait loops had hung, and nobody was told for 7 h.
+  unit("a reply that says nothing is needed from him is left work, not his hands", {
+    given: ["a status with work LEFT that reports what his phone picture showed and ends with no action needed from him, in Swedish and in English", () => [
+      "SUMMARY: Skalet är byggt.\nLEFT: röktest, granskning, deploy.\n- Fynd: därför visade din telefonbild en röd smet.\nNEXT: röktest och deploy. Ingen åtgärd från dig behövs än.",
+      "SUMMARY: The shell is built.\nLEFT: smoke, review, deploy.\n- Not flown on your hardware yet.\nNEXT: smoke and deploy. No action needed from you yet.",
+    ]],
+    when: ["classifying each", (replies) => replies.map((reply) => classify(reply).class)],
+    then: ["both are left work, so the lead gets the nudge", (classes) => expect(classes).toEqual(["left", "left"])],
+  });
+
   unit("LEFT without a blocker is left work", {
     given: ["a reply with a LEFT line that has content and no blocker", () => `NOW: zon 3 byggd\n${LINES.left}`],
     when: ["classifying it", (reply) => classify(reply)],
