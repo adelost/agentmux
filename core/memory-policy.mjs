@@ -6,7 +6,7 @@ import yaml from "js-yaml";
 // WHY: Keeps workspaces without a policy file on one shared rule set.
 export const DEFAULT_MEMORY_POLICY = Object.freeze({
   memoryMaxBytes: 4 * 1024,
-  claudeMemoryIndexMaxChars: 6000,
+  claudeMemoryIndexMaxChars: 2000,
   peopleIndexMaxLines: 300,
   recentDailyDays: 30,
   recentDailyMaxLines: 100,

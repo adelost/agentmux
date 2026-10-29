@@ -32,10 +32,10 @@ const reminderOf = (out) => out ? JSON.parse(out).hookSpecificOutput.additionalC
 
 feature("daily memory section reminder", () => {
   integration("project index reminders reach Edit, MultiEdit and Bash without treating UTF-8 bytes as characters", {
-    given: ["a project index containing 6000 Unicode codepoints", () => {
+    given: ["a project index containing 2000 Unicode codepoints", () => {
       const ws = workspace();
       const index = join(ws.home, "ws", "memory", "MEMORY.md");
-      writeFileSync(index, "😀".repeat(6000));
+      writeFileSync(index, "😀".repeat(2000));
       return { ...ws, index };
     }],
     when: ["checking the boundary and writing one more character through each supported tool", ({ home, index }) => {
@@ -50,17 +50,17 @@ feature("daily memory section reminder", () => {
         session_id: tool_name, tool_name, tool_input,
       })) };
     }],
-    then: ["6000 characters stays silent and every actual hook tool reaches the advisory check", ({ atLimit, writes }, { home }) => {
+    then: ["2000 characters stays silent and every actual hook tool reaches the advisory check", ({ atLimit, writes }, { home }) => {
       expect(atLimit.out).toBe("");
       for (const result of writes) {
         expect(result.status, result.err).toBe(0);
-        expect(reminderOf(result.out)).toContain("MEMORY.md är 6001 tecken, taket är 6 000.");
+        expect(reminderOf(result.out)).toContain("MEMORY.md är 2001 tecken, taket är 2 000.");
       }
       rmSync(home, { recursive: true, force: true });
     }],
   });
 
-  integration("a 6001-character project index warns once per session and file, but 6000 stays silent", {
+  integration("a 2001-character project index warns once per session and file, but 2000 stays silent", {
     given: ["two independent project memory indexes under a temporary home", () => {
       const ws = workspace();
       const index = join(ws.home, "ws", "memory", "MEMORY.md");
@@ -72,16 +72,16 @@ feature("daily memory section reminder", () => {
       const write = (file, session_id = "s1") => hook(home, {
         session_id, tool_name: "Write", tool_input: { file_path: file },
       });
-      writeFileSync(index, "å".repeat(6000));
+      writeFileSync(index, "å".repeat(2000));
       const atLimit = write(index);
-      writeFileSync(index, "å".repeat(6001));
+      writeFileSync(index, "å".repeat(2001));
       const over = write(index);
       const again = write(index);
-      writeFileSync(other, "å".repeat(6001));
+      writeFileSync(other, "å".repeat(2001));
       return { atLimit, over, again, other: write(other), newSession: write(index, "s2") };
     }],
     then: ["only new over-limit session/file pairs get nonblocking Swedish context", (results, { home }) => {
-      const text = "MEMORY.md är 6001 tecken, taket är 6 000. Lägg minnet i rätt index-*.md och lämna högst ett krokord här.";
+      const text = "MEMORY.md är 2001 tecken, taket är 2 000. Lägg minnet i rätt index-*.md och lämna högst ett krokord här.";
       for (const result of Object.values(results)) expect(result.status, result.err).toBe(0);
       expect(results.atLimit.out).toBe("");
       expect(results.again.out).toBe("");
