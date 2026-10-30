@@ -5,7 +5,7 @@ import { join } from "path";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { readAlternateTurns } from "./alternate-session-reader.mjs";
 import { describeToolCall } from "./tool-display.mjs";
-import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
+import { captureJsonlAppendCursor, createJsonlReceiptProbe, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { isSystemNoiseDirective, isWorkDirective } from "./system-noise.mjs";
 import { CLAUDE_TERMINAL_STOP_REASONS as TERMINAL_STOP_REASONS, userPromptText, isClaudeTaskNotification } from "./claude-turn-lifecycle.mjs";
 import { isClaudeTurnBusy } from "./claude-turn-busy.mjs";
@@ -177,6 +177,7 @@ export const isSyntheticClaudeReply = (record) => record?.message?.model === "<s
  */
 const CLAUDE_PROMPT_CURSOR_KIND = "claude-prompt-events-v1";
 const CLAUDE_SLASH_CURSOR_KIND = "claude-slash-events-v1";
+const promptReceipt = createJsonlReceiptProbe(); // 30 Oct: rescanning a replaced 11.6 MB journal per check read 30 MB per 10 s
 
 /** Local event-identity cursor; see the Codex twin for the clock-skew rationale. */
 export function captureClaudePromptEchoCursor(paneDir, promptText) {
@@ -198,8 +199,7 @@ export function isPromptInJsonl(paneDir, promptText, { notBeforeMs = 0, cursor =
   }
 
   if (cursor?.kind === CLAUDE_PROMPT_CURSOR_KIND) {
-    return hasJsonlEventAfterCursor(files.map(({ path }) => path), cursor,
-      (event) => promptEventMatches(event, needle));
+    return promptReceipt(files.map(({ path }) => path), cursor, needle, (event) => promptEventMatches(event, needle));
   }
 
   // findJsonlAndEvents scans all files newest-first for the needle, so it

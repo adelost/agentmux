@@ -54,7 +54,7 @@ const TEST_ALIASES = {
   "core/state.mjs": ["core/state.test.mjs", "core/state-initial-read.test.mjs"],
   "core/heartbeat.mjs": ["core/doctor.test.mjs", "core/windows-wsl-probe.test.mjs"],
   "core/codex-jsonl-reader.mjs": ["test/codex-jsonl-reader.test.mjs"],
-  "core/jsonl-reader.mjs": ["core/dream-summarizer.test.mjs", "test/jsonl-reader.test.mjs"],
+  "core/jsonl-reader.mjs": ["core/dream-summarizer.test.mjs", "core/jsonl-reader-prompt-receipt.test.mjs", "test/jsonl-reader.test.mjs"],
   "core/search-semantic.mjs": ["core/search.test.mjs"],
   "core/ask-origin.mjs": ["core/search-human-words.test.mjs", "core/dream-conversation.test.mjs"],
   "core/search-human-days.mjs": ["core/search-human-words.test.mjs"],
