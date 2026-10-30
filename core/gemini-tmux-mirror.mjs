@@ -18,11 +18,14 @@ export function createGeminiTmuxMirror({ agent, state, post, home } = {}) {
       // A completed turn is immutable even when agy's screen later gains errors,
       // feedback prompts or other scrollback. A new submission has a new id.
       const turnId = createHash("sha256").update(JSON.stringify([dir, prompt.id])).digest("hex");
-      if (state.get(TURN_KEY, {})?.[key] === turnId) return;
+      const prior = state.get(TURN_KEY, {})?.[key];
+      if (prior?.id === turnId && !prior.quota) return;
       const reply = await agent.getResponseStreamWithRaw(name, idx, prompt.text);
       if (!reply?.items?.some(item => item.type === "text" && item.content?.trim())) return;
+      const quota = reply.items.some(item => item.type === "text" && /individual quota reached/iu.test(item.content || ""));
+      if (prior?.id === turnId && quota) return;
       const signature = createHash("sha256").update(JSON.stringify([dir, prompt.id, reply.items])).digest("hex");
-      const completed = current => ({ ...current, [key]: turnId });
+      const completed = current => ({ ...current, [key]: { id: turnId, quota } });
       if (state.get(STATE_KEY, {})?.[key] === signature) {
         if (state.updateKey) state.updateKey(TURN_KEY, completed); else state.set(TURN_KEY, completed(state.get(TURN_KEY, {})));
         return;

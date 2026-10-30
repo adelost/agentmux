@@ -21,10 +21,17 @@ test('one submitted turn is not reposted when quota messages accumulate, includi
     text += '\nIndividual quota reached. Resets in 97h.';
     await createGeminiTmuxMirror(options).poll(request);
     assert.equal(posts.length, 1);
+    text = 'A recovered answer';
+    await createGeminiTmuxMirror(options).poll(request);
+    assert.equal(posts.length, 2);
+    assert.equal(posts[1].items[0].content, 'A recovered answer');
     history(2);
     text = 'A fresh answer';
     await createGeminiTmuxMirror(options).poll(request);
-    assert.equal(posts.length, 2);
-    assert.equal(posts[1].items[0].content, 'A fresh answer');
+    assert.equal(posts.length, 3);
+    assert.equal(posts[2].items[0].content, 'A fresh answer');
+    text += '\nIndividual quota reached. Resets in 97h.';
+    await createGeminiTmuxMirror(options).poll(request);
+    assert.equal(posts.length, 3);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
