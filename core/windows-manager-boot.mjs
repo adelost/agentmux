@@ -9,13 +9,31 @@ import { trackManagerBootId } from "./windows-manager.mjs";
 
 const BOOT_WATCH_MS = 60_000;
 const PROBE_TIMEOUT_MS = 20_000;
+// execFile kills a child only for a timeout above 0.
+const NEVER_KILLED = 0;
+const BOOT_ID_TIMEOUT = Object.freeze({ ok: false, reason: "boot-id-timeout" });
+const BOOT_ID_PENDING = Object.freeze({ ok: false, reason: "boot-id-pending" });
 const WSL_IDENTIFIER = /^[A-Za-z0-9._-]{1,64}$/u;
 const BOOT_ID = /^[0-9a-f-]{36}$/u;
 
+/** WHAT: Resolves with the promise's value, or with onTimeout when timeoutMs passes first. WHY: Frees the turn lane without ending the work behind the promise. */
+function settleWithin(promise, timeoutMs, onTimeout) {
+  let timer;
+  const deadline = new Promise((resolvePromise) => { timer = setTimeout(() => resolvePromise(onTimeout), timeoutMs); });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
+function toBootObservation(read) {
+  const bootId = read.stdout.trim();
+  return read.ok && BOOT_ID.test(bootId) ? { ok: true, running: true, bootId } : { ok: false, reason: "boot-id-unreadable" };
+}
+
 /** WHAT: Builds a reader for the WSL boot id that only runs while the distro is up. WHY: Prevents the boot watch from starting a WSL the human shut down. */
-export function createRunningBootReader({ rootDir, run, readJson, systemRoot = process.env.SystemRoot || "C:\\Windows" }) {
+export function createRunningBootReader({ rootDir, run, readJson, log = () => {}, systemRoot = process.env.SystemRoot || "C:\\Windows" }) {
   const wslExe = join(systemRoot, "System32", "wsl.exe");
+  let slowRead = null;
   return async () => {
+    if (slowRead) return BOOT_ID_PENDING;
     const restarter = readJson(join(rootDir, "config.json"));
     if (!WSL_IDENTIFIER.test(restarter?.distro || "") || !WSL_IDENTIFIER.test(restarter?.linuxUser || "")) {
       return { ok: false, reason: "restarter-config-missing-distro" };
@@ -24,10 +42,21 @@ export function createRunningBootReader({ rootDir, run, readJson, systemRoot = p
     const listed = await run(wslExe, ["--list", "--running", "--quiet"], PROBE_TIMEOUT_MS);
     const names = listed.stdout.replace(/[\0\uFEFF\uFFFD]/gu, "").split(/\r?\n/u).map((line) => line.trim());
     if (!names.includes(restarter.distro)) return { ok: true, running: false };
-    const read = await run(wslExe, ["-d", restarter.distro, "-u", restarter.linuxUser, "--", "cat", "/proc/sys/kernel/random/boot_id"], PROBE_TIMEOUT_MS);
-    const bootId = read.stdout.trim();
-    if (read.ok && BOOT_ID.test(bootId)) return { ok: true, running: true, bootId };
-    return { ok: false, reason: read.timedOut ? "boot-id-timeout" : "boot-id-unreadable" };
+    // The read is never killed: WSL's relay for a wsl.exe killed before it connected waits forever
+    // (95 of the 101 relays left waiting in the 28 to 30 Oct boot). Only the turn is released at the deadline.
+    const startedAt = performance.now();
+    const read = run(wslExe, ["-d", restarter.distro, "-u", restarter.linuxUser, "--", "cat", "/proc/sys/kernel/random/boot_id"], NEVER_KILLED)
+      .then(toBootObservation);
+    const first = await settleWithin(read, PROBE_TIMEOUT_MS, BOOT_ID_TIMEOUT);
+    if (first === BOOT_ID_TIMEOUT) {
+      slowRead = read
+        .then((late) => (late.ok ? "ok" : late.reason), (error) => `failed: ${error?.message || error}`)
+        .then((outcome) => {
+          slowRead = null;
+          log(`boot watch slow read finished after ${Math.round((performance.now() - startedAt) / 1000)}s: ${outcome}`);
+        });
+    }
+    return first;
   };
 }
 
@@ -45,7 +74,8 @@ export async function noteBootObservation(state, observation, { deps, observer }
 export async function watchWslBoot({ state, deps }) {
   const boot = await deps.readRunningBootId();
   if (!boot?.ok) {
-    deps.log?.(`boot watch skipped: ${boot?.reason || "unknown"}`);
+    // A slow read logged its boot-id-timeout once and logs again when it finishes.
+    if (boot?.reason !== BOOT_ID_PENDING.reason) deps.log?.(`boot watch skipped: ${boot?.reason || "unknown"}`);
     return false;
   }
   if (!boot.running) return false;

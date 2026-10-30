@@ -258,7 +258,7 @@ async function main() {
     saveState: (next) => writeJsonAtomic(statePath, next),
     observe: observeDefault,
     executeTool: (name, context = {}) => executeToolDefault(name, { rootDir, logPath, beforeBootId: context.beforeBootId }),
-    readRunningBootId: createRunningBootReader({ rootDir, run: runBounded, readJson }),
+    readRunningBootId: createRunningBootReader({ rootDir, run: runBounded, readJson, log: (line) => logLine(logPath, line) }),
     log: (line) => logLine(logPath, line),
     listMessages: async (after) => {
       const route = `/channels/${config.channelId}/messages?limit=50${after ? `&after=${after}` : ""}`;

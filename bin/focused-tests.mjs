@@ -101,6 +101,7 @@ const TEST_ALIASES = {
   "bin/windows-manager-install.ps1": ["test/windows-manager-install-contract.test.mjs"],
   "bin/windows-rescue-tool.ps1": ["test/windows-manager-contract.test.mjs"],
   "core/windows-manager-discord.mjs": ["bin/windows-manager-smoke.test.mjs", "test/windows-manager-contract.test.mjs"],
+  "core/windows-manager-boot.mjs": ["core/windows-manager-boot.test.mjs", "bin/windows-manager-smoke.test.mjs", "test/windows-manager-contract.test.mjs"],
   "core/windows-manager-phone.mjs": ["core/windows-manager-phone.test.mjs"],
   "core/windows-manager-phone-runtime.mjs": ["core/windows-manager-phone.test.mjs", "test/windows-manager-contract.test.mjs"],
   "core/windows-manager-input.mjs": ["core/windows-manager-input.test.mjs", "core/windows-manager-phone.test.mjs"],
