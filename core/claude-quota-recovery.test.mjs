@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -102,6 +102,74 @@ feature("Claude quota-limit receipts", () => {
     then: ["the receipt read before is returned", (receipt, { homeDir }) => {
       try { expect(receipt).toMatchObject({ limitEventId: "11111111-1111-4111-8111-111111111111" }); }
       finally { rmSync(homeDir, { recursive: true, force: true }); }
+    }],
+  });
+
+  // defect: 30 Oct the bridge read 109 to 261 MB per 10 s, up to 16 MB of each active journal per tick, and delivery stalled.
+  unit("a growing journal without limit text is read only from where the last read ended", {
+    given: ["a journal read once, an old line changed in place to a banner, then one bookkeeping line appended", () => {
+      const homeDir = mkdtempSync(join(tmpdir(), "amux-quota-receipt-"));
+      const paneDir = join(homeDir, "repo", ".agents", "2");
+      const projectDir = claudeProjectDir(paneDir, homeDir);
+      const sessionPath = join(projectDir, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl");
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(sessionPath, `${JSON.stringify(limitEvent({ text: "You've hit your session lemit · resets 8:50pm (Europe/Stockholm)" }))}\n`);
+      const first = activeClaudeLimitReceipt(paneDir, { homeDir });
+      // Only a read of the old bytes can see this banner; an append-only journal never changes them.
+      writeFileSync(sessionPath, readFileSync(sessionPath, "utf8").replace("session lemit", "session limit"));
+      appendFileSync(sessionPath, `${JSON.stringify({ type: "system", uuid: "system-after" })}\n`);
+      return { homeDir, paneDir, first };
+    }],
+    when: ["the receipt is asked for again", ({ homeDir, paneDir }) => activeClaudeLimitReceipt(paneDir, { homeDir })],
+    then: ["the appended bytes alone decide, and they name no limit", (receipt, { homeDir, first }) => {
+      try { expect([first, receipt]).toEqual([null, null]); }
+      finally { rmSync(homeDir, { recursive: true, force: true }); }
+    }],
+  });
+
+  unit("a limit banner appended to a growing journal is still read", {
+    given: ["a journal read once without limit text, then a banner appended", () => {
+      const homeDir = mkdtempSync(join(tmpdir(), "amux-quota-receipt-"));
+      const paneDir = join(homeDir, "repo", ".agents", "2");
+      const projectDir = claudeProjectDir(paneDir, homeDir);
+      const sessionPath = join(projectDir, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl");
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(sessionPath, `${JSON.stringify({ type: "user", uuid: "prompt", message: { content: "ship it" } })}\n`);
+      const first = activeClaudeLimitReceipt(paneDir, { homeDir });
+      appendFileSync(sessionPath, `${JSON.stringify(limitEvent())}\n`);
+      return { homeDir, paneDir, first };
+    }],
+    when: ["the receipt is asked for again", ({ homeDir, paneDir }) => activeClaudeLimitReceipt(paneDir, { homeDir })],
+    then: ["the new banner is the receipt", (receipt, { homeDir, first }) => {
+      try {
+        expect(first).toBe(null);
+        expect(receipt).toMatchObject({ limitEventId: "11111111-1111-4111-8111-111111111111" });
+      } finally { rmSync(homeDir, { recursive: true, force: true }); }
+    }],
+  });
+
+  unit("a limit banner whose line was half written at earlier reads is still read", {
+    given: ["a full read and an appended read that each saw only part of the banner's line", () => {
+      const homeDir = mkdtempSync(join(tmpdir(), "amux-quota-receipt-"));
+      const paneDir = join(homeDir, "repo", ".agents", "2");
+      const projectDir = claudeProjectDir(paneDir, homeDir);
+      const sessionPath = join(projectDir, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl");
+      const banner = `${JSON.stringify(limitEvent())}\n`;
+      const [first, second] = [banner.indexOf("hit your"), banner.indexOf("limit") + "limit".length];
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(sessionPath, `${JSON.stringify({ type: "user", uuid: "prompt", message: { content: "ship it" } })}\n${banner.slice(0, first)}`);
+      const reads = [activeClaudeLimitReceipt(paneDir, { homeDir })];
+      appendFileSync(sessionPath, banner.slice(first, second));
+      reads.push(activeClaudeLimitReceipt(paneDir, { homeDir }));
+      appendFileSync(sessionPath, banner.slice(second));
+      return { homeDir, paneDir, reads };
+    }],
+    when: ["the receipt is asked for once the line is complete", ({ homeDir, paneDir }) => activeClaudeLimitReceipt(paneDir, { homeDir })],
+    then: ["the completed banner is the receipt", (receipt, { homeDir, reads }) => {
+      try {
+        expect(reads).toEqual([null, null]);
+        expect(receipt).toMatchObject({ limitEventId: "11111111-1111-4111-8111-111111111111" });
+      } finally { rmSync(homeDir, { recursive: true, force: true }); }
     }],
   });
 
