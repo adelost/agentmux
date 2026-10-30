@@ -4,10 +4,11 @@
 # the workspace's single STT entry point. One prompt, one model, one place
 # to improve. Same pattern as workspace scripts/util/transcribe-whisper.sh.
 #
-# Backend: Gemini 2.5 Pro. Benchmark 2026-05-27: Whisper-1 misheard tech
-# terms ("Gemini"→"Yemeni", "diarization"→"deresation"); Gemini spells
-# Swedish + jargon correctly and is cheaper. the operator 2026-07-08: accuracy
-# beats latency for voice — never downgrade to flash models.
+# Backend: api.v1d.io (AMUX_STT_PRIMARY=v1d, the default): Gemini 3.5
+# Transcribe with word times, then Haiku proofreads misheard words. Mattias
+# 2026-10-30 chose the API over Gemini 2.5 Pro after using it. The Pro chain
+# stays behind AMUX_STT_PRIMARY=gemini as the way back. Benchmark 2026-05-27:
+# Whisper-1 mishears tech terms ("Gemini"→"Yemeni"), so it is only the fallback.
 #
 # Usage: transcribe-whisper.sh <audio_file> [language]
 
@@ -73,7 +74,14 @@ HUNG_AFTER_S="${AMUX_STT_HUNG_AFTER_S:-60}"
 # A clip of at most 45 s needs about 400 answer tokens, so a thinking or
 # repetition loop stops at these caps instead of running on to the deadline.
 GEMINI_LIMITS=(--thinking-budget 1024 --max-output-tokens 2048)
-STT_FAILURE_LOG="$HOME/.agentmux/stt-gemini-failures.jsonl"
+PRIMARY="${AMUX_STT_PRIMARY:-v1d}"
+case "$PRIMARY" in
+  v1d|gemini) ;;
+  *) echo "[stt] unknown AMUX_STT_PRIMARY: $PRIMARY (use v1d or gemini)" >&2; exit 2 ;;
+esac
+# The API answers a 240 s part in seconds; the cap only bounds a stalled call.
+V1D_CAP_S="${AMUX_STT_V1D_CAP_S:-150}"
+STT_FAILURE_LOG="$HOME/.agentmux/stt-$PRIMARY-failures.jsonl"
 
 try_backend() { # $1=backend $2=wall-clock-cap $3=clip, then extra transcribe options
   local backend="$1" cap="$2" clip="$3"
@@ -81,18 +89,26 @@ try_backend() { # $1=backend $2=wall-clock-cap $3=clip, then extra transcribe op
   timeout "$cap" "$HOME/bin/transcribe" --backend "$backend" --stdout --lang "$LANG" "$@" "$clip"
 }
 
-# One line per failed Gemini try, so a clip that whisper1 rescued still says
-# why Gemini failed. The reason is the provider's error line, never the words.
-log_gemini_failure() { # $1=attempt $2=exit $3=seconds $4=stderr-file $5=start $6=end
-  mkdir -p "${STT_FAILURE_LOG%/*}" && (umask 077; python3 -I - "$@" "$AUDIO_FILE" >> "$STT_FAILURE_LOG") <<'PY' \
-    || echo "[stt] could not log the Gemini failure to $STT_FAILURE_LOG" >&2
+try_primary() { # $1=clip $2=temperature (gemini only)
+  if [ "$PRIMARY" = v1d ]; then
+    try_backend v1d "${V1D_CAP_S}s" "$1"
+  else
+    try_backend gemini "${GEMINI_CAP_S}s" "$1" "${GEMINI_LIMITS[@]}" --temperature "$2"
+  fi
+}
+
+# One line per failed primary try, so a clip that whisper1 rescued still says
+# why the primary failed. The reason is the provider's error line, never the words.
+log_primary_failure() { # $1=attempt $2=exit $3=seconds $4=stderr-file $5=start $6=end
+  mkdir -p "${STT_FAILURE_LOG%/*}" && (umask 077; python3 -I - "$@" "$AUDIO_FILE" "$PRIMARY" >> "$STT_FAILURE_LOG") <<'PY' \
+    || echo "[stt] could not log the $PRIMARY failure to $STT_FAILURE_LOG" >&2
 import json, re, sys, time
-attempt, rc, seconds, errfile, start, end, audio = sys.argv[1:8]
+attempt, rc, seconds, errfile, start, end, audio, backend = sys.argv[1:9]
 lines = [line.strip() for line in open(errfile, encoding="utf-8", errors="replace") if line.strip()]
-errors = [line for line in lines if re.search(r"Error|Exception|DEADLINE|UNAVAILABLE|MAX_TOKENS|[Tt]imeout", line)]
+errors = [line for line in lines if re.search(r"Error|Exception|DEADLINE|UNAVAILABLE|MAX_TOKENS|[Tt]imeout|^v1d ", line)]
 reason = (errors or lines or [f"wall-clock cap after {seconds} s" if rc == "124" else "no error text"])[-1]
 print(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "audio": audio,
-                  "range": [int(start), int(end)], "attempt": int(attempt), "backend": "gemini",
+                  "range": [int(start), int(end)], "attempt": int(attempt), "backend": backend,
                   "exit": int(rc), "seconds": int(seconds), "reason": reason[:300]}, ensure_ascii=False))
 PY
 }
@@ -103,25 +119,28 @@ has_words() { [ -n "${1//[[:space:]]/}" ]; }
 # gets the same answer, so failing the message only made every retry repeat
 # it (2026-10-17). Mark the range instead. Only an unanswered call fails.
 transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
-  local clip="$1" attempt TEXT rc started temperature=0 heard_no_words=false
+  local clip="$1" attempt TEXT rc started temperature=0 heard_no_words=false tries=2
   local errlog
+  # A second API call is a second paid run, and an unknown outcome may already
+  # be billed, so the API gets one try and whisper1 takes over after it.
+  [ "$PRIMARY" = v1d ] && tries=1
   errlog=$(mktemp) || return 1
-  for attempt in 1 2; do
+  for ((attempt = 1; attempt <= tries; attempt++)); do
     started=$SECONDS
-    if TEXT=$(try_backend gemini "${GEMINI_CAP_S}s" "$clip" "${GEMINI_LIMITS[@]}" --temperature "$temperature" 2> "$errlog"); then
+    if TEXT=$(try_primary "$clip" "$temperature" 2> "$errlog"); then
       cat "$errlog" >&2
       if has_words "$TEXT"; then rm -f "$errlog"; printf '%s\n' "$TEXT"; return 0; fi
       heard_no_words=true
-      echo "[stt] gemini attempt $attempt/2 heard no words" >&2
+      echo "[stt] $PRIMARY attempt $attempt/$tries heard no words" >&2
       continue
     else
       rc=$?
       cat "$errlog" >&2
     fi
-    echo "[stt] gemini attempt $attempt/2 failed (exit $rc) after $((SECONDS - started)) s" >&2
-    log_gemini_failure "$attempt" "$rc" "$((SECONDS - started))" "$errlog" "$2" "$3"
+    echo "[stt] $PRIMARY attempt $attempt/$tries failed (exit $rc) after $((SECONDS - started)) s" >&2
+    log_primary_failure "$attempt" "$rc" "$((SECONDS - started))" "$errlog" "$2" "$3"
     if [ $((SECONDS - started)) -ge "$HUNG_AFTER_S" ]; then
-      echo "[stt] gemini hung; whisper1 takes over now" >&2
+      echo "[stt] $PRIMARY hung; whisper1 takes over now" >&2
       break
     fi
     # Only a fast failure reaches a second try; at temperature 0 the same clip
@@ -134,7 +153,7 @@ transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
     if has_words "$TEXT"; then printf '[stt-fallback:whisper1] %s\n' "$TEXT"; else range_marker ohörbart "$2" "$3"; fi
     return 0
   fi
-  echo "[stt] gemini x2 + whisper1 all failed for $clip" >&2
+  echo "[stt] $PRIMARY x$tries + whisper1 all failed for $clip" >&2
   return 1
 }
 
@@ -144,7 +163,10 @@ transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
 # Keep the same transcriber and quality; bound clip duration instead of hiding
 # failures behind a larger deadline. Keep Discord Opus compressed, matching the
 # successful incident reproduction. Other codecs use independent WAV headers.
-if ! awk -v duration="$DURATION" 'BEGIN { exit !(duration > 45) }'; then
+# That bound is Gemini 2.5 Pro's. The API takes 300 s per call and transcribe
+# sends it 240 s parts, so with v1d only a longer message is split.
+if [ "$PRIMARY" = v1d ]; then SPLIT_ABOVE_S=240 PART_S=240; else SPLIT_ABOVE_S=45 PART_S=25; fi
+if ! awk -v duration="$DURATION" -v above="$SPLIT_ABOVE_S" 'BEGIN { exit !(duration > above) }'; then
   transcribe_clip "$AUDIO_FILE" 0 "$TOTAL_SECONDS"
   exit $?
 fi
@@ -159,7 +181,7 @@ if [[ "$CODEC" == opus || "$CODEC" == vorbis ]]; then
   CODEC_ARGS=(-c:a copy)
 fi
 ffmpeg -nostdin -loglevel error -i "$AUDIO_FILE" -map 0:a:0 -vn "${CODEC_ARGS[@]}" \
-  -f segment -segment_time 25 -reset_timestamps 1 "$PARTS/part-%04d.$EXT" || exit 1
+  -f segment -segment_time "$PART_S" -reset_timestamps 1 "$PARTS/part-%04d.$EXT" || exit 1
 
 strongest=-1000
 for clip in "$PARTS"/part-*."$EXT"; do
@@ -181,7 +203,7 @@ part_index=0
 for clip in "$PARTS"/part-*."$EXT"; do
   [ -f "$clip" ] || { echo "[stt] audio split produced no parts" >&2; exit 1; }
   read -r mean peak < "$clip.levels"
-  start=$((part_index * 25)); end=$((start + 25))
+  start=$((part_index * PART_S)); end=$((start + PART_S))
   [ "$end" -le "$TOTAL_SECONDS" ] || end="$TOTAL_SECONDS"
   if is_silent "$mean" "$peak" "$strongest"; then
     range_marker tyst "$start" "$end" > "$clip.txt"

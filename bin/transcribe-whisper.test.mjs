@@ -24,7 +24,7 @@ echo "$part"
       const audio = join(root, "long.ogg");
       execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=110", "-c:a", "libopus", audio]);
       const run = fail => spawnSync("bash", [resolve("bin/transcribe-whisper.sh"), audio], {
-        env: { ...process.env, HOME: root, FAIL_PART: fail ? "yes" : "no" }, encoding: "utf8", timeout: 10000,
+        env: { ...process.env, HOME: root, AMUX_STT_PRIMARY: "gemini", FAIL_PART: fail ? "yes" : "no" }, encoding: "utf8", timeout: 10000,
       });
       const complete = run(false);
       expect(complete.status, complete.stderr).toBe(0);
@@ -47,7 +47,7 @@ if [[ "$part" == "$EMPTY_PART" || "$EMPTY_AUDIBLE" == yes ]]; then exit 0; fi
 echo "$part"
 `, { mode: 0o700 });
   const run = (audio, env = {}, script = resolve("bin/transcribe-whisper.sh")) => spawnSync("bash", [script, audio], {
-    env: { ...process.env, HOME: root, ...env }, encoding: "utf8", timeout: 15_000,
+    env: { ...process.env, HOME: root, AMUX_STT_PRIMARY: "gemini", ...env }, encoding: "utf8", timeout: 15_000,
   });
   const calls = () => { try { return readFileSync(join(root, "calls"), "utf8").trim().split("\n"); } catch { return []; } };
   return { root, run, calls, close: () => rmSync(root, { recursive: true, force: true }) };
@@ -147,7 +147,7 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
 
 // Mattias 2026-10-18: "det är bättre att Whisper kör så fort den kan". A Gemini call that runs
 // into its cap hung; the same clip hung again in 5 of 7 second tries, so whisper1 takes over at once.
-function providerFixture(fakeTranscribe) {
+function providerFixture(fakeTranscribe, seconds = 3) {
   const root = mkdtempSync(join(tmpdir(), "voice-provider-"));
   mkdirSync(join(root, "bin"));
   writeFileSync(join(root, "bin/transcribe"), `#!/bin/bash
@@ -156,13 +156,13 @@ echo "$backend" >> "$HOME/calls"
 ${fakeTranscribe}
 `, { mode: 0o700 });
   const audio = join(root, "clip.ogg");
-  execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-c:a", "libopus", audio]);
+  execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `sine=frequency=440:duration=${seconds}`, "-c:a", "libopus", audio]);
   const run = (env = {}) => spawnSync("bash", [resolve("bin/transcribe-whisper.sh"), audio], {
-    env: { ...process.env, HOME: root, ...env }, encoding: "utf8", timeout: 10_000,
+    env: { ...process.env, HOME: root, AMUX_STT_PRIMARY: "gemini", ...env }, encoding: "utf8", timeout: 10_000,
   });
   const calls = () => readFileSync(join(root, "calls"), "utf8").trim().split("\n");
   const args = () => readFileSync(join(root, "args"), "utf8").trim().split("\n");
-  const failures = () => readFileSync(join(root, ".agentmux/stt-gemini-failures.jsonl"), "utf8")
+  const failures = (backend = "gemini") => readFileSync(join(root, `.agentmux/stt-${backend}-failures.jsonl`), "utf8")
     .trim().split("\n").map((line) => JSON.parse(line));
   return { run, calls, args, failures, close: () => rmSync(root, { recursive: true, force: true }) };
 }
@@ -234,6 +234,63 @@ echo "whisper words"`);
       const result = fx.run();
       expect(result.status, result.stderr).toBe(0);
       expect(fx.args().map((line) => line.includes("--temperature 0 "))).toEqual([true, true]);
+    } finally { fx.close(); }
+  });
+});
+
+// Mattias 2026-10-30: the API, not Gemini 2.5 Pro, transcribes voice; whisper1 stays the fallback.
+describe("api.v1d.io is the primary transcriber", () => {
+  const v1d = { AMUX_STT_PRIMARY: "v1d" };
+  it("is the default and gets a 110 s message whole, in one call", () => {
+    const fx = providerFixture(`echo "$backend $(basename "\${@: -1}" | sed 's/[.].*//')"`, 110);
+    try {
+      const result = fx.run({ AMUX_STT_PRIMARY: "" });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("v1d clip");
+      expect(fx.calls()).toEqual(["v1d"]);
+    } finally { fx.close(); }
+  });
+  it("splits only a message longer than the API's 240 s parts", () => {
+    const fx = providerFixture(`echo "$backend $(basename "\${@: -1}" | sed 's/[.].*//')"`, 250);
+    try {
+      const result = fx.run(v1d);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("v1d part-0000 v1d part-0001");
+      expect(fx.calls()).toEqual(["v1d", "v1d"]);
+    } finally { fx.close(); }
+  });
+  it("hands a failed call to whisper1 at once, logs why without the words, and never sends it again", () => {
+    const fx = providerFixture(`if [ "$backend" = v1d ]; then
+  echo "v1d 503 provider_unavailable: The provider could not be reached; the run did not start (provider_refused)." >&2; exit 1
+fi
+echo "whisper words"`);
+    try {
+      const result = fx.run(v1d);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("[stt-fallback:whisper1] whisper words");
+      expect(fx.calls()).toEqual(["v1d", "whisper1"]);
+      const log = fx.failures("v1d");
+      expect(log).toHaveLength(1);
+      expect(log[0]).toMatchObject({ backend: "v1d", attempt: 1, exit: 1, reason: expect.stringContaining("503 provider_unavailable") });
+      expect(JSON.stringify(log)).not.toContain("whisper words");
+    } finally { fx.close(); }
+  });
+  it("marks a clip the API heard without words instead of asking whisper1", () => {
+    const fx = providerFixture(`[ "$backend" = v1d ] && exit 0
+echo "whisper words"`);
+    try {
+      const result = fx.run(v1d);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("[ohörbart 0:00–0:03]");
+      expect(fx.calls()).toEqual(["v1d"]);
+    } finally { fx.close(); }
+  });
+  it("refuses an unknown primary instead of guessing one", () => {
+    const fx = providerFixture(`echo words`);
+    try {
+      const result = fx.run({ AMUX_STT_PRIMARY: "pro" });
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("unknown AMUX_STT_PRIMARY");
     } finally { fx.close(); }
   });
 });

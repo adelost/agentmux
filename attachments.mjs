@@ -66,7 +66,7 @@ export function createAttachmentHandler({
   async function replyWithTranscript(msg, attachmentId, text, viaFallback) {
     const heading = viaFallback ? "**Transcript · Whisper fallback**" : "**Transcript**";
     const note = viaFallback
-      ? "-# Gemini was unavailable. Technical terms may be less accurate."
+      ? "-# The main transcription was unavailable. Technical terms may be less accurate."
       : "-# Speech-to-text may contain errors.";
     const chunks = splitMessage(`${heading}\n${text}\n${note}`);
     if (typeof msg.sendTranscriptOnce === "function") {
@@ -91,7 +91,7 @@ export function createAttachmentHandler({
         let transcribed = await takeTranscription(msg, att, tmpFiles);
         if (msg.isInboundCompleted?.()) return null;
         if (transcribed === null) return null;
-        // The wrapper marks fallback-engine transcripts (gemini failed →
+        // The wrapper marks fallback-engine transcripts (the primary failed →
         // whisper1 took over). The mark must survive into BOTH destinations:
         // whisper1 mishears technical terms, and a silent fallback would be
         // a quality downgrade nobody knows to compensate for.
@@ -104,7 +104,7 @@ export function createAttachmentHandler({
         // the prompt — anyone seeing it knows this is AI-transcribed and
         // may have word-level errors.
         const tagged = viaFallback
-          ? `[transcribed voice via whisper1 FALLBACK (gemini failed); extra error-prone on technical terms, interpret intent${lateVoiceNote(msg)}] ${transcribed}`
+          ? `[transcribed voice via whisper1 FALLBACK (primary transcription failed); extra error-prone on technical terms, interpret intent${lateVoiceNote(msg)}] ${transcribed}`
           : `[transcribed voice, may contain speech-to-text errors; interpret intent${lateVoiceNote(msg)}] ${transcribed}`;
         await replyWithTranscript(msg, att.id, transcribed, viaFallback);
         if (!rawText) rawText = tagged;
