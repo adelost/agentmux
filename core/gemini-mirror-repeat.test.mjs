@@ -35,3 +35,19 @@ test('one submitted turn is not reposted when quota messages accumulate, includi
     assert.equal(posts.length, 3);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test('a failed delivery is retried instead of marking the turn sent', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'gemini-mirror-'));
+  try {
+    const path = join(home, '.gemini/antigravity-cli');
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'history.jsonl'), `${JSON.stringify({ workspace: '/repo', display: 'question', timestamp: 1 })}\n`);
+    const data = new Map(); let attempts = 0;
+    const state = { get: (key, fallback) => data.get(key) ?? fallback, set: (key, value) => data.set(key, value) };
+    const options = { home, state, agent: { isBusy: async () => false, getResponseStreamWithRaw: async () => ({ items: [{ type: 'text', content: 'An answer' }] }) }, post: async () => ({ ok: ++attempts > 1 }) };
+    const request = { name: 'demo', idx: 9, dir: '/repo' };
+    const mirror = createGeminiTmuxMirror(options);
+    await mirror.poll(request); await mirror.poll(request); await mirror.poll(request);
+    assert.equal(attempts, 2);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
