@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { dreamAttemptPath } from "./dream-schedule-state.mjs";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { parseDreamSchedule, dreamDeadline, readDreamSuccess, observeDreamHealth } from "./dream-health.mjs";
 import { lintMemory, formatMemoryStatus } from "./memory-lint.mjs";
+import { archiveNightDay } from "./memory-archive.mjs";
 
 const roots = [], now = new Date("2026-09-05T04:30:00Z");
 function fixture() {
@@ -105,6 +106,16 @@ describe("on-demand Dream deadline and artifact guard", () => {
     const fx = fixture(), base = success(fx); writeFileSync(`${base}.summary.md`, "wrong run");
     expect(readDreamSuccess(fx.workspace, "2026-09-05", { home: fx.home, now }).ok).toBe(false);
     expect(observeDreamHealth(fx.workspace, fx.options).status).toBe("warn");
+  });
+  // defect: from 27 Oct every session start called yesterday's verified digest not-validated, because the
+  // next night's archive had moved its Dream block out of the daily file.
+  it("still verifies a day after the next night archived it, but not once its archived original changed", () => {
+    const fx = fixture(); success(fx);
+    const nextMorning = new Date("2026-09-06T04:30:00Z");
+    expect(archiveNightDay(fx.workspace, "2026-09-05", { summary: "Natten 6 sep.", now: nextMorning }).archived).toBeTruthy();
+    expect(readDreamSuccess(fx.workspace, "2026-09-05", { home: fx.home, now: nextMorning })).toMatchObject({ ok: true, runId: "41310b1d-8a21-4e8c-8a57-196ecc5a2cf5" });
+    appendFileSync(join(fx.workspace, "memory", "archive", "daily", "2026-09-05.md"), "\n- Added after the archive.");
+    expect(readDreamSuccess(fx.workspace, "2026-09-05", { home: fx.home, now: nextMorning }).ok).toBe(false);
   });
   it("accepts a controller no-work run but not partial or future results", () => {
     const fx = fixture();

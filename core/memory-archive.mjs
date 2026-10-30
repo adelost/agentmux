@@ -28,7 +28,8 @@ const GENERIC_SUMMARY_RES = [/^\{.*\}$/, /^Daily notes for \d{4}-\d{2}-\d{2}(?:[
 const LOCK_STALE_MS = 10 * 60_000;
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const archiveRel = (dateKey) => `${ARCHIVE_DIR}/${dateKey}.md`;
+/** WHAT: Names a day's archived original. WHY: Keeps readers of a stub from following a pointer to any other file. */
+export const archiveRel = (dateKey) => `${ARCHIVE_DIR}/${dateKey}.md`;
 
 /** WHAT: Reads the archive pointer of a stub. WHY: Lets lint and reruns tell an archived day from an unarchived one. */
 export function parseArchiveStub(text) {

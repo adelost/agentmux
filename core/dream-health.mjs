@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { loadConfig } from "../cli/config.mjs";
 import { defaultWorkspace, runtimeAgentsPath } from "./runtime-defaults.mjs";
 import { localDateKey } from "./memory-policy.mjs";
+import { archiveRel, parseArchiveStub } from "./memory-archive.mjs";
 import { readDreamOwnerResult } from "./dream-owner.mjs";
 import { dreamSnapshotReference, verifyDreamSnapshot } from "./dream-snapshot.mjs";
 import { readDreamAttempt } from "./dream-schedule-state.mjs";
@@ -62,11 +63,27 @@ export function dreamDeadline(now, schedule) {
   return { startMs, deadlineMs: startMs + schedule.graceMs, dateKey: localDateKey(new Date(startMs)) };
 }
 
+/** WHAT: Reads the original that an archived day's stub points to. WHY: The next night's archive moves the day's Dream block out of the daily file, so the stub alone proves nothing. */
+function archivedDailyText(workspace, dateKey, stub) {
+  if (stub.archivePath !== archiveRel(dateKey)) return { ok: false, reason: "archive pointer is not this day's archive" };
+  try {
+    const bytes = readFileSync(join(workspace, stub.archivePath));
+    if (createHash("sha256").update(bytes).digest("hex") !== stub.sha256) return { ok: false, reason: "archived original changed" };
+    return { ok: true, text: bytes.toString("utf8") };
+  } catch (error) { return { ok: false, reason: `archived original unreadable: ${error.code || error.message}` }; }
+}
+
 /** WHAT: Checks the controller's existing Dream artifacts. WHY: Prevents cron starts or stale marker text from counting as success. */
 export function readDreamSuccess(workspace, dateKey, { home, now = new Date(), dailyText } = {}) {
   let text = dailyText;
   try { text ??= readFileSync(join(workspace, "memory", `${dateKey}.md`), "utf8"); }
   catch (error) { return { ok: false, reason: error.code === "ENOENT" ? "daily result missing" : `daily result unreadable: ${error.code}` }; }
+  const stub = parseArchiveStub(text);
+  if (stub) {
+    const archived = archivedDailyText(workspace, dateKey, stub);
+    if (!archived.ok) return archived;
+    text = archived.text;
+  }
   const runs = [...text.matchAll(/<!-- amux-dream-run:(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}) \((\d+) panes ok \/ (\d+) failed\) -->/g)];
   const run = runs.filter((m) => m[1] === dateKey).at(-1);
   if (!run) return { ok: false, reason: "current run sentinel missing or stale" };

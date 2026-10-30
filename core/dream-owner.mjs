@@ -6,7 +6,8 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DREAM_SUMMARY_LINES, validateDreamSummary } from "./dream-summarizer.mjs";
+import { DREAM_SUMMARY_BYTES, DREAM_SUMMARY_LINES, validateDreamSummary } from "./dream-summarizer.mjs";
+import { loadMemoryPolicy } from "./memory-policy.mjs";
 import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
 import { readClaudeScreenQuality } from "./claude-statusline.mjs";
@@ -182,7 +183,7 @@ export function dreamOwnerPrompt({
     "",
     `Skriv resultatfilen ${outputPath} med vanliga filverktyg, och skriv den först. Den ska innehålla:`,
     `> Kuraterad av ${owner.agent}:${owner.pane} efter verifierad kompaktering · run \`${input.runId}\` · source \`${input.sha256}\`.`,
-    `- En noggrann svensk sammanfattning i högst ${DREAM_SUMMARY_LINES} icke-tomma rader. Den blir dygnets dagbok.`,
+    `- En noggrann svensk sammanfattning i högst ${DREAM_SUMMARY_LINES} icke-tomma rader; hela filen högst ${DREAM_SUMMARY_BYTES} byte. Den blir dygnets dagbok.`,
     input.memoryFormat >= 3 ? "- Sammanfatta loggpaketets dygn. Ange datum för arbete från ett tidigare dygn."
       : "- Sammanfatta hela dygnet, också det panelerna skrivit i dagsfilerna. Ange datum för arbete från ett tidigare dygn.",
     "- Inga ordagranna citat. Skriv om det någon sagt med egna ord och ange tid och kanal.",
@@ -198,7 +199,8 @@ export function dreamOwnerPrompt({
     ...(workspace && input.memoryFormat >= 3 ? [
       `Du får skriva i workspace-filer när det hör till kurateringen: memory/, MEMORY.md och memory/references/ i ${workspace}. Rör inga journaler, credentials, .git eller andra agenters arbetsfiler.`,
       `Vårda också vanliga Markdown-filer. Läs MEMORY.md och ${DREAM_CARE_REFERENCE}; skapa en kort aktuell teknisk referens memory/references/care-${dateKey}.md med > summary: och > why:. Ordna relevant bestående kunskap från referensen och loggpaketet, ange källdatum/pekare och skilj historik från aktuell instruktion. Inga nya fakta eller privata credentials.`,
-      "Behåll den befintliga MEMORY.md-texten och lägg en kort indexlänk till den nya referensen sist, med dess memory/references/...-sökväg i backticks. Skriv inte över andras filer.",
+      "Lista den nya referensen sist under \"Vård per natt\" i memory/references/INDEX.md.",
+      `MEMORY.md har en enda vårdrad med senaste referensens memory/references/...-sökväg i backticks: byt sökvägen där (skriv raden om den saknas), lägg aldrig till en rad per natt och håll MEMORY.md under ${loadMemoryPolicy(workspace).memoryMaxBytes} byte. Behåll övrig MEMORY.md-text. Skriv inte över andras filer.`,
       "Resultatfilen är kvittot. Ett fel i vården ska aldrig hindra att den giltiga filen finns.",
     ] : []),
     "Skriv inga reserverade amux-markörer i resultatet. AMUX validerar filen och skriver själv det tillåtna Dream-blocket i dagens minne.",
