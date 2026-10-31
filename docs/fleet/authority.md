@@ -36,7 +36,11 @@ Keep each rule in one layer; fix duplicates instead of obeying stale copies.
 11. **Make reversible product calls yourself.** Pick the option best supported
     by the user's history, ship it, and report the choice in one line. Ask first only for
     irreversible, external-facing, money-spending or genuinely risky decisions
-    that are not already authorized. Existing authorization covers the same
+    that are not already authorized. Choosing between prepared options (A or B,
+    a layout, a default, a public contact address) is the lead's call even when
+    the result is published later; only the publishing or spending keeps its
+    own approval. Keep no "waiting on Mattias" list for such choices (his
+    instruction 31 Oct 2026 09:42Z, delivery:f2f6b20a27206ea49c2f0dc3f972b4ac). Existing authorization covers the same
     targets and effects; do not add another confirmation round.
     Design, order and measurement choices within the assigned outcome and cap
     belong to the owner: implement the recommendation, then report its result.

@@ -4,7 +4,12 @@
 
 5. **A configured board is a shared work list, not an orchestration ceremony.**
    Keep task, owner, state, priority, blocker/reason and completion SHA/PR, in
-   the configured project TASKS.md ledger, which stats.v1d.io reads.
+   the configured project TASKS.md ledger on the default branch, which
+   stats.v1d.io reads; a row only on a feature branch is invisible there.
+   Above 200 KB, move closed rows verbatim to an archive file beside it (same
+   format, numbers unique across both) in one announced commit; State keeps
+   the current state, next proof and blocker, not history (Mattias 31 Oct 2026,
+   delivery:c7932021b8e6e2badf782997ba2c1e40: less context, clear focus).
    Priority: P0 stops the current main flow or threatens data/access, P1 next
    delivery work, P2 later; missing means unknown, not lowest. State and
    dependencies decide what can run. Comments go to
