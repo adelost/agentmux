@@ -36,10 +36,21 @@ export function createAttachmentHandler({
   const downloadAttachment = (att) =>
     downloadDiscordAttachment(att, { downloadBuffer, sleep });
 
-  // One STT run per attachment: the ordered handler joins the run that
-  // started on arrival instead of starting a second one.
+  // One STT run per attachment: the ordered handler, and a REST scan that
+  // re-prepares the message, join the run in flight instead of paying for a
+  // second one. A run stays here until it settles (31 Oct 2026: two voice
+  // notes were billed twice when a scan re-prepared them mid-transcription).
   const transcriptions = new Map();
   const transcriptionKey = (msg, att) => `${msg.channelId}:${msg.id}:${att.id}`;
+
+  function trackTranscription(key, transcription) {
+    transcriptions.set(key, transcription);
+    // The ordered handler awaits this same promise and handles its failure.
+    transcription.catch(() => {}).finally(() => {
+      if (transcriptions.get(key) === transcription) transcriptions.delete(key);
+    });
+    return transcription;
+  }
 
   /** WHAT: Starts STT for each journaled audio attachment once its bytes are durable. WHY: Keeps one hung transcription from delaying the next message's. */
   function transcribeAhead(msg) {
@@ -47,19 +58,13 @@ export function createAttachmentHandler({
       if (!att.contentType?.startsWith("audio/") || !att.durablePath) continue;
       const key = transcriptionKey(msg, att);
       if (transcriptions.has(key) || msg.getCachedTranscript?.(att.id)) continue;
-      const transcription = transcribeAudio(msg, att, []);
-      // The ordered handler awaits this same promise and handles its failure.
-      transcription.catch(() => {});
-      transcriptions.set(key, transcription);
+      trackTranscription(key, transcribeAudio(msg, att, []));
     }
   }
 
   function takeTranscription(msg, att, tmpFiles) {
     const key = transcriptionKey(msg, att);
-    const ahead = transcriptions.get(key);
-    if (!ahead) return transcribeAudio(msg, att, tmpFiles);
-    transcriptions.delete(key);
-    return ahead;
+    return transcriptions.get(key) || trackTranscription(key, transcribeAudio(msg, att, tmpFiles));
   }
 
   /** WHAT: Posts a readable Discord transcript in bounded chunks. WHY: Keeps long voice notes visible without markdown noise or 2000-character failures. */

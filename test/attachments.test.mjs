@@ -343,3 +343,47 @@ feature("buildPrompt: multiple attachments", () => {
     }],
   });
 });
+
+// --- transcribeAhead: one STT run per voice note ---
+
+/**
+ * A journaled voice note as the inbound store hands it out: durable bytes and
+ * the store's transcript cache, shared by every message object for that note.
+ */
+function durableVoiceMsg(store) {
+  return {
+    ...fakeMsg({
+      id: "m-voice",
+      attachments: [{ id: "a1", name: "voice-message.ogg", contentType: "audio/ogg", durablePath: "/durable/a1.ogg" }],
+    }),
+    channelId: "c1",
+    getCachedTranscript: (id) => store.get(id) ?? null,
+    saveTranscript: (id, text) => { store.set(id, text); },
+  };
+}
+
+feature("transcribeAhead: one STT run per voice note", () => {
+  unit("a scan that re-prepares a note mid-transcription joins the running STT (defect: 31 Oct 08:23Z and 08:26Z notes billed twice)", {
+    given: ["a note whose STT still runs when a REST scan re-observes it", () => {
+      const pending = [];
+      const run = vi.fn(() => new Promise((resolve) => {
+        pending.push(() => resolve({ stdout: "race mellan gates", stderr: "" }));
+      }));
+      const handler = createAttachmentHandler({
+        run, transcribeScript: "/fake/transcribe.sh", downloadBuffer: vi.fn(), writeTmp: vi.fn(), sleep: async () => {},
+      });
+      return { handler, run, store: new Map(), finish: () => pending.forEach((end) => end()) };
+    }],
+    when: ["arrival starts STT, the ordered turn takes it, the scan re-prepares, then STT ends", async (ctx) => {
+      ctx.handler.transcribeAhead(durableVoiceMsg(ctx.store));
+      const prompt = ctx.handler.buildPrompt(durableVoiceMsg(ctx.store), []);
+      ctx.handler.transcribeAhead(durableVoiceMsg(ctx.store));
+      ctx.finish();
+      return prompt;
+    }],
+    then: ["the note was transcribed once and delivered", (prompt, ctx) => {
+      expect(ctx.run).toHaveBeenCalledTimes(1);
+      expect(prompt).toContain("race mellan gates");
+    }],
+  });
+});
