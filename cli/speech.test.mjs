@@ -37,11 +37,22 @@ feature("explicit speech synthesis", () => {
     }],
   });
 
-  component("spoken text has one deterministic short-message boundary", {
+  // Defect 31 Oct 2026: two spoken status summaries (2 785 and 2 364 chars) were cut to 1 500
+  // without a word, so their endings never reached Mattias. Over the limit the caller must
+  // shorten or split; the boundary itself stays.
+  component("spoken text over one clip's limit is refused, not cut", {
     given: ["markdown and more text than a mobile clip permits", () =>
       `*${"a".repeat(MAX_SPEECH_CHARS + 20)}*`],
+    when: ["the text is normalized", (text) => () => cleanSpeechText(text)],
+    then: ["the caller learns the length and the limit", (normalize) => {
+      expect(normalize).toThrow(`speech text is ${MAX_SPEECH_CHARS + 20} chars, max ${MAX_SPEECH_CHARS}`);
+    }],
+  });
+
+  component("spoken text at the limit keeps every character", {
+    given: ["markdown around exactly one clip of text", () => `*${"a".repeat(MAX_SPEECH_CHARS)}*`],
     when: ["the text is normalized", (text) => cleanSpeechText(text)],
-    then: ["formatting is removed and the result is capped", (clean) => {
+    then: ["formatting is removed and nothing is cut", (clean) => {
       expect(clean).toHaveLength(MAX_SPEECH_CHARS);
       expect(clean).not.toContain("*");
     }],

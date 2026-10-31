@@ -18,11 +18,15 @@ export const DEFAULT_SPEECH_VOICE = DEFAULT_TTS_VOICE;
 export const MAX_SPEECH_CHARS = 1500;
 
 /**
- * WHAT: Normalizes display text for short spoken output.
- * WHY: Keeps spoken output concise and free of Markdown punctuation.
+ * WHAT: Normalizes display text for one spoken update and refuses text over its limit.
+ * WHY: Prevents the silent cut that lost two summaries' endings on 31 Oct 2026; callers shorten or split.
  */
 export function cleanSpeechText(text) {
-  return String(text ?? "").replace(/[`*_~|]/g, "").trim().slice(0, MAX_SPEECH_CHARS);
+  const clean = String(text ?? "").replace(/[`*_~|]/g, "").trim();
+  if (clean.length > MAX_SPEECH_CHARS) {
+    throw new Error(`speech text is ${clean.length} chars, max ${MAX_SPEECH_CHARS}: shorten it or send several clips`);
+  }
+  return clean;
 }
 
 /**

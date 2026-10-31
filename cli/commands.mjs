@@ -86,7 +86,7 @@ import { spawn, execSync } from "child_process";
 import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
-import { DEFAULT_SPEECH_VOICE, publishSpeechEvent, synthesizeSpeech } from "./speech.mjs";
+import { cleanSpeechText, DEFAULT_SPEECH_VOICE, publishSpeechEvent, synthesizeSpeech } from "./speech.mjs";
 import {
   DEFAULT_TMUX_SOCKET, normalizeServiceBaseUrl, operatorName, runtimeAgentsPath,
 } from "../core/runtime-defaults.mjs";
@@ -2258,7 +2258,7 @@ async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
  *   amux say -p project:2 "..."              # explicit agent:pane
  *   amux say --voice 'sv-SE-SofieNeural' "..."  # different voice
  *
- * Truncates at 1500 chars to keep the clip under about 90 seconds.
+ * Refuses text over 1500 chars (about 90 seconds of speech) instead of cutting it.
  */
 async function cmdSay(args, ctx) {
   const { execSync: execSyncFn } = await import("child_process");
@@ -2311,8 +2311,9 @@ async function cmdSay(args, ctx) {
   const voice = flags.voice || flags.v || process.env.TTS_VOICE || DEFAULT_SPEECH_VOICE;
   let speech;
   try {
+    const spoken = cleanSpeechText(text); // refuses an over-long text before the phone event is published
     const audioEvent = publishSpeechEvent(text, channelId);
-    speech = synthesizeSpeech(text, { voice });
+    speech = synthesizeSpeech(spoken, { voice });
     await sendFileToChannelId(channelId, speech.mediaPath, speech.clean, { kind: "voice" });
     console.log(`spoken (${speech.clean.length} chars) → ${channelId} · audio event ${audioEvent.eventId}`);
   } catch (err) {
