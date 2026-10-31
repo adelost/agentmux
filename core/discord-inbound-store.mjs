@@ -2,8 +2,8 @@
 
 import { createHash, randomUUID } from "crypto";
 import {
-  chmodSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync,
-  renameSync, unlinkSync, writeFileSync,
+  chmodSync, closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync,
+  renameSync, statSync, unlinkSync, writeFileSync,
 } from "fs";
 import { homedir } from "os";
 import { extname, join } from "path";
@@ -43,8 +43,22 @@ function atomicJson(path, value) {
 
 function atomicBuffer(path, value) {
   const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
-  writeFileSync(tmp, value, { mode: 0o600 });
+  const fd = openSync(tmp, "w", 0o600);
+  try {
+    writeFileSync(fd, value);
+    // The bytes reach the disk before the rename names them: on 31 Oct 2026 a
+    // WSL restart minutes after a voice note was journaled left the file empty.
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   renameSync(tmp, path);
+}
+
+/** WHAT: Says whether a journaled attachment still holds every byte it was saved with. WHY: An empty or cut copy must be fetched again, not fed to STT on every retry. */
+function durableCopyIntact(attachment) {
+  if (!attachment.durablePath || !existsSync(attachment.durablePath)) return false;
+  return attachment.bytes == null || statSync(attachment.durablePath).size === attachment.bytes;
 }
 
 function parse(path, fallback = null) {
@@ -175,7 +189,10 @@ export function createDiscordInboundStore({
     let current = read(record.channelId, record.messageId) || record;
     if (current.status === "completed") return current;
     for (const attachment of current.attachments || []) {
-      if (attachment.durablePath && existsSync(attachment.durablePath)) continue;
+      if (durableCopyIntact(attachment)) continue;
+      if (attachment.durablePath && existsSync(attachment.durablePath)) {
+        console.warn(`inbound attachment ${current.identity}/${attachment.id} lost bytes on disk; downloading it again`);
+      }
       if (typeof downloadBuffer !== "function") {
         throw new Error(`Discord attachment downloader is unavailable for ${current.identity}`);
       }

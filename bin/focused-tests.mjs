@@ -36,7 +36,7 @@ const TEST_ALIASES = {
   "bin/transcribe-whisper.sh": ["bin/transcribe-whisper.test.mjs"],
   "core/discord-inbound-store.mjs": ["core/inbound-voice-failure.test.mjs", "core/inbound-reconciler.test.mjs",
     "core/inbound-completed.test.mjs", "core/inbound-transcript-compat.test.mjs", "core/inactive-channel.test.mjs",
-    "core/unmapped-channel.test.mjs"],
+    "core/unmapped-channel.test.mjs", "core/inbound-asset-integrity.test.mjs"],
   "bot.mjs": ["channels/quota-warning-runtime.test.mjs"],
   "channels/fixtures/quota-warning-20261016.json": ["channels/quota-warning.test.mjs"],
   "agent.mjs": ["core/tui-stall-recovery.test.mjs", "core/claude-reboot-idle.test.mjs"],
