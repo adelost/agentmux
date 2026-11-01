@@ -411,6 +411,19 @@ feature("formatReminderMessage --section override (1.25.53 behavior)", () => {
     }],
   });
 
+  // sandman:0, 1 Nov 2026: live panes get the momentum protocol through a pinned reminder, sleepers are never woken.
+  unit("the momentum protocol is a pinnable section with its numbers", {
+    when: ["pinning Framdrift on both engines", () => ["claude", "codex"].map((engine) =>
+      formatReminderMessage(40, 0, engine, "/repo", "Framdrift"))],
+    then: ["the generated file's section and the 10 min and two-stop rules are named", (messages) => {
+      expect(messages[0]).toContain('the "Framdrift" section of /repo/.agents/CLAUDE.md');
+      expect(messages[1]).toContain('the "Framdrift" section of /repo/.agents/AGENTS.md');
+      for (const message of messages) {
+        expect(message).toMatch(/his own example[\s\S]*10 min without change[\s\S]*two stops on the same step/u);
+      }
+    }],
+  });
+
   unit("reminderSectionNames lists each section once, in rotation order", {
     given: ["the drift sections", () => ({})],
     when: ["reading the valid names", () => reminderSectionNames()],
