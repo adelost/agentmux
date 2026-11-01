@@ -6,6 +6,7 @@ import {
   createVoiceBufferTranscriber,
   transcribeVoiceBuffer,
 } from "./voice-transcriber.mjs";
+import { createPaneReplyReader } from "./pane-latest-reply.mjs";
 
 feature("shared voice transcriber", () => {
   component("one buffer becomes the same prefixed transcript for every host", {
@@ -66,4 +67,27 @@ feature("shared voice transcriber", () => {
       rmSync(ctx.tempDir, { recursive: true, force: true });
     }],
   });
+  for (const [pane, expected] of [[3, "Är det en porslinshand?"], [4, undefined]]) {
+    component(`the buffer transcriber for lsrc:${pane} ${expected ? "passes that pane's latest reply" : "passes no V1D_CONTEXT, since the pane has no reply"}`, {
+      given: ["a reader where only lsrc:3 has replied", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "amux-transcriber-context-"));
+        const envs = [];
+        const transcribe = createVoiceBufferTranscriber({
+          tempDir, transcribeScript: "/opt/transcribe",
+          run: async (_command, _timeoutMs, env) => { envs.push(env || {}); return { stdout: "porslinshand" }; },
+          paneReply: createPaneReplyReader("/fake/agents.yaml", {
+            loadAgents: () => [{ name: "lsrc", dir: "/fake/lsrc", panes: [{}, {}, {}, {}, {}] }],
+            readTurns: (_agent, index) => (index === 3 ? { turns: [{ items: [{ type: "text", content: "Är det en porslinshand?" }] }] } : null),
+          }),
+        });
+        return { tempDir, envs, transcribe };
+      }],
+      when: ["transcribing for the pane", async (ctx) => ctx.transcribe(Buffer.from("VOICE"), "capture.m4a", { name: "lsrc", pane })],
+      then: ["the transcriber's environment holds exactly that reply", (_text, ctx) => {
+        expect(ctx.envs[0].V1D_CONTEXT).toBe(expected);
+        if (!expected) expect(Object.hasOwn(ctx.envs[0], "V1D_CONTEXT")).toBe(false);
+        rmSync(ctx.tempDir, { recursive: true, force: true });
+      }],
+    });
+  }
 });

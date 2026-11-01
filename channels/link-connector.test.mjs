@@ -218,6 +218,22 @@ feature("link connector cycle", () => {
     }],
   });
 
+  component("a voice message is transcribed for the pane it targets, so that pane's reply is its context", {
+    given: ["one voice message to lsrc:3", () => {
+      const ctx = harness({
+        responses: { "/api/link/connector/poll?source=wsl": { messages: [message({ kind: "voice", body: "", voiceRef: "voice/abc-123.m4a" })] } },
+      });
+      ctx.targets = [];
+      ctx.deps.transcribe = async (_bytes, _ref, target) => { ctx.targets.push(target); return "transkript"; };
+      return ctx;
+    }],
+    when: ["running the cycle", async (ctx) => cycleWithReplies(ctx.deps)],
+    then: ["the transcriber is told the target pane", (_result, ctx) => {
+      expect(ctx.targets).toEqual([{ name: "lsrc", pane: 3 }]);
+      ctx.cleanup();
+    }],
+  });
+
   component("empty voice transcription posts one terminal failure and never reclaims locally", {
     given: ["one claimed voice message with no intelligible transcript", () => {
       const ctx = harness({

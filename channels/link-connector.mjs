@@ -176,6 +176,8 @@ async function deliverOneTurn({
   deliveryBroker, deliveryQueue, receiptTimeoutMs, sleep, post, connectorId, log,
 }) {
   let body = String(message.body || "").trim();
+  const agentName = String(message.target).split(":")[0];
+  const pane = Number(String(message.target).split(":")[1]);
   if (message.kind === "voice" && message.voiceRef) {
     const audio = await fetchImpl(`${serviceBase}/api/link/voice/${message.voiceRef}`, {
       headers: auth,
@@ -183,11 +185,9 @@ async function deliverOneTurn({
     });
     if (!audio.ok) throw new Error(`link-voice-${audio.status}`);
     if (typeof transcribe !== "function") throw new Error("transcribe-unavailable");
-    body = String(await transcribe(Buffer.from(await audio.arrayBuffer()), message.voiceRef) || "").trim();
+    body = String(await transcribe(Buffer.from(await audio.arrayBuffer()), message.voiceRef, { name: agentName, pane }) || "").trim();
     if (!body) throw new Error("transcribe-empty");
   }
-  const agentName = String(message.target).split(":")[0];
-  const pane = Number(String(message.target).split(":")[1]);
   const prompt = linkTurnPrompt({ clientMessageId: id, body });
   const leaseAttempt = Number.isSafeInteger(message.attempts) && message.attempts > 0
     ? message.attempts : 1;

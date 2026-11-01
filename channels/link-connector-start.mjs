@@ -8,6 +8,7 @@ import yaml from "js-yaml";
 import { runLinkConnectorCycle } from "./link-connector.mjs";
 import { phoneTargets } from "./audio-targets.mjs";
 import { createVoiceBufferTranscriber } from "../core/voice-transcriber.mjs";
+import { createPaneReplyReader } from "../core/pane-latest-reply.mjs";
 import { normalizeServiceBaseUrl } from "../core/runtime-defaults.mjs";
 import { targetsWithModels } from "./link-target-models.mjs";
 
@@ -56,6 +57,7 @@ export function startLinkConnectorIfConfigured({
   const voiceTranscriber = transcribe || createVoiceBufferTranscriber({
     run,
     transcribeScript,
+    paneReply: agentsYamlPath ? createPaneReplyReader(agentsYamlPath) : null,
   });
   const seed = String(process.env.LINK_TARGETS_WSL)
     .split(",").map((value) => value.trim()).filter(Boolean);

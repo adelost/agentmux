@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { esc } from "../lib.mjs";
+import { voiceContextEnv } from "./pane-latest-reply.mjs";
 
 export const TRANSCRIPT_PREFIX =
   "[transcribed voice, may contain speech-to-text errors; interpret intent]";
@@ -11,14 +12,14 @@ function withStatus(message, status) {
 }
 
 /**
- * WHAT: Transcribes one in-memory voice payload through the pinned local
- * transcriber. WHY: Phone PTT and public-mailbox PTT must share one audited
- * temporary-file, language, timeout, and error contract.
+ * WHAT: Routes one in-memory voice payload through the pinned local transcriber.
+ * WHY: Keeps phone and mailbox PTT on one temp-file, timeout and error contract.
  */
 export async function transcribeVoiceBuffer({
   audioBuffer,
   filename,
   language = "sv",
+  context = "", // the target pane's latest reply, the words the transcriber spells against
   run,
   transcribeScript,
   tempDir = "/tmp",
@@ -37,6 +38,7 @@ export async function transcribeVoiceBuffer({
     const { stdout } = await run(
       `'${esc(transcribeScript)}' '${esc(tmpPath)}' '${esc(lang)}'`,
       60_000,
+      voiceContextEnv(context),
     );
     const transcript = String(stdout || "").trim();
     if (!transcript) {
@@ -54,9 +56,11 @@ export async function transcribeVoiceBuffer({
   }
 }
 
-/** Adapts the shared result to the connector's buffer→text port. */
-export function createVoiceBufferTranscriber(deps) {
-  return async (audioBuffer, filename) => (
-    await transcribeVoiceBuffer({ ...deps, audioBuffer, filename })
+/** WHAT: Builds the connector's buffer→text port; `target` is the voice's pane. WHY: Keeps the connector from reading pane journals itself. */
+export function createVoiceBufferTranscriber({ paneReply, ...deps }) {
+  return async (audioBuffer, filename, target = null) => (
+    await transcribeVoiceBuffer({
+      ...deps, audioBuffer, filename, context: target && paneReply ? paneReply(target.name, target.pane) : "",
+    })
   ).text;
 }

@@ -4,8 +4,11 @@
 # the workspace's single STT entry point. One prompt, one model, one place
 # to improve. Same pattern as workspace scripts/util/transcribe-whisper.sh.
 #
-# Backend: api.v1d.io (AMUX_STT_PRIMARY=v1d, the default): Gemini 3.5
-# Transcribe with word times, then Haiku proofreads misheard words. Mattias
+# Backend: api.v1d.io (AMUX_STT_PRIMARY=v1d, the default): transcribe hears
+# with tidy on the default route (Gemini 3.1 Flash-Lite) in 19 s parts. When
+# the bridge sets V1D_CONTEXT (the target pane's latest reply), transcribe then
+# spells the heard words against it with /v1/proofread, 2 to 4 s and about
+# 0.0006 USD more per part (ai:1 1 Nov). Mattias
 # 2026-10-30 chose the API over Gemini 2.5 Pro after using it. The Pro chain
 # stays behind AMUX_STT_PRIMARY=gemini as the way back. Benchmark 2026-05-27:
 # Whisper-1 mishears tech terms ("Gemini"→"Yemeni"), so it is only the fallback.
@@ -163,8 +166,8 @@ transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
 # Keep the same transcriber and quality; bound clip duration instead of hiding
 # failures behind a larger deadline. Keep Discord Opus compressed, matching the
 # successful incident reproduction. Other codecs use independent WAV headers.
-# That bound is Gemini 2.5 Pro's. The API takes 300 s per call and transcribe
-# sends it 240 s parts, so with v1d only a longer message is split.
+# That bound is Gemini 2.5 Pro's. With v1d, transcribe cuts the API's parts
+# itself, so only a message over 240 s is split here.
 if [ "$PRIMARY" = v1d ]; then SPLIT_ABOVE_S=240 PART_S=240; else SPLIT_ABOVE_S=45 PART_S=25; fi
 if ! awk -v duration="$DURATION" -v above="$SPLIT_ABOVE_S" 'BEGIN { exit !(duration > above) }'; then
   transcribe_clip "$AUDIO_FILE" 0 "$TOTAL_SECONDS"

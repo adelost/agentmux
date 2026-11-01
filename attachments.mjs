@@ -5,6 +5,7 @@ import { writeFileSync } from "fs";
 import { extname } from "path";
 import { splitMessage } from "./lib.mjs";
 import { downloadDiscordAttachment } from "./core/discord-attachment-download.mjs";
+import { createPaneReplyReader, voiceContextEnv } from "./core/pane-latest-reply.mjs";
 
 // No whitelist needed. All non-audio attachments are downloaded and passed
 // to Claude, which can read most file types (PDF, images, text, archives, etc).
@@ -25,12 +26,15 @@ function lateVoiceNote(msg) {
  *                      the network; defaults live in index.mjs wiring)
  *   writeTmp         - optional override for writeFileSync, used only by tests
  *                      that don't want /tmp writes
+ *   agentsYamlPath   - config that names each pane, for its latest reply
+ *   paneReply        - (agent, pane) → latest reply; tests inject it
  * WHAT: Builds agent prompts from text, voice, images, and files.
  * WHY: Keeps platform attachment handling outside the message delivery path.
  */
 export function createAttachmentHandler({
   run, transcribeScript, downloadBuffer, writeTmp = writeFileSync,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  agentsYamlPath = null, paneReply = agentsYamlPath ? createPaneReplyReader(agentsYamlPath) : null,
 }) {
 
   const downloadAttachment = (att) =>
@@ -60,6 +64,12 @@ export function createAttachmentHandler({
       if (transcriptions.has(key) || msg.getCachedTranscript?.(att.id)) continue;
       trackTranscription(key, transcribeAudio(msg, att, []));
     }
+  }
+
+  // The journal stores each note's target pane; the words that pane said last name its terms.
+  function replyToVoice(msg) {
+    const target = msg.resolvedTarget;
+    return paneReply && target?.agentName && target.kind !== "inactive" ? paneReply(target.agentName, target.pane) : "";
   }
 
   function takeTranscription(msg, att, tmpFiles) {
@@ -145,7 +155,7 @@ export function createAttachmentHandler({
       // The old 60s cap killed stalled-but-recoverable gemini calls and
       // surfaced them as a bare "Command failed" (2026-07-11, api:3: the
       // user's voice order was silently never delivered).
-      const { stdout } = await run(`'${transcribeScript}' '${tmpPath}'`, 300000);
+      const { stdout } = await run(`'${transcribeScript}' '${tmpPath}'`, 300000, voiceContextEnv(replyToVoice(msg)));
       if (msg.isInboundCompleted?.()) return null;
       const text = stdout.trim();
       if (!text) {

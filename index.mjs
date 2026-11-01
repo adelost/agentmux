@@ -133,8 +133,8 @@ for (const failure of startupHints.errors) {
 // --- Services ---
 
 const exec = promisify(execCb);
-const run = (cmd, timeoutMs = TIMEOUT) =>
-  exec(cmd, { timeout: timeoutMs, env: { ...process.env, PATH: SHELL_PATH }, maxBuffer: 1024 * 1024 });
+const run = (cmd, timeoutMs = TIMEOUT, env = {}) =>
+  exec(cmd, { timeout: timeoutMs, env: { ...process.env, ...env, PATH: SHELL_PATH }, maxBuffer: 1024 * 1024 });
 const { exec: tmuxExec, fleet: fleetPanes } = startPulse({ socket: TMUX_SOCKET, processExec: (cmd) =>
   exec(cmd, { timeout: 3000, env: { ...process.env, PATH: SHELL_PATH } }) });
 
@@ -181,9 +181,7 @@ await runPendingFleetRestart({
   log: (message) => console.log(`[fleet-restart] ${message}`),
 });
 const attachments = createAttachmentHandler({
-  run,
-  transcribeScript: TRANSCRIBE_SCRIPT,
-  downloadBuffer,
+  run, transcribeScript: TRANSCRIBE_SCRIPT, downloadBuffer, agentsYamlPath: AGENTS_YAML,
 });
 const inboundStore = createDiscordInboundStore({ downloadBuffer });
 const tts = createTTS({ run, state: appState, voice: TTS_VOICE });

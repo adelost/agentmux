@@ -25,6 +25,7 @@ import yaml from "js-yaml";
 import { esc } from "../lib.mjs";
 import { createAudioFeedHandlers } from "./audio-feed.mjs";
 import { createVoiceInput } from "./voice-input.mjs";
+import { createPaneReplyReader } from "../core/pane-latest-reply.mjs";
 import { phoneTargets } from "./audio-targets.mjs";
 import { targetsWithModels } from "./link-target-models.mjs";
 import { DEFAULT_TTS_VOICE } from "../core/runtime-defaults.mjs";
@@ -204,7 +205,7 @@ export function createVoicePWA(deps) {
   const voiceInput = createVoiceInput({
     agent, audioDiscovery: deps.audioDiscovery, audioOutbox, deliveryBroker,
     findChannelIdForPane, json, loadAgents, mirror, parseJsonBody, run,
-    transcribeScript, validatePane,
+    paneReply: createPaneReplyReader(agentsYamlPath), transcribeScript, validatePane,
   });
 
   async function handlePoke(req, res, name, paneStr) {

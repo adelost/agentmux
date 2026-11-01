@@ -1,6 +1,7 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
 import { createAttachmentHandler } from "../attachments.mjs";
+import { createPaneReplyReader } from "../core/pane-latest-reply.mjs";
 
 // --- Test helpers ---
 
@@ -386,4 +387,43 @@ feature("transcribeAhead: one STT run per voice note", () => {
       expect(prompt).toContain("race mellan gates");
     }],
   });
+});
+
+// --- Spelling context: the target pane's latest reply ---
+
+/** Two panes with journals and one without, read through the real by-name reader. */
+function paneReplies() {
+  const journals = {
+    "sandman:0": { turns: [{ items: [{ type: "text", content: "Fel panels svar" }] }] },
+    "sandman:1": { turns: [
+      { items: [{ type: "text", content: "Äldre svar" }] },
+      { items: [{ type: "text", content: "Är det en porslinshand från Rörstrand?" }, { type: "tool", content: "Bash ls" }] },
+    ] },
+  };
+  return createPaneReplyReader("/fake/agents.yaml", {
+    loadAgents: () => [{ name: "sandman", dir: "/fake/sandman", panes: [{}, {}, {}] }],
+    readTurns: (agent, pane) => journals[`${agent.name}:${pane}`] || null,
+  });
+}
+
+feature("Discord voice is transcribed with its pane's latest reply as context", () => {
+  for (const [pane, expected] of [[1, "Är det en porslinshand från Rörstrand?"], [2, undefined]]) {
+    unit(`a note to sandman:${pane} ${expected ? "carries that pane's reply" : "has no V1D_CONTEXT, since the pane has no reply"}`, {
+      given: ["a journaled note routed to the pane", () => {
+        const run = vi.fn(async () => ({ stdout: "porslinshand", stderr: "" }));
+        const handler = createAttachmentHandler({
+          run, transcribeScript: "/fake/transcribe.sh", downloadBuffer: vi.fn(), writeTmp: vi.fn(),
+          sleep: async () => {}, paneReply: paneReplies(),
+        });
+        const msg = { ...durableVoiceMsg(new Map()), resolvedTarget: { agentName: "sandman", pane, dir: "/fake/sandman" } };
+        return { handler, run, msg };
+      }],
+      when: ["the note is transcribed", (ctx) => ctx.handler.buildPrompt(ctx.msg, [])],
+      then: ["the transcriber's environment holds exactly that reply", (_prompt, ctx) => {
+        const env = ctx.run.mock.calls[0][2] || {};
+        expect(env.V1D_CONTEXT).toBe(expected);
+        if (!expected) expect(Object.hasOwn(env, "V1D_CONTEXT")).toBe(false);
+      }],
+    });
+  }
 });

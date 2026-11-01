@@ -15,6 +15,7 @@ export function createVoiceInput({
   loadAgents,
   mirror,
   parseJsonBody,
+  paneReply = null,
   run,
   transcribeScript,
   validatePane,
@@ -23,7 +24,7 @@ export function createVoiceInput({
     return paneForChannel(loadAgents(), target);
   }
 
-  async function transcribe(body) {
+  async function transcribe(body, { name, pane }) {
     if (typeof body.text === "string" && body.text.trim()) {
       return { text: body.text, transcript: null };
     }
@@ -34,6 +35,7 @@ export function createVoiceInput({
       audioBuffer: Buffer.from(body.audio, "base64"),
       filename: body.filename || "voice.webm",
       language: body.lang || "sv",
+      context: paneReply ? paneReply(name, pane) : "",
       run,
       transcribeScript,
     });
@@ -42,7 +44,7 @@ export function createVoiceInput({
   async function deliver(res, { name, pane, body, phoneTarget = null }) {
     let parsed;
     try {
-      parsed = await transcribe(body);
+      parsed = await transcribe(body, { name, pane });
     } catch (error) {
       return json(res, error.status || 400, { error: error.message });
     }
