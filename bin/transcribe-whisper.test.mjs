@@ -73,6 +73,7 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
   });
   // Mattias 2026-10-17: "fixar så inte meddelandena failar på samma sätt igen". Gemini answering
   // "no words" twice is an answer, not an outage; failing the message made every retry repeat it.
+  // Since sandman:0 1 Nov, whisper1 hears it too before the range is marked: two Gemini tries, then whisper1.
   it("marks audible audio without words after one more try instead of failing the message", () => {
     const fx = silenceFixture();
     try {
@@ -80,7 +81,7 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
       execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", audio]);
       const result = fx.run(audio, { EMPTY_AUDIBLE: "yes" });
       expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe("[ohörbart 0:00–0:01]");
-      expect(fx.calls()).toEqual(["audible", "audible"]);
+      expect(fx.calls()).toEqual(["audible", "audible", "audible"]);
     } finally { fx.close(); }
   });
   it("delivers the rest of a long message around an audible part without words", () => {
@@ -233,7 +234,9 @@ echo "whisper words"`);
     try {
       const result = fx.run();
       expect(result.status, result.stderr).toBe(0);
-      expect(fx.args().map((line) => line.includes("--temperature 0 "))).toEqual([true, true]);
+      // whisper1 follows the two wordless Gemini tries (sandman:0 1 Nov); only Gemini's tries are compared.
+      const gemini = fx.args().filter((line) => line.includes("--backend gemini"));
+      expect(gemini.map((line) => line.includes("--temperature 0 "))).toEqual([true, true]);
     } finally { fx.close(); }
   });
 });
@@ -275,14 +278,35 @@ echo "whisper words"`);
       expect(JSON.stringify(log)).not.toContain("whisper words");
     } finally { fx.close(); }
   });
-  it("marks a clip the API heard without words instead of asking whisper1", () => {
+  // sandman:0 1 Nov: the API answered Mattias' clear 13 s message of 20:40Z without words, and it
+  // reached his pane as [ohörbart 0:00–0:12]. whisper1 hears a wordless answer before it is marked.
+  it("gives whisper1 a clip the API heard without words, marked as the fallback", () => {
     const fx = providerFixture(`[ "$backend" = v1d ] && exit 0
 echo "whisper words"`);
     try {
       const result = fx.run(v1d);
       expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("[stt-fallback:whisper1] whisper words");
+      expect(fx.calls()).toEqual(["v1d", "whisper1"]);
+    } finally { fx.close(); }
+  });
+  it("marks a clip inaudible only when whisper1 hears no words either", () => {
+    const fx = providerFixture(`exit 0`);
+    try {
+      const result = fx.run(v1d);
+      expect(result.status, result.stderr).toBe(0);
       expect(result.stdout.trim()).toBe("[ohörbart 0:00–0:03]");
-      expect(fx.calls()).toEqual(["v1d"]);
+      expect(fx.calls()).toEqual(["v1d", "whisper1"]);
+    } finally { fx.close(); }
+  });
+  it("still marks a clip the API heard without words when whisper1 cannot answer", () => {
+    const fx = providerFixture(`[ "$backend" = v1d ] && exit 0
+echo "401 insufficient_quota" >&2; exit 1`);
+    try {
+      const result = fx.run(v1d);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("[ohörbart 0:00–0:03]");
+      expect(fx.calls()).toEqual(["v1d", "whisper1"]);
     } finally { fx.close(); }
   });
   it("refuses an unknown primary instead of guessing one", () => {

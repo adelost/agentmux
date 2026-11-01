@@ -118,9 +118,12 @@ PY
 
 has_words() { [ -n "${1//[[:space:]]/}" ]; }
 
-# A backend that answers with no words has heard the clip; the same audio
-# gets the same answer, so failing the message only made every retry repeat
-# it (2026-10-17). Mark the range instead. Only an unanswered call fails.
+# A primary that answers with no words can still have missed clear speech:
+# the API answered a 13 s message at -20 LUFS without words (1 Nov 20:40Z).
+# So whisper1 hears it too, and the range is marked only when neither heard
+# words, or whisper1 could not answer after the primary did. Failing the
+# message only made every retry repeat it (2026-10-17). Only an unanswered
+# call fails.
 transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
   local clip="$1" attempt TEXT rc started temperature=0 heard_no_words=false tries=2
   local errlog
@@ -151,11 +154,11 @@ transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
     temperature=0.3
   done
   rm -f "$errlog"
-  if $heard_no_words; then range_marker ohörbart "$2" "$3"; return 0; fi
   if TEXT=$(try_backend whisper1 60s "$clip"); then
     if has_words "$TEXT"; then printf '[stt-fallback:whisper1] %s\n' "$TEXT"; else range_marker ohörbart "$2" "$3"; fi
     return 0
   fi
+  if $heard_no_words; then range_marker ohörbart "$2" "$3"; return 0; fi
   echo "[stt] $PRIMARY x$tries + whisper1 all failed for $clip" >&2
   return 1
 }
