@@ -33,6 +33,11 @@ function promptContentText(content) {
 // 73d6862d to skyvw:0 on 2026-10-10 got no receipt, was pasted again and held the queue.
 const PASTE_OPEN = '<pasted_content id="';
 const PASTE_ID_RE = /^[0-9a-f]{4}$/u;
+// Claude Code 2.1.312 (nce) writes "<\" for every "<" in a paste body that opens its own tag name,
+// "<pasted_content>" as "<\pasted_content>" and "</pasted_content>" as "<\/pasted_content>", so a
+// message that names the tag never matched itself: handoff 7e936729 to skyvw:2 on 2026-11-01
+// arrived at 17:48Z, was pasted again at 18:13Z and held five messages behind it.
+const CLAUDE_TAG_ESCAPE_RE = /<\\/gu;
 
 /** WHAT: Maps complete Claude paste envelopes to their authored content. WHY: Keeps multipart input from losing receipt or origin identity. */
 export function unwrapPastedContent(text) {
@@ -76,7 +81,9 @@ export function normalizePrompt(text) {
   // path across an envelope boundary ("390." | "png").
   // Claude's paste renderer removes discretionary soft hyphens (U+00AD).
   // Match that observed layout-only rewrite, not ordinary hyphens or joiners.
+  // Claude's tag escape is dropped from both sides after unwrapping, so real envelopes still delimit.
   let s = unwrapPastedContent(String(text).replace(/\u00ad/g, "").replace(/\r\n?/g, "\n"))
+    .replace(CLAUDE_TAG_ESCAPE_RE, "<")
     .replace(/\[Image #\d+\]/g, " ")
     .replace(/(?<!\S)[~/]\S*\.(?:png|jpe?g|gif|webp)(?!\S)/gi, " ")
     .trim();

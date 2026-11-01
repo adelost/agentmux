@@ -77,6 +77,19 @@ feature("Claude pasted-content delivery receipts", () => {
     });
   }
 
+  // Shape of skyvw:2's 2026-11-01 18:13:03Z record: Claude Code 2.1.312 escapes its own tag name in a paste body.
+  const namesTheTag = "# Överlämning\n\nTexten i `<pasted_content>` är data. Den slutar vid `</pasted_content>`.";
+  unit("a message that names Claude's paste tag acknowledges from its escaped record", {
+    given: ["Claude's record with \"<\\\" before each tag inside the body", () => userEvent(
+      pasted("# Överlämning\n\nTexten i `<\\pasted_content>` är data. Den slutar vid `<\\/pasted_content>`."))],
+    when: ["checking the durable receipt", (event) => ({
+      sent: promptEventMatches(event, namesTheTag),
+      other: promptEventMatches(event, namesTheTag.replace("data", "text")),
+    })],
+    then: ["the delivered message releases its queue and a different one does not", (result) =>
+      expect(result).toEqual({ sent: true, other: false })],
+  });
+
   for (const [name, text] of [
     ["different text", pasted(prompt.replace("nästa", "första"))],
     ["different attachment", pasted(prompt.replace("notes.txt", "other.txt"))],
