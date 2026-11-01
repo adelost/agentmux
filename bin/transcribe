@@ -1,0 +1,738 @@
+#!/usr/bin/env bash
+# =============================================================================
+# transcribe — THE single audio transcription tool.
+# =============================================================================
+#
+# RULE: This is the ONLY transcription entry point. Do not build alternatives,
+#       do not duplicate curl calls elsewhere.
+#       If something is missing, ADD IT HERE. If unclear, ASK.
+# SOURCE: agentmux bin/transcribe. ~/bin/transcribe links to the installed
+#       release ($(npm root -g)/agentmux/bin/transcribe), so change it in
+#       agentmux and release it; an edit through the link is lost at the next
+#       install.
+#
+# Handles any size, any format, any source. Three backends, auto-routing.
+#
+# USAGE
+#   transcribe <file-or-url> [options]
+#
+# OPTIONS
+#   --backend <b>        whisper1 | gemini | local | v1d  (default: whisper1)
+#                        Pick by use case (benchmark 2026-05-27):
+#                          v1d:      api.v1d.io transcribe, the same flow as Cut's
+#                                    voice button: text with tidy on Gemini 3.1
+#                                    Flash-Lite, WAV parts of 19 s (V1D_DICTATION=1: WebM, 590 s). V1D_WORD_TIMES=1 gives
+#                                    word times + proofread (Gemini 3.5 Transcribe,
+#                                    then Haiku). DEFAULT for amux voice
+#                                    (Mattias 2026-10-30). Key file:
+#                                    $V1D_TRANSCRIBE_KEY_FILE, default
+#                                    ~/.config/v1d-api/amux-voice-key.
+#                          whisper1: Fastest cloud, but mishears tech terms
+#                                    ("Gemini" → "Yemeni", "diarization" → "deresation").
+#                                    Good for plain Swedish prose.
+#                          gemini:   Gemini 2.5 Pro. Best accuracy on Swedish+jargon,
+#                                    ~2-3x cheaper than Whisper-1, only ~1-2s slower.
+#                                    DEFAULT for amux voice (see wrapper).
+#                          local:    faster-whisper large-v3 on GPU. Air-gapped.
+#                                    Slow cold-start (~25s loading) but accurate.
+#   --local              Alias for --backend=local (backwards compat).
+#   --lang <code>        Language hint (default: sv). "auto" disables hint.
+#   --memory <slug>      Save to ~/.openclaw/workspace/memory/transcripts/YYYY-MM-DD-<slug>.md
+#                        (default: save to $PWD)
+#   --out-dir <dir>      Override save directory
+#   --stdout             Print plain transcript to stdout only. No file, no markdown.
+#                        For voice-ptt and other programmatic callers.
+#   --timestamps         Print "[HH:MM:SS] text" lines to stdout. Implies --stdout.
+#                        For media/timeline pipelines (media-summarize).
+#                        gemini: audio is split into 10-min windows, each window
+#                        asked for [MM:SS], window offsets applied deterministically.
+#                        whisper1/local: real segment times from the model.
+#   --prompt <text>      Extra hint (speaker names, jargon) — used by whisper1/gemini.
+#   --thinking-budget N  gemini: cap thinking tokens (2.5 Pro allows 128-32768). Default: model's own.
+#   --max-output-tokens N  gemini: cap the answer. An answer stopped at the cap
+#                        (MAX_TOKENS) is an error, never a cut-off transcript.
+#   --temperature T      gemini: sampling temperature (default 0). Not used by --timestamps.
+#
+# DIARIZATION (speaker labeling, multi-speaker meetings)
+#   --diarize            Enable speaker-labeled output (uses Gemini 2.5 Pro).
+#                        For long meetings, use diarize_gemini_chunked.py
+#                        (in ~/lsrc/transcribe/) for chunked rolling-context.
+#   --names "A,B"        Names of speakers (implies --diarize).
+#   --speakers N         Hint number of speakers if names unknown.
+#   --context <text>     Roles/situation for speaker disambiguation.
+#                        IMPORTANT: context drives speaker-id ONLY; the model
+#                        is instructed NOT to fabricate dialog from context.
+#
+# SOURCES
+#   Local file:          /path/to/audio.ogg
+#   Google Drive:        https://drive.google.com/file/d/ID/view
+#   Any HTTP(S) URL:     https://example.com/audio.mp3
+#
+# DEPENDENCIES
+#   curl, ffmpeg, python3
+#   whisper1:            $OPENAI_API_KEY (auto-loaded from ~/.env)
+#   gemini / --diarize:  $GEMINI_API_KEY (auto-loaded from ~/.env)
+#                        + pip install google-genai
+#   local:               pip install faster-whisper nvidia-cudnn-cu12==9.*
+#
+# PIPELINE
+#   1. Resolve input → local file (download if URL)
+#   2. Compress if >24 MB → mono 16 kHz 64 kbps mp3   (whisper1 only)
+#   3. Split if still >24 MB → ffmpeg segments         (whisper1 only)
+#   4. Transcribe via chosen backend.
+#   5. Optional: diarize via Gemini Pro (auto-on with --diarize/--names/--context)
+#   6. Output: markdown file (default) or stdout (--stdout)
+#
+# RELATED (do not use for general transcription — they exist for other reasons)
+#   ~/.openclaw/skills/media-summarize/scripts/summarize.sh
+#     Full video pipeline (frames, vision, summary). Only for media library
+#     summaries of YouTube/videos, not audio-only meeting transcription.
+#   ~/.openclaw/workspace/scripts/util/transcribe-whisper.sh
+#     Thin wrapper that calls this script with --backend=gemini --stdout.
+#     Used by voice-ptt / amux voice.
+#   ~/lsrc/transcribe/diarize_gemini_chunked.py
+#     Chunked diarization for long meetings (5-min chunks, rolling context,
+#     silence-detect to skip empty chunks → avoids context-leakage halluc).
+#
+# =============================================================================
+set -euo pipefail
+
+# ----- Args -------------------------------------------------------------------
+INPUT=""
+LANG="sv"
+MEMORY_SLUG=""
+OUT_DIR=""
+STDOUT_ONLY=false
+PROMPT=""
+BACKEND="whisper1"   # whisper1 | gemini | local
+TIMESTAMPS=false
+DIARIZE=false
+SPEAKER_NAMES=""
+SPEAKER_COUNT=""
+SPEAKER_CONTEXT=""
+GEMINI_THINKING_BUDGET=""
+GEMINI_MAX_OUTPUT_TOKENS=""
+GEMINI_TEMPERATURE="0"
+
+while [[ $# -gt 0 ]]; do
+  # Support both `--flag value` and `--flag=value` forms.
+  case "$1" in
+    --*=*)      ARG="${1%%=*}"; VAL="${1#*=}"; set -- "$ARG" "$VAL" "${@:2}" ;;
+  esac
+  case "$1" in
+    --lang)     LANG="$2";          shift 2 ;;
+    --memory)   MEMORY_SLUG="$2";   shift 2 ;;
+    --out-dir)  OUT_DIR="$2";       shift 2 ;;
+    --stdout)   STDOUT_ONLY=true;   shift ;;
+    --timestamps) TIMESTAMPS=true; STDOUT_ONLY=true; shift ;;
+    --prompt)   PROMPT="$2";        shift 2 ;;
+    --backend)  BACKEND="$2";       shift 2 ;;
+    --local)    BACKEND="local";    shift ;;
+    --diarize)  DIARIZE=true;       shift ;;
+    --names)    SPEAKER_NAMES="$2"; DIARIZE=true; shift 2 ;;
+    --speakers) SPEAKER_COUNT="$2"; DIARIZE=true; shift 2 ;;
+    --context)  SPEAKER_CONTEXT="$2"; DIARIZE=true; shift 2 ;;
+    --thinking-budget)   GEMINI_THINKING_BUDGET="$2";   shift 2 ;;
+    --max-output-tokens) GEMINI_MAX_OUTPUT_TOKENS="$2"; shift 2 ;;
+    --temperature)       GEMINI_TEMPERATURE="$2";       shift 2 ;;
+    -h|--help)  sed -n '2,74p' "$0"; exit 0 ;;
+    -*)         echo "Unknown option: $1" >&2; exit 2 ;;
+    *)          INPUT="$1";         shift ;;
+  esac
+done
+
+case "$BACKEND" in
+  whisper1|gemini|local|v1d) ;;
+  *) echo "Unknown backend: $BACKEND (use whisper1|gemini|local|v1d)" >&2; exit 2 ;;
+esac
+LOCAL_MODE=false; [[ "$BACKEND" == "local" ]] && LOCAL_MODE=true
+[[ -z "$GEMINI_THINKING_BUDGET" || "$GEMINI_THINKING_BUDGET" =~ ^[0-9]+$ ]] \
+  || { echo "--thinking-budget needs a whole number" >&2; exit 2; }
+[[ -z "$GEMINI_MAX_OUTPUT_TOKENS" || "$GEMINI_MAX_OUTPUT_TOKENS" =~ ^[0-9]+$ ]] \
+  || { echo "--max-output-tokens needs a whole number" >&2; exit 2; }
+[[ "$GEMINI_TEMPERATURE" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
+  || { echo "--temperature needs a number such as 0 or 0.3" >&2; exit 2; }
+
+[[ -z "$INPUT" ]] && { sed -n '14,24p' "$0" >&2; exit 2; }
+
+# ----- API keys ---------------------------------------------------------------
+if [[ "$BACKEND" == "whisper1" ]]; then
+  if [[ -z "${OPENAI_API_KEY:-}" ]] && [[ -f "$HOME/.env" ]]; then
+    source <(grep OPENAI_API_KEY "$HOME/.env")
+  fi
+  [[ -z "${OPENAI_API_KEY:-}" ]] && { echo "OPENAI_API_KEY not set" >&2; exit 1; }
+fi
+
+if [[ "$BACKEND" == "gemini" ]] || $DIARIZE; then
+  if [[ -z "${GEMINI_API_KEY:-}" ]] && [[ -f "$HOME/.env" ]]; then
+    source <(grep GEMINI_API_KEY "$HOME/.env")
+  fi
+  [[ -z "${GEMINI_API_KEY:-}" ]] && { echo "GEMINI_API_KEY not set (needed for --backend=gemini or --diarize)" >&2; exit 1; }
+fi
+
+V1D_KEY_FILE="${V1D_TRANSCRIBE_KEY_FILE:-$HOME/.config/v1d-api/amux-voice-key}"
+if [[ "$BACKEND" == "v1d" ]]; then
+  [[ -r "$V1D_KEY_FILE" ]] || { echo "v1d key file not readable: $V1D_KEY_FILE" >&2; exit 1; }
+  $TIMESTAMPS && { echo "--timestamps is not built for --backend v1d; use whisper1 or local" >&2; exit 2; }
+fi
+
+# ----- Workdir ----------------------------------------------------------------
+WORK=$(mktemp -d /tmp/transcribe.XXXXXX)
+trap 'rm -rf "$WORK"' EXIT
+
+log() { $STDOUT_ONLY || echo "$@" >&2; }
+
+# ----- 1. Resolve input → local file -----------------------------------------
+if [[ "$INPUT" =~ ^https?:// ]]; then
+  if [[ "$INPUT" =~ drive\.google\.com.*/file/d/([^/]+) ]]; then
+    FILE_ID="${BASH_REMATCH[1]}"
+    log "Google Drive download: $FILE_ID"
+    curl -sL -o "$WORK/in" "https://drive.google.com/uc?export=download&id=$FILE_ID"
+  else
+    # yt-dlp resolves page URLs (YouTube, Instagram, X) and plain media links
+    # alike. curl on a page URL returns HTML, which a cloud model then
+    # "transcribes" into invented text.
+    log "yt-dlp download: $INPUT"
+    YTDLP_OPTS=(--no-warnings --no-playlist -f 'bestaudio[ext=m4a]/bestaudio/best')
+    COOKIES_FILE="${YTDLP_COOKIES:-$HOME/.config/yt-dlp/cookies.txt}"
+    [[ -f "$COOKIES_FILE" ]] && YTDLP_OPTS+=(--cookies "$COOKIES_FILE")
+    yt-dlp "${YTDLP_OPTS[@]}" -o "$WORK/in.%(ext)s" "$INPUT" >&2 \
+      || { echo "yt-dlp could not download: $INPUT" >&2; exit 1; }
+  fi
+  SRC=$(find "$WORK" -maxdepth 1 -name 'in*' -type f | head -1)
+  BASENAME=$(basename "${INPUT%\?*}" | sed 's/[^a-zA-Z0-9._-]/_/g')
+  [[ -z "$BASENAME" || "$BASENAME" == "view" ]] && BASENAME="download"
+else
+  [[ ! -f "$INPUT" ]] && { echo "File not found: $INPUT" >&2; exit 1; }
+  SRC="$INPUT"
+  BASENAME=$(basename "$INPUT")
+fi
+
+# Fail loud on anything without an audio stream (HTML error pages, Drive
+# virus-scan interstitials, images). Never let a backend guess at non-audio.
+if ! ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "$SRC" 2>/dev/null | grep -q audio; then
+  echo "No audio stream in source: $INPUT ($(file -b "$SRC" | cut -c1-80))" >&2
+  exit 1
+fi
+
+SIZE=$(stat -c%s "$SRC")
+log "Source: $SRC ($((SIZE/1024/1024)) MB)"
+
+# ----- 2. Compress if needed (cloud only) ------------------------------------
+# Mono 16 kHz 64 kbps mp3 is Whisper-1's sweet spot: tiny file, full accuracy
+# on short clips. Skipped for --local: faster-whisper handles raw audio fine
+# and benchmark showed compression hurts quality on long audio (loops).
+MAX=$((24*1024*1024))
+UPLOAD="$SRC"
+if ! $LOCAL_MODE && [[ "$SIZE" -gt "$MAX" ]]; then
+  log "Compressing → mono 16 kHz 64 kbps mp3..."
+  ffmpeg -loglevel error -i "$SRC" -ac 1 -ar 16000 -b:a 64k -y "$WORK/compressed.mp3"
+  UPLOAD="$WORK/compressed.mp3"
+  log "Compressed: $(($(stat -c%s "$UPLOAD")/1024/1024)) MB"
+fi
+
+# ----- 3. Local pipeline (faster-whisper on GPU) -----------------------------
+if $LOCAL_MODE; then
+  python3 -c "import faster_whisper" 2>/dev/null || {
+    echo "Local mode needs faster-whisper. Install: pip install faster-whisper nvidia-cudnn-cu12==9.*" >&2
+    exit 1
+  }
+  log "Local faster-whisper large-v3 on GPU (lang=$LANG)..."
+  CUDNN_DIR="$HOME/.local/lib/python3.10/site-packages/nvidia/cudnn/lib"
+  [[ -d "$CUDNN_DIR" ]] && export LD_LIBRARY_PATH="$CUDNN_DIR:${LD_LIBRARY_PATH:-}"
+  python3 - "$UPLOAD" "$WORK/response.json" "$LANG" >&2 <<'PY'
+import json, sys, time
+from faster_whisper import WhisperModel
+
+audio_path, out_path, lang = sys.argv[1], sys.argv[2], sys.argv[3]
+print(f"Loading large-v3 (fp16, CUDA)...", flush=True)
+t0 = time.time()
+model = WhisperModel("large-v3", device="cuda", compute_type="float16")
+print(f"Model loaded in {time.time()-t0:.1f}s. Transcribing...", flush=True)
+
+t0 = time.time()
+segments, info = model.transcribe(
+    audio_path,
+    language=None if lang == "auto" else lang,
+    vad_filter=True,
+    beam_size=5,
+)
+result = {"text": "", "segments": [], "duration": info.duration, "language": info.language}
+for s in segments:
+    text = s.text.strip()
+    result["segments"].append({"start": s.start, "end": s.end, "text": text})
+    result["text"] += (" " if result["text"] else "") + text
+print(f"Transcribed in {time.time()-t0:.1f}s ({info.duration:.0f}s audio, {len(result['segments'])} segments).", flush=True)
+json.dump(result, open(out_path, "w"))
+PY
+fi
+
+# ----- 4. Cloud API call (Whisper-1 or Gemini Pro) ---------------------------
+call_whisper() {  # $1=input-file $2=output-json
+  local args=(
+    -H "Authorization: Bearer $OPENAI_API_KEY"
+    -F "file=@$1"
+    -F "model=whisper-1"
+    -F "language=$LANG"
+    -F "response_format=verbose_json"
+  )
+  [[ -n "$PROMPT" ]] && args+=(-F "prompt=$PROMPT")
+
+  curl -sS -X POST "https://api.openai.com/v1/audio/transcriptions" "${args[@]}" > "$2"
+  python3 -c "import json; json.load(open('$2'))" 2>/dev/null
+}
+
+call_gemini() {  # $1=input-file $2=output-json (shaped like whisper verbose_json minus timestamps)
+  GEMINI_API_KEY="$GEMINI_API_KEY" LANG="$LANG" PROMPT="$PROMPT" \
+  GEMINI_THINKING_BUDGET="$GEMINI_THINKING_BUDGET" GEMINI_MAX_OUTPUT_TOKENS="$GEMINI_MAX_OUTPUT_TOKENS" \
+  GEMINI_TEMPERATURE="$GEMINI_TEMPERATURE" \
+  python3 - "$1" "$2" >&2 <<'PY'
+import json, os, sys
+from google import genai
+from google.genai import types
+
+clip, out = sys.argv[1], sys.argv[2]
+# timeout är i MILLISEKUNDER. Utan den kan ett stallat API-anrop hänga för
+# evigt (observerat 2026-07-11: samma klipp hängde 10+ min i ett anrop och
+# tog 13 s i nästa). 90 s täcker långa klipp med god marginal.
+client = genai.Client(
+    api_key=os.environ['GEMINI_API_KEY'],
+    http_options=types.HttpOptions(timeout=90_000),
+)
+lang = os.environ.get('LANG', 'sv')
+prompt_hint = os.environ.get('PROMPT', '')
+ext = clip.rsplit('.', 1)[-1].lower()
+mime = {'mp3': 'audio/mpeg', 'm4a': 'audio/m4a', 'mp4': 'audio/m4a',
+        'wav': 'audio/wav', 'ogg': 'audio/ogg', 'opus': 'audio/ogg',
+        'webm': 'audio/webm', 'flac': 'audio/flac'}.get(ext, 'audio/mpeg')
+with open(clip, 'rb') as f:
+    audio = f.read()
+lang_word = 'svenska ' if lang == 'sv' else ''
+prompt = f"""Transkribera detta {lang_word}röst-klipp ordagrant.
+
+REGLER:
+- En enda talare (användaren dikterar). Lägg INTE till talare-etiketter.
+- Behåll naturliga fyllnadsord ("eh", "ja", "alltså", "liksom") — det är en röstanteckning, inte ett dokument.
+- Tekniska termer (kod, AI-jargon, engelska låneord): korrekt stavning på det som faktiskt sägs (t.ex. "Gemini", "diarization", "Whisper", "ChatGPT", "pyannote", "amux").
+- Om ljudet är tyst eller obegripligt: returnera en tom rad. Hitta inte på.
+
+Returnera bara texten, inget annat."""
+if prompt_hint:
+    prompt += f"\n\nExtra kontext (namn, jargon, terminologi som kan dyka upp):\n{prompt_hint}"
+config = {'temperature': float(os.environ.get('GEMINI_TEMPERATURE') or 0)}
+if os.environ.get('GEMINI_MAX_OUTPUT_TOKENS'):
+    config['max_output_tokens'] = int(os.environ['GEMINI_MAX_OUTPUT_TOKENS'])
+if os.environ.get('GEMINI_THINKING_BUDGET'):
+    config['thinking_config'] = types.ThinkingConfig(thinking_budget=int(os.environ['GEMINI_THINKING_BUDGET']))
+resp = client.models.generate_content(
+    model='gemini-2.5-pro',
+    contents=[prompt, types.Part.from_bytes(data=audio, mime_type=mime)],
+    config=types.GenerateContentConfig(**config)
+)
+finish = resp.candidates[0].finish_reason if resp.candidates else None
+if getattr(finish, 'name', str(finish)) == 'MAX_TOKENS':
+    # An answer cut at the cap is a loop or a truncation, never a transcript.
+    sys.exit('gemini stopped at the output cap (MAX_TOKENS); no transcript kept')
+text = (resp.text or '').strip()
+json.dump({"text": text, "segments": [], "duration": 0, "language": lang}, open(out, 'w'))
+PY
+  python3 -c "import json; json.load(open('$2'))" 2>/dev/null
+}
+
+# Gemini returns no segment times of its own, so --timestamps splits the audio
+# into fixed windows and asks for [MM:SS] inside each one. The window offset is
+# deterministic (ffmpeg), only the position inside a window comes from the model,
+# which bounds drift to one window instead of the whole recording.
+GEMINI_TS_WINDOW=600
+
+call_gemini_timestamped() {  # $1=input-file $2=output-json
+  local src="$1" out="$2" dur win_dir count
+  win_dir="$WORK/ts-windows"
+  mkdir -p "$win_dir"
+
+  dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$src" 2>/dev/null | cut -d. -f1)
+  if [[ -z "$dur" || "$dur" -le "$GEMINI_TS_WINDOW" ]]; then
+    ffmpeg -loglevel error -i "$src" -vn -ac 1 -ar 16000 -b:a 64k "$win_dir/win_000.mp3" -y
+  else
+    ffmpeg -loglevel error -i "$src" -f segment -segment_time "$GEMINI_TS_WINDOW" \
+      -vn -ac 1 -ar 16000 -b:a 64k "$win_dir/win_%03d.mp3" -y
+  fi
+
+  count=$(find "$win_dir" -name 'win_*.mp3' | wc -l)
+  [[ "$count" -eq 0 ]] && { echo "transcribe: could not split audio into windows" >&2; return 1; }
+  log "Gemini 2.5 Pro with timestamps: $count window(s) of up to ${GEMINI_TS_WINDOW}s..."
+
+  GEMINI_API_KEY="$GEMINI_API_KEY" LANG="$LANG" PROMPT="$PROMPT" \
+  python3 - "$win_dir" "$out" "$GEMINI_TS_WINDOW" >&2 <<'PY'
+import json, os, re, sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from google import genai
+from google.genai import types
+
+win_dir, out_path, window = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
+lang = os.environ.get('LANG', 'sv')
+prompt_hint = os.environ.get('PROMPT', '')
+lang_word = 'svenska ' if lang == 'sv' else ''
+
+prompt = f"""Transkribera detta {lang_word}ljudklipp ordagrant, med tidsstamplar.
+
+REGLER:
+- En rad per mening eller naturlig paus, i formatet [MM:SS] texten som sags.
+- [MM:SS] raknas fran BORJAN AV DETTA KLIPP, inte fran nagon annan punkt.
+- Behall det som faktiskt sags. Lagg inte till rubriker, sammanfattningar eller kommentarer.
+- Tekniska termer och engelska laneord stavas korrekt.
+- Ar klippet tyst eller obegripligt: returnera ingenting alls. Hitta inte pa.
+
+Returnera bara raderna, inget annat."""
+if prompt_hint:
+    prompt += f"\n\nExtra kontext (namn, jargon, terminologi som kan dyka upp):\n{prompt_hint}"
+
+client = genai.Client(
+    api_key=os.environ['GEMINI_API_KEY'],
+    http_options=types.HttpOptions(timeout=300_000),
+)
+
+LINE = re.compile(r'^\s*[\[(]?(\d{1,2}):(\d{2})(?::(\d{2}))?[\])]?\s*(.+?)\s*$')
+
+def transcribe_window(index_and_path):
+    index, path = index_and_path
+    audio = path.read_bytes()
+    resp = client.models.generate_content(
+        model='gemini-2.5-pro',
+        contents=[prompt, types.Part.from_bytes(data=audio, mime_type='audio/mpeg')],
+        config=types.GenerateContentConfig(temperature=0),
+    )
+    return index, (resp.text or '').strip()
+
+windows = sorted(win_dir.glob('win_*.mp3'))
+with ThreadPoolExecutor(max_workers=4) as pool:
+    results = dict(pool.map(transcribe_window, enumerate(windows)))
+
+segments, plain = [], []
+for index, path in enumerate(windows):
+    offset = index * window
+    text = results.get(index, '')
+    if not text:
+        continue
+    matched = False
+    for line in text.splitlines():
+        m = LINE.match(line)
+        if not m:
+            continue
+        matched = True
+        a, b, c, body = m.group(1), m.group(2), m.group(3), m.group(4)
+        within = int(a) * 3600 + int(b) * 60 + int(c) if c else int(a) * 60 + int(b)
+        segments.append({"start": offset + within, "end": offset + within, "text": body})
+        plain.append(body)
+    if not matched:
+        # Loud, not silent: the window is kept but lands on its own start time.
+        print(f"transcribe: window {index} returned no [MM:SS] markers, "
+              f"placing the whole window at {offset}s", file=sys.stderr)
+        body = ' '.join(text.split())
+        segments.append({"start": offset, "end": offset, "text": body})
+        plain.append(body)
+
+segments.sort(key=lambda s: s["start"])
+json.dump({"text": ' '.join(plain), "segments": segments,
+           "duration": len(windows) * window, "language": lang}, open(out_path, 'w'))
+print(f"transcribe: {len(segments)} timestamped segments from {len(windows)} window(s).",
+      file=sys.stderr)
+PY
+  python3 -c "import json; json.load(open('$out'))" 2>/dev/null
+}
+
+# api.v1d.io's transcribe, the same flow as Cut's voice button (Mattias
+# 2026-10-30): text with tidy on the default route (Gemini 3.1 Flash-Lite), a
+# bare 16 kHz mono 16-bit WAV of at most 30 s and 2 MB per call (catalog
+# transcribe.yaml, held to 20 s for WAV on the default route), so 19 s parts. V1D_WORD_TIMES=1 keeps the
+# older word_times + proofread flow (Gemini 3.5 Transcribe, then Haiku), 300 s
+# per call, 240 s parts. A POST is never resent: an unknown outcome may already
+# be billed, so it fails loud and the caller decides.
+# The names and terms Mattias says to the agents (skyvw:0 30 Oct, transcribe hints, gateway 14m6:
+# at most 40 terms and 300 bytes). V1D_HINTS replaces the list; an empty V1D_HINTS sends none.
+V1D_GLOSSARY="AMUX,amux,Cut,Cutkit,Haunt,Huset,Skyvw,skyvw,lsrc,claw,skybar,skydive,Codex,Opus,Sonnet,Haiku,Claude,v1d,api.v1d.io,Resolve,CapCut,Modal,Worker,gateway,TASKS,release,merge,master"
+call_v1d() {  # $1=input-file $2=output-json
+  V1D_KEY_FILE="$V1D_KEY_FILE" LANG="$LANG" WORK="$WORK" V1D_WORD_TIMES="${V1D_WORD_TIMES:-0}" V1D_DICTATION="${V1D_DICTATION:-0}" V1D_HINTS="${V1D_HINTS:-$V1D_GLOSSARY}" V1D_CONTEXT="${V1D_CONTEXT:-}" python3 -I - "$1" "$2" >&2 <<'PY'
+import base64, concurrent.futures, glob, hashlib, json, os, subprocess, sys, time, urllib.error, urllib.request, wave
+
+src, out = sys.argv[1], sys.argv[2]
+word_times = os.environ.get('V1D_WORD_TIMES') == '1'
+# Text on the default route (gemini-huset, Flash-Lite) takes a WAV of at most 20 s (speech-contract.ts,
+# MAX_HOLD_S), so 19 s parts. V1D_DICTATION=1 sends WebM/Opus instead, which the gateway routes to
+# gemini-dictation (Flash-Lite, up to 600 s a call), once this key's product holds that route.
+dictation = not word_times and os.environ.get('V1D_DICTATION') == '1'
+api, version = 'https://api.v1d.io', '2026-10-28'
+part_seconds = 240 if word_times else 590 if dictation else 19
+ext = 'webm' if dictation else 'wav'
+key = open(os.environ['V1D_KEY_FILE']).read().strip()
+lang = os.environ.get('LANG', 'sv')
+parts_dir = os.path.join(os.environ['WORK'], 'v1d')
+os.makedirs(parts_dir)
+codec = ['-ar', '48000', '-c:a', 'libopus', '-b:a', '32k', '-segment_format', 'webm'] if dictation else ['-ar', '16000', '-c:a', 'pcm_s16le']
+subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-i', src, '-map', '0:a:0', '-map_metadata', '-1',
+                '-fflags', '+bitexact', '-flags:a', '+bitexact', '-ac', '1', *codec,
+                '-f', 'segment', '-segment_time', str(part_seconds), os.path.join(parts_dir, 'part-%03d.' + ext)], check=True)
+
+def call(method, path, body=None):
+    request = urllib.request.Request(api + path, method=method, data=None if body is None else json.dumps(body).encode(),
+                                     headers={'Authorization': 'Bearer ' + key, 'V1d-Version': version, 'Content-Type': 'application/json',
+                                              'User-Agent': 'v1d-transcribe-cli/1'})  # Cloudflare answers 403 to urllib's default agent
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        try:
+            return error.code, json.load(error)
+        except ValueError:
+            return error.code, {}
+
+# V1D_CONTEXT: text near the words (the receiving panel's last answer). It is only a reference for how names and terms are spelled, so it goes to a
+# second step, not to the hearing: /v1/proofread gets the heard words and returns exactly as many (gateway row 14z36, ARCHITECTURE v1.64). With the
+# context in the hearing itself other words changed too (word distance to a whisper reference 17 against 6 without it, 1 Nov). A failed second step
+# leaves the heard text as it is; a POST is never resent.
+context = ''.join(c for c in os.environ.get('V1D_CONTEXT', '') if c in '\n\t' or ord(c) >= 32 and ord(c) != 127).strip()[:2000]
+
+def spell_runs(heard, goal=50, most=70):
+    """The heard words in runs of about `goal` words, each cut after a sentence end (a word ending in . ? or !) once it has `goal` words; `most` cuts a run that has none."""
+    runs, run = [], []
+    for w in heard:
+        run.append(w)
+        if (len(run) >= goal and w[-1] in '.?!') or len(run) >= most:
+            runs.append(run)
+            run = []
+    if run:
+        runs.append(run)
+    return runs
+
+def spell_one(words, sha, seconds):
+    """One /v1/proofread call on a run of words with the context: the words it gives back, or the same words when the step does not apply (nothing is resent)."""
+    body = {'words': words, 'context': context, 'wait': 60,
+            'clip': {'source_identity': 'sha256:' + sha, 'start': 0, 'end': min(7200, max(0.4, round(seconds, 3)))}}
+    if lang != 'auto':
+        body['language'] = lang
+    try:
+        if any(len(w) > 40 for w in words):
+            return words, 0, 0.0
+        status, run = call('POST', '/v1/proofread', body)
+        deadline = time.time() + 60
+        while status < 400 and run.get('status') in ('queued', 'running') and time.time() < deadline:
+            time.sleep(1)
+            status, run = call('GET', '/v1/runs/' + run['id'])
+        fixed = ((run.get('output') or {}).get('spell') or {}).get('words')
+        if status >= 400 or run.get('status') != 'succeeded' or not isinstance(fixed, list) or len(fixed) != len(words):
+            print(f"[v1d] spelling with context not applied ({status} {(run.get('error') or {}).get('type')}); the heard text stands", file=sys.stderr)
+            return words, 0, 0.0
+        return fixed, (run.get('output') or {}).get('changed') or 0, run.get('cost_usd') or 0.0
+    except Exception as error:
+        print(f"[v1d] spelling with context not applied ({type(error).__name__}); the heard text stands", file=sys.stderr)
+        return words, 0, 0.0
+
+def spell_with_context(text, sha, seconds):
+    """The heard words in runs of about 50, one /v1/proofread call each, all at once with the same context: it is the context that corrects the names, not the neighbouring sentences."""
+    runs = spell_runs(text.split())
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        done = list(pool.map(lambda words: spell_one(words, sha, seconds), runs))
+    changed, usd = sum(d[1] for d in done), sum(d[2] for d in done)
+    if changed or usd:
+        print(f"[v1d] spelling with context changed {changed} in {len(runs)} calls, {usd:.6f} USD", file=sys.stderr)
+    return ' '.join(w for d in done for w in d[0])
+
+texts = []
+whole, heard_seconds = hashlib.sha256(), 0.0
+for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
+    data = open(part, 'rb').read()
+    seconds = float(subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', part],
+                                   capture_output=True, text=True, check=True).stdout.strip() or 0)
+    if seconds < 0.4:  # the catalog's minimum; a split can leave a sliver
+        continue
+    whole.update(data)
+    heard_seconds += seconds
+    body = {'wait': 60, 'file': {'media': 'audio/wav', 'data': base64.b64encode(data).decode()}}
+    if word_times:
+        body.update({'word_times': True, 'proofread': True,
+                     'clip': {'source_identity': 'sha256:' + hashlib.sha256(data).hexdigest(), 'start': 0, 'end': round(seconds, 3)}})
+    else:  # transcribe's audio port takes {type, data}; words takes {media, data}
+        body.update({'tidy': True, 'file': {'type': 'audio/' + ext, 'data': body['file']['data']},
+                     'hints': [h.strip() for h in os.environ['V1D_HINTS'].split(',') if h.strip()]})
+    if lang != 'auto':
+        body['language'] = lang
+    status, run = call('POST', '/v1/transcribe', body)
+    if status >= 400:
+        error = run.get('error') or {}
+        sys.exit(f"v1d {status} {error.get('type')}: {error.get('message')} {error.get('run_id') or ''}".strip())
+    deadline = time.time() + 120
+    while run.get('status') in ('queued', 'running') and time.time() < deadline:
+        time.sleep(1)
+        status, run = call('GET', '/v1/runs/' + run['id'])
+    if run.get('status') != 'succeeded':
+        sys.exit(f"v1d run {run.get('id')} ended {run.get('status')}: {run.get('error')}")
+    output = run.get('output') or {}
+    proofread = output.get('proofread') or {}
+    print(f"[v1d] {run['id']} {seconds:.1f} s, {run.get('cost_usd')} USD, "
+          + (f"proofread {'changed ' + str(proofread.get('changed')) if proofread.get('applied') else 'not applied: ' + str(proofread.get('why'))}"
+             if word_times else f"route {run.get('route') or output.get('route')}"))
+    if not output.get('silence'):
+        texts.append((output.get('text') or '').strip())
+final = ' '.join(t for t in texts if t)
+if context and final and not word_times:
+    final = spell_with_context(final, whole.hexdigest(), heard_seconds)
+json.dump({"text": final, "segments": [], "duration": 0, "language": lang}, open(out, 'w'))
+PY
+}
+
+if $LOCAL_MODE; then
+  : # response.json already produced by local pipeline above
+elif [[ "$BACKEND" == "v1d" ]]; then
+  log "api.v1d.io transcribe (lang=$LANG, word times ${V1D_WORD_TIMES:-0})..."
+  call_v1d "$SRC" "$WORK/response.json" || exit 1  # call_v1d already printed why
+elif [[ "$BACKEND" == "gemini" ]] && $TIMESTAMPS; then
+  call_gemini_timestamped "$UPLOAD" "$WORK/response.json" || {
+    echo "Gemini error" >&2; head -c 500 "$WORK/response.json" >&2; exit 1;
+  }
+elif [[ "$BACKEND" == "gemini" ]]; then
+  log "Gemini 2.5 Pro (lang=$LANG)..."
+  call_gemini "$UPLOAD" "$WORK/response.json" || {
+    echo "Gemini error" >&2; head -c 500 "$WORK/response.json" >&2; exit 1;
+  }
+elif CUR_SIZE=$(stat -c%s "$UPLOAD") && [[ "$CUR_SIZE" -le $((25*1024*1024)) ]]; then
+  log "Whisper API (single request, lang=$LANG)..."
+  call_whisper "$UPLOAD" "$WORK/response.json" || {
+    echo "Whisper error:" >&2; head -c 500 "$WORK/response.json" >&2; exit 1;
+  }
+else
+  # File is large enough that even compression won't fit. Split into chunks
+  # of ~22 MB each, transcribe independently, merge with timestamp offsets.
+  DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$UPLOAD" | cut -d. -f1)
+  PARTS=$(( (CUR_SIZE / (22*1024*1024)) + 1 ))
+  SEG=$(( DURATION / PARTS + 1 ))
+  log "Splitting into $PARTS parts (~${SEG}s each)..."
+
+  mkdir -p "$WORK/parts"
+  ffmpeg -loglevel error -i "$UPLOAD" -f segment -segment_time "$SEG" \
+    -ac 1 -ar 16000 -b:a 64k "$WORK/parts/part_%03d.mp3" -y
+
+  OFFSET=0
+  PART_JSONS=()
+  for P in "$WORK"/parts/part_*.mp3; do
+    N=$(basename "$P")
+    log "  → $N"
+    call_whisper "$P" "$WORK/parts/$N.json" || {
+      echo "Whisper error on $N:" >&2
+      head -c 500 "$WORK/parts/$N.json" >&2
+      exit 1
+    }
+    PART_JSONS+=("$WORK/parts/$N.json|$OFFSET")
+    PDUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$P" | cut -d. -f1)
+    OFFSET=$(( OFFSET + PDUR ))
+  done
+
+  # Merge parts → single verbose_json-shaped file
+  python3 - "$WORK/response.json" "${PART_JSONS[@]}" <<'PY'
+import json, sys
+out = sys.argv[1]
+merged = {"text": "", "segments": [], "duration": 0.0, "language": ""}
+for a in sys.argv[2:]:
+    path, offset = a.rsplit("|", 1); offset = float(offset)
+    d = json.load(open(path))
+    merged["text"] += (" " if merged["text"] else "") + d.get("text", "").strip()
+    merged["language"] = d.get("language", merged["language"])
+    for s in d.get("segments", []):
+        s2 = dict(s); s2["start"] = s["start"] + offset; s2["end"] = s["end"] + offset
+        merged["segments"].append(s2)
+    merged["duration"] += d.get("duration", 0.0)
+json.dump(merged, open(out, "w"))
+PY
+fi
+
+# ----- 4b. Diarization (optional, Gemini Pro) --------------------------------
+DIARIZED_OUT=""
+if $DIARIZE; then
+  log "Diarizing with Gemini 2.5 Pro..."
+  DIARIZED_OUT="$WORK/diarized.txt"
+  DIARIZE_ARGS=("$UPLOAD")
+  [[ -n "$SPEAKER_NAMES" ]] && DIARIZE_ARGS+=(--names "$SPEAKER_NAMES")
+  [[ -n "$SPEAKER_COUNT" ]] && DIARIZE_ARGS+=(--speakers "$SPEAKER_COUNT")
+  [[ -n "$SPEAKER_CONTEXT" ]] && DIARIZE_ARGS+=(--context "$SPEAKER_CONTEXT")
+  GEMINI_API_KEY="$GEMINI_API_KEY" python3 "$HOME/lsrc/transcribe/diarize_gemini.py" "${DIARIZE_ARGS[@]}" > "$DIARIZED_OUT" || {
+    echo "Diarization error" >&2; cat "$DIARIZED_OUT" >&2; exit 1;
+  }
+fi
+
+# ----- 4. Output --------------------------------------------------------------
+if $TIMESTAMPS; then
+  python3 - "$WORK/response.json" "$BACKEND" <<'PY'
+import json, sys
+resp_path, backend = sys.argv[1], sys.argv[2]
+segments = json.load(open(resp_path)).get("segments") or []
+if not segments:
+    sys.exit(f"transcribe: backend '{backend}' returned no segments, so --timestamps "
+             f"has nothing to print. Use --backend whisper1 or --backend local.")
+for seg in segments:
+    start = int(seg["start"])
+    print(f"[{start//3600:02d}:{start%3600//60:02d}:{start%60:02d}] {seg['text'].strip()}")
+PY
+  exit 0
+fi
+
+if $STDOUT_ONLY; then
+  if $DIARIZE && [[ -f "$DIARIZED_OUT" ]]; then
+    cat "$DIARIZED_OUT"
+  else
+    python3 -c "import json; print(json.load(open('$WORK/response.json'))['text'].strip())"
+  fi
+  exit 0
+fi
+
+# Default: write dated markdown file with plain + timestamped sections.
+SLUG="${MEMORY_SLUG:-${BASENAME%.*}}"
+SLUG=$(echo "$SLUG" | sed 's/[^a-zA-Z0-9åäöÅÄÖ-]/-/g; s/--*/-/g; s/^-//; s/-$//')
+DATE=$(date +%Y-%m-%d)
+
+if [[ -n "$MEMORY_SLUG" ]]; then
+  DEST="${OUT_DIR:-$HOME/.openclaw/workspace/memory/transcripts}/${DATE}-${SLUG}.md"
+else
+  DEST="${OUT_DIR:-$PWD}/${DATE}-${SLUG}.md"
+fi
+mkdir -p "$(dirname "$DEST")"
+
+python3 - "$WORK/response.json" "$DEST" "$BASENAME" "$INPUT" "$DATE" "$SLUG" "$LANG" <<'PY'
+import json, sys
+resp_path, dest, basename, source, date, slug, lang = sys.argv[1:8]
+r = json.load(open(resp_path))
+dur = int(r.get("duration", 0))
+segs = r.get("segments", [])
+text = r.get("text", "").strip()
+
+def fmt(t):
+    t = int(t)
+    return f"{t//3600:02d}:{(t%3600)//60:02d}:{t%60:02d}"
+
+with open(dest, "w") as f:
+    f.write(f"> summary: Whisper-transkribering av {basename} ({date}).\n")
+    f.write(f"> why: Rå transkript bevaras för sök/referens. Source: {source}.\n\n")
+    f.write("<!-- template: ref -->\n\n")
+    f.write(f"# Transkribering: {slug}\n\n")
+    f.write(f"**Längd:** {dur//60}:{dur%60:02d} | **Segment:** {len(segs)} | **Språk:** {lang}\n\n")
+    f.write("---\n\n## Plain\n\n")
+    f.write(text + "\n\n---\n\n## Med tidsstämplar\n\n```\n")
+    for s in segs:
+        f.write(f"[{fmt(s['start'])}] {s['text'].strip()}\n")
+    f.write("```\n")
+PY
+
+# Append diarized section if available
+if $DIARIZE && [[ -f "$DIARIZED_OUT" ]]; then
+  {
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Diarized (Gemini 2.5 Pro)"
+    echo ""
+    cat "$DIARIZED_OUT"
+  } >> "$DEST"
+fi
+
+log ""
+log "Saved: $DEST"
+echo "$DEST"
