@@ -645,4 +645,33 @@ feature("generated agent policy", () => {
       expect(rule5.replace(/\s+/gu, " ").trim()).toMatch(/A row may carry a `Source` column: a pointer to his decision-log entry \(file, date, and time to the precision the log proves, or a stable message id\), `own`, after his pointer if any, or `inferred:` before the pointer when the row rests on your reading of his words\.$/u);
     }],
   });
+
+  // sandman:0, 1 Nov 2026: Mattias's momentum protocol (rules 1-12) goes into every pane's register, its cases one link away.
+  unit("carries the momentum protocol in every pane's register with its cases one link away", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const register = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return { register: register.replace(/\s+/gu, " "), linked: linkedFleetPolicy(register) };
+    }],
+    then: ["each rule and its numbers are always loaded, the cases are demand-read", ({ register, linked }) => {
+      for (const rule of [
+        /vad han ska kunna göra när det är klart: konto, väg och enhet/u,
+        /Kör hans exempel, eller det svåraste riktiga fallet/u,
+        /Byt aldrig ut det han bett om/u,
+        /Session, kvot, disk, kostnadstak och klippgränser ska räcka för hela jobbet, också för reservvägen/u,
+        /vad du väntar på, till när och vad som händer då/u,
+        /larmar också när inget ändrats på 10 min/u,
+        /Efter två stopp på samma steg byter ägaren väg eller frågar ledaren inom 10 min/u,
+        /Gör bara det som för hans resultat framåt eller bevisar det/u,
+        /Check ids, accounts, files and paths at their source/u,
+        /först efter att ägarens senaste läge är läst/u,
+        /rätt namn, syns i hans lista, spelar på hans telefon och klarar hans exempel/u,
+        /sandman:0 bevakar.*var 5:e min.*stått still i 10 min.*stoppat två gånger/u,
+      ]) expect(register).toMatch(rule);
+      expect(linked.files.some((file) => file.endsWith("/docs/fleet/momentum.md"))).toBe(true);
+      expect(linked.text).toMatch(/## Fallen[\s\S]*12\. /u);
+    }],
+  });
 });

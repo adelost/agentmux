@@ -106,13 +106,11 @@ export function paneDir(rootDir, pane) {
 }
 
 // Placed in .agents/CLAUDE.md so Claude Code auto-reads it from any pane
-// (panes run in .agents/N/, Claude searches upward for CLAUDE.md).
-// Survives /compact because CLAUDE.md is system context, not conversation.
-//
-// The marker lets ensureAgentHints detect stale copies on spawn; bump it
-// whenever AGENT_HINTS content changes. Appended content survives upgrades.
+// (panes run in .agents/N/); as system context it survives /compact.
+// Bump it whenever AGENT_HINTS changes: hints sync warns while the running
+// bridge still serves an older one. Appended content survives upgrades.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
-export const HINTS_VERSION = "1.25.350";
+export const HINTS_VERSION = "1.25.426";
 /** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 /** DTO: Shared generated instructions, excluding workspace-owned notes. */
