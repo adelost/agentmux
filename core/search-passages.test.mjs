@@ -13,6 +13,26 @@ const fixture = () => {
 const query = "Vad hjälpte mig med ljudboken och social kontakt?";
 
 feature("fresh original passage retrieval", () => {
+  component("bounded passage cache preserves search across many files", {
+    given: ["several notes and a cache smaller than their parsed contents", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-passages-bounded-"));
+      for (let n = 0; n < 12; n++) writeFileSync(join(dir, `${n}.md`), `# Note ${n}\n\nneedle common answer ${n}.\n`);
+      return { dir, roots: [{ name: "memory", path: dir, semantic: true, exclude: [] }], cache: new Map() };
+    }],
+    when: ["searching twice with the bounded cache", ({ roots, cache }) => ({
+      cold: searchPassages("needle common", roots, { max: 20 }),
+      first: searchPassages("needle common", roots, { max: 20, cache, cacheBudgetBytes: 1024 }),
+      second: searchPassages("needle common", roots, { max: 20, cache, cacheBudgetBytes: 1024 }),
+    })],
+    then: ["all hits and order match the uncached search and the cache stays bounded", ({ cold, first, second }, { dir, cache }) => {
+      try {
+        expect(first).toEqual(cold);
+        expect(second).toEqual(cold);
+        expect(first).toHaveLength(12);
+        expect(cache.size).toBeLessThanOrEqual(1);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }],
+  });
   component("search reads current text and refuses an old expansion after edits", {
     given: ["a source containing the first answer", fixture],
     when: ["editing the source between search and expansion", ({ path, roots }) => {

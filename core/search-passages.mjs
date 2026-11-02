@@ -7,6 +7,10 @@ import { readTopicFile } from "./memory-topics.mjs";
 import { swedishStem } from "./swedish-stem.mjs";
 
 const SOURCE_MAX_BYTES = 1024 * 1024;
+// Parsed word maps and labels cost far more than the UTF-8 source. Bound the
+// warm cache by a conservative source-size estimate; uncached files are still searched.
+const CACHE_BUDGET_BYTES = 128 * 1024 * 1024;
+const PARSED_BYTES_PER_SOURCE_BYTE = 64;
 const STOP = new Set("a an and are as att av blev blir de den det do du då eller en ett får för från ha hade han har hela hur i in inte jag kan man med mig min mina mitt och of om on på sig ska som the till to vad var vi vilken vilket vilka varför är efter before is it does have when where why who när bara skulle".split(" "));
 const PASSAGES_PER_FILE = 2;
 const COMPOUND_HEAD = 6;
@@ -168,18 +172,31 @@ function fileSegment(path) {
 }
 
 /** WHAT: Returns a file's segment, rebuilt only when it changed. WHY: Keeps repeated queries in one process from re-reading the corpus. */
-function cachedSegment(path, cache) {
+function cachedSegment(path, cache, budget) {
   const info = statSync(path);
   const hit = cache?.get(path);
-  if (hit && hit.mtimeMs === info.mtimeMs && hit.size === info.size) return hit.segment;
+  if (hit && hit.mtimeMs === info.mtimeMs && hit.size === info.size) {
+    cache.delete(path); cache.set(path, hit);
+    return hit.segment;
+  }
+  cache?.delete(path);
   const segment = fileSegment(path);
-  cache?.set(path, { mtimeMs: info.mtimeMs, size: info.size, segment });
+  if (cache) {
+    const cost = Math.max(1024, Math.min(info.size, SOURCE_MAX_BYTES) * PARSED_BYTES_PER_SOURCE_BYTE);
+    let used = [...cache.values()].reduce((total, entry) => total + entry.cost, 0);
+    while (used + cost > budget && cache.size) {
+      const oldest = cache.keys().next().value;
+      used -= cache.get(oldest).cost;
+      cache.delete(oldest);
+    }
+    if (cost <= budget) cache.set(path, { mtimeMs: info.mtimeMs, size: info.size, cost, segment });
+  }
   return segment;
 }
 
 /** WHAT: Returns source-bound note items ranked for natural questions. WHY: Prevents file-level word-AND from hiding answers behind incidental question words. */
 export function searchPassages(query, roots, { max = 12, excludePath = () => false, onWarning = console.warn, cache = null, dates = [],
-  perFile = PASSAGES_PER_FILE } = {}) {
+  perFile = PASSAGES_PER_FILE, cacheBudgetBytes = CACHE_BUDGET_BYTES } = {}) {
   const files = [];
   const seen = new Set();
   for (const root of roots.filter(root => root.semantic)) {
@@ -189,13 +206,9 @@ export function searchPassages(query, roots, { max = 12, excludePath = () => fal
       files.push({ path, root });
     }
   }
-  const segments = new Map();
   const segmentOf = (path) => {
-    if (!segments.has(path)) {
-      try { segments.set(path, cachedSegment(path, cache)); }
-      catch (error) { segments.set(path, null); onWarning(`Passage source omitted: ${path} (${error.code || error.message}); original search remains available.`); }
-    }
-    return segments.get(path);
+    try { return cachedSegment(path, cache, cacheBudgetBytes); }
+    catch (error) { onWarning(`Passage source omitted: ${path} (${error.code || error.message}); original search remains available.`); return null; }
   };
   const names = new Set();
   for (const { path } of files) if (PEOPLE_FILE.test(path)) for (const name of segmentOf(path)?.names || []) names.add(name);
@@ -238,7 +251,11 @@ export function searchPassages(query, roots, { max = 12, excludePath = () => fal
         if (count) { counts[term] += count; any = true; }
         if (unit.labels.has(word)) { labelMatches[term] = true; any = true; }
       }
-      if (any) docs.push({ path, root, segment, unit, counts, labelMatches });
+      if (any) {
+        const { line, start, length, section, context, snippet, words } = unit;
+        docs.push({ path, root, segment: { date: segment.date, sha256: segment.sha256 },
+          unit: { line, start, length, section, context, snippet, words }, counts, labelMatches });
+      }
     }
   }
   if (!docs.length) return [];
