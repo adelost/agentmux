@@ -1,6 +1,7 @@
 import { expect, feature, unit } from "bdd-vitest";
 import {
   formatMemoryRelief,
+  dropWslPageCache,
   gradleDaemonsFromPs,
   parseGradleStatus,
   relieveIdleGradleDaemons,
@@ -21,6 +22,18 @@ function status(rows) {
 }
 
 feature("memory relief", () => {
+  unit("runs only page-cache reclaim asynchronously and reports a failed command", {
+    then: ["the privileged boundary is fixed, and its result is visible", async () => {
+      const calls = [], logs = [];
+      const result = await dropWslPageCache({ state: { sample: { memFreeKb: 1, cachedKb: 9 } },
+        clock: () => 100, log: (message) => logs.push(message),
+        run: (command, args, done) => { calls.push([command, args]); done(new Error("denied")); } });
+      expect(calls).toEqual([["sudo", ["-n", "sysctl", "-w", "vm.drop_caches=1"]]]);
+      expect(result.ok).toBe(false);
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toContain("failed: denied");
+    }],
+  });
   unit("finds only Gradle daemons, with version, JVM and size", {
     then: ["Kotlin daemons and other processes are not Gradle daemons", () => {
       expect(gradleDaemonsFromPs(PS)).toEqual([

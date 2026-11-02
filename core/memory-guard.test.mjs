@@ -242,6 +242,32 @@ feature("memory admission guard", () => {
     }],
   });
 
+  unit("reclaims cache only under Windows pressure, no more than once per ten minutes", {
+    then: ["free and cached boundaries, in-flight work and restart retain the cooldown", async () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-cache-pressure-"));
+      try {
+        let free = 5, cached = 9, now = 1_000_000, ticks = [], calls = 0;
+        const path = join(root, "guard.json");
+        const readMeminfo = () => `${meminfo({ availableGiB: 20, swapFreeGiB: 4 })}\nMemFree: ${free * 1024 * 1024} kB\nCached: ${cached * 1024 * 1024} kB`;
+        const start = () => startMemoryGuard({ path, readMeminfo, bootId: "boot", clock: () => now,
+          schedule: (tick) => { ticks.push(tick); return () => {}; },
+          onCachePressure: async () => { calls++; }, log: () => {} });
+        start();
+        await new Promise(setImmediate);
+        expect(calls).toBe(1);
+        now += 599_999; ticks.at(-1)();
+        start();
+        expect(calls).toBe(1);
+        now++; free = 6; ticks.at(-1)();
+        free = 5; cached = 8; ticks.at(-1)();
+        expect(calls).toBe(1);
+        cached = 9; ticks.at(-1)();
+        await new Promise(setImmediate);
+        expect(calls).toBe(2);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+  });
+
   unit("emits no alert for an initial normal verdict or a held level", {
     then: ["quiet states stay quiet", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-memguard-quiet-"));

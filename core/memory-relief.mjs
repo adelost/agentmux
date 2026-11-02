@@ -126,6 +126,24 @@ export function formatMemoryRelief(result) {
 
 const gibText = (kb) => Math.round((kb || 0) / 1024 / 1024 * 10) / 10;
 
+/** WHAT: Returns clean page cache to WSL's host without blocking the bridge. WHY: Linux available memory can hide Windows starvation. */
+export function dropWslPageCache({ run = execFile, clock = Date.now, log = console.warn, state } = {}) {
+  const started = clock();
+  return new Promise((resolve) => {
+    run("sudo", ["-n", "sysctl", "-w", "vm.drop_caches=1"], (error) => {
+      const durationMs = clock() - started;
+      log(`[memory-guard] page-cache drop ${error ? `failed: ${error.message}` : "complete"}; ${durationMs}ms; MemFree ${gibText(state.sample.memFreeKb)} GiB, Cached ${gibText(state.sample.cachedKb)} GiB`);
+      resolve({ ok: !error, durationMs });
+    });
+  });
+}
+
+/** WHAT: Checks whether the kernel is WSL. WHY: Keeps the Windows cache policy off other Linux hosts. */
+export function isWsl() {
+  try { return /microsoft|wsl/iu.test(readFileSync("/proc/sys/kernel/osrelease", "utf8")); }
+  catch { return false; }
+}
+
 /** WHAT: Schedules the bridge's memory guard with its alarm and relief. WHY: Keeps pressure policy out of the bridge entry point. */
 export function startBridgeMemoryGuard({ discord = null, alertChannel = null, log = console.warn, relieve = relieveIdleGradleDaemons, ...guardOptions } = {}) {
   const notify = async (text, reason) => {

@@ -4,6 +4,8 @@
 //   node bin/memory-guard.mjs poll
 //     Sample once, advance the durable state, print it. (The bridge normally
 //     polls in-process; this is the manual/debug path.)
+//   node bin/memory-guard.mjs watch-cache
+//     Watch WSL page-cache pressure independently of the running bridge.
 //   node bin/memory-guard.mjs relieve
 //     Stop the Gradle daemons Gradle reports IDLE; BUSY builds keep running.
 //   node bin/memory-guard.mjs check --class pane-revive [--reserve-mib N]
@@ -13,10 +15,12 @@
 //     never fail closed on a stale state file.
 
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
-  canStartHeavy, classifyMemory, parseMeminfo, pollMemoryGuardOnce,
+  canStartHeavy, classifyMemory, parseMeminfo, pollMemoryGuardOnce, startMemoryGuard,
 } from "../core/memory-guard.mjs";
-import { formatMemoryRelief, relieveIdleGradleDaemons } from "../core/memory-relief.mjs";
+import { dropWslPageCache, formatMemoryRelief, isWsl, relieveIdleGradleDaemons } from "../core/memory-relief.mjs";
 
 const [command, ...rest] = process.argv.slice(2);
 
@@ -30,7 +34,14 @@ function bootId() {
   catch { return null; }
 }
 
-if (command === "poll") {
+if (command === "watch-cache") {
+  if (!isWsl()) throw new Error("page cache watcher requires WSL");
+  startMemoryGuard({
+    path: join(homedir(), ".agentmux", "wsl-cache-guard.json"),
+    schedule: (tick, interval) => { const timer = setInterval(tick, interval); return () => clearInterval(timer); },
+    onCachePressure: ({ state }) => dropWslPageCache({ state }),
+  });
+} else if (command === "poll") {
   const { state, previousLevel, changed } = pollMemoryGuardOnce();
   console.log(JSON.stringify({ ...state, previousLevel, changed }, null, 2));
 } else if (command === "relieve") {
@@ -58,6 +69,6 @@ if (command === "poll") {
   }
   console.log(`memory-guard allowed ${heavyClass}: ${verdict.reason}`);
 } else {
-  console.error("Usage: node bin/memory-guard.mjs poll | relieve [--json] | check --class <class> [--reserve-mib N]");
+  console.error("Usage: node bin/memory-guard.mjs poll | watch-cache | relieve [--json] | check --class <class> [--reserve-mib N]");
   process.exit(2);
 }

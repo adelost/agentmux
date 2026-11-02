@@ -32,7 +32,7 @@ export const MEMORY_GUARDRAIL_DEFAULTS = Object.freeze({
 const LEVELS = ["normal", "warn", "blocked", "critical"];
 const HEAVY_CLASSES = new Set(["browser", "emulator", "heavy-gate", "pane-revive"]);
 
-/** WHAT: Parses /proc/meminfo into the four counters the guard uses. WHY: Prevents mixed-snapshot decisions from skewing thresholds. */
+/** WHAT: Parses one /proc/meminfo snapshot into guard counters. WHY: Prevents mixed-snapshot decisions from skewing thresholds. */
 export function parseMeminfo(text) {
   const read = (key) => {
     const match = String(text).match(new RegExp(`^${key}:\\s+(\\d+)\\s*kB`, "mu"));
@@ -40,7 +40,9 @@ export function parseMeminfo(text) {
   };
   const sample = {
     memTotalKb: read("MemTotal"),
+    memFreeKb: read("MemFree"),
     memAvailableKb: read("MemAvailable"),
+    cachedKb: read("Cached"),
     swapTotalKb: read("SwapTotal"),
     swapFreeKb: read("SwapFree"),
   };
@@ -185,6 +187,8 @@ export function pollMemoryGuardOnce({
     clearStreak: transitioned.clearStreak,
     classified: transitioned.classified,
     sample,
+    ...(prev?.bootId === bootId && Number.isFinite(prev.lastCacheReliefAt)
+      ? { lastCacheReliefAt: prev.lastCacheReliefAt } : {}),
   };
   writeGuardState(state, { path });
   return { state, previousLevel: prev?.level || null, changed: prev?.level !== state.level };
@@ -200,17 +204,31 @@ function scheduleInterval(tick, intervalMs) {
 export function startMemoryGuard({
   intervalMs = 30_000,
   pressureIntervalMs = 5 * 60_000,
+  cacheIntervalMs = 10 * 60_000,
   onTransition = () => {},
   onPressure = () => {},
+  onCachePressure = null,
   log = (message) => console.warn(message),
   clock = () => Date.now(),
   schedule = scheduleInterval,
   ...pollOptions
 } = {}) {
   let lastPressureAt = null;
+  let cacheReliefRunning = false;
   const tick = () => {
     try {
       const { state, previousLevel, changed } = pollMemoryGuardOnce(pollOptions);
+      const { memFreeKb, cachedKb } = state.sample;
+      if (onCachePressure && !cacheReliefRunning && memFreeKb !== null && cachedKb !== null
+          && memFreeKb < 6 * 1024 * 1024 && cachedKb > 8 * 1024 * 1024
+          && (!Number.isFinite(state.lastCacheReliefAt) || clock() - state.lastCacheReliefAt >= cacheIntervalMs)) {
+        state.lastCacheReliefAt = clock();
+        writeGuardState(state, { path: pollOptions.path });
+        cacheReliefRunning = true;
+        Promise.resolve().then(() => onCachePressure({ state }))
+          .catch((error) => log(`memory-guard cache relief failed: ${error.message}`))
+          .finally(() => { cacheReliefRunning = false; });
+      }
       // A first-ever non-normal verdict is one visible alert, not a silent
       // boot; the next poll carries previousLevel and stays quiet again.
       const initialAlert = !previousLevel && state.level !== "normal";
