@@ -5,6 +5,8 @@ import { createInterface } from "node:readline";
 // (attachment, pr-link, frame-link ...), and its list grows with each release.
 const CONVERSATION = new Set(["user", "assistant"]);
 const localCommand = content => typeof content === "string" && /^\s*<(?:local-command|command-)/u.test(content);
+const transcriptOnlyTask = entry => entry?.origin?.kind === "task-notification"
+  && entry.promptSource === "system" && entry.queueTranscriptOnly === true;
 const sameFile = (left, right) => left.dev === right.dev && left.ino === right.ino
   && left.size === right.size && left.mtimeMs === right.mtimeMs;
 
@@ -31,7 +33,7 @@ export async function hasEmptyClaudeEpoch(identity) {
       if (!boundary) continue;
       const content = entry?.message?.content;
       const harmless = !CONVERSATION.has(entry?.type)
-        || (entry?.type === "user" && (entry.isCompactSummary === true || localCommand(content)));
+        || (entry?.type === "user" && (entry.isCompactSummary === true || localCommand(content) || transcriptOnlyTask(entry)));
       if (!harmless || entry.isSidechain || (entry.sessionId && entry.sessionId !== identity.sessionId)
           || entry?.message?.usage) empty = false;
     }

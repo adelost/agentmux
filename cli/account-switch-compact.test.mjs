@@ -9,6 +9,34 @@ const target = { agent: { name: "lsrc" }, pane: { index: 0 } };
 const runReturning = (row) => async () => ({ rows: [{ pane: "lsrc:0", ...row }] });
 
 feature("the compact step of an account switch", () => {
+  for (const systemNotification of [true, false]) {
+    component(`a ${systemNotification ? "transcript-only system" : "human"} notification after compact`, {
+      given: ["an idle session with one notification and no model output", () => {
+        const root = mkdtempSync(join(tmpdir(), "amux-switch-notification-"));
+        const path = join(root, "session.jsonl"), sessionId = "s";
+        const events = [
+          { type: "system", subtype: "compact_boundary", sessionId, timestamp: "2026-10-31T05:02:31Z" },
+          { type: "user", sessionId, isCompactSummary: true, message: { content: "summary" } },
+          { type: "user", sessionId, ...(systemNotification ? { origin: { kind: "task-notification" },
+            promptSource: "system", queueTranscriptOnly: true } : {}),
+            message: { content: "<task-notification>stopped</task-notification>" } },
+        ];
+        writeFileSync(path, events.map(event => JSON.stringify(event)).join("\n") + "\n");
+        return { root, facts: { engine: "claude", backend: "tmux", running: true, sessionId, sessionPath: path,
+          status: "idle", composerEmpty: true, queued: 0, tokens: null, idleMs: 60_000 } };
+      }],
+      when: ["the account switch reads the unchanged epoch", async ({ facts }) => {
+        const context = await observeSwitchContext({ deliveryQueue: {} }, { agent: {}, agentName: "test", pane: 0 }, {
+          discover: async () => [{ engine: "claude", agent: {}, pane: { index: 0 } }], observe: async () => facts,
+        });
+        return accountSwitchPlan({ mode: "running", facts: context.facts, compacted: context.compacted });
+      }],
+      then: ["only a verified transcript-only system notification keeps the epoch empty", (plan, fx) => {
+        try { expect(plan.action).toBe(systemNotification ? "RESTART" : "HOLD"); }
+        finally { rmSync(fx.root, { recursive: true, force: true }); }
+      }],
+    });
+  }
   // lsrc:0 and skyvw:0, 27 Oct: 61 and 1 prompts held by Claude V's quota floor kept both large contexts from
   // compacting, so rotate could never move them to an account with room.
   const floorHeld = { status: "pending", costHold: true, attempts: 41,
