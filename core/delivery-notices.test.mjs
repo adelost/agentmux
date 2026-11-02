@@ -35,6 +35,13 @@ const humanJob = (overrides = {}) => ({
 const MODEL_GUARD = "Codex work blocked: selected gpt-5.6-sol, running gpt-6-sol; verify /status before retrying";
 
 feature("delivery notices a human understands", () => {
+  unit("a missing context reading does not claim a pane failed to start", {
+    when: ["a delivery is held for missing context evidence", () => blockedDeliveryNotice({
+      agentName: "a", pane: 1, lastReason: "wake-refused:held-for-evidence:context-cost:unknown-evidence",
+    })],
+    then: ["the notice gives the actual reason", text => expect(text).toContain(
+      "Cause: the pane's context could not be checked, so delivery waits for a reliable reading.")],
+  });
   unit("waiting names the panel and the real reason in everyday words", {
     when: ["rendering the lsrc:3 model-guard wait", () => deliveryStateNotice(humanJob({ lastReason: MODEL_GUARD }), "blocked", UTC)],
     then: ["one sentence per part, no machinery", (text) => expect(text).toBe(

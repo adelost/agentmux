@@ -4,6 +4,13 @@ import { deliveryBlockerDetail } from "./delivery-handoff.mjs";
 // 2026-10-20 18:12Z: the quota floor held api:0's note to api:6 (Codex A's 5 h window spent), and the sender's stop
 // notice said the pane's process could not be started, with advice to hand the work to another owner.
 feature("the reason the sender of a held handoff reads", () => {
+  unit("unknown context evidence does not claim the live pane failed to start", {
+    when: ["an unsubmitted message is held for missing context evidence", () => deliveryBlockerDetail({
+      lastReason: "wake-refused:held-for-evidence:context-cost:unknown-evidence",
+    })],
+    then: ["the actual evidence hold is explained", detail => expect(detail).toBe(
+      "uppgifter om panelens kontext saknas; leveransen hålls tills de kan kontrolleras")],
+  });
   unit("a quota hold names the account's state and says the job waits; a failed start reads as before", {
     when: ["the floor held a note to a Codex A pane, and a pane did not start", () => [
       deliveryBlockerDetail({ lastReason: "wake-refused:quota-floor: Codex A has spent its 5h window until 2026-10-20T22:15:37.000Z;"

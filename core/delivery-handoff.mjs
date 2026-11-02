@@ -7,6 +7,9 @@ const ALERT_RETRY_MS = 60_000;
 /** WHAT: Names the observed delivery boundary. WHY: Prevents installation failures from being diagnosed as project checkout faults. */
 export function deliveryBlockerDetail(job) {
   const reason = String(job?.lastReason || "");
+  if (reason.startsWith("wake-refused:held-for-evidence:context-cost:unknown-evidence")) {
+    return "uppgifter om panelens kontext saknas; leveransen hålls tills de kan kontrolleras";
+  }
   if (reason.startsWith("wake-refused:identity-")) {
     return "AMUX-installationen kan inte verifieras. Felet gäller inte projektets arbetskopia. "
       + "Kontrollera amux doctor och installerad release; en ny feature-worktree löser inte detta";

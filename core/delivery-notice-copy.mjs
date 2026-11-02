@@ -59,6 +59,8 @@ function actorName(requestedBy) {
 }
 
 const REASON_WORDS = [
+  [/^held-for-evidence:context-cost:unknown-evidence/u,
+    () => "the pane's context could not be checked, so delivery waits for a reliable reading"],
   // Prefixes of ENGINE_START_REFUSED (engine-start-guard) and PANE_LAYOUT_UNSAFE (pane-provisioning).
   [/^engine start refused:/u,
     () => "the pane's session already runs in another process or pane, so amux does not start it twice"],
