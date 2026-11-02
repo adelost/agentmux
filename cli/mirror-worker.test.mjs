@@ -1,7 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
 import { deliverMirror } from "./mirror-worker.mjs";
 import { mirrorLine } from "../core/mirror-copy.mjs";
+import { discordMessagePayload } from "./send-notify.mjs";
 describe("the detached report mirror", () => {
+  it("keeps authored numbers and bullets while suppressing link cards", async () => {
+    const input = "1. ANDROID-PAKET\n- Första punkten\n2. PLAY-SIDAN\n- Nästa punkt\nhttps://example.org\n```\n1. kod\n```";
+    const send = vi.fn(async () => []);
+    await deliverMirror({ channelId: "channel", content: input }, send);
+    const text = send.mock.calls[0][1];
+    expect(text).toBe("1\\. ANDROID-PAKET\n- Första punkten\n2\\. PLAY-SIDAN\n- Nästa punkt\nhttps://example.org\n```\n1. kod\n```");
+    expect(discordMessagePayload(text, null, true)).toMatchObject({ content: text, flags: 4 });
+    expect(discordMessagePayload("ordinary", null, false)).not.toHaveProperty("flags");
+  });
   it("forwards one concise line with the real stable queue identity", async () => {
     const send = vi.fn(async () => [{ id: "post" }]);
     const text = "[from lsrc:4]\n\nSUMMARY: " + "x".repeat(180) + "\nDONE: private details";

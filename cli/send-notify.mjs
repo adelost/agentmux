@@ -126,8 +126,10 @@ function getDiscordBotToken() {
   return "";
 }
 
-export function discordMessagePayload(content, nonce = null) {
+/** WHAT: Builds a Discord message payload with optional preview suppression. WHY: Keeps mirrors from growing unrelated preview cards. */
+export function discordMessagePayload(content, nonce = null, suppressEmbeds = false) {
   return { content: String(content).slice(0, 2000),
+    ...(suppressEmbeds ? { flags: 4 } : {}),
     ...(nonce ? { nonce, enforce_nonce: true } : {}) };
 }
 
@@ -148,10 +150,10 @@ async function recordedPost(channelId, payload, kind, post) {
 
 /** Post to a Discord channel directly via REST API using agentmux's bot token. */
 async function discordPost(channelId, content, nonce = null, kind = "notice") {
-  return recordedPost(channelId, content, kind, () => postMessage(channelId, content, nonce));
+  return recordedPost(channelId, content, kind, () => postMessage(channelId, content, nonce, kind));
 }
 
-async function postMessage(channelId, content, nonce) {
+async function postMessage(channelId, content, nonce, kind) {
   const token = getDiscordBotToken();
   if (!token) throw new Error("DISCORD_TOKEN not found — cannot mirror");
   const controller = new AbortController();
@@ -164,7 +166,7 @@ async function postMessage(channelId, content, nonce) {
         Authorization: `Bot ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(discordMessagePayload(content, nonce)),
+      body: JSON.stringify(discordMessagePayload(content, nonce, kind === "mirror")),
       signal: controller.signal,
     });
   } finally {
