@@ -38,7 +38,8 @@ export function blockedHandoffSender(job, nowMs) {
   const park = job.metadata?.preSubmitPark;
   const attempts = Number(job.attempts || 0) + Number(park?.attempts || 0);
   const firstAttemptAt = Number(park?.firstAttemptAt || job.firstAttemptAt || 0);
-  const failedWakes = job.lastReason.startsWith("wake-refused:") && attempts >= 2;
+  const failedWakes = job.lastReason.startsWith("wake-refused:")
+    && !job.lastReason.startsWith("wake-refused:held-for-evidence:") && attempts >= 2;
   const timedOut = attempts > 0 && firstAttemptAt > 0 && nowMs - firstAttemptAt >= HANDOFF_STALL_MS;
   return (failedWakes || timedOut) && Number(job.metadata?.handoffNoticeNextAttemptAt || 0) <= nowMs
     ? sender : null;
