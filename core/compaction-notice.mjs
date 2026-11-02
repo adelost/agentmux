@@ -27,6 +27,6 @@ export function compactionNoticeText(paneName, compactions) {
   const times = compactions.map((event) => event.timestamp).filter((ts) => Number.isFinite(Date.parse(ts))).map(clock);
   const when = times.length ? ` (${times.join(", ")})` : "";
   return compactions.length === 1
-    ? `Context compacted for **${paneName}**${when}. Work continues from the summary.`
-    : `Context compacted ${compactions.length} times for **${paneName}**${when}. Work continues from the latest summary.`;
+    ? `Context compacted for **${paneName}**${when}. The summary is available for the next turn.`
+    : `Context compacted ${compactions.length} times for **${paneName}**${when}. The latest summary is available for the next turn.`;
 }
