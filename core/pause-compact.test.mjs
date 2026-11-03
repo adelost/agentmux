@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PAUSE_COMPACT_POLICY } from "../policies/context-cost.mjs";
-import { codexBackgroundActivity, codexTerminalStarts, latestJournalCompactMs, leaderPanes, openFileHolderStarts, pauseCompactDecision, pauseCompactLimit,
-  readPauseCompactModes, sessionBackgroundActivity } from "./pause-compact.mjs";
+import { codexBackgroundActivity, codexTerminalStarts, latestJournalCompactMs, leaderPanes, openFileHolderStarts, oversizeNotice, oversizeWhileWorking, pauseAskTokens,
+  pauseCompactDecision, pauseCompactLimit, readPauseCompactModes, sessionBackgroundActivity } from "./pause-compact.mjs";
 
 const NOW = Date.parse("2026-10-11T03:36:00Z");
 const MIN = 60_000;
@@ -82,6 +82,31 @@ feature("compaction at a natural pause: one guard per condition", () => {
       lsrc0: pauseCompactLimit(lsrc, 0), lsrc2: pauseCompactLimit(lsrc, 2), lsrcLeaders: [...leaderPanes(lsrc)] })],
     then: ["leaders get 700k, builders 400k", budgets => expect(budgets).toEqual({ skyvw0: 700_000, skyvw1: 400_000,
       lsrc0: 700_000, lsrc2: 400_000, lsrcLeaders: [3, 0] })],
+  });
+  // sandman:0 2026-11-03: a Claude builder compacts from 200k, where a compact pays back (replay in docs/AMUX-COST-POLICY.md); leaders, Codex builders and the panes of the ongoing film work keep what they had.
+  unit("a Claude builder has 200k, and the leader, the Codex builder and a kept film pane keep their earlier budgets", {
+    given: ["ai led by Codex pane 3, lsrc led by Codex pane 3 and Claude pane 0, skyvw orchestrated by pane 0", () => ({
+      ai: { name: "ai", orchestrator: 3, leaders: [] }, lsrc: { name: "lsrc", orchestrator: 3, leaders: [0] }, skyvw: { name: "skyvw", orchestrator: 0, leaders: [] } })],
+    when: ["reading the budgets by engine", ({ ai, lsrc, skyvw }) => ({ aiClaude: pauseCompactLimit(ai, 1, PAUSE_COMPACT_POLICY, "claude"), aiCodex: pauseCompactLimit(ai, 4, PAUSE_COMPACT_POLICY, "codex"),
+      aiLeaderCodex: pauseCompactLimit(ai, 3, PAUSE_COMPACT_POLICY, "codex"), lsrcLeaderClaude: pauseCompactLimit(lsrc, 0, PAUSE_COMPACT_POLICY, "claude"),
+      lsrc1: pauseCompactLimit(lsrc, 1, PAUSE_COMPACT_POLICY, "claude"), skyvw2: pauseCompactLimit(skyvw, 2, PAUSE_COMPACT_POLICY, "claude"),
+      skyvw0: pauseCompactLimit(skyvw, 0, PAUSE_COMPACT_POLICY, "claude"), noEngine: pauseCompactLimit(ai, 1) })],
+    then: ["only the Claude builders outside the kept panes drop to 200k", budgets => expect(budgets).toEqual({ aiClaude: 200_000, aiCodex: 400_000, aiLeaderCodex: 700_000,
+      lsrcLeaderClaude: 700_000, lsrc1: 400_000, skyvw2: 400_000, skyvw0: 700_000, noEngine: 400_000 })],
+  });
+  unit("the mid-turn ask stays where it was, so the lower budget adds no notice in a turn", {
+    given: ["a Claude builder in ai and a leader in skyvw", () => ({ ai: { name: "ai", orchestrator: 3, leaders: [] }, skyvw: { name: "skyvw", orchestrator: 0, leaders: [] } })],
+    when: ["reading where a working pane is asked and what it is told", ({ ai, skyvw }) => {
+      const limit = pauseCompactLimit(ai, 1, PAUSE_COMPACT_POLICY, "claude"), askAt = pauseAskTokens(ai, 1);
+      return { limit, askAt, leaderAskAt: pauseAskTokens(skyvw, 0), at450: oversizeWhileWorking({ tokens: 450_000, limit, askAt, status: "working" }),
+        at600: oversizeWhileWorking({ tokens: 600_000, limit, askAt, status: "working" }), notice: oversizeNotice({ tokens: 615_000, limit, askAt }),
+        oldStyle: oversizeNotice({ tokens: 615_000, limit: 400_000 }) };
+    }],
+    then: ["600k for a builder, 1.05M for a leader, and the notice names the factor against the budget it states", seen => {
+      expect(seen).toMatchObject({ limit: 200_000, askAt: 600_000, leaderAskAt: 1_050_000, at450: false, at600: true });
+      expect(seen.notice).toContain("615k tokens, 3 times your 200k budget");
+      expect(seen.oldStyle).toContain("615k tokens, 1.5 times your 400k budget");
+    }],
   });
   unit("both engines are on after the dry run, each switchable back, and a typo fails loudly", {
     when: ["reading modes", () => ({ unset: readPauseCompactModes({}), codexDry: readPauseCompactModes({ AUTO_COMPACT_PAUSE_CODEX: "dry" }),

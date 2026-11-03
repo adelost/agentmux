@@ -29,8 +29,16 @@ export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 80_000, coldMaxTok
 // A Codex compact leaves about 94k (median of the next call), so it pays back
 // after 94k / (0.05 x (C - 94k)) calls: 313 at 100k, 34 at 150k, 7 at 370k.
 // Sessions made about 90 calls per compact, so Codex compacts from 150k.
+// sandman:0 2026-11-03, on Mattias's "var går tokens": a Claude builder compacts from 200k, not 400k. Replaying 38,155 builder
+// calls since 1 Nov (docs/AMUX-COST-POLICY.md, receipt compact-budget-skyvw2-20261103) gives 280 compacts at 400k against 271 real
+// ones and a cost within 1 % of the real cost. A compact leaves a Claude session at about 99k at its first call (72k of it written at
+// 2x), so the budgets compare as: 200k is the cost minimum on each of three days (-6.7 % of the builders' weighted cost with 100k
+// extra per compact for re-orienting), 150k is worse (-5.6 %), 250k and 300k are -5.8 % and -4.9 %.
+// The panes of the ongoing film work (the Cutkit launch, testers from Wed 4 Nov 10:00Z) keep 400k until sandman:0 lifts the list.
+// The mid-turn ask stays at 1.5 times the earlier budgets (600k for builders, 1.05M for leaders), so the lower budget adds no notice in a turn.
 /** WHAT: Defines compaction at a natural pause. WHY: Keeps busy panes from growing past 700k between 50-minute rests that never come. */
-export const PAUSE_COMPACT_POLICY = Object.freeze({ builderTokens: 400_000, leaderTokens: 700_000, oversizeFactor: 1.5,
+export const PAUSE_COMPACT_POLICY = Object.freeze({ builderTokens: 400_000, claudeBuilderTokens: 200_000, leaderTokens: 700_000, oversizeFactor: 1.5,
+  keepBuilderPanes: Object.freeze(["skyvw:1", "skyvw:2", "lsrc:1", "lsrc:2"]),
   settleMs: 60_000, spacingMs: 30 * 60_000, backgroundQuietMs: 5 * 60_000, hungJobMs: 60 * 60_000,
   codexIdleMs: 25 * 60_000, codexMinTokens: 150_000 });
 

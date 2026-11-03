@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { CONTEXT_COST_POLICY, PAUSE_COMPACT_POLICY, readContextCostPolicy } from "../policies/context-cost.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { contextMaintenanceAttempt, lastContextCompactAt } from "../core/context-maintenance.mjs";
-import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, oversizeNotice, oversizeWhileWorking, pauseCompactDecision,
+import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, oversizeNotice, oversizeWhileWorking, pauseAskTokens, pauseCompactDecision,
   pauseCompactLimit, sessionBackgroundActivity } from "../core/pause-compact.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import { SELF_COMPACT_POLICY, formatSelfCompactNotice } from "../core/self-compact.mjs";
@@ -82,7 +82,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
 
   // A turn can run far past its budget before the pause this rule waits for (lsrc:0 2026-10-19: 943k against 400k).
   // The pane is asked to compact itself; the queue holds the ask until no other delivery to it is on its way.
-  function askToCompact({ name, pane, paneKey, engine, paneDir, tokens, limit, base }) {
+  function askToCompact({ name, pane, paneKey, engine, paneDir, tokens, limit, askAt, base }) {
     const identity = identityFor(engine, paneDir);
     const episode = `${identity?.sessionId || "session"}:${lastCompactAt(name, pane, paneKey, identity?.path)}`;
     const jobs = deliveryBroker?.queue?.list?.(name, pane);
@@ -90,10 +90,10 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     const idempotencyKey = `pause-compact-oversize:${paneKey}:${episode}`;
     if (!jobs.some(job => job.idempotencyKey === idempotencyKey)) {
       if (jobs.some(job => !TERMINAL_DELIVERY_STATES.has(job.status))) return;
-      if (base.mode === "on") deliveryBroker.enqueue({ agentName: name, pane, text: oversizeNotice({ tokens, limit }, policy),
+      if (base.mode === "on") deliveryBroker.enqueue({ agentName: name, pane, text: oversizeNotice({ tokens, limit, askAt }, policy),
         source: "pause-compact", idempotencyKey });
       report(paneKey, episode, { ...base, limit, cell: "oversize", outcome: base.mode === "on" ? "asked" : "would-ask",
-        detail: `working at ${tokens} tokens, ${policy.oversizeFactor} times ${limit} or more` });
+        detail: `working at ${tokens} tokens, ${askAt} or more` });
     }
     asked.set(paneKey, episode);
   }
@@ -243,16 +243,17 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       report(paneKey, request.requestedAt, { ...base, outcome: "dropped", detail: "new input or session superseded the saved handoff" });
       return false;
     }
-    // A pane that asked at a stage boundary is compacted from about 80k, the size rule waits for 400k or 700k.
-    const limit = request ? SELF_COMPACT_POLICY.minTokens : pauseCompactLimit(agentConfig, pane, policy);
+    // A pane that asked at a stage boundary is compacted from about 80k, the size rule waits for its budget: 200k for a Claude builder, 400k for the others, 700k for a leader.
+    const limit = request ? SELF_COMPACT_POLICY.minTokens : pauseCompactLimit(agentConfig, pane, policy, engine);
+    const askAt = pauseAskTokens(agentConfig, pane, policy);
     // Codex's cache lives about 30 minutes, so its idle rule is 25 minutes instead of the shared 50.
     const codexIdle = engine === "codex" ? { idleLimit: policy.codexMinTokens, idleMs: policy.codexIdleMs } : {};
     // A self-request resumes work at once, so its compact is due even on a cold cache.
-    const facts = { engine, tokens: contextTokens, limit, ...codexIdle, status, inCopyMode, quietMs,
+    const facts = { engine, tokens: contextTokens, limit, askAt, ...codexIdle, status, inCopyMode, quietMs,
       cacheLifeMs: request ? null : cacheLifeMs, now: now() };
     const first = pauseCompactDecision(facts, decisionPolicy);
     if (first.cell === "turn-running" && !request && oversizeWhileWorking(facts, policy)) {
-      askToCompact({ name, pane, paneKey, engine, paneDir, tokens: contextTokens, limit, base });
+      askToCompact({ name, pane, paneKey, engine, paneDir, tokens: contextTokens, limit, askAt, base });
     }
     if (first.action === "none") {
       if (request && first.cell === "within-budget" && mode === "on") {

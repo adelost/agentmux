@@ -33,19 +33,28 @@ export function readPauseCompactModes(env = process.env) {
 export const leaderPanes = (agentConfig) =>
   new Set([agentConfig?.orchestrator, ...(agentConfig?.leaders || [])].filter(Number.isSafeInteger));
 
-/** WHAT: Picks a pane's pause budget. WHY: Keeps leaders, who carry the plan, from being compacted as often as builders. */
-export const pauseCompactLimit = (agentConfig, pane, policy = PAUSE_COMPACT_POLICY) =>
-  leaderPanes(agentConfig).has(pane) ? policy.leaderTokens : policy.builderTokens;
+/**
+ * WHAT: Maps a pane and its engine to its pause budget.
+ * WHY: Keeps leaders on 700k, Claude builders on 200k where a compact pays, the rest on 400k.
+ */
+export const pauseCompactLimit = (agentConfig, pane, policy = PAUSE_COMPACT_POLICY, engine = null) => {
+  if (leaderPanes(agentConfig).has(pane)) return policy.leaderTokens;
+  return engine === "claude" && !policy.keepBuilderPanes.includes(`${agentConfig?.name}:${pane}`) ? policy.claudeBuilderTokens : policy.builderTokens;
+};
+
+/** WHAT: Maps a pane to the size where a working pane is asked to compact. WHY: Keeps the mid-turn ask at 1.5 times the earlier budgets, so 200k adds no notice. */
+export const pauseAskTokens = (agentConfig, pane, policy = PAUSE_COMPACT_POLICY) =>
+  (leaderPanes(agentConfig).has(pane) ? policy.leaderTokens : policy.builderTokens) * policy.oversizeFactor;
 
 const hold = (cell, detail) => ({ action: "hold", cell, detail });
 
 /** WHAT: Checks whether a working pane has grown to its oversize factor times its budget. WHY: Keeps the mid-turn ask for turns far past a pause-sized overshoot. */
-export const oversizeWhileWorking = ({ tokens, limit, status }, policy = PAUSE_COMPACT_POLICY) =>
-  isLiveStatus(status) && Number.isFinite(tokens) && tokens >= limit * policy.oversizeFactor;
+export const oversizeWhileWorking = ({ tokens, limit, askAt, status }, policy = PAUSE_COMPACT_POLICY) =>
+  isLiveStatus(status) && Number.isFinite(tokens) && tokens >= (askAt ?? limit * policy.oversizeFactor);
 
 /** WHAT: Formats the ask to a working pane far past its budget. WHY: Keeps the compact the pane's own choice at its clean point. */
-export const oversizeNotice = ({ tokens, limit }, policy = PAUSE_COMPACT_POLICY) =>
-  `[pause-compact] Your context is ${Math.round(tokens / 1000)}k tokens, ${policy.oversizeFactor} times your ${Math.round(limit / 1000)}k budget,`
+export const oversizeNotice = ({ tokens, limit, askAt }, policy = PAUSE_COMPACT_POLICY) =>
+  `[pause-compact] Your context is ${Math.round(tokens / 1000)}k tokens, ${Math.round(((askAt ?? limit * policy.oversizeFactor) / limit) * 10) / 10} times your ${Math.round(limit / 1000)}k budget,`
   + " and it grows while you work. At your next clean point, bank your work and run"
   + " `amux compact --self --continue-file <handoff>`, then end your turn: the compact runs then and your handoff continues."
   + " Nothing compacts you mid-turn. One notice until you compact.";

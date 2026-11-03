@@ -32,6 +32,7 @@ const TEST_ALIASES = {
   "core/delivery-not-sent.mjs": ["core/delivery-broker.test.mjs"],
   "core/quota-park-resume.mjs": ["core/claude-quota-coordinator.test.mjs"],
   "channels/quota-park.mjs": ["channels/quota-park.test.mjs", "channels/pause-compact.test.mjs"],
+  "policies/context-cost.mjs": ["core/context-cost.test.mjs", "core/auto-compact.test.mjs", "core/pause-compact.test.mjs", "channels/pause-compact.test.mjs"],
   "test/fixtures/composer-agent.mjs": ["core/delivery-broker.test.mjs", "core/draft-withdrawal.test.mjs"],
   "bin/transcribe-whisper.sh": ["bin/transcribe-whisper.test.mjs"],
   "core/discord-inbound-store.mjs": ["core/inbound-voice-failure.test.mjs", "core/inbound-reconciler.test.mjs",

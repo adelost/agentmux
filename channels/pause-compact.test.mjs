@@ -251,6 +251,65 @@ feature("pause compaction in the bridge poll", () => {
   });
 });
 
+// sandman:0 2026-11-03: a Claude builder compacts at a pause from 200k, the film panes (lsrc:1 and 2, skyvw:1 and 2) keep 400k, Codex builders and leaders keep what they had.
+feature("a Claude builder's budget of 200k", () => {
+  const ai = { name: "ai", orchestrator: 3, leaders: [] };
+  function pane(mode = "on") {
+    const runs = [], lines = [], enqueued = [];
+    const pause = createPauseCompact({ modes: { claude: mode, codex: mode }, now: () => NOW, state: { get: () => ({}) },
+      contextMaintenance: { run: async (name, paneIndex, options) => { runs.push({ pane: `${name}:${paneIndex}`, ...options }); return { ok: true, compacted: true, cell: "compact-once" }; } },
+      record: line => lines.push(line), identityFor: () => ({ path: "/projects/ai-1/s1.jsonl", sessionId: "s1" }),
+      backgroundFor: { claude: () => null, codex: () => null }, journalCompactFor: () => null,
+      deliveryBroker: { queue: { list: () => enqueued }, enqueue: job => { enqueued.push({ ...job, status: "pending" }); return job; } } });
+    const poll = (facts = {}) => pause.consider({ agentConfig: ai, pane: 1, engine: "claude", paneDir: "/ai/.agents/1", status: "idle", inCopyMode: false,
+      contextTokens: 250_000, lastActivityMs: NOW - 82_000, ...facts });
+    return { runs, lines, enqueued, poll };
+  }
+
+  component("a Claude builder at 250k is compacted at its pause with the 200k budget", {
+    given: ["ai:1, a Claude builder", () => pane()],
+    when: ["polling it 82 s after its turn at 250k", ctx => ctx.poll()],
+    then: ["it compacts, the admission carries 200k and the line says so", (sent, ctx) => {
+      expect(sent).toBe(true);
+      expect(ctx.runs).toEqual([{ pane: "ai:1", pauseTokens: 200_000, dry: false }]);
+      expect(ctx.lines[0]).toMatchObject({ pane: "ai:1", outcome: "compacted", limit: 200_000, leader: false, tokens: 250_000 });
+    }],
+  });
+  component("under 200k nothing happens", {
+    given: ["ai:1", () => pane()],
+    when: ["polling it at 190k at its pause", ctx => ctx.poll({ contextTokens: 190_000 })],
+    then: ["no admission", (sent, ctx) => { expect(sent).toBe(false); expect(ctx.runs).toEqual([]); }],
+  });
+  component("a film pane (lsrc:2) at 250k keeps its 400k and is left alone", {
+    given: ["lsrc:2, a Claude builder of the ongoing film work", () => pane()],
+    when: ["polling it at 250k at its pause", ctx => ctx.poll({ agentConfig: lsrc, pane: 2, paneDir: "/lsrc/.agents/2", contextTokens: 250_000 })],
+    then: ["no admission", (sent, ctx) => { expect(sent).toBe(false); expect(ctx.runs).toEqual([]); }],
+  });
+  component("a Codex builder at 250k keeps its 400k pause budget", {
+    given: ["ai:4, a Codex builder", () => pane()],
+    when: ["polling it at 250k, 82 s after its turn", ctx => ctx.poll({ pane: 4, engine: "codex", contextTokens: 250_000 })],
+    then: ["no admission: it is under its budget and its 25-minute rule has not run", (sent, ctx) => { expect(sent).toBe(false); expect(ctx.runs).toEqual([]); }],
+  });
+  component("a working Claude builder is asked only from 600k, as before, and told the factor against its 200k", {
+    given: ["ai:1 working", () => pane()],
+    when: ["polling it working at 300k, 450k, 599k and 610k", async ctx => {
+      const sent = [];
+      for (const tokens of [300_000, 450_000, 599_000]) sent.push(await ctx.poll({ status: "working", lastActivityMs: NOW, contextTokens: tokens }));
+      const before = ctx.enqueued.length;
+      await ctx.poll({ status: "working", lastActivityMs: NOW, contextTokens: 610_000 });
+      return { sent, before };
+    }],
+    then: ["no notice under 600k, one at 610k", ({ sent, before }, ctx) => {
+      expect(sent).toEqual([false, false, false]);
+      expect(before).toBe(0);
+      expect(ctx.enqueued).toHaveLength(1);
+      expect(ctx.enqueued[0]).toMatchObject({ agentName: "ai", pane: 1, source: "pause-compact" });
+      expect(ctx.enqueued[0].text).toContain("610k tokens, 3 times your 200k budget");
+      expect(ctx.lines.at(-1)).toMatchObject({ cell: "oversize", outcome: "asked", limit: 200_000, detail: "working at 610000 tokens, 600000 or more" });
+    }],
+  });
+});
+
 // lsrc:0, a leader at 150k: far under its 700k pause limit, so only its own request compacts it.
 function selfController({ background = null } = {}) {
   let now = NOW;
