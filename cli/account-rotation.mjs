@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { listAgents } from "./config.mjs";
+import { externalClaudeMdImports } from "../core/claude-md-imports.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
 import {
   accountRotationOutcome,
@@ -156,6 +157,15 @@ function cachedJsonReader() {
       try { cache.set(path, JSON.parse(readFileSync(path, "utf8"))); } catch { cache.set(path, null); }
     }
     return cache.get(path);
+  };
+}
+
+/** WHAT: Checks a pane directory's CLAUDE.md imports once per rotation. WHY: Keeps the panes of one project, which share their parent directories, from reading the same files once each. */
+function cachedImportScan(scan = externalClaudeMdImports) {
+  const cache = new Map();
+  return (cwd) => {
+    if (!cache.has(cwd)) cache.set(cwd, scan(cwd));
+    return cache.get(cwd);
   };
 }
 
@@ -390,8 +400,8 @@ export async function rotateClaudeFleet(ctx, requested, {
     compactPane: dependencies.compactPane || ((context, compactTarget) => compactBeforeSwitch(context, compactTarget)),
     identityOf: dependencies.identityOf || readClaudeProfileIdentity,
     recordCompact: dependencies.recordCompact || recordCompactCall,
-    startDialog: dependencies.startDialog || ((readJson) => (source, target, cwd) =>
-      claudeStartDialog({ source, target, cwd, readJson }))(cachedJsonReader()),
+    startDialog: dependencies.startDialog || ((readJson, externalImports) => (_current, target, cwd) =>
+      claudeStartDialog({ target, cwd, readJson, externalImports }))(cachedJsonReader(), cachedImportScan(dependencies.externalImports)),
     limitReceipt: dependencies.limitReceipt || ((agentName, pane) => (ctx.configPath
       ? activeClaudeLimitForTarget(agentName, pane, { configPath: ctx.configPath }) : null)),
     output: dependencies.output || console.log,

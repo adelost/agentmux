@@ -665,15 +665,14 @@ feature("the quota night of 20 to 21 October", () => {
   // Case 6. 03:52Z ai:1, ai:2, skybar:1 and skybar:2 waited 120 s each on "Allow external CLAUDE.md file imports?" in
   // the Claude A profile and were rolled back; lsrc:0 approved the imports there at about 04:00Z.
   unit("a target profile that would ask to allow external CLAUDE.md imports stops that pane before any restart", {
-    given: ["lsrc:0's directory has its imports approved on Claude S but never on Claude A", () => {
+    given: ["lsrc:0's directory imports a CLAUDE.md file from outside it and Claude A has never answered for it", () => {
       const fx = running(fixture());
       const root = mkdtempSync(join(tmpdir(), "amux-rotation-dialog-"));
       roots.push(root);
-      const source = join(root, "one.claude.json"), target = join(root, "two.claude.json");
-      writeFileSync(source, JSON.stringify({ projects: { "/work/.agents/0": {
-        hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true } } }));
+      const target = join(root, "two.claude.json");
       writeFileSync(target, JSON.stringify({ projects: {} }));
-      fx.deps.catalog = [{ ...catalog[0], identityPath: source }, { ...catalog[1], identityPath: target }];
+      fx.deps.catalog = [{ ...catalog[0] }, { ...catalog[1], identityPath: target }];
+      fx.deps.externalImports = cwd => (cwd === "/work/.agents/0" ? [{ path: "/work/AGENTS.md", from: "/work/CLAUDE.md" }] : []);
       return fx;
     }],
     when: ["rotating to Claude A", rotate],
@@ -682,6 +681,29 @@ feature("the quota night of 20 to 21 October", () => {
         status: "blocked", reason: "target-start-dialog:external-claude-md-imports" });
       expect(result.rows.find((row) => row.key === "lsrc:1")).toMatchObject({ status: "switched" });
       expect(fx.ctx.agent.restartClaudeAccount.mock.calls.map(([, pane]) => pane)).toEqual([1]);
+    }],
+  });
+
+  // Case 7. 3 Nov 2026: the dry run for Claude S held all 22 panes, 16 of them for a question that never comes: Claude I had
+  // once approved each pane directory, and nothing is imported from outside those directories any more.
+  component("an old approval on the source profile holds no pane whose directory imports nothing from outside", {
+    given: ["Claude S has no answers, Claude I approved lsrc:0's directory long ago, and no CLAUDE.md imports from outside", () => {
+      const fx = running(fixture());
+      const root = mkdtempSync(join(tmpdir(), "amux-rotation-dialog-"));
+      roots.push(root);
+      const source = join(root, "one.claude.json"), target = join(root, "two.claude.json");
+      writeFileSync(source, JSON.stringify({ projects: { "/work/.agents/0": {
+        hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true } } }));
+      writeFileSync(target, JSON.stringify({ projects: {} }));
+      fx.deps.catalog = [{ ...catalog[0], identityPath: source }, { ...catalog[1], identityPath: target }];
+      fx.deps.externalImports = () => [];
+      return fx;
+    }],
+    when: ["rotating to Claude A", rotate],
+    then: ["both panes move, as no question would be asked", (result, fx) => {
+      expect(result.rows.find((row) => row.key === "lsrc:0")).toMatchObject({ status: "switched" });
+      expect(result.rows.find((row) => row.key === "lsrc:1")).toMatchObject({ status: "switched" });
+      expect(fx.ctx.agent.restartClaudeAccount.mock.calls.map(([, pane]) => pane).sort()).toEqual([0, 1]);
     }],
   });
 });

@@ -1,5 +1,9 @@
 // Pure policy for subscription-account rotation.
 
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { externalClaudeMdImports } from "./claude-md-imports.mjs";
+
 const SHELL_COMMAND = /^(?:bash|zsh|sh|fish|dash)$/u;
 
 /** WHAT: Maps one configured Claude pane to a rotation mode. WHY: Prevents ambiguous context or process truth from authorizing rotation. */
@@ -54,11 +58,28 @@ export function accountRotationOutcome(rows = []) {
 }
 
 // 2026-10-21 03:52Z: four panes moved to Claude A waited 120 s each on "Allow external CLAUDE.md file imports?" and
-// were rolled back. Claude Code asks once per profile and directory; the source profile's answer does not carry over.
-/** WHAT: Names a start dialog the target profile shows where the source profile settled it. WHY: Keeps a move from restarting a pane into a dialog nobody answers. */
-export function claudeStartDialog({ source, target, cwd, readJson }) {
-  const project = profile => readJson(profile?.identityPath)?.projects?.[cwd] || {};
-  const before = project(source), after = project(target);
-  return before.hasClaudeMdExternalIncludesApproved === true && after.hasClaudeMdExternalIncludesApproved !== true
-    && after.hasClaudeMdExternalIncludesWarningShown !== true ? "external-claude-md-imports" : null;
+// were rolled back. Claude Code asks once per profile and project; the source profile's answer does not carry over.
+// 2026-11-03: the check held all 22 panes on Claude S, 16 of them for a question that never comes. Claude Code 2.1.312
+// saves the answer under the project root (the git root, else the directory) and asks only when a CLAUDE.md imports a
+// file from outside the directory; the old check read projects[pane directory] and took the source's old approval as
+// proof that a question exists.
+// Current Claude Code saves the answers under the git root, older versions under the directory itself. A linked worktree counts as its own root.
+/** WHAT: Names the project keys a directory's start answers may be saved under. WHY: Keeps a current answer under the git root from being missed by reading only the pane directory. */
+export function claudeStartAnswerKeys(cwd, hasGitEntry = dir => existsSync(join(dir, ".git"))) {
+  const keys = [cwd];
+  for (let dir = cwd; dir !== dirname(dir); dir = dirname(dir)) {
+    if (hasGitEntry(dir)) {
+      if (dir !== cwd) keys.push(dir);
+      break;
+    }
+  }
+  return keys;
+}
+
+/** WHAT: Names the start question the target profile would ask for a pane directory. WHY: Keeps a pane from restarting into an open question, and from being held for one never asked. */
+export function claudeStartDialog({ target, cwd, readJson, hasGitEntry, externalImports = externalClaudeMdImports }) {
+  const projects = readJson(target?.identityPath)?.projects || {};
+  const answered = claudeStartAnswerKeys(cwd, hasGitEntry).some(key =>
+    projects[key]?.hasClaudeMdExternalIncludesApproved === true || projects[key]?.hasClaudeMdExternalIncludesWarningShown === true);
+  return !answered && externalImports(cwd).length > 0 ? "external-claude-md-imports" : null;
 }
