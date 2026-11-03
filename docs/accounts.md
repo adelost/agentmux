@@ -109,7 +109,9 @@ of its engine has room below the reserve, earns one notice to that pane per
 episode. The notice names the pane, the reason, the account and the command that
 moves it. When the room is on the account the pane already runs on, it names the
 resume amux sent, or why it did not, instead of a rotate. It never
-wakes, moves or restarts a pane. `AMUX_IDLE_CAPACITY_ALERT_ENABLED=false` turns
+wakes, moves or restarts a pane. The notice passes the target's own quota floor
+on the weekly reserve, never on paid credits: on 3 Nov 2026 lsrc:0 stood at
+Claude I's floor from 16:07Z and seven notices waited there until 17:03Z. `AMUX_IDLE_CAPACITY_ALERT_ENABLED=false` turns
 it off.
 
 ## Foreign drafts

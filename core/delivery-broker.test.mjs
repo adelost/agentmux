@@ -2917,6 +2917,18 @@ feature("the quota floor holds new automatic work on an account near its weekly 
       finally { w.cleanup(); }
     }],
   });
+  // 2026-11-03: lsrc:0 stood at Claude I's floor from 16:07Z, and seven notices about panes it could move waited there
+  // until 17:03Z.
+  component("an idle-capacity notice uses the reserve to reach the dispatcher", {
+    given: ["a notice to the dispatcher at the weekly floor", () => floorWorld({ job: {
+      text: "[idle-capacity] skybar:2 has not been able to work for 17 min: its messages are parked by a usage limit.",
+      source: "idle-capacity", idempotencyKey: "idle-capacity:skybar:2:fixture" } })],
+    when: ["the ordinary broker FIFO serves the notice", w => w.broker.kickTarget("claw", 1)],
+    then: ["the notice reaches the pane", (_result, w) => {
+      try { expect(w.current().status).toBe("acknowledged"); expect(w.agent.sends).toHaveLength(1); }
+      finally { w.cleanup(); }
+    }],
+  });
   const RESETS = "2026-10-20T04:00:00.000Z";
   function floorWorld({ weekUsed = 97, freshWeekUsed = weekUsed, job = {}, floor = null } = {}) {
     const rootDir = tempRoot();

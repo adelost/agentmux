@@ -54,11 +54,13 @@ export function moveTarget({ engine, accounts = [], from, readAfter, reservePerc
     if (keys.includes(fromKey) || account.name === fromKey || (from?.email && account.account?.email === from.email)
         || !(quotaObservedAt(account) > readAfter)) return false;
     const windows = accountWindows(account);
-    return ["week", "session"].every(kind => windows.some(window => window.kind === kind
-      && Number.isFinite(window.usedPercent) && window.usedPercent >= 0
+    const hasRoom = window => Number.isFinite(window.usedPercent) && window.usedPercent >= 0
       // Claude names no reset for a window unused since it reset (Claude S at 16:10:01Z on 2026-10-20): it has room.
       && (Date.parse(window.resetsAt) > quotaObservedAt(account) || (window.resetsAt == null && window.usedPercent === 0))
-      && (kind === "week" ? window.usedPercent < reservePercent : 100 - window.usedPercent >= sessionFloor)));
+      && (window.kind === "week" ? window.usedPercent < reservePercent : 100 - window.usedPercent >= sessionFloor);
+    // A reading without a session runs none: Claude S at 17:05Z on 2026-11-03 read only its week, 1 % used.
+    return windows.some(window => window.kind === "week" && hasRoom(window))
+      && windows.filter(window => window.kind === "session").every(hasRoom);
   });
   return accountWithRoom(candidates, engine, { reservePercent });
 }

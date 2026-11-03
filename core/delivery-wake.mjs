@@ -8,6 +8,9 @@ import { quotaFloorHold, staleWindows } from "./quota-park.mjs";
 import { QUOTA_WIND_DOWN_ORIGIN } from "./quota-wind-down.mjs";
 import { deliveryPreparationStage } from "./delivery-preparation.mjs";
 
+// The idle-capacity alarm's source (channels/idle-capacity-runtime.mjs).
+const RESERVE_ORIGINS = new Set([QUOTA_WIND_DOWN_ORIGIN, "idle-capacity"]);
+
 const pendingState = (drafted, ownsPaneDraft) =>
   drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending");
 
@@ -59,8 +62,9 @@ export async function wakeDeliveryTarget({
     const fresh = await deliveryPreparationStage("quota-floor:fresh", () => quotaFloor.windowsFor(paneKey, { fresh: true })).catch(() => null);
     if (!fresh || fresh.unavailable) return "quota-floor: fresh account reading unavailable; existing hold remains";
     const hold = holdOf(fresh);
-    // A clean-stop nudge may use the weekly reserve, never paid Codex credits.
-    if (!hold || (job.source === QUOTA_WIND_DOWN_ORIGIN && !hold.credits)) return null;
+    // A clean-stop nudge, and a notice that lets the dispatcher move stopped panes, may use the weekly reserve, never
+    // paid Codex credits.
+    if (!hold || (RESERVE_ORIGINS.has(job.source) && !hold.credits)) return null;
     const name = `${fresh.account?.name || "its account"}${fresh.stale ? ` (reading failed; last good ${new Date(fresh.observedAt).toISOString()})` : ""}`;
     return hold.credits
       ? `quota-floor: ${name} has spent its ${hold.window === "session" ? "5h" : hold.window} window until ${hold.resetsAt};`

@@ -58,10 +58,17 @@ feature("quota wind-down decisions (unit)", () => {
     when: ["room was read before or exactly at compact verification", () => moveTarget({ engine: "claude", accounts: [account("claude:2")], from: "claude:1", readAfter: at("10:10:00") })],
     then: ["no target", target => expect(target).toBeNull()],
   });
-  unit("the current account, its aliases and a missing window never qualify", {
-    when: ["only the current login and an incomplete reading", () => moveTarget({ engine: "claude", from: "claude:1", readAfter: at("10:09:00"),
-      accounts: [{ ...account("claude:2"), sharedBy: [{ key: "claude:1" }] }, { ...account("claude:3"), limits: account("claude:3").limits.slice(0, 1) }] })],
+  unit("the current account, its aliases and a missing week never qualify", {
+    when: ["only the current login and a reading without its week", () => moveTarget({ engine: "claude", from: "claude:1", readAfter: at("10:09:00"),
+      accounts: [{ ...account("claude:2"), sharedBy: [{ key: "claude:1" }] }, { ...account("claude:3"), limits: account("claude:3").limits.slice(1) }] })],
     then: ["no target", target => expect(target).toBeNull()],
+  });
+  // 2026-11-03 16:07Z to 17:00Z: Claude I stood at its floor with 14 panes while Claude S read 1 % of its week and no
+  // session, and the stop mover moved nothing.
+  unit("an account whose reading has no session runs none and has room", {
+    when: ["Claude S reads only its week, 1 % used", () => moveTarget({ engine: "claude", from: "claude:1", readAfter: at("10:09:00"),
+      accounts: [{ ...account("claude:2", 1), limits: account("claude:2", 1).limits.slice(0, 1) }] })],
+    then: ["it is the target", target => expect(target?.name).toBe("claude:2")],
   });
   unit("notice and continuation match design §2", {
     when: ["formatting the three strings", () => [windDownNotice({ stage: "notice", account: "Claude S", leftPercent: 5, window: "session", resetAt: at("11:10:00") }),

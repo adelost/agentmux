@@ -46,10 +46,14 @@ one pane to the logged-in Claude account with the most weekly room below
 `AMUX_QUOTA_RESERVE_PERCENT`, in its exact session; its parked messages follow.
 A session window moves a pane only after a verified wind-down compact or through the stop mover. `AMUX_CLAUDE_LIMIT_RECOVERY_ENABLED=false`
 disables banner recovery. Other rotations still require his instruction.
-Mattias 2026-10-21 (day file 03:49Z): when the quota park or floor holds
-panes because their account's week is spent and another logged-in account
-has room, move them there at once without asking, then report it. Paid
-credits still need his yes.
+Mattias 2026-10-21 (day file 03:49Z) and 2026-11-03 17:05Z (sandman:0, ask
+ledger): when the quota park or floor holds panes and another logged-in
+account has room, move them there at once without asking, then report it.
+The floor is a stop: an account at `AMUX_QUOTA_FLOOR_PERCENT` left on its
+week stops its panes though the week is not spent (3 Nov: Claude I at 98 %
+held 14 panes 16:07Z to 17:05Z while Claude S read 1 %). An account whose
+reading shows no session window runs no session and has room. Paid credits
+still need his yes.
 The bridge's stop mover does this each minute through the rotation
 (`AMUX_QUOTA_STOP_MOVE=on|dry|off`, default on). lsrc:0 2026-10-21 07:0xZ
 (case 11): a Claude session at 3 % left, or forecast to run out within 20
@@ -75,10 +79,14 @@ same hold applies, idle compacts included, until its reset, unless
 `AMUX_CODEX_CREDITS=allow` (lsrc:0 2026-10-20). `amux quota` shows the balance.
 With `AMUX_IDLE_CAPACITY_TARGET=agent:pane` the bridge tells that pane once per
 episode when a pane has been stopped or parked for 15 minutes while an account
-of its engine has room. It never wakes or moves anything itself.
+of its engine has room. It never wakes or moves anything itself. Its notice
+passes the target's own floor on the weekly reserve, never on paid credits.
+Floor-held panes in it are already authorized: move them, do not ask.
 
 ## 3. Switch only on Mattias's word
 
+- Panes the floor or the quota park holds are covered by his word above: move
+  them without asking (2026-11-03: lsrc:0 asked instead, and the fleet waited).
 - When Mattias activates an account and says it should be used, that is his
   word for all panes: move the quota-stopped panes in the same turn with
   `amux accounts rotate claude:<login>`, and do not ask him again
