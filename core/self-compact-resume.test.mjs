@@ -2,12 +2,12 @@ import { component, expect, feature } from "bdd-vitest";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createSelfCompactStore } from "./self-compact.mjs";
+import { createSelfCompactStore, formatSelfCompactNotice } from "./self-compact.mjs";
 import { createContextMaintenance } from "./context-maintenance.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createPauseCompact } from "../channels/pause-compact.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
-import { fenceSelfCompactJobs } from "./self-compact-resume.mjs";
+import { fenceSelfCompactJobs, finishSelfCompactRequest } from "./self-compact-resume.mjs";
 
 const NOW = Date.parse("2026-10-12T16:18:07.172Z");
 const HANDOFF = "Continue from the clean pushed checkpoint 9cd1f581. Read the saved task. Återkör inte färdiga prov. No provider or deploy.";
@@ -81,6 +81,23 @@ feature("a checkpoint compact continues its own saved task", () => {
       expect(fx.calls).toEqual([]); expect(fx.queue.list("lsrc", 4)).toEqual([]); expect(fx.requests.read("lsrc", 4)).toBeNull();
       expect(fx.notices).toHaveLength(1);
       expect(fx.notices[0][2]).toContain("saved continuation was not queued");
+    }], cleanup: fx => fx.cleanup(),
+  });
+  component("input arriving after a verified compact also reports the discarded handoff", {
+    given: ["a checkpoint followed by newer user input", () => {
+      const fx = fixture();
+      fx.append({ type: "event_msg", payload: { type: "user_message", message: "Stop. Work on the new request." } });
+      return fx;
+    }],
+    when: ["a verified compact is finalized", fx => {
+      const request = fx.requests.read("lsrc", 4);
+      return finishSelfCompactRequest(request, { outcome: "compacted" }, { store: fx.requests, queue: fx.queue,
+        identityFor: () => fx.identity, receiptFor: () => ({ status: "VERIFIED", sessionId: fx.identity.sessionId,
+          at: NOW, cursor: { positions: { [fx.path]: 0 } } }) });
+    }],
+    then: ["the new input wins and the missing continuation is reported", (ending, fx) => {
+      expect(fx.queue.list("lsrc", 4)).toEqual([]);
+      expect(formatSelfCompactNotice("lsrc:4", ending)).toContain("saved continuation was not queued");
     }], cleanup: fx => fx.cleanup(),
   });
   for (const scenario of ["session-change", "working", "dialog", "new-input", "submitted"]) {
