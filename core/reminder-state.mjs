@@ -187,8 +187,8 @@ export const DRIFT_SECTIONS = [
     section: "Framdrift",
     label: "framdrift (hans exempel först, klocka på varje väntan, nytt spår efter två stopp)",
     directive: "run his own example through his path before building on, and never " +
-      "substitute what he asked for. Give every wait a clock; a watch also alarms " +
-      "after 10 min without change. Write the cause with file:line before a retry; " +
+      "substitute what he asked for. Give every wait a clock; a watch alarms after " +
+      "10 min with no working process and no code commit. Write the cause with file:line before a retry; " +
       "after two stops on the same step change path or ask the lead within 10 min. " +
       "DONE only in his view.",
   },

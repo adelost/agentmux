@@ -419,7 +419,7 @@ feature("formatReminderMessage --section override (1.25.53 behavior)", () => {
       expect(messages[0]).toContain('the "Framdrift" section of /repo/.agents/CLAUDE.md');
       expect(messages[1]).toContain('the "Framdrift" section of /repo/.agents/AGENTS.md');
       for (const message of messages) {
-        expect(message).toMatch(/his own example[\s\S]*10 min without change[\s\S]*two stops on the same step/u);
+        expect(message).toMatch(/his own example[\s\S]*10 min with no working process and no code commit[\s\S]*two stops on the same step/u);
       }
     }],
   });

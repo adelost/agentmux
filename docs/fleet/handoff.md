@@ -59,7 +59,7 @@
 4. **Respect actual availability.** One active feature per agent. Never stack
    work on a pane that is working, in a modal, or between tool calls.
    A blocked task does not reserve its pane indefinitely:
-   checkpoint it and release its active resources before taking independent work.
+   write it BLOCKED with its clock and release its active resources before taking independent work.
    Honor the project's concurrency limit; invent no extra parallelism. A board lease alone does not prove a pane is free.
 
 5. **One allocator, one shared-resource lock.** The project lead owns who does

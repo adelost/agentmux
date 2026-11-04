@@ -7,9 +7,10 @@
    the configured project TASKS.md ledger on the default branch, which
    stats.v1d.io reads; a row only on a feature branch is invisible there.
    Above 200 KB, move closed rows verbatim to an archive file beside it (same
-   format, numbers unique across both) in one announced commit; State keeps
-   the current state, next proof and blocker, not history (Mattias 31 Oct 2026,
-   delivery:c7932021b8e6e2badf782997ba2c1e40: less context, clear focus).
+   format, numbers unique across both) in one announced commit (Mattias
+   31 Oct 2026, delivery:c7932021b8e6e2badf782997ba2c1e40: less context, clear
+   focus). The row is one line: state, owner, target with its UTC clock
+   (2026-11-04T10:00Z) and proof link. No history in the row; git log has it.
    Priority: P0 stops the current main flow or threatens data/access, P1 next
    delivery work, P2 later; missing means unknown, not lowest. State and
    dependencies decide what can run. Comments go to
@@ -26,10 +27,11 @@
    id), `own`, after his pointer if any, or `inferred:` before the pointer
    when the row rests on your reading of his words.
 
-8. **Each place has one job.** TASKS holds status and checkpoint updates.
-   The existing task receipt holds delivery proof at DONE, release or spending;
-   do not create a receipt file for every message. Messages report only DONE,
-   a concrete stop or a decision, to the next owner or the person who must act.
+8. **Each place has one job.** A row is written at start and at DONE or
+   BLOCKED, never at checkpoints. A wait is BLOCKED with what it waits for and
+   its UTC clock. No receipt file per step or message: the proof is an image
+   link or a SHA in the DONE message. Messages report only DONE, a concrete
+   stop or a decision, to the next owner or the person who must act.
    Do not copy other recipients for information.
 
 9. **Record blockers where work is tracked:** a concrete reason and the
@@ -39,8 +41,8 @@
 
 ## Messages between agents
 
-DONE fits in at most three lines: the change, its key measured result and a
-link to the receipt. A stop names the cause and what clears it. A decision
+DONE fits in at most three lines: the change, its key measured result and an
+image link or SHA. A stop names the cause and what clears it. A decision
 names the question and recommendation. Keep enough facts to act without
 opening the link. Shorten words, not evidence or uncertainty.
 
@@ -55,9 +57,20 @@ Why: repeated status messages consume attention and model context without
 moving work. Source: Mattias's 25 October decision relayed by lsrc:0,
 [TASKS 96](../TASKS.md), with its original delivery source.
 
+## Code first
+
+Time and tokens go to code. Measurement scripts, plans and documentation are
+made only when directly needed to deliver or prove a row. No new test files:
+the proof is a manual trial in the real app, and the rule has no end date.
+The state-age watch reads code commits whose subject names the row, the owner
+pane's process and a blocked row's stated clock, never ledger edits; a note
+or re-stamp renews nothing. Why: in Cutkit on the night to 4 Nov, 38 of 51
+commits were TASKS or docs and 13 were code. Source: Mattias 4 Nov 2026
+05:39Z, delivery:2c931a8c583165bff6e83695c6609c03, relayed by sandman:0.
+
 ## Time budgets
 
-Each allocated row names a time budget and next checkpoint in TASKS. At the
+Each allocated row names a time budget and its target clock when it starts. At the
 budget, bank the result, finish safe resource closure and report the stop plus
 the smallest continuation proposal; do not begin another investigation or phase
 without a new bounded decision. Independent assigned READY work may proceed.

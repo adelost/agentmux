@@ -13,18 +13,22 @@ them; avatars, memory and claims are not proof.
 
 Mellan agenter gäller:
 
-1. **Ett jobb per plats.** TASKS-raden visar läget; uppdatera den vid
-   checkpoint och skriv där vad du väntar på, till när och vad som händer då.
-   En bevakning larmar också när inget ändrats på 10 min; då undersöker
-   ägaren direkt.
-   Skriv leveransbevis vid DONE, släpp eller använda pengar i
-   uppgiftens befintliga kvittofil. Skapa inte en kvittofil per meddelande.
-   Meddelanden gäller bara klart, stopp eller beslut.
+1. **Ett jobb per plats.** TASKS-raden skrivs vid start och vid DONE eller
+   BLOCKED, aldrig vid kontrollpunkter. Den är en rad: läge, ägare, mål med
+   klockslag (UTC, som 2026-11-04T10:00Z) och bevislänk. Ingen historik i
+   raden; den finns i git log. En väntan skrivs som BLOCKED med vad du väntar
+   på och klockslaget. Bevakningen ser på kod-commits som nämner raden och på
+   om ägarens process arbetar, aldrig på om TASKS ändrats; larmar den,
+   undersöker ägaren direkt.
+   Inga kvittofiler per steg eller meddelande: beviset är en bildlänk eller
+   ett sha i DONE. Meddelanden gäller bara klart, stopp eller beslut.
 2. **Gör meddelandet användbart direkt.** Klart: högst tre rader med
-   ändringen, huvudsiffran och kvittolänken. Stopp: orsak och vad som behövs.
+   ändringen, huvudsiffran och bildlänken eller sha:t. Stopp: orsak och vad som behövs.
    Beslut: fråga och rekommendation. Korta texten utan att tappa fakta;
    mottagaren ska kunna agera utan att öppna länken.
-3. **Inga sidospår.** Gör bara det som för hans resultat framåt eller bevisar
+3. **Inga sidospår.** Tid och tokens går till kod. Mätskript, planer och
+   dokumentation görs bara när de direkt behövs för att leverera eller bevisa
+   en rad. Gör bara det som för hans resultat framåt eller bevisar
    det; annat blir en rad till ledaren, inte arbete. Lista inte sådant som inte
    gjordes om ingen har frågat. Använd SHA eller länk för interna id i löptext.
 4. **En mottagare, en ledare per leverans.** Skriv till nästa ägare eller den
@@ -37,6 +41,10 @@ Mellan agenter gäller:
    TASKS-raden med beställningens delivery-id i Source-cellen och vad han ska
    kunna göra när det är klart: konto, väg och enhet, läst i kod, logg eller
    hans bild.
+7. **Inga nya testfiler.** Beviset är manuell provning i den riktiga appen:
+   hans väg, hans enhet, en bild. Befintliga tester och lint körs riktat.
+   Regeln har inget slutdatum (Mattias 4 nov 2026,
+   delivery:2c931a8c583165bff6e83695c6609c03).
 
 Delade träd fryses bara under korta koordinerade gate-fönster med utsedd
 koordinator, aldrig genom en annan panels långvariga blanket-fence.
@@ -61,7 +69,8 @@ Mattias protokoll 1 nov 2026, fallen i [momentum.md](${fleetPolicyFile("momentum
    ledaren inom 10 min.
 5. **sandman:0 bevakar** pågående leveranser med en skriptkoll var 5:e min
    och knuffar ägaren med fakta när en panel och dess arbete stått still i
-   10 min, en väntan passerat sin klocka eller samma steg stoppat två gånger.
+   10 min (ingen process i arbete och ingen kod-commit), en väntan passerat
+   sin klocka eller samma steg stoppat två gånger.
    Mattias får besked bara vid beslut, ändrad tid eller klart.
 
 ## Staffing and review economics
@@ -70,7 +79,7 @@ Mattias protokoll 1 nov 2026, fallen i [momentum.md](${fleetPolicyFile("momentum
 - The allocator names READY owners once; owners then build and deliver without a manager round-trip.
 - Do not wake a fleet to look busy; wake only the exact owner of authorised work.
 - Respect actual availability: one active feature per agent, within the project's concurrency limit.
-- TASKS owns status and checkpoints; messages are DONE, concrete stops or decisions.
+- TASKS owns status, written at start and at DONE or BLOCKED; messages are DONE, concrete stops or decisions.
 - Human direction is authoritative; current direct instructions outrank relayed decisions and older rules.
 
 ## Read when triggered

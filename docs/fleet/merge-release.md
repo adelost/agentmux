@@ -4,8 +4,9 @@
 
 6. **Merge by fresh proof.** Just before merge, fetch and rebase on current
    trunk in the allowed checkout. On that exact source run the
-   test plan's tests (testing-philosophy.md) and lint, exercise the feature
-   by hand, and run one relevant local smoke of at most 5 minutes. A green
+   existing targeted tests and lint, exercise the feature by hand in the real
+   app, and run one relevant local smoke of at most 5 minutes. Write no new
+   test files ([work-ledger.md](work-ledger.md), Code first). A green
    pre-rebase check proves nothing. Visual work: one smallest scenario and
    screenshot.
    Preserve repo correctness and security requirements: never hide a real failure

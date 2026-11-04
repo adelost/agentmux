@@ -110,7 +110,7 @@ export function paneDir(rootDir, pane) {
 // Bump it whenever AGENT_HINTS changes: hints sync warns while the running
 // bridge still serves an older one. Appended content survives upgrades.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
-export const HINTS_VERSION = "1.25.426";
+export const HINTS_VERSION = "1.25.437";
 /** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 /** DTO: Shared generated instructions, excluding workspace-owned notes. */

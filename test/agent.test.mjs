@@ -464,7 +464,9 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["local proof stays small without weakening correctness requirements", (content) => {
-      expect(content).toContain("test plan's tests (testing-philosophy.md) and lint, exercise the feature");
+      // Mattias 4 Nov 2026 (delivery:2c931a8c): no new test files; existing targeted tests, lint and a hand trial in the real app.
+      expect(content).toMatch(/existing targeted tests and lint, exercise the feature by hand in the real\s+app/u);
+      expect(content).toMatch(/Write no new\s+test files/u);
       expect(content).toContain("one relevant local smoke of at most 5 minutes");
       // lsrc:0, 2026-10-22 (release philosophy, testing-philosophy.md): release checks follow that file's
       // release philosophy and point 8; an older named chain no longer binds by name alone.
@@ -575,7 +577,7 @@ feature("generated agent policy", () => {
       expect(content).toContain("One active feature per agent");
       expect(content).toMatch(/working, in a modal, or between tool calls/u);
       expect(content).toMatch(/A blocked task does not reserve its pane indefinitely/u);
-      expect(content).toMatch(/checkpoint it and release its active resources before taking independent work/u);
+      expect(content).toMatch(/write it BLOCKED with its clock and release its active resources before taking independent work/u);
       expect(content).toMatch(/A board lease alone does not prove a pane is\s+free/u);
       expect(content).toMatch(/Do not wake a fleet to look busy/u);
     }],
@@ -661,8 +663,9 @@ feature("generated agent policy", () => {
         /Kör hans exempel, eller det svåraste riktiga fallet/u,
         /Byt aldrig ut det han bett om/u,
         /Session, kvot, disk, kostnadstak och klippgränser ska räcka för hela jobbet, också för reservvägen/u,
-        /vad du väntar på, till när och vad som händer då/u,
-        /larmar också när inget ändrats på 10 min/u,
+        // Mattias 4 Nov 2026 (delivery:2c931a8c): a wait is BLOCKED with its clock, and the watch reads code and process, not ledger edits.
+        /BLOCKED med vad du väntar\s+på och klockslaget/u,
+        /Bevakningen ser på kod-commits som nämner raden/u,
         /Efter två stopp på samma steg byter ägaren väg eller frågar ledaren inom 10 min/u,
         /Gör bara det som för hans resultat framåt eller bevisar det/u,
         /Check ids, accounts, files and paths at their source/u,
