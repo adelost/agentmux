@@ -311,13 +311,14 @@ feature("a Claude builder's budget of 200k", () => {
 });
 
 // lsrc:0, a leader at 150k: far under its 700k pause limit, so only its own request compacts it.
-function selfController({ background = null } = {}) {
+function selfController({ background = null, superseded = false } = {}) {
   let now = NOW;
   const dir = mkdtempSync(join(tmpdir(), "amux-self-compact-"));
   const requests = createSelfCompactStore({ dir, now: () => now });
   const runs = [], lines = [], notices = [];
   const pause = createPauseCompact({ modes: { claude: "on", codex: "on" }, now: () => now, state: { get: () => ({}) },
-    contextMaintenance: { run: async (name, pane, options) => { runs.push({ pane: `${name}:${pane}`, ...options }); return { ok: true, compacted: true }; } },
+    contextMaintenance: { run: async (name, pane, options) => { runs.push({ pane: `${name}:${pane}`, ...options }); return { ok: true, compacted: true }; },
+      selfRequestSuperseded: () => superseded },
     record: line => lines.push(line), identityFor: () => ({ path: "/projects/lsrc-0/s1.jsonl", sessionId: "s1" }),
     backgroundFor: { claude: () => background, codex: () => background }, journalCompactFor: () => null,
     selfRequests: requests, notify: async (agent, pane, text) => notices.push(`${agent}:${pane} ${text}`) });
@@ -328,6 +329,24 @@ function selfController({ background = null } = {}) {
 }
 
 feature("a pane's own request to be compacted", () => {
+  component("a superseded handoff is reported without restarting old work", {
+    given: ["a saved continuation and later input", () => {
+      const ctx = selfController({ superseded: true });
+      const path = "/projects/lsrc-0/s1.jsonl";
+      ctx.requests.request({ agent: "lsrc", pane: 0, tokens: 150_000, continuation: "finish the film",
+        identity: { sessionId: "s1", path }, cursor: { positions: { [path]: 0 } } });
+      return ctx;
+    }],
+    when: ["the bridge considers the request", async ctx => { await ctx.poll(); await ctx.poll(); }],
+    then: ["one channel notice says no continuation was queued", (_result, ctx) => {
+      try {
+        expect(ctx.notices).toHaveLength(1);
+        expect(ctx.notices[0]).toContain("saved continuation was not queued");
+        expect(ctx.runs).toEqual([]);
+        expect(ctx.requests.list()).toEqual([]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
   component("a request made mid-turn compacts when the turn ends, not during it", {
     given: ["lsrc:0 at 150k asks at a stage boundary while its turn runs", () => {
       const ctx = selfController();

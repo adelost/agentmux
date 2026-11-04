@@ -77,8 +77,10 @@ feature("a checkpoint compact continues its own saved task", () => {
       const fx = fixture(); fx.append({ type: "event_msg", payload: { type: "user_message", message: "Stop. Work on the new request." } }); return fx;
     }],
     when: ["the next safe pause is considered", fx => fx.poll()],
-    then: ["no compact or continuation for the superseded request", (_, fx) => {
+    then: ["no compact or continuation, and the missing handoff is reported", (_, fx) => {
       expect(fx.calls).toEqual([]); expect(fx.queue.list("lsrc", 4)).toEqual([]); expect(fx.requests.read("lsrc", 4)).toBeNull();
+      expect(fx.notices).toHaveLength(1);
+      expect(fx.notices[0][2]).toContain("saved continuation was not queued");
     }], cleanup: fx => fx.cleanup(),
   });
   for (const scenario of ["session-change", "working", "dialog", "new-input", "submitted"]) {

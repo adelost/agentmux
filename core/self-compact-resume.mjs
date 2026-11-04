@@ -46,7 +46,7 @@ export function finishSelfCompactRequest(request, ending, { store, queue, identi
       + createHash("sha256").update(request.continuation).digest("hex").slice(0, 16);
     const existing = queue.list(request.agent, request.pane).find(job => job.idempotencyKey === key);
     if (!existing && selfCompactSuperseded(request, { identityFor, queue })) {
-      result = { ...ending, outcome: "satisfied", detail: "new input or session superseded the saved handoff" };
+      result = { ...ending, outcome: "satisfied", detail: "new input or session superseded the saved handoff", continuationSuperseded: true };
     } else {
       const job = existing || queue.enqueue({ agentName: request.agent, pane: request.pane, kind: "prompt", source: "self-compact",
         text: request.continuation, idempotencyKey: key, metadata: { selfCompactContinuation: {

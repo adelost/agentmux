@@ -240,7 +240,13 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       selfRequests.clear(name, pane);
       // New input outdates the park's handoff, not its compact: the next turn end parks the pane again for this stop.
       if (parking) parked.delete(paneKey);
-      report(paneKey, request.requestedAt, { ...base, outcome: "dropped", detail: "new input or session superseded the saved handoff" });
+      const ending = { ...base, outcome: "dropped", detail: "new input or session superseded the saved handoff" };
+      report(paneKey, request.requestedAt, ending);
+      if (request.continuation) {
+        const text = formatSelfCompactNotice(paneKey, { ...ending, continuationSuperseded: true });
+        Promise.resolve().then(() => notify(name, pane, text))
+          .catch((error) => log(`${paneKey} self-compact notice failed: ${error.message}`));
+      }
       return false;
     }
     // A pane that asked at a stage boundary is compacted from about 80k, the size rule waits for its budget: 200k for a Claude builder, 400k for the others, 700k for a leader.
