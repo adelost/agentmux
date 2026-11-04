@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { planStateAge } from "./state-age-guard.mjs";
 import { stateAgeClockHistory } from "./state-age-state-history.mjs";
 import { stateAgeDigests } from "./state-age-digests.mjs";
+import { stateAgeCodeIndex, stateAgeWithCode } from "./state-age-code.mjs";
 export { stateAgeRows } from "./state-age-rows.mjs";
 
 const git = (root, args) => execFileSync("git", ["-C", root, ...args], {
@@ -38,7 +39,8 @@ export async function readStateAgeSnapshot(project, tip, at = null) {
     const history = await stateAgeClockHistory(project, sha, new Set([ledgerSha]));
     cached = { sha, rows: history.snapshots.get(ledgerSha) || [] }; currentCache.set(cacheKey, cached);
   }
-  return { ...project, tip, sha, rows: cached.rows };
+  const until = at ?? Date.now();
+  return { ...project, tip, sha, rows: stateAgeWithCode(cached.rows, stateAgeCodeIndex(project, sha, until), until) };
 }
 
 /** WHAT: Builds an exact hourly replay with the same daily recipient digests as live checks. WHY: Keeps unsent later alerts from masquerading as rows mentioned in an earlier digest. */
@@ -51,9 +53,10 @@ export async function replayStateAge(project, { since, until, panesAt = null }) 
     ticks.push({ at, sha, ledgerSha }); if (ledgerSha) wanted.add(ledgerSha);
   }
   const history = await stateAgeClockHistory(project, source.tip, wanted);
+  const code = stateAgeCodeIndex(project, source.tip, until, 8 + (until - since) / 86400000);
   const seen = new Set(), flagged = new Set(), days = {}, firstFlags = {}, firstNamed = {}, snapshots = [];
   for (const { at, sha, ledgerSha } of ticks) {
-    const snapshot = { ...project, sha, rows: history.snapshots.get(ledgerSha) || [] };
+    const snapshot = { ...project, sha, rows: stateAgeWithCode(history.snapshots.get(ledgerSha) || [], code, at) };
     const plan = planStateAge({ projects: [snapshot], panes: panesAt?.(at) || [], now: at });
     const messages = stateAgeDigests(plan, [snapshot], seen);
     const day = days[plan.day] ||= { rows: 0, paneAlarms: 0, messages: 0, recipients: {}, alarms: [], deliveries: [], ambiguousRows: [] };

@@ -2,6 +2,7 @@ const HOUR = 3600000;
 const TERMINAL = /^(?:done|closed|cancelled|canceled|dropped|retired|incorporated|superseded|replaced|stängd|klar[ta]?|färdig|levererad)(?:\b|(?=\d))/iu;
 const WORKING = /^(?:working|active|doing|in.progress|pågår|arbetar)\b/iu;
 const BLOCKED = /^(?:blocked|blockerad|waiting|väntar|stopp?|hold|paused)\b/iu;
+const UTC_CLOCK = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z/gu;
 
 /** WHAT: Resolves the leading state word into its canonical meaning. WHY: Keeps notes and translated spellings from renewing a state clock. */
 export function stateAgeWord(state) {
@@ -18,6 +19,12 @@ export function stateAgeWord(state) {
 export function stateAgeOwners(cell) {
   if (/(?:unassigned|staffs|bemannar|utan ägare|no owner|not allocated)/iu.test(cell)) return [];
   return [...new Set(String(cell).match(/(?<![\p{L}\d_-])[a-z][\w-]*:\d+(?![\p{L}\d_:])/giu) || [])];
+}
+
+/** WHAT: Reads the latest UTC clock a row states after its state was set. WHY: Keeps a blocked row waiting on its own clock, not a daily ledger edit. */
+export function stateAgeClock(state, setAt) {
+  const times = [...String(state || "").matchAll(UTC_CLOCK)].map(match => Date.parse(match[0])).filter(at => Number.isFinite(at) && at > setAt);
+  return times.length ? Math.max(...times) : null;
 }
 
 /** WHAT: Checks whether a ledger row remains open. WHY: Keeps historical completion text from suppressing an active row. */
@@ -45,8 +52,12 @@ export function planStateAge({ projects, registrationProjects = projects, panes 
     for (const id of ambiguous) unknownClocks.push({ project: project.id, row: id, kind: "duplicate-row", lines: open.filter(row => row.row === id).map(row => row.line) });
     for (const row of open.filter(row => !ambiguous.has(row.row))) {
       const owners = stateAgeOwners(row.owner), reasons = [], idleOwners = [], limitMs = stateAgeLimit(row);
-      const ageMs = Number.isFinite(row.changedAt) && row.changedAt <= now ? now - row.changedAt : null;
-      if (ageMs === null) unknownClocks.push({ project: project.id, row: row.row, kind: "row" });
+      // A code commit naming the row counts as its last sign of work; ledger notes never do.
+      const since = Number.isFinite(row.changedAt) ? Math.max(row.changedAt, Number.isFinite(row.codeAt) ? row.codeAt : -Infinity) : null;
+      const ageMs = since !== null && since <= now ? now - since : null;
+      const clockAt = stateAgeWord(row.state) === "blocked" && Number.isFinite(row.changedAt) ? stateAgeClock(row.state, row.changedAt) : null;
+      if (clockAt !== null) { if (now >= clockAt) reasons.push("clock-passed"); }
+      else if (ageMs === null) unknownClocks.push({ project: project.id, row: row.row, kind: "row" });
       else if (ageMs >= limitMs) reasons.push("state-age");
       if (stateAgeWord(row.state) === "working") for (const owner of owners) {
         const pane = panes.find(p => p.key === owner);
@@ -59,7 +70,8 @@ export function planStateAge({ projects, registrationProjects = projects, panes 
       const key = `${day}:${project.id}:row:${row.row}`;
       if (reasons.length && !seen.has(key)) alarms.push({ key, kind: "row", project: project.id, row: row.row,
         title: row.title, state: row.state, stateWord: stateAgeWord(row.state), changedAt: row.changedAt,
-        stateChangedAt: row.stateChangedAt ?? row.changedAt, stateSourceSha: row.stateSourceSha || null,
+        stateChangedAt: row.stateChangedAt ?? row.changedAt, codeAt: Number.isFinite(row.codeAt) ? row.codeAt : null, clockAt,
+        stateSourceSha: row.stateSourceSha || null,
         ownerSourceSha: row.ownerSourceSha || null, dependencyText: row.state,
         ageMs, limitMs, reasons, idleOwners, noOwner: !owners.length,
         recipients: [...new Set([...owners, project.dispatcher])] });
@@ -92,5 +104,7 @@ export function stateAgeMessage(alarm) {
   const age = alarm.ageMs === null ? "okänd" : (alarm.ageMs / HOUR).toFixed(1), limit = alarm.limitMs / HOUR;
   const subject = alarm.kind === "row" ? `${alarm.row} (${String(alarm.title || "uppgift utan namn").split(/\s+/u).slice(0, 4).join(" ")})` : alarm.pane;
   const idle = (alarm.idleOwners || []).map(owner => `${owner.pane} idle/stopped ${(owner.ageMs / HOUR).toFixed(1)} h, gräns2h`).join("; ");
-  return `[state-age] ${subject}: ${alarm.state}. Ålder ${age} h; gräns ${limit} h. ${alarm.noOwner ? "Raden saknar tilldelad ägare. " : ""}${idle || alarm.reasons.join(", ")}. Ändra läget, ange ett konkret hinder med datum, eller stryk med skäl.`;
+  const bound = alarm.reasons.includes("clock-passed") ? `klockan ${new Date(alarm.clockAt).toISOString().slice(0, 16)}Z har passerat`
+    : alarm.reasons.includes("state-age") ? `gräns ${limit} h utan kod-commit som nämner raden` : `gräns ${limit} h`;
+  return `[state-age] ${subject}: ${alarm.state}. Ålder ${age} h; ${bound}. ${alarm.noOwner ? "Raden saknar tilldelad ägare. " : ""}${idle || alarm.reasons.join(", ")}. Nästa: kod som nämner raden, BLOCKED med klockslag som 2026-11-04T10:00Z, DONE, eller stryk med skäl.`;
 }

@@ -12,7 +12,7 @@ import { watchStateAge } from "./state-age-watch.mjs";
 import { stateAgeDigests } from "../core/state-age-digests.mjs";
 
 const help = "amux state-age replay --project cutkit --since ISO --until ISO [--output FILE]\namux state-age check|watch [--project ID] [--output FILE] [--send --measurement FILE]\nRead-only by default. Watch checks immediately, then hourly. Sends require Rule v2 probe hits, ten checked state clocks and at most12 recipient messages/day.";
-const policyHash = () => createHash("sha256").update(["../core/state-age-guard.mjs", "../core/state-age-history.mjs", "../core/state-age-state-history.mjs", "../core/state-age-rows.mjs", "../core/state-age-digests.mjs", "../core/state-age-projects.mjs", "./state-age.mjs", "./state-age-panes.mjs", "./state-age-watch.mjs"]
+const policyHash = () => createHash("sha256").update(["../core/state-age-guard.mjs", "../core/state-age-history.mjs", "../core/state-age-code.mjs", "../core/state-age-state-history.mjs", "../core/state-age-rows.mjs", "../core/state-age-digests.mjs", "../core/state-age-projects.mjs", "./state-age.mjs", "./state-age-panes.mjs", "./state-age-watch.mjs"]
   .map(path => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n")).digest("hex");
 
 /** WHAT: Checks a measured state-age activation record. WHY: Prevents a partial history or row count from authorizing excessive messages. */
@@ -21,7 +21,8 @@ export function qualifyStateAge(report, project) {
     && report.source?.ledger === project.ledger
     && Object.keys(report.days || {}).length >= 3 && Object.values(report.days).every(day => day.messages <= 12)
     && report.sampleReview?.complete === true && report.sampleReview.reviewed === 10 && report.sampleReview.falseRecentChanges === 0
-    && (project.id !== "cutkit" || report.firstFlags?.["533c"] <= "2026-10-27T09:24:00.000Z" && report.firstNamed?.["557a"] < "2026-10-27T00:00:00.000Z");
+    // 533c is no probe since 4 Nov: code commits named it 26 Oct 09:56Z and 27 Oct 08:12Z, so it was worked, not stalled.
+    && (project.id !== "cutkit" || report.firstNamed?.["557a"] < "2026-10-27T00:00:00.000Z");
 }
 
 /** WHAT: Reads receipt identities from durable dispatcher jobs. WHY: Prevents a crash between enqueue and local bookkeeping from repeating an unowned-row alert. */
