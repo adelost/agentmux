@@ -197,7 +197,8 @@ on the limits `policies/context-cost.mjs` documents (80k tokens, one hour):
 | compact not admissible or context unknown | stays on its source | `blocked (compact-refused:…)` / `blocked (context-unknown)` |
 
 The compact runs on its own pane lease, outside the project's rotation lease.
-Manual, auto, nightly, pause, quota-floor, self and rotation share the pane's
+Manual, auto, nightly, pause, quota-floor, self, rotation, Dream, sleep and
+model changes share the pane's
 `context_maintenance_by_pane_v1` receipt. Nightly run files are reports, not
 independent attempt fences; existing files and quota episodes are read during
 the transition so earlier attempts are not forgotten. After 40 minutes an

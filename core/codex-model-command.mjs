@@ -146,13 +146,14 @@ export async function runCompactFirstCodexModelChange({
   }
 
   let reusedCompact = false;
-  const compact = agent.compactCodex ? async () => {
+  if (!agent.compactCodex) return { ok: false, stage: "compact", reason: "compact-store-unavailable" };
+  const compact = async () => {
     const context = await readContext();
     const prior = context?.sessionId ? contextMaintenanceAttempt(state, name, pane, context) : null;
-    const receipt = prior?.status === "VERIFIED" ? { ...prior, ok: true, compactBoundary: true } : null;
+    const receipt = prior?.status === "VERIFIED" && prior.compactBoundary ? { ...prior, ok: true } : null;
     if (validCodexCompactReceipt(receipt, context?.sessionId)) { reusedCompact = true; return receipt; }
     return agent.compactCodex(name, pane, { sendCompact });
-  } : null;
+  };
 
   const result = await compactThenSwitchCodex({
     readContext,

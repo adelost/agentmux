@@ -1,11 +1,13 @@
 import { expect, feature, unit } from "bdd-vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, vi } from "vitest";
 import { cmdSleep, cmdSleepWatch, cmdWake } from "./sleep.mjs";
 import { observePane } from "./sleep-probes.mjs";
 import { readPaneSleepState, writePaneSleepState } from "../core/pane-sleep.mjs";
+import { createState } from "../core/state.mjs";
+import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 
 const NOW = Date.parse("2026-07-20T12:00:00Z");
 
@@ -102,6 +104,45 @@ function successFixture() {
 }
 
 feature("exact Claude sleep sequence", () => {
+  unit("sleep records its compact in the same shared store before input", {
+    given: ["a proven idle pane and an exact session", () => {
+      const fx = successFixture(), path = join(fx.stateRoot, "session.jsonl");
+      writeFileSync(path, ""); fx.ctx.state = createState(join(fx.stateRoot, "shared.json"));
+      fx.deps.latestIdentity = () => ({ sessionId: "after", path });
+      const observe = fx.deps.observe;
+      fx.deps.observe = vi.fn(async (...args) => ({ ...(await observe(...args)), identity: { sessionId: "after", path } }));
+      fx.ctx.agent.capturePromptEchoCursor = vi.fn(async () => ({ positions: { [path]: 0 } }));
+      const original = fx.deps.sendSlash;
+      fx.deps.sendSlash = async (...args) => {
+        if (args[3] === "/compact") expect(fx.ctx.state.get("context_maintenance_by_pane_v1")["lsrc:3"].status).toBe("ATTEMPTING");
+        return original(...args);
+      };
+      return fx;
+    }],
+    when: ["the ordinary sleep command runs", async fx => { await cmdSleep(fx.ctx, "lsrc", 3, {}, fx.deps); return fx; }],
+    then: ["the same receipt is verified before sleep completes", fx => {
+      expect(fx.ctx.state.get("context_maintenance_by_pane_v1")["lsrc:3"].status).toBe("VERIFIED");
+      rmSync(fx.stateRoot, { recursive: true, force: true });
+    }],
+  });
+  unit("sleep never treats a no-op as a verified compact boundary", {
+    given: ["an idle pane with a shared no-op receipt", () => {
+      const fx = successFixture(), path = join(fx.stateRoot, "session.jsonl");
+      writeFileSync(path, ""); fx.ctx.state = createState(join(fx.stateRoot, "shared.json"));
+      fx.deps.latestIdentity = () => ({ sessionId: "after", path });
+      const observe = fx.deps.observe;
+      fx.deps.observe = vi.fn(async (...args) => ({ ...(await observe(...args)), identity: { sessionId: "after", path } }));
+      fx.ctx.state.set("context_maintenance_by_pane_v1", { "lsrc:3": { sessionId: "after", status: "VERIFIED",
+        compactBoundary: false, cursor: captureJsonlAppendCursor("sleep-test", [path]) } });
+      return fx;
+    }],
+    when: ["sleep checks the existing receipt", async fx => { await cmdSleep(fx.ctx, "lsrc", 3, {}, fx.deps); return fx; }],
+    then: ["it holds without a second compact or exit", fx => {
+      expect(fx.slashCalls).toEqual([]); expect(fx.deps.exit).toHaveBeenCalledWith(1);
+      expect(readPaneSleepState("lsrc", 3, { rootDir: fx.stateRoot }).blockedReason).toBe("sleep-compact-boundary-unverified");
+      rmSync(fx.stateRoot, { recursive: true, force: true });
+    }],
+  });
   unit("compact, nonce response, two observations, and graceful exit produce asleep state", {
     given: ["a fully proven idle pane", () => successFixture()],
     when: ["sleeping it", async (fixture) => {

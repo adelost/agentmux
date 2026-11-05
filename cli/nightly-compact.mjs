@@ -247,7 +247,8 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     const save = (row) => updateCompactReceipt(ctx.state, key, prior => {
       const status = sharedStatus(row);
       const cursor = row.status === "attempting" ? captureJsonlAppendCursor("context-maintenance-v1", [row.sessionPath]) : prior.cursor;
-      return { ...prior, ...row, receiptStoreVersion: 1, attemptId: row.attemptId || randomUUID(), status, nightlyStatus: row.status, nightlyDateKey: dateKey, cursor,
+      const base = row.status === "attempting" ? { ...(prior.quotaCompactions && { quotaCompactions: prior.quotaCompactions }) } : prior;
+      return { ...base, ...row, receiptStoreVersion: 1, attemptId: row.attemptId || randomUUID(), status, nightlyStatus: row.status, nightlyDateKey: dateKey, cursor,
         at: Number.isFinite(Date.parse(row.attemptedAt)) ? Date.parse(row.attemptedAt) : now(),
         ...(row.status === "attempting" ? { pid: process.pid } : {}) };
     });
@@ -314,7 +315,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       await sleep(500);
       const after = await observe(ctx, target, { queue, now });
       const outcome = nightlyCompactOutcome(receipt, first, after, policy.maxTokens);
-      const row = { ...intent, ...outcome, finishedAt: new Date(now()).toISOString() };
+      const row = { ...intent, ...outcome, compactBoundary: receipt?.compactBoundary === true, finishedAt: new Date(now()).toISOString() };
       save(row);
       rows.push({ pane: key, ...row });
     } catch (error) {

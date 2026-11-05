@@ -4,7 +4,7 @@ import { parseCodexPaneReading } from "./codex-status.mjs";
 import { findBlockingPrompt } from "./dismiss.mjs";
 import { codexModelOverride, resolveCodexModelSelection, selectedCodexProfile } from "./codex-profiles.mjs";
 import { verifiedCodexCompact } from "./verified-compact.mjs";
-import { beginContextCompact, rememberContextCompact } from "./context-maintenance.mjs";
+import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "./context-maintenance.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
 import { esc } from "../lib.mjs";
 
@@ -110,7 +110,12 @@ export function createCodexCompact({ control, dirFor, wait, state, identityFor =
     // The intent is durable before the paid call, so a crash or an unverified
     // outcome is never followed by a second attempt on the same context.
     const identity = identityFor("codex", dirFor(name, pane));
-    if (identity?.path) beginContextCompact(state, name, pane, identity);
+    if (!state || !identity?.sessionId || !identity.path) return { ok: false, reason: "compact-store-or-session-unavailable" };
+    const previous = contextMaintenanceAttempt(state, name, pane, identity);
+    if (previous?.status === "VERIFIED" && previous.compactBoundary) return { ...previous, ok: true };
+    if (previous?.status === "VERIFIED") return { ok: false, reason: "compact-boundary-unverified" };
+    if (previous) return { ok: false, reason: `compact-previous-${previous.status.toLowerCase()}` };
+    beginContextCompact(state, name, pane, identity, { source: "codex-model", command: "/compact" });
     const receipt = await verifiedCodexCompact({
       agentName: name, pane, paneDir: dirFor(name, pane), agent: control, sleep: wait,
       ...(sendCompact ? { sendSlash: () => sendCompact() } : {}),

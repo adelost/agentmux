@@ -144,6 +144,24 @@ feature("a cold large Codex session is compacted before it resumes work", () => 
     then: ["an unverified attempt stays on record for that session", (data) =>
       expect(data.context_maintenance_by_pane_v1["skyvw:4"]).toMatchObject({ sessionId: "s4", status: "ATTEMPTING" })],
   });
+  component("a Codex model compact never overwrites another trigger's unknown receipt", {
+    given: ["an exact session with an unresolved shared compact", () => {
+      const root = mkdtempSync(join(tmpdir(), "codex-shared-unknown-")), path = join(root, "rollout.jsonl");
+      writeFileSync(path, "");
+      const data = { context_maintenance_by_pane_v1: { "skyvw:4": { sessionId: "s4", status: "UNKNOWN",
+        cursor: captureJsonlAppendCursor("fixture", [path]) } } };
+      const state = { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
+      const compact = createCodexCompact({ state, dirFor: () => root, identityFor: () => ({ sessionId: "s4", path }),
+        control: { sendOnly: () => { throw new Error("must not send"); } } });
+      return { root, data, compact };
+    }],
+    when: ["the model-change path asks to compact", async fx => {
+      try { return await fx.compact("skyvw", 4); } finally { rmSync(fx.root, { recursive: true, force: true }); }
+    }],
+    then: ["the previous unknown holds without another provider call", result => {
+      expect(result).toMatchObject({ ok: false, reason: "compact-previous-unknown" });
+    }],
+  });
 });
 
 feature("Codex wake cannot bypass compact-first model selection", () => {

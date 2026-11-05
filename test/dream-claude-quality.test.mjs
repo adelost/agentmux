@@ -7,12 +7,46 @@ import { readClaudeScreenQuality } from "../core/claude-statusline.mjs";
 import { readDreamOwnerQuality } from "../core/dream-owner.mjs";
 import { claudeProjectDir } from "../core/claude-paths.mjs";
 import { cmdDream } from "../cli/dream.mjs";
+import { prepareDreamOwner } from "../cli/dream-curator.mjs";
+import { createState } from "../core/state.mjs";
+import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 
 const FOOTER = "  ⬆ /gsd-update │ Fable 5.1 │ 0 █░░░░░░░░░ 10% · thinking: xhigh";
 const SCREEN = `old text\n────────────\n❯ \n────────────\n${FOOTER}\n bypass permissions on`;
 const ID = randomUUID();
 
 describe("Dream reads idle Claude quality without trusting stale cache", () => {
+  it("stores the curator compact intent and result in the shared receipt store", async () => {
+    const root = mkdtempSync(join(tmpdir(), "dream-compact-receipt-")), path = join(root, "session.jsonl");
+    writeFileSync(path, "");
+    const state = createState(join(root, "state.json")), identity = { sessionId: ID, path };
+    const owner = { agent: "claw", pane: 0, engine: "claude", paneDir: root };
+    const ctx = { state, deliveryQueue: { list: () => [], acquireSessionLease: () => ({ release() {} }) },
+      agent: { isBusy: async () => false } };
+    try {
+      await prepareDreamOwner(ctx, owner, { identityFor: () => identity,
+        getContext: () => ({ model: "claude-opus-5-5", effort: "xhigh", sessionId: ID }),
+        compactClaude: async () => {
+          expect(state.get("context_maintenance_by_pane_v1")["claw:0"]).toMatchObject({ status: "ATTEMPTING", sessionId: ID });
+          return { ok: true, compactBoundary: true, sessionId: ID, cursor: captureJsonlAppendCursor("dream-test", [path]) };
+        } });
+      expect(state.get("context_maintenance_by_pane_v1")["claw:0"].status).toBe("VERIFIED");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it("does not use a no-op compact as Dream's native boundary", async () => {
+    const root = mkdtempSync(join(tmpdir(), "dream-compact-no-boundary-")), path = join(root, "session.jsonl");
+    writeFileSync(path, "");
+    const state = createState(join(root, "state.json")), identity = { sessionId: ID, path };
+    state.set("context_maintenance_by_pane_v1", { "claw:0": { sessionId: ID, status: "VERIFIED",
+      compactBoundary: false, cursor: captureJsonlAppendCursor("dream-test", [path]) } });
+    const owner = { agent: "claw", pane: 0, engine: "claude", paneDir: root };
+    const ctx = { state, deliveryQueue: { list: () => [], acquireSessionLease: () => ({ release() {} }) }, agent: { isBusy: async () => false } };
+    try {
+      await expect(prepareDreamOwner(ctx, owner, { identityFor: () => identity,
+        getContext: () => ({ model: "claude-opus-5-5", effort: "xhigh", sessionId: ID }),
+        compactClaude: async () => { throw new Error("must not repeat"); } })).rejects.toThrow("dream-owner-compact-boundary-unverified");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
   it.each([
     [SCREEN, { model: "Fable 5.1", effort: "xhigh" }],
     [SCREEN.replace("Fable 5.1", "claude-opus-5"), { model: "claude-opus-5", effort: "xhigh" }],

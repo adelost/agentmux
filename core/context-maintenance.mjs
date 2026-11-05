@@ -65,7 +65,8 @@ function write(state, key, record) {
 export function rememberContextCompact(state, name, pane, receipt) {
   // "Nothing to compact" leaves the context as small as a compact would: no attempt is due before new work.
   if (!state || !(receipt?.ok || receipt?.nothingToCompact)) return;
-  write(state, paneKey(name, pane), { sessionId: receipt.sessionId, cursor: receipt.cursor, status: "VERIFIED", at: Date.now() });
+  write(state, paneKey(name, pane), { sessionId: receipt.sessionId, cursor: receipt.cursor, status: "VERIFIED",
+    compactBoundary: receipt.compactBoundary === true, at: Date.now() });
 }
 
 /** WHAT: Reads when amux last tried to compact a pane, whatever the outcome. WHY: Keeps pause compaction at most once per spacing window. */
@@ -94,7 +95,7 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null, no
   const files = Object.keys(cursor.positions);
   if (hasWorkAfter(files, cursor)) return null;
   if (record.status !== "VERIFIED" && hasJsonlEventAfterCursor(files, cursor, compactEvent)) {
-    const verified = { ...record, cursor, status: "VERIFIED",
+    const verified = { ...record, cursor, status: "VERIFIED", compactBoundary: true,
       ...(["attempting", "unverified", "measured"].includes(record.nightlyStatus)
         && { nightlyStatus: "compacted-unmeasured", afterTokens: null, reason: "native-compact-boundary" }) };
     if (!readOnly) write(state, paneKey(name, pane), verified);
@@ -102,6 +103,9 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null, no
   }
   // A compact the provider's usage limit refused spent nothing, so its fence ends when that limit resets.
   if (record.status === "FAILED" && now >= record.retryAt) return null;
+  if (record.status === "VERIFIED" && record.compactBoundary == null) {
+    return { ...record, compactBoundary: hasJsonlEventAfterCursor(files, cursor, compactEvent) };
+  }
   return record;
 }
 
@@ -332,7 +336,8 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
         onCommandAccepted: () => writer?.releaseSession?.() });
       // A usage limit refused the compact before it spent anything; it may run again once that limit resets.
       const retryAt = result.reason === "provider-usage-limited" ? claudeRefusalResetAt(result.detail, now()) : null;
-      write(state, paneKey(name, pane), { ...record, status: result.ok ? "VERIFIED" : "FAILED", reason: result.reason || null, finishedAt: now(),
+      write(state, paneKey(name, pane), { ...record, status: result.ok ? "VERIFIED" : "FAILED", compactBoundary: result.compactBoundary === true,
+        reason: result.reason || null, finishedAt: now(),
         ...(retryAt ? { retryAt } : {}) });
       finishQuotaCompact(state, quotaClaim, result.ok ? "verified" : result.reason === "provider-usage-limited" ? "refused" : "unknown", result.reason, now());
       log(`${name}:${pane} ${decision.cell}: ${result.ok ? "compact verified" : result.reason}`);

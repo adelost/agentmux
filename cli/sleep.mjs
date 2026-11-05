@@ -26,6 +26,8 @@ import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { sendSlashVerified } from "../core/delivery.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import { verifiedClaudeCompact } from "../core/verified-compact.mjs";
+import { beginContextCompact, contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
+import { updateCompactReceipt } from "../core/compact-receipts.mjs";
 import { createWakeAdmissionGate } from "../core/wake-admission.mjs";
 import {
   beginSleepState,
@@ -115,7 +117,21 @@ export async function cmdSleep(ctx, agentName, pane, _opts = {}, deps = {}) {
     });
     writePaneSleepState(state, stateOptions);
 
-    const compact = await verifiedClaudeCompact({
+    let intent = null, compact = null;
+    if (ctx.state) {
+      const identity = latestIdentity(paneDirectory(agent, pane));
+      if (!identity?.path || identity.sessionId !== first.identity?.sessionId) return fail("sleep-compact-session-unavailable");
+      const previousCompact = contextMaintenanceAttempt(ctx.state, agentName, pane, identity, now());
+      if (previousCompact?.status === "VERIFIED" && previousCompact.compactBoundary) compact = { ...previousCompact, ok: true };
+      else if (previousCompact?.status === "VERIFIED") return fail("sleep-compact-boundary-unverified");
+      else if (previousCompact) return fail(`sleep-compact-previous-${previousCompact.status.toLowerCase()}`);
+      else intent = beginContextCompact(ctx.state, agentName, pane, identity, { source: "sleep", command: "/compact" });
+    } else if (!deps.sendSlash) return fail("sleep-compact-store-unavailable");
+    const recordFailure = reason => {
+      if (intent) updateCompactReceipt(ctx.state, `${agentName}:${pane}`, current => current.attemptId === intent.attemptId
+        ? { ...current, status: "UNKNOWN", reason, finishedAt: now() } : current);
+    };
+    try { compact ||= await verifiedClaudeCompact({
       agent: ctx.agent,
       agentName,
       pane,
@@ -128,8 +144,20 @@ export async function cmdSleep(ctx, agentName, pane, _opts = {}, deps = {}) {
       pollAttempts: deps.compactPollAttempts,
       pollMs: deps.compactPollMs,
       settleMs: deps.slashSettleMs,
-    });
-    if (!compact.ok) return fail(compact.reason);
+    }); } catch (error) { recordFailure(error.message); throw error; }
+    if (!compact.ok || !compact.compactBoundary || intent && compact.sessionId !== intent.sessionId) {
+      recordFailure(compact.reason || "compact-session-or-boundary-unverified");
+      return fail(compact.reason || "compact-session-or-boundary-unverified");
+    }
+    if (intent) {
+      let saved = false;
+      updateCompactReceipt(ctx.state, `${agentName}:${pane}`, current => {
+        if (current.attemptId !== intent.attemptId) return current;
+        saved = true;
+        return { ...current, status: "VERIFIED", compactBoundary: true, cursor: compact.cursor || current.cursor, finishedAt: now() };
+      });
+      if (!saved) return fail("sleep-compact-receipt-superseded");
+    }
     const compactFence = compact.cursor;
     const postCompactIdentity = { sessionId: compact.sessionId };
     state = {
