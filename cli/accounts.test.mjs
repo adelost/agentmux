@@ -4,14 +4,15 @@ import { cmdAccounts, runQuotaCommand } from "./accounts.mjs";
 feature("account subscription CLI", () => {
   unit("reports the durable Claude request by its id", {
     given: ["a saved request", () => {
-      const lines = [], request = { id: "req-1", phase: "complete", name: "lsrc", pane: 0, target: "wetterlind" };
+      const lines = [], request = { id: "req-1", phase: "complete", outcome: "selected-for-next-wake", name: "lsrc", pane: 0, target: "wetterlind" };
       return { lines, ctx: { agent: {}, deliveryQueue: {}, state: { get: key => key === "claude_account_receipt_v1:req-1" ? request : null } } };
     }],
     when: ["Stats reads the JSON receipt", async fx => {
       await cmdAccounts(["rotate-status", "--request-id", "req-1", "--json"], fx.ctx, { output: line => fx.lines.push(line) });
       return JSON.parse(fx.lines[0]);
     }],
-    then: ["the final phase and pane are explicit", result => expect(result).toMatchObject({ found: true, status: "complete", pane: "lsrc:0" })],
+    then: ["the final phase, exact outcome and pane are explicit", result => expect(result).toMatchObject({
+      found: true, status: "complete", outcome: "selected-for-next-wake", pane: "lsrc:0" })],
   });
   unit("a Claude rotate can target only named panes", {
     when: ["requesting a dry plan for three panes", async () => {

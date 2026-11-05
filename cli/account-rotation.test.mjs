@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { rotateClaudeFleet, runRequestedClaudeRotation } from "./account-rotation.mjs";
+import { claudeRotationStatus } from "./claude-rotation-status.mjs";
 import {
   beginRuntimeProfileTransition,
   selectedRuntimeProfile,
@@ -100,9 +101,30 @@ feature("Claude fleet account rotation", () => {
     then: ["the session is switched and the durable request completes", (row, fx) => {
       expect(row.status).toBe("switched");
       expect(fx.state.get("claude_account_request_v1:lsrc:0").phase).toBe("complete");
+      expect(claudeRotationStatus(fx.state, { pane: "lsrc:0" }).outcome).toBe("switched");
       expect(fx.state.get("account_profile_by_pane_v1")).toEqual({ "lsrc:0": "2" });
     }],
   });
+  for (const expected of ["already-selected", "selected-for-quota-recovery", "selected-for-next-wake"]) {
+    component(`a pending rotation reports its exact ${expected} outcome`, {
+      given: ["an explicit request first blocked by work", async () => {
+        const fx = fixture({ busy: true });
+        await rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps);
+        fx.ctx.agent.isBusy = async () => false;
+        if (expected === "already-selected") fx.state.set("account_profile_by_pane_v1", { "lsrc:0": "2" });
+        if (expected === "selected-for-quota-recovery") fx.deps.limitReceipt = () => ({ stopped: true });
+        if (expected === "selected-for-next-wake") fx.ctx.agent.paneProcessState = async () => ({ command: "bash", running: false, shell: true });
+        return fx;
+      }],
+      when: ["the idle follow-up finishes", async fx => {
+        await runRequestedClaudeRotation(fx.ctx, "lsrc", 0, fx.deps);
+        return claudeRotationStatus(fx.state, { pane: "lsrc:0" });
+      }],
+      then: ["its durable receipt retains the exact outcome", receipt => {
+        expect(receipt.status).toBe("complete"); expect(receipt.outcome).toBe(expected);
+      }],
+    });
+  }
   component("a pending rotation never follows a different session", {
     given: ["a blocked explicit request followed by a different session", async () => {
       const fx = fixture({ busy: true });

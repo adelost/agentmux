@@ -27,8 +27,8 @@ export function claudeRotationStatus(state, { id = null, pane = null } = {}) {
   if (!request && id && state.all) request = Object.entries(state.all()).find(([key, value]) =>
     key.startsWith("claude_account_request_v1:") && value?.id === id)?.[1];
   return request ? { schemaVersion: 1, found: true, requestId: request.id, pane: `${request.name}:${request.pane}`,
-    target: request.target, sessionId: request.sessionId || null, status: request.phase, reason: request.reason || null }
-    : { schemaVersion: 1, found: false, requestId: id, pane, status: "not-found" };
+    target: request.target, sessionId: request.sessionId || null, status: request.phase, outcome: request.outcome || null, reason: request.reason || null }
+    : { schemaVersion: 1, found: false, requestId: id, pane, status: "not-found", outcome: null };
 }
 
 /** WHAT: Reports one saved rotation outcome. WHY: Keeps Stats and operators on the same durable status contract. */

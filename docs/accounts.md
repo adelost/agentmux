@@ -209,7 +209,10 @@ a durable follow-up, and `blocked` when none was saved. The watcher retries
 pending requests at an idle boundary on their original session. Read the
 outcome with `amux accounts rotate-status --request-id ID --json`: `status`
 is `pending`, `complete`, `blocked`, `superseded`, or `not-found`; `reason`
-explains a stop. `--only agent:pane` reads the latest request for that pane.
+explains a stop. `outcome` is the exact final pane verdict: `switched`,
+`already-selected`, `selected-for-quota-recovery`, `selected-for-next-wake`,
+`failed`, or `rolled-back`. It is `null` while pending or when an older receipt
+did not save the verdict. `--only agent:pane` reads the latest request for that pane.
 The ID receipt survives a later request for the same pane.
 
 The real switch then requires idle/empty-composer observations, no pending

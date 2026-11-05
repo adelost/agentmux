@@ -484,7 +484,7 @@ export async function runRequestedClaudeRotation(ctx, name, pane, dependencies =
   const latest = ctx.state.get(key, null);
   if (latest?.id === request.id && row && row.status !== "blocked") {
     saveClaudeRotation(ctx.state, { ...request, phase: ["switched", "already-selected", "selected-for-quota-recovery", "selected-for-next-wake"].includes(row.status)
-      ? "complete" : "blocked", reason: row.reason || null }, request.id);
+      ? "complete" : "blocked", outcome: row.status, reason: row.reason || null }, request.id);
   }
   return row || null;
 }
