@@ -2,7 +2,7 @@ import { feature, unit, component, expect } from "bdd-vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nightlyCompactPolicy, nightlyCompactDecision, nightlyCompactOutcome, nightlyUnresolvedCount, compactAccessBlocker } from "../core/nightly-compact.mjs";
+import { nightlyCompactPolicy, nightlyCompactDecision, nightlyCompactOutcome, nightlyUnresolvedCount, compactAccessBlocker, resolveStaleCompact } from "../core/nightly-compact.mjs";
 import { runNightlyCompact, reconcileNightlyCompactReport } from "../cli/nightly-compact.mjs";
 import { cmdDream } from "../cli/dream.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
@@ -39,6 +39,42 @@ function fixture() {
 }
 
 feature("nightly context budget", () => {
+  unit("a stale intent cannot use another session, unknown size, active pane or a second retry", {
+    when: ["the compact recovery checks unsafe or ambiguous facts", () => {
+      const record = { status: "attempting", sessionId: "same-session", sessionPath: "/exact.jsonl", attemptedAt: "2026-09-07T01:00:00Z" };
+      return [
+        resolveStaleCompact(record, { ...facts(), sessionId: "other" }, policy, now()),
+        resolveStaleCompact(record, { ...facts(), tokens: null }, policy, now()),
+        resolveStaleCompact(record, { ...facts(), status: "working" }, policy, now()),
+        resolveStaleCompact({ ...record, staleRetryUsed: true }, facts(), policy, now()),
+      ];
+    }],
+    then: ["none can authorize another attempt", result => expect(result).toEqual([null, null, null, null])],
+  });
+  for (const size of [70_000, 259_541]) {
+    component(`a stale account-switch intent is resolved from the same session at ${size} tokens`, {
+      given: ["an idle exact session and an abandoned intent older than the longest writer", () => {
+        const fx = fixture(); fx.deps.retryUnmeasured = true;
+        fx.deps.policy = { ...policy, maxTokens: 80_000, idleMinutes: 0 };
+        fx.change({ tokens: size });
+        return fx;
+      }],
+      when: ["the guarded account compact runs", async fx => {
+        const { mkdirSync } = await import("node:fs");
+        mkdirSync(fx.deps.path, { recursive: true });
+        writeFileSync(join(fx.deps.path, "claw%3A4.json"), JSON.stringify({ version: 1, dateKey: "2026-09-07",
+          panes: { "claw:4": { sessionId: "same-session", sessionPath: join(fx.root, "session.jsonl"),
+            status: "attempting", attemptedAt: "2026-09-07T01:00:00Z", beforeTokens: 591475 } } }));
+        return runNightlyCompact(fx.ctx, {}, fx.deps);
+      }],
+      then: ["a measured small session resolves without a call; a large one retries once", (result, fx) => {
+        try {
+          expect(result.rows[0].status).toBe("within-budget");
+          expect(fx.calls()).toBe(size <= 80_000 ? 0 : 1);
+        } finally { fx.clean(); }
+      }],
+    });
+  }
   for (const [size, shared] of [[70_000, false], [199_293, false], [199_293, true]]) {
     component(`an explicitly retried unmeasured account compact remeasures ${size} tokens${shared ? " with shared proof" : ""}`, {
       given: ["a finished compact with an unknown size, saved earlier tonight", () => {

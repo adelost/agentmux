@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID, createHash } from "node:crypto";
-import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "../core/context-maintenance.mjs";
+import { beginContextCompact, contextMaintenanceAttempt, liveCompactAttempts, rememberContextCompact } from "../core/context-maintenance.mjs";
 import { listAgents, loadConfig, findChannelForPane } from "./config.mjs";
 import { listPanes } from "./tmux.mjs";
 import { dialectFor, inspectPane } from "./inspect-pane.mjs";
@@ -18,7 +18,7 @@ import { findBlockingPrompt } from "../core/dismiss.mjs";
 import { createDeliveryQueue, TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
 import { compactAccessBlocker, nightlyCompactDecision, nightlyCompactOutcome, nightlyCompactPolicy, nightlyUnresolvedCount,
-  sharedNightlyCompactOutcome, isUnmeasuredCompact } from "../core/nightly-compact.mjs";
+  sharedNightlyCompactOutcome, isUnmeasuredCompact, resolveStaleCompact } from "../core/nightly-compact.mjs";
 import { claudeComposerIsPasting } from "../core/claude-paste-stall.mjs";
 
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -178,10 +178,13 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     catch { rows.push({ pane: key, status: "skipped", reason: "observation-unavailable" }); continue; }
     const previous = readReport(receiptPath, dateKey).panes[key];
     const retryUnmeasured = dependencies.retryUnmeasured === true && target.engine === "claude";
+    const resolved = retryUnmeasured ? resolveStaleCompact(previous, first, policy, now()) : null;
     const sharedOutcome = () => {
       const record = contextMaintenanceAttempt(ctx.state, target.agent.name, target.pane.index, { sessionId: first.sessionId, path: first.sessionPath });
       const current = readNightlyCompactAttempt(path, dateKey, key);
       if (retryUnmeasured && isUnmeasuredCompact(current, first) && record?.status === "VERIFIED") return null;
+      if (resolved && ["VERIFIED", "ATTEMPTING"].includes(record?.status)
+          && !liveCompactAttempts(ctx.state).some(attempt => attempt.pane === key)) return null;
       return sharedNightlyCompactOutcome(record, first);
     };
     const priorShared = sharedOutcome();
@@ -189,7 +192,9 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       rows.push({ pane: key, ...priorShared });
       continue;
     }
-    const reason = nightlyCompactDecision(first, policy, previous, { force: dependencies.force, retryUnmeasured });
+    const retryStale = retryUnmeasured && (resolved?.status === "failed" || previous?.reason === "stale-attempt-above-budget");
+    const reason = resolved?.status === "within-budget" ? null
+      : nightlyCompactDecision(first, policy, resolved || previous, { force: dependencies.force, retryUnmeasured, retryStale });
     if (reason) { rows.push({ pane: key, status: "skipped", reason, beforeTokens: first.tokens }); continue; }
     if (flags.dry) { rows.push({ pane: key, status: "eligible", beforeTokens: first.tokens }); continue; }
 
@@ -213,11 +218,20 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       // and the intent below must share the same physical session lease.
       const currentShared = sharedOutcome();
       if (currentShared) { rows.push({ pane: key, ...currentShared }); continue; }
-      const current = readReport(receiptPath, dateKey).panes[key];
+      let current = readReport(receiptPath, dateKey).panes[key];
       await sleep(200);
+      if (retryUnmeasured) {
+        const fresh = await observe(ctx, target, { queue, now });
+        const recovery = resolveStaleCompact(current, fresh, policy, now());
+        if (recovery && fresh.sessionId === first.sessionId && fresh.sessionPath === first.sessionPath && fresh.activity === first.activity) {
+          save(recovery);
+          current = recovery;
+          if (recovery.status === "within-budget") { rows.push({ pane: key, ...recovery }); continue; }
+        }
+      }
       const check = async () => {
         const fresh = await observe(ctx, target, { queue, now });
-        const why = nightlyCompactDecision(fresh, policy, current, { force: dependencies.force, retryUnmeasured });
+        const why = nightlyCompactDecision(fresh, policy, current, { force: dependencies.force, retryUnmeasured, retryStale });
         if (why || fresh.sessionId !== first.sessionId || fresh.sessionPath !== first.sessionPath
             || fresh.activity !== first.activity) throw new Error(why || "session-or-activity-changed");
         return fresh;
@@ -229,7 +243,8 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       // Durable intent precedes typing. A crash/ambiguous outcome is not a
       // licence to repeat a model call on a later invocation tonight.
       intent = { sessionId: first.sessionId, sessionPath: first.sessionPath, beforeTokens: first.tokens,
-        status: "attempting", attemptedAt: new Date(now()).toISOString(), command };
+        status: "attempting", attemptedAt: new Date(now()).toISOString(), command,
+        ...(retryStale ? { staleRetryUsed: true } : {}) };
       save(intent);
       await (dependencies.mirror || mirror)(ctx, target, command);
       const guardedAgent = { ...ctx.agent,

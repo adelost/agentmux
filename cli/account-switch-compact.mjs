@@ -9,8 +9,8 @@ import { join } from "node:path";
 import { findChannelForPane } from "./config.mjs";
 import { sendToChannelId } from "./send-notify.mjs";
 import { compactDayKey, discoverCompactTargets, observeNightlyPane, runNightlyCompact, readNightlyCompactAttempt } from "./nightly-compact.mjs";
-import { nightlyCompactDecision, isUnmeasuredCompact } from "../core/nightly-compact.mjs";
-import { contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
+import { nightlyCompactDecision, isUnmeasuredCompact, resolveStaleCompact } from "../core/nightly-compact.mjs";
+import { contextMaintenanceAttempt, liveCompactAttempts } from "../core/context-maintenance.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
 import { hasEmptyClaudeEpoch } from "../core/claude-empty-epoch.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
@@ -64,6 +64,9 @@ export async function observeSwitchContext(ctx, entry, {
     : null;
   const previous = readNightlyCompactAttempt(reportDirectory(now()), compactDayKey(now()), `${entry.agentName}:${entry.pane}`);
   const unmeasured = isUnmeasuredCompact(previous, facts);
+  const stale = resolveStaleCompact(previous, facts, compactPolicy(policy), now());
+  const staleShared = stale && prior && ["ATTEMPTING", "VERIFIED"].includes(prior.status)
+    && !liveCompactAttempts(ctx.state).some(attempt => attempt.pane === `${entry.agentName}:${entry.pane}`);
   // Claude clears usage at /compact. Its exact, unchanged compact epoch is
   // still proof for an idle restart; never turn that proof into zero tokens.
   if (!Number.isFinite(facts.tokens) && facts.running === true && facts.status === "idle"
@@ -71,8 +74,8 @@ export async function observeSwitchContext(ctx, entry, {
       && await hasEmptyClaudeEpoch({ sessionId: facts.sessionId, path: facts.sessionPath })) {
     return { target, facts, compactRefusal: null, compacted: true };
   }
-  if (prior?.status === "VERIFIED" && !unmeasured) return { target, facts, compactRefusal: null, compacted: true };
-  const refusal = prior && !(unmeasured && prior.status === "VERIFIED") ? `previous-compact-${String(prior.status).toLowerCase()}`
+  if (prior?.status === "VERIFIED" && !unmeasured && !staleShared) return { target, facts, compactRefusal: null, compacted: true };
+  const refusal = prior && !staleShared && !(unmeasured && prior.status === "VERIFIED") ? `previous-compact-${String(prior.status).toLowerCase()}`
     : nightlyCompactDecision(facts, compactPolicy(policy), null);
   return { target, facts, compactRefusal: refusal === "within-budget" ? null : refusal, compacted: false };
 }

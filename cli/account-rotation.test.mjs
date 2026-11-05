@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
-import { rotateClaudeFleet } from "./account-rotation.mjs";
+import { rotateClaudeFleet, runRequestedClaudeRotation } from "./account-rotation.mjs";
 import {
   beginRuntimeProfileTransition,
   selectedRuntimeProfile,
@@ -80,6 +80,42 @@ function fixture({ busy = false, restart = async () => ({ ok: true }) } = {}) {
 }
 
 feature("Claude fleet account rotation", () => {
+  component("a busy Claude pane keeps its account request for an idle retry", {
+    given: ["an explicit rotation blocked by a working pane", () => fixture({ busy: true })],
+    when: ["the operator rotates only that pane", fx => rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps)],
+    then: ["the same target remains durably pending", (result, fx) => {
+      expect(result.rows[0].status).toBe("blocked");
+      expect(fx.state.get("claude_account_request_v1:lsrc:0")).toMatchObject({ target: "2", phase: "pending" });
+    }],
+  });
+  component("the pending rotation moves only the original session when it becomes idle", {
+    given: ["a previously blocked explicit request", async () => {
+      const fx = fixture({ busy: true });
+      await rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps);
+      fx.ctx.agent.isBusy = async () => false;
+      return fx;
+    }],
+    when: ["the existing watcher retries the original pane", fx => runRequestedClaudeRotation(fx.ctx, "lsrc", 0, fx.deps)],
+    then: ["the session is switched and the durable request completes", (row, fx) => {
+      expect(row.status).toBe("switched");
+      expect(fx.state.get("claude_account_request_v1:lsrc:0").phase).toBe("complete");
+      expect(fx.state.get("account_profile_by_pane_v1")).toEqual({ "lsrc:0": "2" });
+    }],
+  });
+  component("a pending rotation never follows a different session", {
+    given: ["a blocked explicit request followed by a different session", async () => {
+      const fx = fixture({ busy: true });
+      await rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps);
+      fx.deps.latestIdentity = () => ({ sessionId: "different", path: fx.path });
+      fx.ctx.agent.restartClaudeAccount = vi.fn();
+      return fx;
+    }],
+    when: ["the watcher considers the request", fx => runRequestedClaudeRotation(fx.ctx, "lsrc", 0, fx.deps)],
+    then: ["the new session is left untouched", (result, fx) => {
+      expect(result).toBeNull();
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+    }],
+  });
   component("an idle pane moves while a sibling compact retains its real kernel fence", {
     given: ["lsrc:1 keeps its fence but releases the session, and only lsrc:0 is selected to move", () => {
       const fx = fixture(), root = mkdtempSync(join(tmpdir(), "amux-move-fence-")); roots.push(root);

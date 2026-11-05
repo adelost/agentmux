@@ -57,7 +57,7 @@ export function createQuotaStopMover({ runtime, readSnapshot, rotate, floorPerce
       const line = { at: new Date(now()).toISOString(), pane: move.panes.join(","), cell: "quota-stop-move", from: move.from, to: move.target.name,
         window: move.window };
       if (mode === "dry") { record({ ...line, outcome: "would-move" }); results.push({ ...move, status: "dry" }); continue; }
-      const result = await rotate(ctx, move.target.profileId, { only: move.panes }, { output: () => {}, setExitCode: () => {} });
+      const result = await rotate(ctx, move.target.profileId, { only: move.panes }, { persistBlocked: false, output: () => {}, setExitCode: () => {} });
       const rows = (result?.rows || []).map((row) => `${row.key}=${row.status}${row.reason ? `:${row.reason}` : ""}`);
       record({ ...line, outcome: result?.status || "unknown", detail: rows.join(" ") });
       log(`${move.from} ${move.window === "week" ? "at its floor" : "session near its limit"}: ${move.panes.length} panes to ${move.target.name}, ${result?.status}`);

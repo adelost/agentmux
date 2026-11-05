@@ -35,19 +35,15 @@ import { planQuotaStopMirror } from "../core/watcher-quota-stop.mjs";
 import { refusalNoticeText } from "../core/codex-refusal-notice.mjs";
 import { isCodexCapacityError } from "../core/codex-capacity-recovery.mjs";
 import { createCodexRecovery } from "../cli/codex-recovery.mjs";
+import { runRequestedClaudeRotation } from "../cli/account-rotation.mjs";
+import { bridgeRotationRuntime } from "./account-switch-command.mjs";
 import { isPaneModelSwitchReading, paneModelSelection, recordPaneModelReading, setPaneModelSelection } from "../core/pane-model-state.mjs";
 import { settleLandedClaudeModelSwitch } from "../core/claude-model-command.mjs";
 const DEFAULT_POLL_MS = 15_000;
-// Typing-indicator is event-driven via fs.watch (every jsonl write fires
-// sendTyping with throttle below). This polling cadence is the fallback
-// for environments where fs.watch silently drops events (WSL 9p mounts,
-// some network filesystems). Every 8s, sweep all panes and refresh the
-// bubble for any pane whose jsonl mtime is fresh.
+// Polling backs up fs.watch where events are dropped.
+
 const DEFAULT_TYPING_POLL_MS = 8_000;
-// Throttle per-channel typing-bubble refresh. Discord auto-clears the
-// bubble ~10s after the last sendTyping call, so refreshing every 5s
-// keeps it continuously lit during long streams without hammering the
-// API on every assistant-delta jsonl write (which can be 10×/sec).
+// Refresh before Discord clears typing, without one API call per delta.
 const TYPING_THROTTLE_MS = 5_000;
 // jsonl write within this window = pane is active. Polling fallback
 // uses this to refresh typing when fs.watch missed events. Tuned to
@@ -119,6 +115,7 @@ export function createJsonlWatcher({
   let stopped = false;
   const codexRecovery = createCodexRecovery({ state, broker: deliveryBroker, agent, log, configPath: agentsYamlPath,
     notify: (text, target) => discord.send(findChannelForPane(agentsYamlPath, target.name, target.pane), text) });
+  const rotationRuntime = bridgeRotationRuntime({ agent, deliveryBroker, state, configPath: agentsYamlPath });
 
   const paneKey = (name, idx) => `${name}:${idx}`;
   const geminiMirror = createGeminiTmuxMirror({ agent, state, post: request => postTurn(request) });
@@ -635,6 +632,9 @@ export function createJsonlWatcher({
 
       if (sameFileStamp(cached, fileInfo) && !retryDue && !graceDue) {
         await timedWatcherStep(`${key} recovery-idle`, () => codexRecovery.tick({ name, pane: idx, dir, result: cached.recovery, idleBoundary: true }), log);
+        if (deliveryBroker?.queue && state.get(`claude_account_request_v1:${key}`, null)?.phase === "pending") {
+          await timedWatcherStep(`${key} claude-rotation-idle`, () => runRequestedClaudeRotation(rotationRuntime(), name, idx), log);
+        }
         metric(`${key} skip unchanged bytes=0 nextGrace=${cached?.graceDueAtMs || "-"}`);
         return { skipped: "unchanged" };
       }

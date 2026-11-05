@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { listAgents } from "./config.mjs";
 import { externalClaudeMdImports } from "../core/claude-md-imports.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
@@ -36,6 +37,7 @@ import { waitForSessionLease } from "../core/session-lease.mjs";
 import { compactBeforeSwitch, observeSwitchContext } from "./account-switch-compact.mjs";
 
 const paneKey = (agentName, pane) => `${agentName}:${pane}`;
+const requestKey = (name, pane) => `claude_account_request_v1:${paneKey(name, pane)}`;
 // Modes whose switch is only a new selection: an ordinary wake or quota recovery starts the process.
 const SELECT_ONLY = new Set(["dormant", "quota-stopped"]);
 
@@ -431,8 +433,28 @@ export async function rotateClaudeFleet(ctx, requested, {
     prepared = true;
   };
   const chosen = configuredClaudePanes(deps.agents).filter((pane) => !only || only.includes(paneKey(pane.agentName, pane.pane)));
+  const previousRequests = new Map(chosen.map(entry => {
+    const key = requestKey(entry.agentName, entry.pane);
+    return [key, ctx.state?.get?.(key, null)];
+  }));
   for (const [agentName, panes] of projectsFor(chosen)) {
     await rotateProject(ctx, agentName, panes, target, deps, { dry, rows, prepareOnce });
+  }
+  if (!dry && dependencies.persistBlocked !== false && ctx.state?.set) {
+    for (const row of rows) {
+      const entry = chosen.find(item => paneKey(item.agentName, item.pane) === row.key);
+      if (!entry) continue;
+      const key = requestKey(entry.agentName, entry.pane), prior = previousRequests.get(key);
+      if (ctx.state.get(key, null)?.id !== prior?.id) continue;
+      if (row.status !== "blocked") {
+        if (prior?.phase === "pending") ctx.state.set(key, { ...prior, phase: "superseded", reason: "newer-rotation" });
+        continue;
+      }
+      const identity = entry && deps.latestIdentity(join(entry.agent.dir, ".agents", String(entry.pane)));
+      if (!identity?.sessionId || !identity?.path) continue;
+      ctx.state.set(key, { id: randomUUID(), phase: "pending", target: target.id,
+        name: entry.agentName, pane: entry.pane, sessionId: identity.sessionId, sessionPath: identity.path, reason: row.reason });
+    }
   }
   const outcome = accountRotationOutcome(rows);
   const status = dry && outcome.status === "RECOVERED" ? "DRY-RUN" : outcome.status;
@@ -440,4 +462,23 @@ export async function rotateClaudeFleet(ctx, requested, {
   report(deps.output, status, target, rows, reason);
   if (status !== "RECOVERED" && status !== "DRY-RUN") deps.setExitCode(1);
   return { ...outcome, status, ...(reason ? { reason } : {}), rows };
+}
+
+/** WHAT: Routes one pending Claude switch on its original session. WHY: Keeps an idle retry from moving a different session or its neighbours. */
+export async function runRequestedClaudeRotation(ctx, name, pane, dependencies = {}) {
+  const key = requestKey(name, pane), request = ctx.state?.get?.(key, null);
+  if (!request || request.phase !== "pending") return null;
+  const agents = dependencies.agents || listAgents(ctx.configPath);
+  const entry = configuredClaudePanes(agents).find(item => item.agentName === name && item.pane === pane);
+  const identity = entry && (dependencies.latestIdentity || latestClaudeSessionIdentity)(join(entry.agent.dir, ".agents", String(pane)));
+  if (!identity || identity.sessionId !== request.sessionId || identity.path !== request.sessionPath) return null;
+  const result = await rotateClaudeFleet(ctx, request.target, { only: [paneKey(name, pane)] },
+    { ...dependencies, agents, persistBlocked: false, leaseWaitMs: 0, output: () => {}, setExitCode: () => {} });
+  const row = result.rows?.[0];
+  const latest = ctx.state.get(key, null);
+  if (latest?.id === request.id && row && row.status !== "blocked") {
+    ctx.state.set(key, { ...request, phase: ["switched", "already-selected", "selected-for-quota-recovery", "selected-for-next-wake"].includes(row.status)
+      ? "complete" : "blocked", reason: row.reason || null });
+  }
+  return row || null;
 }

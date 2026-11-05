@@ -2,6 +2,17 @@ import { feature, unit, expect } from "bdd-vitest";
 import { cmdAccounts, runQuotaCommand } from "./accounts.mjs";
 
 feature("account subscription CLI", () => {
+  unit("a Claude rotate can target only named panes", {
+    when: ["requesting a dry plan for three panes", async () => {
+      const calls = [], ctx = { agent: {}, deliveryQueue: {} };
+      await cmdAccounts(["rotate", "claude:wetterlind", "--dry", "--only", "lsrc:0,claw:1,skybar:2"], ctx,
+        { rotate: async (...args) => { calls.push(args); } });
+      return calls[0];
+    }],
+    then: ["only those panes reach the regular rotation", call => {
+      expect(call[2]).toEqual({ dry: true, only: ["lsrc:0", "claw:1", "skybar:2"] });
+    }],
+  });
   unit("routes a Codex pane switch and dry-run through the shared safe account path", {
     when: ["requesting an explicit target without running a provider", async () => {
       const calls = [], ctx = { agent: {}, deliveryQueue: {} };
@@ -41,7 +52,7 @@ feature("account subscription CLI", () => {
     given: ["a snapshot and a guard log with one stopped turn that drew 1.2 credits", () => {
       const lines = [];
       return { lines, readSnapshot: async () => ({ schemaVersion: 2, accounts: [], claude: { ok: false, error: "x" }, codex: { ok: false, error: "y" }, kimi: { ok: false, error: "z" } }),
-        boxText: () => "BOX", creditGuard: () => ({ stopped: 1, ownerTurns: 0, credits: 1.2 }), output: line => lines.push(line) };
+        boxText: () => "BOX", claimShadowLine: () => "shadow fixture", creditGuard: () => ({ stopped: 1, ownerTurns: 0, credits: 1.2 }), output: line => lines.push(line) };
     }],
     when: ["running the plain view", async ctx => { await runQuotaCommand([], ctx); return ctx.lines[0]; }],
     then: ["the last line says so", text => expect(text.split("\n").at(-1)).toBe("Codex credit guard, 7 days: 1 stopped, 0 owner turns left running, 1.2 credits drawn")],

@@ -20,7 +20,7 @@ const usage = `Usage:
   amux accounts                                  same view as amux quota
   amux accounts login <codex|kimi>:<1|2>
   amux accounts login claude:<1|2|login|email>   a new login name gets its own dir
-  amux accounts rotate claude:<1|2|login|email> [--dry]
+  amux accounts rotate claude:<1|2|login|email> [--dry] [--only agent:pane,...]
   amux accounts switch codex:<1|2> PROJECT [-p N] [--dry] [--continue-file PATH]
   amux accounts switch codex:<1|2> --all [--dry] [--json] [--request-id ID]
   amux accounts switch-status [--json] [--request-id ID]
@@ -94,11 +94,16 @@ export async function cmdAccounts(args, ctxOrOptions = null, suppliedOptions = {
     return runQuotaCommand([], { readSnapshot, output });
   }
   if (args[0] === "rotate") {
-    if (!ctx || args.length < 2 || args.length > 3
-        || (args[2] && args[2] !== "--dry")) throw new Error(usage);
+    if (!ctx || args.length < 2) throw new Error(usage);
     const [provider, id] = String(args[1]).split(":");
     if (provider !== "claude" || !id) throw new Error(usage);
-    return rotate(ctx, id, { dry: args[2] === "--dry" });
+    let dry = false, only = null;
+    for (let i = 2; i < args.length; i++) {
+      if (args[i] === "--dry") dry = true;
+      else if (args[i] === "--only" && /^[\w.-]+:\d+(?:,[\w.-]+:\d+)*$/u.test(args[i + 1] || "")) only = args[++i].split(",");
+      else throw new Error(usage);
+    }
+    return rotate(ctx, id, { dry, ...(only ? { only } : {}) });
   }
   if (args[0] === "switch-status") {
     if (!ctx) throw new Error(usage);

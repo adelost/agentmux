@@ -20,12 +20,14 @@ export function nightlyCompactPolicy(value) {
 }
 
 /** WHAT: Checks idle contexts by tokens. WHY: Prevents a large million-token pane escaping through a low percentage. */
-export function nightlyCompactDecision(facts, policy, previous = null, { force = false, retryUnmeasured = false } = {}) {
+export function nightlyCompactDecision(facts, policy, previous = null, { force = false, retryUnmeasured = false, retryStale = false } = {}) {
   if (!policy.enabled) return "disabled";
   if (!["claude", "codex"].includes(facts.engine)) return "compact-receipt-unsupported";
   if (facts.backend !== "tmux" || facts.running !== true) return "not-running-tmux";
   if (!facts.sessionId || !facts.sessionPath) return "exact-session-unknown";
-  if (previous?.sessionId === facts.sessionId && !(retryUnmeasured && isUnmeasuredCompact(previous, facts))) {
+  if (previous?.sessionId === facts.sessionId && !(retryUnmeasured && isUnmeasuredCompact(previous, facts))
+      && !(retryStale && previous.sessionPath === facts.sessionPath && previous.status === "failed"
+        && previous.reason === "stale-attempt-above-budget" && !previous.staleRetryUsed)) {
     return `already-attempted:${previous.status}`;
   }
   if (facts.blocker) return facts.blocker;
@@ -40,6 +42,19 @@ export function nightlyCompactDecision(facts, policy, previous = null, { force =
   if (!Number.isFinite(facts.idleMs)) return "activity-unknown";
   if (facts.idleMs < policy.idleMinutes * 60_000) return "recent-activity";
   return null;
+}
+
+/** WHAT: Resolves an abandoned account-switch intent from a fresh exact-session measurement. WHY: Prevents an interrupted writer from holding a pane for the rest of the day. */
+export function resolveStaleCompact(record, facts, policy, now) {
+  const at = Date.parse(record?.attemptedAt);
+  if (record?.status !== "attempting" || record.staleRetryUsed || record.sessionId !== facts.sessionId
+      || record.sessionPath !== facts.sessionPath || !Number.isFinite(at) || now - at < 40 * 60_000
+      || facts.engine !== "claude" || facts.backend !== "tmux" || facts.running !== true || facts.blocker
+      || facts.status !== "idle" || !facts.composerEmpty || facts.queued !== 0
+      || !Number.isFinite(facts.tokens) || facts.tokens < 0) return null;
+  return { ...record, status: facts.tokens <= policy.maxTokens ? "within-budget" : "failed",
+    reason: facts.tokens <= policy.maxTokens ? "stale-attempt-measured" : "stale-attempt-above-budget",
+    afterTokens: facts.tokens, resolvedAt: new Date(now).toISOString() };
 }
 
 /** WHAT: Checks an exact session's completed but unmeasured compact. WHY: Separates missing size proof from failed or still-running model calls. */
