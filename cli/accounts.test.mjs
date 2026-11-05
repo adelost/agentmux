@@ -1,7 +1,23 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { cmdAccounts, runQuotaCommand } from "./accounts.mjs";
+import { claudeRotationStatus, saveClaudeRotation } from "./claude-rotation-status.mjs";
 
 feature("account subscription CLI", () => {
+  unit("a later rotation preserves a completed request's exact outcome", {
+    given: ["a durable completed request for one pane", () => {
+      const data = {}, state = { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
+      const first = { id: "first", name: "lsrc", pane: 0, target: "wetterlind", phase: "complete", outcome: "switched" };
+      saveClaudeRotation(state, first);
+      return { state, first };
+    }],
+    when: ["a newer pending rotation is saved", ({ state, first }) => {
+      saveClaudeRotation(state, { id: "second", name: "lsrc", pane: 0, target: "1", phase: "pending" }, first.id);
+      return claudeRotationStatus(state, { id: first.id });
+    }],
+    then: ["the first request remains complete with its original outcome", result => {
+      expect(result).toMatchObject({ status: "complete", outcome: "switched" });
+    }],
+  });
   unit("reports the durable Claude request by its id", {
     given: ["a saved request", () => {
       const lines = [], request = { id: "req-1", phase: "complete", outcome: "selected-for-next-wake", name: "lsrc", pane: 0, target: "wetterlind" };

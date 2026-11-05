@@ -9,7 +9,8 @@ export function saveClaudeRotation(state, request, expectedId = null) {
   const write = data => {
     const prior = data[key];
     if ((prior?.id || null) !== expectedId) return false;
-    if (prior?.id && prior.id !== request.id) data[receiptKey(prior.id)] = { ...prior, phase: "superseded", reason: "newer-rotation" };
+    if (prior?.id && prior.id !== request.id) data[receiptKey(prior.id)] = prior.phase === "pending"
+      ? { ...prior, phase: "superseded", reason: "newer-rotation" } : prior;
     data[key] = request;
     data[receiptKey(request.id)] = request;
     return true;

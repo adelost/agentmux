@@ -449,7 +449,12 @@ export async function rotateClaudeFleet(ctx, requested, {
       const key = requestKey(entry.agentName, entry.pane), prior = previousRequests.get(key);
       if (ctx.state.get(key, null)?.id !== prior?.id) continue;
       if (row.status !== "blocked") {
-        if (prior?.phase === "pending") saveClaudeRotation(ctx.state, { ...prior, phase: "superseded", reason: "newer-rotation" }, prior.id);
+        if (prior?.phase === "pending") {
+          const sameTarget = prior.target === target.id;
+          const successful = ["switched", "already-selected", "selected-for-quota-recovery", "selected-for-next-wake"].includes(row.status);
+          saveClaudeRotation(ctx.state, { ...prior, phase: sameTarget ? successful ? "complete" : "blocked" : "superseded",
+            outcome: sameTarget ? row.status : null, reason: sameTarget ? row.reason || null : "newer-rotation" }, prior.id);
+        }
         continue;
       }
       const identity = entry && deps.latestIdentity(join(entry.agent.dir, ".agents", String(entry.pane)));

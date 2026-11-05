@@ -105,6 +105,22 @@ feature("Claude fleet account rotation", () => {
       expect(fx.state.get("account_profile_by_pane_v1")).toEqual({ "lsrc:0": "2" });
     }],
   });
+  component("an explicit retry for the same target completes the original request", {
+    given: ["one blocked request that later becomes idle", async () => {
+      const fx = fixture({ busy: true });
+      await rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps);
+      fx.requestId = fx.state.get("claude_account_request_v1:lsrc:0").id;
+      fx.ctx.agent.isBusy = async () => false;
+      return fx;
+    }],
+    when: ["the operator retries the same target", async fx => {
+      await rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps);
+      return claudeRotationStatus(fx.state, { id: fx.requestId });
+    }],
+    then: ["the original request keeps the actual successful outcome", receipt => {
+      expect(receipt).toMatchObject({ status: "complete", outcome: "switched" });
+    }],
+  });
   for (const expected of ["already-selected", "selected-for-quota-recovery", "selected-for-next-wake"]) {
     component(`a pending rotation reports its exact ${expected} outcome`, {
       given: ["an explicit request first blocked by work", async () => {
