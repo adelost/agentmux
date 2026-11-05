@@ -2,7 +2,7 @@ import { feature, unit, component, expect } from "bdd-vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nightlyCompactPolicy, nightlyCompactDecision, nightlyCompactOutcome, nightlyUnresolvedCount, compactAccessBlocker, resolveStaleCompact } from "../core/nightly-compact.mjs";
+import { nightlyCompactPolicy, nightlyCompactDecision, nightlyCompactOutcome, nightlyUnresolvedCount, compactAccessBlocker, resolveStaleCompact, isUnmeasuredCompact } from "../core/nightly-compact.mjs";
 import { runNightlyCompact, reconcileNightlyCompactReport } from "../cli/nightly-compact.mjs";
 import { cmdDream } from "../cli/dream.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
@@ -50,6 +50,11 @@ feature("nightly context budget", () => {
       ];
     }],
     then: ["none can authorize another attempt", result => expect(result).toEqual([null, null, null, null])],
+  });
+  unit("an unmeasured result cannot repeat the one stale-intent retry", {
+    when: ["the retry returned a compact boundary without a token reading", () => isUnmeasuredCompact({
+      status: "compacted-unmeasured", staleRetryUsed: true, sessionId: "same-session", sessionPath: "/exact.jsonl" }, facts())],
+    then: ["no second model call is admitted", result => expect(result).toBe(false)],
   });
   for (const size of [70_000, 259_541]) {
     component(`a stale account-switch intent is resolved from the same session at ${size} tokens`, {

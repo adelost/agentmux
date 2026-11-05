@@ -59,7 +59,7 @@ export function resolveStaleCompact(record, facts, policy, now) {
 
 /** WHAT: Checks an exact session's completed but unmeasured compact. WHY: Separates missing size proof from failed or still-running model calls. */
 export function isUnmeasuredCompact(record, facts) {
-  return record?.status === "compacted-unmeasured" && record.sessionId === facts.sessionId
+  return record?.status === "compacted-unmeasured" && !record.staleRetryUsed && record.sessionId === facts.sessionId
     && record.sessionPath === facts.sessionPath;
 }
 
