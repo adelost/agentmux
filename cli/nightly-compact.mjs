@@ -4,7 +4,9 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID, createHash } from "node:crypto";
-import { beginContextCompact, contextMaintenanceAttempt, liveCompactAttempts, rememberContextCompact } from "../core/context-maintenance.mjs";
+import { contextMaintenanceAttempt, liveCompactAttempts } from "../core/context-maintenance.mjs";
+import { compactReceipt, updateCompactReceipt } from "../core/compact-receipts.mjs";
+import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 import { listAgents, loadConfig, findChannelForPane } from "./config.mjs";
 import { listPanes } from "./tmux.mjs";
 import { dialectFor, inspectPane } from "./inspect-pane.mjs";
@@ -46,8 +48,29 @@ function writeReport(path, value) {
 }
 
 /** WHAT: Reads one pane's saved compact attempt for this night. WHY: Keeps rotation and the compact runner on the same durable attempt evidence. */
-export function readNightlyCompactAttempt(path, dateKey, key) {
-  return readReport(join(path, `${encodeURIComponent(key)}.json`), dateKey).panes[key] || null;
+export function readNightlyCompactAttempt(state, path, dateKey, key) {
+  const record = compactReceipt(state, key);
+  // Existing receipts remain readable as historical input during the cutover.
+  if (record?.nightlyDateKey === dateKey && record.nightlyStatus) return { ...record, status: record.nightlyStatus };
+  if (record?.receiptStoreVersion === 1) return null;
+  const legacy = readReport(join(path, `${encodeURIComponent(key)}.json`), dateKey).panes[key] || null;
+  if (!record?.status || record.sessionId !== legacy?.sessionId) return legacy;
+  return record.status === "VERIFIED" && legacy?.status === "compacted-unmeasured"
+    && legacy.sessionId === record.sessionId && record.cursor?.positions?.[legacy.sessionPath] != null ? legacy : null;
+}
+
+const sharedStatus = row => row.status === "attempting" ? "ATTEMPTING" : row.status === "unverified" ? "UNKNOWN"
+  : ["within-budget", "compacted-above-budget", "compacted-unmeasured", "nothing-to-compact"].includes(row.status)
+    ? row.reason === "stale-attempt-measured" ? "MEASURED" : "VERIFIED"
+    : row.reason === "stale-attempt-above-budget" ? "MEASURED" : "FAILED";
+
+function importLegacyAttempt(state, key, dateKey, row, facts, now) {
+  if (!state || !row || row.sessionId !== facts.sessionId || row.sessionPath !== facts.sessionPath || compactReceipt(state, key)?.status) return;
+  let cursor = null;
+  try { cursor = captureJsonlAppendCursor("context-maintenance-v1", [row.sessionPath]); } catch { /* missing journal remains unknown */ }
+  updateCompactReceipt(state, key, prior => prior.status ? prior : { ...prior, ...row, receiptStoreVersion: 1,
+    attemptId: randomUUID(), nightlyDateKey: dateKey, nightlyStatus: row.status, status: sharedStatus(row), cursor,
+    at: Number.isFinite(Date.parse(row.attemptedAt)) ? Date.parse(row.attemptedAt) : now });
 }
 
 function composerText(screen, engine) {
@@ -81,7 +104,7 @@ export async function observeNightlyPane(ctx, target, { queue, now = Date.now } 
       && (engine === "claude" ? process.command === "claude" : ["node", "codex"].includes(process.command)),
     sessionId: stable ? after.sessionId : null, sessionPath: stable ? after.path : null,
     status: observed.status, composerEmpty: composerText(screen, engine) === "", queued,
-    tokens: observed.context?.tokens ?? null,
+    tokens: observed.context?.tokens ?? null, tokensObservedAt: observed.context?.observedAt ?? null,
     model: quality?.sessionId === after?.sessionId ? quality.model : null,
     effort: quality?.sessionId === after?.sessionId ? quality.effort : null,
     idleMs: Number.isFinite(activity) ? now() - activity : null, activity,
@@ -168,7 +191,6 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
   console.log(`${label}: >${policy.maxTokens} tokens, idle >=${policy.idleMinutes}min, at most one attempt/session/night${flags.dry ? " (dry)" : ""}.`);
   for (const target of targets) {
     const key = `${target.agent.name}:${target.pane.index}`;
-    const receiptPath = join(path, `${encodeURIComponent(key)}.json`);
     if (!["claude", "codex"].includes(target.engine)) {
       rows.push({ pane: key, status: "skipped", reason: "compact-receipt-unsupported" });
       continue;
@@ -176,14 +198,25 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     let first;
     try { first = await observe(ctx, target, { queue, now }); }
     catch { rows.push({ pane: key, status: "skipped", reason: "observation-unavailable" }); continue; }
-    const previous = readReport(receiptPath, dateKey).panes[key];
+    let previous = readNightlyCompactAttempt(ctx.state, path, dateKey, key);
+    if (!flags.dry && previous) {
+      importLegacyAttempt(ctx.state, key, dateKey, previous, first, now());
+      previous = readNightlyCompactAttempt(ctx.state, path, dateKey, key);
+    }
     const retryUnmeasured = dependencies.retryUnmeasured === true && target.engine === "claude";
-    const resolved = retryUnmeasured ? resolveStaleCompact(previous, first, policy, now()) : null;
+    const initialSharedStatus = compactReceipt(ctx.state, key)?.status;
+    const resolved = resolveStaleCompact(previous, first, policy, now());
     const sharedOutcome = () => {
-      const record = contextMaintenanceAttempt(ctx.state, target.agent.name, target.pane.index, { sessionId: first.sessionId, path: first.sessionPath });
-      const current = readNightlyCompactAttempt(path, dateKey, key);
+      const record = contextMaintenanceAttempt(ctx.state, target.agent.name, target.pane.index,
+        { sessionId: first.sessionId, path: first.sessionPath }, now(), { readOnly: Boolean(flags.dry) });
+      const current = readNightlyCompactAttempt(ctx.state, path, dateKey, key);
+      if (record?.status === "VERIFIED" && initialSharedStatus !== "VERIFIED") return sharedNightlyCompactOutcome(record, first);
+      // A nightly attempt is the shared record itself, not a competing writer.
+      if (current?.attemptId && record?.nightlyStatus && current.attemptId === previous?.attemptId && current.status === previous.status
+          && !(record.status === "UNKNOWN" && record.reason === "compact-attempt-timeout")
+          && !(record.status === "VERIFIED" && current.status === "compacted-unmeasured" && !retryUnmeasured)) return null;
       if (retryUnmeasured && isUnmeasuredCompact(current, first) && record?.status === "VERIFIED") return null;
-      if (resolved && ["VERIFIED", "ATTEMPTING"].includes(record?.status)
+      if (resolved && ["VERIFIED", "ATTEMPTING", "UNKNOWN", "MEASURED"].includes(record?.status)
           && !liveCompactAttempts(ctx.state).some(attempt => attempt.pane === key)) return null;
       return sharedNightlyCompactOutcome(record, first);
     };
@@ -196,7 +229,11 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     const reason = resolved ? null
       : nightlyCompactDecision(first, policy, resolved || previous, { force: dependencies.force, retryUnmeasured, retryStale });
     if (reason) { rows.push({ pane: key, status: "skipped", reason, beforeTokens: first.tokens }); continue; }
-    if (flags.dry) { rows.push({ pane: key, status: "eligible", beforeTokens: first.tokens }); continue; }
+    if (flags.dry) {
+      rows.push(resolved?.status === "unverified" ? { pane: key, ...resolved }
+        : { pane: key, status: resolved?.status === "within-budget" ? "would-resolve" : "eligible", beforeTokens: first.tokens });
+      continue;
+    }
 
     // Same cross-process lease as the broker. Enqueue remains possible; the
     // final observation sees it, or delivery waits until compact releases.
@@ -207,27 +244,28 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
     }
     if (!lease) { rows.push({ pane: key, status: "skipped", reason: "delivery-lease-busy" }); continue; }
     let intent;
-    const save = (row) => {
-      const report = readReport(receiptPath, dateKey);
-      report.policy = policy;
-      report.panes[key] = row;
-      writeReport(receiptPath, report);
-    };
+    const save = (row) => updateCompactReceipt(ctx.state, key, prior => {
+      const status = sharedStatus(row);
+      const cursor = row.status === "attempting" ? captureJsonlAppendCursor("context-maintenance-v1", [row.sessionPath]) : prior.cursor;
+      return { ...prior, ...row, receiptStoreVersion: 1, attemptId: row.attemptId || randomUUID(), status, nightlyStatus: row.status, nightlyDateKey: dateKey, cursor,
+        at: Number.isFinite(Date.parse(row.attemptedAt)) ? Date.parse(row.attemptedAt) : now(),
+        ...(row.status === "attempting" ? { pid: process.pid } : {}) };
+    });
     try {
       // Other controllers can complete while the lease is busy. This read
       // and the intent below must share the same physical session lease.
       const currentShared = sharedOutcome();
       if (currentShared) { rows.push({ pane: key, ...currentShared }); continue; }
-      let current = readReport(receiptPath, dateKey).panes[key];
+      let current = readNightlyCompactAttempt(ctx.state, path, dateKey, key);
       await sleep(200);
-      if (retryUnmeasured) {
+      if (resolved) {
         const fresh = await observe(ctx, target, { queue, now });
         const recovery = resolveStaleCompact(current, fresh, policy, now());
         if (recovery && fresh.sessionId === first.sessionId && fresh.sessionPath === first.sessionPath && fresh.activity === first.activity) {
           save(recovery);
           current = recovery;
           if (recovery.status === "within-budget") { rows.push({ pane: key, ...recovery }); continue; }
-          if (recovery.staleRetryUsed) { rows.push({ pane: key, ...recovery }); continue; }
+          if (recovery.status === "unverified" || !retryStale || recovery.staleRetryUsed) { rows.push({ pane: key, ...recovery }); continue; }
         }
       }
       const check = async () => {
@@ -244,7 +282,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       // Durable intent precedes typing. A crash/ambiguous outcome is not a
       // licence to repeat a model call on a later invocation tonight.
       intent = { sessionId: first.sessionId, sessionPath: first.sessionPath, beforeTokens: first.tokens,
-        status: "attempting", attemptedAt: new Date(now()).toISOString(), command,
+        status: "attempting", attemptId: randomUUID(), attemptedAt: new Date(now()).toISOString(), command,
         ...(retryStale ? { staleRetryUsed: true } : {}) };
       save(intent);
       await (dependencies.mirror || mirror)(ctx, target, command);
@@ -270,11 +308,9 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
         },
       };
       const compact = dependencies.compact || (target.engine === "claude" ? verifiedClaudeCompact : verifiedCodexCompact);
-      beginContextCompact(ctx.state, target.agent.name, target.pane.index, { sessionId: first.sessionId, path: first.sessionPath });
       const receipt = await compact({ agent: guardedAgent, agentName: target.agent.name, pane: target.pane.index,
         paneDir: target.paneDir, latestIdentity: (dir) => latestPaneSessionIdentity(target.engine, dir),
         command, sleep, maxRescues: 0, onCommandAccepted: () => lease.releaseSession?.() });
-      rememberContextCompact(ctx.state, target.agent.name, target.pane.index, receipt);
       await sleep(500);
       const after = await observe(ctx, target, { queue, now });
       const outcome = nightlyCompactOutcome(receipt, first, after, policy.maxTokens);

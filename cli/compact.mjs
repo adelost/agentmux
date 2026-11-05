@@ -1,6 +1,7 @@
 // Manual compact and the shared nightly maintenance entry.
 import { listAgents } from "./config.mjs";
-import { hasSession, listPanes, sendToPane } from "./tmux.mjs";
+import { hasSession, listPanes } from "./tmux.mjs";
+import { sendRecordedCompact } from "./manual-compact.mjs";
 import { isCodingDialect } from "../core/dialects.mjs";
 import { dialectFor, inspectPane } from "./inspect-pane.mjs";
 import { isCompactUnsafe } from "../core/pane-status.mjs";
@@ -87,7 +88,7 @@ export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions =
         skipped.push({ agent: a.name, pane: p.index, dialect, context, status });
         continue;
       }
-      targets.push({ agent: a.name, pane: p.index, dialect, context, status });
+      targets.push({ agent: a.name, agentConfig: a, pane: p.index, dialect, context, status });
     }
   }
 
@@ -124,7 +125,7 @@ export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions =
       // Mirror to Discord with an "amux:compact" source tag so channel
       // watchers can tell this was a bulk-compact action vs a manual
       // /compact somebody typed. Transparency without noise.
-      const sent = await sendToPane(ctx, t.agent, t.pane, compactText, { source: "amux:compact" });
+      const sent = await sendRecordedCompact(ctx, t.agentConfig, t.pane, t.dialect, compactText);
       if (sent?.delivered) console.log(`✓ ${t.agent} p${t.pane}: ${compactText} sent`);
       else console.log(`✗ ${t.agent} p${t.pane}: ${sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged"}`);
     } catch (err) {
@@ -201,7 +202,7 @@ async function compactOnePane(ctx, name, flags, compactText) {
   if (dialect === "codex" && compactText !== "/compact") {
     throw new Error("Codex /compact takes no focus. The pane must use amux compact --self -m HANDOFF or --continue-file FILE.");
   }
-  const sent = await sendToPane(ctx, name, paneIdx, compactText, { source: "amux:compact" });
+  const sent = await sendRecordedCompact(ctx, a, paneIdx, dialect, compactText);
   if (!sent?.delivered) {
     console.error(`${name} p${paneIdx}: ${sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged"}`);
     process.exitCode = 1;

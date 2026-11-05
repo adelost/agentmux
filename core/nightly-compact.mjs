@@ -47,11 +47,15 @@ export function nightlyCompactDecision(facts, policy, previous = null, { force =
 /** WHAT: Resolves an abandoned account-switch intent from a fresh exact-session measurement. WHY: Prevents an interrupted writer from holding a pane for the rest of the day. */
 export function resolveStaleCompact(record, facts, policy, now) {
   const at = Date.parse(record?.attemptedAt);
-  if (record?.status !== "attempting" || record.sessionId !== facts.sessionId
+  const pending = record?.status === "attempting" || ["unverified", "measured"].includes(record?.status)
+    && ["stale-attempt-timeout", "compact-attempt-timeout", "compact-attempt-measured"].includes(record.reason);
+  if (!pending || record.sessionId !== facts.sessionId
       || record.sessionPath !== facts.sessionPath || !Number.isFinite(at) || now - at < 40 * 60_000
       || facts.engine !== "claude" || facts.backend !== "tmux" || facts.running !== true || facts.blocker
-      || facts.status !== "idle" || !facts.composerEmpty || facts.queued !== 0
-      || !Number.isFinite(facts.tokens) || facts.tokens < 0) return null;
+      || facts.status !== "idle" || !facts.composerEmpty || facts.queued !== 0) return null;
+  if (!Number.isFinite(facts.tokens) || facts.tokens < 0 || !Number.isFinite(Date.parse(facts.tokensObservedAt))
+      || Date.parse(facts.tokensObservedAt) < at) return { ...record, status: "unverified", reason: "stale-attempt-timeout",
+    afterTokens: null, resolvedAt: new Date(now).toISOString() };
   return { ...record, status: facts.tokens <= policy.maxTokens ? "within-budget" : "failed",
     reason: facts.tokens <= policy.maxTokens ? "stale-attempt-measured" : "stale-attempt-above-budget",
     afterTokens: facts.tokens, resolvedAt: new Date(now).toISOString() };
@@ -78,7 +82,7 @@ export function nightlyCompactOutcome(receipt, before, after, maxTokens) {
   };
 }
 
-const UNRESOLVED_SKIP = /^(claude-subscription-access-disabled|provider-usage-limited|activity-unknown|already-attempted:(failed|attempting|compacted-))/u;
+const UNRESOLVED_SKIP = /^(claude-subscription-access-disabled|provider-usage-limited|activity-unknown|already-attempted:(failed|attempting|unverified|unknown|measured|compacted-))/u;
 
 /** WHAT: Calculates how many rows leave tonight's budget work undone. WHY: Keeps one definition behind the report, the exit code and Dream's maintenance state. */
 export function nightlyUnresolvedCount(rows, policy) {

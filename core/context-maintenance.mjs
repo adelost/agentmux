@@ -21,19 +21,12 @@ import { QUOTA_PARK_ORIGIN } from "./quota-park.mjs";
 import { QUOTA_WIND_DOWN_ORIGIN } from "./quota-wind-down.mjs";
 import { withdrawDraft } from "./draft-withdrawal.mjs";
 import { assertDeliveryPreparation, onUnsentPreparationTimeout } from "./delivery-preparation.mjs";
+import { COMPACT_RECEIPTS_STATE, compactWriterGone, resolveExpiredCompact, updateCompactReceipt } from "./compact-receipts.mjs";
+import { randomUUID } from "node:crypto";
 
-const STATE_KEY = "context_maintenance_by_pane_v1";
+const STATE_KEY = COMPACT_RECEIPTS_STATE;
 const paneKey = (name, pane) => `${name}:${pane}`;
-// The longest compact wait (Codex, 1 920 polls of 1 s) plus a margin: no live writer owns an older attempt.
-const COMPACT_WRITER_LIFETIME_MS = 40 * 60_000;
 const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; } };
-
-/** WHAT: Tells whether the process that began a compact attempt has stopped. WHY: Only then may another pass touch what it typed. */
-function compactWriterGone(record, { now, alive, self = process.pid }) {
-  if (record.pid === self) return false;
-  if (record.pid && !alive(record.pid)) return true;
-  return now - record.at > COMPACT_WRITER_LIFETIME_MS;
-}
 
 /** WHAT: Reads the compact attempts whose writer is not gone by the compact rule. WHY: Lets the restart gate stop for live work, never for a marker its writer left behind. */
 export function liveCompactAttempts(state, { now = Date.now(), alive = processAlive, self = process.pid } = {}) {
@@ -64,7 +57,8 @@ function hasWorkAfter(files, cursor) {
 
 function write(state, key, record) {
   assertDeliveryPreparation();
-  state.set(STATE_KEY, { ...state.get(STATE_KEY, {}), [key]: record });
+  updateCompactReceipt(state, key, prior => ({ ...record, receiptStoreVersion: 1,
+    ...(prior.quotaCompactions && { quotaCompactions: prior.quotaCompactions }) }));
 }
 
 /** WHAT: Stores verified compact evidence from another maintenance path. WHY: Prevents model switching and cold-wake protection from compacting the same context twice. */
@@ -81,22 +75,29 @@ export function lastContextCompactAt(state, name, pane) {
 }
 
 /** WHAT: Reads the current context-generation fence. WHY: Keeps warm, cold and nightly maintenance from repeating a paid attempt without new work. */
-export function contextMaintenanceAttempt(state, name, pane, identity = null, now = Date.now()) {
-  const record = state?.get?.(STATE_KEY, {})?.[paneKey(name, pane)];
-  if (!record || record.status === "NOT_SENT" || (identity && record.sessionId !== identity.sessionId)) return null;
-  if (!Object.keys(record.cursor?.positions || {}).length) return null;
+export function contextMaintenanceAttempt(state, name, pane, identity = null, now = Date.now(), { readOnly = false } = {}) {
+  let record = state?.get?.(STATE_KEY, {})?.[paneKey(name, pane)];
+  if (!record || record.status === "NOT_SENT") return null;
+  if (!readOnly && (record.status === "ATTEMPTING" || record.status === "UNKNOWN")) {
+    record = resolveExpiredCompact(state, paneKey(name, pane), { identity, now }) || record;
+  }
+  if (identity && record.sessionId !== identity.sessionId) return null;
+  if (!Object.keys(record.cursor?.positions || {}).length) return { ...record, status: "UNKNOWN",
+    reason: record.reason || "compact-cursor-missing" };
   // A receipt whose journal was trimmed or rewritten since cannot prove a byte prefix; the compact the session's current
   // journal holds then anchors it (row 104), stored so the search runs once, and only a journal without one stays unknown.
   const copied = identity?.path ? cursorForCopiedJsonl(record.cursor, identity.path) : record.cursor;
   const cursor = copied ?? (identity?.path
     ? cursorAfterLastJsonlEvent(record.cursor, identity.path, compactEvent, { maxBytes: REANCHOR_MAX_BYTES }) : null);
   if (!cursor) return { ...record, status: "UNKNOWN", reason: "journal-copy-unverified" };
-  if (!copied) write(state, paneKey(name, pane), { ...record, cursor });
+  if (!copied && !readOnly) write(state, paneKey(name, pane), { ...record, cursor });
   const files = Object.keys(cursor.positions);
   if (hasWorkAfter(files, cursor)) return null;
   if (record.status !== "VERIFIED" && hasJsonlEventAfterCursor(files, cursor, compactEvent)) {
-    const verified = { ...record, cursor, status: "VERIFIED" };
-    write(state, paneKey(name, pane), verified);
+    const verified = { ...record, cursor, status: "VERIFIED",
+      ...(["attempting", "unverified", "measured"].includes(record.nightlyStatus)
+        && { nightlyStatus: "compacted-unmeasured", afterTokens: null, reason: "native-compact-boundary" }) };
+    if (!readOnly) write(state, paneKey(name, pane), verified);
     return verified;
   }
   // A compact the provider's usage limit refused spent nothing, so its fence ends when that limit resets.
@@ -105,10 +106,13 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null, no
 }
 
 /** WHAT: Stores a maintenance intent before the model call. WHY: Prevents a crash or an ambiguous compact from becoming permission to spend again. */
-export function beginContextCompact(state, name, pane, identity) {
+export function beginContextCompact(state, name, pane, identity, { command = null, source = null } = {}) {
   if (!state) return;
   const cursor = captureJsonlAppendCursor("context-maintenance-v1", [identity.path]);
-  write(state, paneKey(name, pane), { sessionId: identity.sessionId, cursor, status: "ATTEMPTING", at: Date.now(), pid: process.pid });
+  const record = { sessionId: identity.sessionId, sessionPath: identity.path, cursor, status: "ATTEMPTING", at: Date.now(),
+    pid: process.pid, attemptId: randomUUID(), ...(command && { command }), ...(source && { source }) };
+  write(state, paneKey(name, pane), record);
+  return record;
 }
 
 /** WHAT: Builds shared warm and cold context protection. WHY: Keeps paid compact attempts durable, serialized and bound to exact session evidence. */
@@ -189,7 +193,8 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const ended = state?.get?.(STATE_KEY, {})?.[paneKey(name, pane)];
     if (ended?.status === "NOT_SENT") finishQuotaCompact(state, ended.quotaClaim, "not-sent", ended.reason, now());
     let prior = existing(name, pane, identity);
-    if (prior?.status === "ATTEMPTING" && compactWriterGone(prior, { now: now(), alive: writerAlive })) {
+    if ((prior?.status === "ATTEMPTING" || prior?.status === "UNKNOWN" && prior.reason === "compact-attempt-timeout")
+        && compactWriterGone(prior, { now: now(), alive: writerAlive })) {
       prior = await withdrawAbandonedCompact(name, pane, prior);
     }
     if (prior?.status === "VERIFIED") {
@@ -197,6 +202,12 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       return { ok: true, cell: "receipt-exists" };
     }
     const context = await (agent.getContext?.(name, pane) ?? agent.getContextPercent(name, pane));
+    if (prior?.status === "UNKNOWN" && prior.reason === "compact-attempt-timeout") {
+      const latest = identityFor(target.engine, target.dir);
+      if (latest?.sessionId === identity?.sessionId && latest?.path === identity?.path) {
+        prior = resolveExpiredCompact(state, paneKey(name, pane), { identity, reading: context, now: now(), alive: writerAlive }) || prior;
+      }
+    }
     let activity = activityFor(target.dir, target.engine, { recoverCodexHistory: true });
     if (!Number.isFinite(activity)) {
       const usage = journalFor(target.dir, target.engine, { journalOnly: true });
@@ -229,7 +240,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     if (decision.values.action === "HOLD") return { ok: false, need, reason: `context-cost:${decision.cell}${holder}${prior?.reason ? `:${prior.reason}` : ""}` };
     const warmMs = target.engine === "codex" ? 30 * 60_000 : policy.coldMs;
     const quota = !cold && Number.isFinite(activity) && now() < activity + warmMs
-      ? warmQuotaHold(state, name, pane, queue.list(name, pane)) : null;
+      ? warmQuotaHold(state, name, pane, queue.list(name, pane), now()) : null;
     const result = await compactOnce({ name, pane, target, identity, context, decision, dry, leaseHeld, heldLease, jobId, focus, beforeDelivery,
       quota: quota && { ...quota, expiresAt: activity + warmMs } });
     if (cold && coldPolicy !== policy) {
@@ -250,7 +261,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const pending = () => {
       if (quota && now() >= quota.expiresAt) return true;
       const jobs = queue.list(name, pane);
-      const held = quota && now() < quota.expiresAt ? warmQuotaHold(state, name, pane, jobs) : null;
+      const held = quota && now() < quota.expiresAt ? warmQuotaHold(state, name, pane, jobs, now()) : null;
       return jobs.some(j => !TERMINAL_DELIVERY_STATES.has(j.status)
         && blocksQuotaCompact(j, { jobId, beforeDelivery, hold: held?.id === quota?.id ? held : null }));
     };
@@ -274,7 +285,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
         if (!idle.ok) return { ok: false, reason: `context-cost:${idle.stage}:${idle.error}` };
       }
       if (quota) {
-        const currentHold = warmQuotaHold(state, name, pane, queue.list(name, pane));
+        const currentHold = warmQuotaHold(state, name, pane, queue.list(name, pane), now());
         if (currentHold?.id !== quota.id) return { ok: false, reason: "context-cost:delivery-pending:quota-episode-changed" };
         if (currentHold.attempts.some(attempt => ["attempting", "unknown"].includes(attempt.status))) {
           return { ok: false, reason: "context-cost:delivery-pending:quota-floor-compact-unknown" };

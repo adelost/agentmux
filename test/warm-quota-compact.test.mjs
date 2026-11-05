@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createState } from "../core/state.mjs";
 import { createContextMaintenance } from "../core/context-maintenance.mjs";
+import { warmQuotaHold } from "../core/quota-floor-compact.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { createDeliveryBroker } from "../core/delivery-broker.mjs";
 import { composerAgent } from "./fixtures/composer-agent.mjs";
@@ -54,7 +55,7 @@ it("persists the maximum of two quota-episode attempts across controller reloads
   await fx.maintenance().run("fixture", 0); await fx.maintenance().run("fixture", 0);
   const third = await fx.maintenance().run("fixture", 0);
   expect(fx.calls()).toBe(2); expect(third.reason).toContain("quota-floor-compact-limit");
-  expect(fx.state.get("quota_floor_alert_v1").accounts["claude:fixture"].warmCompactions["fixture:0"].attempts).toHaveLength(2);
+  expect(warmQuotaHold(fx.state, "fixture", 0, fx.jobs, fx.deps.now()).attempts).toHaveLength(2);
 });
 
 it("does not reset the budget for a new session, and resets it only for a new quota episode", async () => {
@@ -63,7 +64,7 @@ it("does not reset the budget for a new session, and resets it only for a new qu
   fx.deps.identityFor = () => ({ path: fx.path, sessionId: "new-session" });
   expect((await fx.maintenance().run("fixture", 0)).reason).toContain("quota-floor-compact-limit"); expect(fx.calls()).toBe(2);
   const data = fx.state.get("quota_floor_alert_v1"); data.accounts["claude:fixture"].id = "new-proven-episode";
-  data.accounts["claude:fixture"].warmCompactions = {}; fx.state.set("quota_floor_alert_v1", data);
+  fx.state.set("quota_floor_alert_v1", data);
   await fx.maintenance().run("fixture", 0); expect(fx.calls()).toBe(3);
 });
 
@@ -109,7 +110,7 @@ it("preserves an unknown compact across a new controller and session instead of 
   fx.deps.identityFor = () => ({ path: fx.path, sessionId: "later-session" });
   const blocked = await fx.maintenance().run("fixture", 0);
   expect(blocked.reason).toContain("quota-floor-compact-unknown");
-  expect(fx.state.get("quota_floor_alert_v1").accounts["claude:fixture"].warmCompactions["fixture:0"].attempts).toHaveLength(1);
+  expect(warmQuotaHold(fx.state, "fixture", 0, fx.jobs, fx.deps.now()).attempts).toHaveLength(1);
 });
 
 it("holds a submitted pending job even through the ordinary before-delivery path", async () => {

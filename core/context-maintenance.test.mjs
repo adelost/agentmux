@@ -2,7 +2,8 @@ import { component, expect, feature } from "bdd-vitest";
 import { appendFileSync, copyFileSync, mkdtempSync, truncateSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { contextMaintenanceAttempt, createContextMaintenance } from "./context-maintenance.mjs";
+import { contextMaintenanceAttempt, createContextMaintenance, liveCompactAttempts } from "./context-maintenance.mjs";
+import { resolveExpiredCompact } from "./compact-receipts.mjs";
 import { deliveryHead, wakeDeliveryTarget } from "./delivery-wake.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
@@ -35,6 +36,43 @@ function fixture({ fail = false, jobs = [] } = {}) {
 }
 
 feature("warm and cold compaction share a durable one-attempt fence", () => {
+  component("an abandoned compact becomes unknown or a fresh exact-session measurement", {
+    given: ["an expired attempting receipt with no live writer", () => {
+      const ctx = fixture(), identity = ctx.identityFor(), now = 100_000_000;
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [identity.path]);
+      ctx.state.set("context_maintenance_by_pane_v1", { "claw:2": { sessionId: identity.sessionId,
+        sessionPath: identity.path, cursor, status: "ATTEMPTING", at: now - 41 * 60_000, pid: 99999999 } });
+      return { ...ctx, identity, now };
+    }],
+    when: ["the same store is observed first without and then with a fresh measurement", ctx => {
+      const unknown = resolveExpiredCompact(ctx.state, "claw:2", { identity: ctx.identity, now: ctx.now, alive: () => false });
+      const measured = resolveExpiredCompact(ctx.state, "claw:2", { identity: ctx.identity, now: ctx.now, alive: () => false,
+        reading: { tokens: 70_000, sessionId: ctx.identity.sessionId, observedAt: new Date(ctx.now).toISOString() } });
+      return { unknown, measured };
+    }],
+    then: ["unknown never becomes zero and fresh same-session tokens are retained", ({ unknown, measured }, ctx) => {
+      expect(unknown).toMatchObject({ status: "UNKNOWN", afterTokens: null });
+      expect(measured).toMatchObject({ status: "MEASURED", afterTokens: 70_000 });
+      ctx.cleanup();
+    }],
+  });
+  component("an overdue live writer cannot be classified as measured", {
+    given: ["an old compact whose writer still exists", () => {
+      const ctx = fixture(), identity = ctx.identityFor(), now = 100_000_000;
+      ctx.state.set("context_maintenance_by_pane_v1", { "claw:2": { sessionId: identity.sessionId,
+        sessionPath: identity.path, status: "ATTEMPTING", at: now - 41 * 60_000, pid: 1234 } });
+      return { ...ctx, identity, now };
+    }],
+    when: ["a current token reading arrives while the writer is live", ctx => {
+      const options = { identity: ctx.identity, now: ctx.now, alive: () => true, self: 99,
+        reading: { sessionId: ctx.identity.sessionId, tokens: 70_000, observedAt: new Date(ctx.now).toISOString() } };
+      return { before: liveCompactAttempts(ctx.state, options), result: resolveExpiredCompact(ctx.state, "claw:2", options),
+        live: liveCompactAttempts(ctx.state, options) };
+    }],
+    then: ["the outcome is unknown and the existing 40-minute restart limit still applies", ({ before, result, live }, ctx) => {
+      expect(before).toHaveLength(0); expect(result.status).toBe("UNKNOWN"); expect(live).toHaveLength(0); ctx.cleanup();
+    }],
+  });
   component("a preparation timeout before compact input closes only its exact unsent intent", {
     given: ["the real compact owner has recorded its intent but its final composer read is held", () => {
       const ctx = fixture();

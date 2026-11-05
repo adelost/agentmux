@@ -1,5 +1,5 @@
 import { feature, unit, component, expect } from "bdd-vitest";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nightlyCompactPolicy, nightlyCompactDecision, nightlyCompactOutcome, nightlyUnresolvedCount, compactAccessBlocker, resolveStaleCompact, isUnmeasuredCompact } from "../core/nightly-compact.mjs";
@@ -9,12 +9,13 @@ import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { parseConfig, generateAgentsYaml } from "../sync.mjs";
 import { beginContextCompact, rememberContextCompact } from "../core/context-maintenance.mjs";
 import { createState } from "../core/state.mjs";
+import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 
 const now = () => Date.parse("2026-09-07T02:00:00Z");
 const facts = () => ({ engine: "claude", backend: "tmux", running: true,
   sessionId: "same-session", sessionPath: "/exact.jsonl", status: "idle",
   composerEmpty: true, queued: 0, tokens: 227_000, percent: 28, idleMs: 61 * 60_000,
-  activity: now() - 61 * 60_000, model: "Fable 5.1", effort: "xhigh" });
+  activity: now() - 61 * 60_000, tokensObservedAt: new Date(now()).toISOString(), model: "Fable 5.1", effort: "xhigh" });
 const policy = nightlyCompactPolicy();
 const target = { agent: { name: "claw", backend: "tmux" }, pane: { index: 4 }, engine: "claude", paneDir: "/pane" };
 
@@ -25,7 +26,7 @@ function fixture() {
   writeFileSync(sessionPath, "");
   let observed = { ...facts(), sessionPath };
   const queue = createDeliveryQueue({ rootDir: join(root, "queue") });
-  const ctx = { agent: { sendOnly: async () => { calls++; } } };
+  const ctx = { state: createState(join(root, "state.json")), agent: { sendOnly: async () => { calls++; } } };
   const deps = { path: join(root, "night.json"), targets: [target], runtimeConfig: {}, queue, now,
     observe: async () => ({ ...observed }), sleep: async () => {}, mirror: async () => {},
     compact: async ({ agent }) => {
@@ -39,6 +40,93 @@ function fixture() {
 }
 
 feature("nightly context budget", () => {
+  component("nightly and rotation leave their one compact receipt in the shared store", {
+    given: ["an exact idle session and a durable shared state", () => {
+      const fx = fixture(); fx.ctx.state = createState(join(fx.root, "state.json")); return fx;
+    }],
+    when: ["nightly finishes the compact", async fx => {
+      const result = await runNightlyCompact(fx.ctx, {}, fx.deps);
+      return { result, stored: fx.ctx.state.get("context_maintenance_by_pane_v1", {})["claw:4"],
+        legacy: existsSync(join(fx.deps.path, "claw%3A4.json")) };
+    }],
+    then: ["the shared receipt owns the outcome and no second per-trigger receipt is written", ({ result, stored, legacy }, fx) => {
+      try { expect(result.rows[0].status).toBe("within-budget"); expect(stored.status).toBe("VERIFIED"); expect(legacy).toBe(false); }
+      finally { fx.clean(); }
+    }],
+  });
+  component("a stale nightly attempt with no fresh reading resolves to unknown in the same store", {
+    given: ["an expired exact-session intent without a post-attempt token reading", () => {
+      const fx = fixture(), path = join(fx.root, "session.jsonl"), at = now() - 41 * 60_000;
+      fx.change({ tokens: null, tokensObservedAt: null });
+      fx.ctx.state.set("context_maintenance_by_pane_v1", { "claw:4": { sessionId: "same-session", sessionPath: path,
+        status: "ATTEMPTING", nightlyStatus: "attempting", nightlyDateKey: "2026-09-07", attemptedAt: new Date(at).toISOString(),
+        at, pid: 99999999, cursor: { positions: { [path]: 0 } } } });
+      return fx;
+    }],
+    when: ["the nightly pass observes the receipt", async fx => ({ result: await runNightlyCompact(fx.ctx, {}, fx.deps),
+      stored: fx.ctx.state.get("context_maintenance_by_pane_v1")["claw:4"], calls: fx.calls() })],
+    then: ["it records unknown without sending another compact", ({ result, stored, calls }, fx) => {
+      try { expect(result.rows[0].status).toBe("unverified"); expect(stored.status).toBe("UNKNOWN"); expect(calls).toBe(0); }
+      finally { fx.clean(); }
+    }],
+  });
+  component("a late native compact boundary resolves the shared nightly intent", {
+    given: ["an interrupted nightly attempt followed by its native boundary", () => {
+      const fx = fixture(), path = join(fx.root, "session.jsonl"), at = now() - 5 * 60_000;
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [path]);
+      fx.ctx.state.set("context_maintenance_by_pane_v1", { "claw:4": { sessionId: "same-session", sessionPath: path,
+        status: "ATTEMPTING", nightlyStatus: "attempting", nightlyDateKey: "2026-09-07", attemptId: "late-boundary",
+        attemptedAt: new Date(at).toISOString(), at, cursor } });
+      writeFileSync(path, `${JSON.stringify({ type: "system", subtype: "compact_boundary" })}\n`);
+      return fx;
+    }],
+    when: ["nightly observes the same session again", async fx => ({ result: await runNightlyCompact(fx.ctx, {}, fx.deps),
+      stored: fx.ctx.state.get("context_maintenance_by_pane_v1")["claw:4"], calls: fx.calls() })],
+    then: ["the shared receipt becomes verified without a duplicate call", ({ result, stored, calls }, fx) => {
+      try { expect(result.rows[0].status).toBe("already-compacted"); expect(stored.status).toBe("VERIFIED");
+        expect(stored.nightlyStatus).toBe("compacted-unmeasured"); expect(calls).toBe(0); }
+      finally { fx.clean(); }
+    }],
+  });
+  component("a native boundary settles an already timed-out nightly intent", {
+    given: ["an unknown receipt whose native boundary arrived later", () => {
+      const fx = fixture(), path = join(fx.root, "session.jsonl"), at = now() - 41 * 60_000;
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [path]);
+      fx.change({ tokens: null, tokensObservedAt: null });
+      fx.ctx.state.set("context_maintenance_by_pane_v1", { "claw:4": { sessionId: "same-session", sessionPath: path,
+        status: "UNKNOWN", reason: "compact-attempt-timeout", nightlyStatus: "unverified", nightlyDateKey: "2026-09-07",
+        attemptId: "timed-out", attemptedAt: new Date(at).toISOString(), at, cursor } });
+      writeFileSync(path, `${JSON.stringify({ type: "system", subtype: "compact_boundary" })}\n`);
+      return fx;
+    }],
+    when: ["the rotation examines the same session", async fx => {
+      fx.deps.retryUnmeasured = true;
+      return { result: await runNightlyCompact(fx.ctx, {}, fx.deps), stored: fx.ctx.state.get("context_maintenance_by_pane_v1")["claw:4"], calls: fx.calls() };
+    }],
+    then: ["verified evidence wins over timeout and no second compact is sent", ({ result, stored, calls }, fx) => {
+      try { expect(result.rows[0].status).toBe("already-compacted"); expect(stored.status).toBe("VERIFIED"); expect(calls).toBe(0); }
+      finally { fx.clean(); }
+    }],
+  });
+  component("a dry nightly pass does not rewrite an expired intent", {
+    given: ["an expired exact-session intent with unknown context", () => {
+      const fx = fixture(), path = join(fx.root, "session.jsonl"), at = now() - 41 * 60_000;
+      fx.change({ tokens: null, tokensObservedAt: null });
+      fx.ctx.state.set("context_maintenance_by_pane_v1", { "claw:4": { sessionId: "same-session", sessionPath: path,
+        status: "ATTEMPTING", nightlyStatus: "attempting", nightlyDateKey: "2026-09-07", attemptedAt: new Date(at).toISOString(),
+        at, pid: 99999999, cursor: { positions: { [path]: 0 } } } });
+      return fx;
+    }],
+    when: ["the operator previews the pass", async fx => {
+      const before = JSON.stringify(fx.ctx.state.all());
+      const result = await runNightlyCompact(fx.ctx, { dry: true }, fx.deps);
+      return { result, before, after: JSON.stringify(fx.ctx.state.all()), calls: fx.calls() };
+    }],
+    then: ["the unknown outcome is shown and no state or model input changes", ({ result, before, after, calls }, fx) => {
+      try { expect(result.rows[0].status).toBe("unverified"); expect(after).toBe(before); expect(calls).toBe(0); }
+      finally { fx.clean(); }
+    }],
+  });
   unit("a stale intent cannot use another session, unknown size, active pane or a second retry", {
     when: ["the compact recovery checks unsafe or ambiguous facts", () => {
       const record = { status: "attempting", sessionId: "same-session", sessionPath: "/exact.jsonl", attemptedAt: "2026-09-07T01:00:00Z" };
@@ -48,7 +136,9 @@ feature("nightly context budget", () => {
         resolveStaleCompact(record, { ...facts(), status: "working" }, policy, now()),
       ];
     }],
-    then: ["none can authorize another attempt", result => expect(result).toEqual([null, null, null])],
+    then: ["a missing reading is unknown and neither an active pane nor a different session may proceed", result => {
+      expect(result[0]).toBeNull(); expect(result[1]).toMatchObject({ status: "unverified", afterTokens: null }); expect(result[2]).toBeNull();
+    }],
   });
   unit("an abandoned retry resolves as failed without admitting a third call", {
     when: ["the measured exact session still exceeds its limit", () => {
@@ -106,6 +196,9 @@ feature("nightly context budget", () => {
           fx.ctx.state = createState(join(fx.root, "state.json"));
           rememberContextCompact(fx.ctx.state, "claw", 4, { ok: true, sessionId: "same-session",
             cursor: { positions: { [fx.sessionPath]: 0 } } });
+          fx.ctx.state.updateKey("context_maintenance_by_pane_v1", records => {
+            delete records["claw:4"].receiptStoreVersion; return records;
+          });
         }
         return fx;
       }],
@@ -393,13 +486,13 @@ feature("nightly context budget", () => {
         const first = await runNightlyCompact(fx.ctx, {}, fx.deps);
         fx.change({ tokens: 150_000 });
         const second = await runNightlyCompact(fx.ctx, {}, fx.deps);
-        return { first, second, calls: fx.calls(), stored: JSON.parse(readFileSync(join(fx.deps.path, "claw%3A4.json"), "utf8")) };
+        return { first, second, calls: fx.calls(), stored: fx.ctx.state.get("context_maintenance_by_pane_v1", {})["claw:4"] };
       } finally { fx.clean(); }
     }],
     then: ["a real reduction is saved and a second invocation never calls the model", ({ first, second, calls, stored }) => {
       expect(first.rows[0]).toMatchObject({ status: "within-budget", beforeTokens: 227_000, afterTokens: 23_000 });
       expect(second.rows[0].reason).toBe("already-attempted:within-budget");
-      expect(calls).toBe(1); expect(stored.panes["claw:4"].sessionId).toBe("same-session");
+      expect(calls).toBe(1); expect(stored.sessionId).toBe("same-session");
     }],
   });
   for (const [name, delta] of [["new enqueue", { queued: 1 }], ["human draft", { composerEmpty: false }], ["changed session", { sessionId: "new" }]]) {

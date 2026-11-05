@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { accountWindows, quotaFloorHold } from "./quota-park.mjs";
 import { quotaObservedAt } from "./quota-wind-down.mjs";
 import { compactPaneList } from "./quota-format.mjs";
+import { expireCompactReceipts, quotaCompactRecords, reconcileQuotaCompactions } from "./compact-receipts.mjs";
 
 /** WHAT: Defines the durable alert state key. WHY: Keeps delivery episodes separate from task state. */
 export const QUOTA_FLOOR_ALERT_STATE = "quota_floor_alert_v1";
@@ -137,7 +138,8 @@ export function createQuotaFloorAlert({ state, readEvidence, notifyHuman, notify
     });
     if (!claimed) return;
     let result;
-    try { result = await send(formatQuotaFloorAlert(get(key), accounts, now()), idempotencyKey); }
+    try { const episode = get(key); result = await send(formatQuotaFloorAlert({ ...episode,
+      warmCompactions: quotaCompactRecords(state, episode) }, accounts, now()), idempotencyKey); }
     catch (error) { result = { outcome: error.notSent === true ? "not-sent" : "unknown", reason: error.message }; }
     const status = result?.sent === true || result?.deduped === true ? "delivered"
       : result?.jobId ? "queued" : result?.outcome === "not-sent" ? "not-sent" : "unknown";
@@ -149,6 +151,7 @@ export function createQuotaFloorAlert({ state, readEvidence, notifyHuman, notify
   }
 
   async function run() {
+    expireCompactReceipts(state, now());
     const evidence = await readEvidence();
     const at = now(), accounts = evidence.snapshot?.accounts || [];
     const groups = quotaFloorGroups({ ...evidence, now: at });
@@ -188,10 +191,11 @@ export function createQuotaFloorAlert({ state, readEvidence, notifyHuman, notify
       data.lastCheckedAt = at;
     });
     const result = [];
+    for (const episode of Object.values(state.get(QUOTA_FLOOR_ALERT_STATE).accounts)) reconcileQuotaCompactions(state, episode, at, QUOTA_FLOOR_ALERT_STATE);
     for (const id of Object.keys(state.get(QUOTA_FLOOR_ALERT_STATE).history || {})) await reconcile(id, true);
     for (const [key, episode] of Object.entries(state.get(QUOTA_FLOOR_ALERT_STATE).accounts)) {
       await reconcile(key);
-      const compactLimit = Object.values(episode.warmCompactions || {}).some(record => record.attempts?.length >= 2);
+      const compactLimit = Object.values(quotaCompactRecords(state, episode)).some(record => record.attempts?.length >= 2);
       if (episode.status !== "held" || !compactLimit && at - episode.firstRefusedAt <= QUOTA_FLOOR_ALERT_AFTER_MS) continue;
       // No waiting work means no new send; retain the episode until recovery is proven.
       if (!groups.some(group => group.key === key)) continue;

@@ -60,9 +60,9 @@ export async function observeSwitchContext(ctx, entry, {
   if (!observed) return { target, facts: null, compactRefusal: "observation-unavailable", compacted: false };
   const facts = { ...observed, queued: liveQueued(queue, entry.agentName, entry.pane, observed.queued) };
   const prior = facts.sessionId
-    ? contextMaintenanceAttempt(ctx.state, entry.agentName, entry.pane, { sessionId: facts.sessionId, path: facts.sessionPath })
+    ? contextMaintenanceAttempt(ctx.state, entry.agentName, entry.pane, { sessionId: facts.sessionId, path: facts.sessionPath }, now(), { readOnly: true })
     : null;
-  const previous = readNightlyCompactAttempt(reportDirectory(now()), compactDayKey(now()), `${entry.agentName}:${entry.pane}`);
+  const previous = readNightlyCompactAttempt(ctx.state, reportDirectory(now()), compactDayKey(now()), `${entry.agentName}:${entry.pane}`);
   const unmeasured = isUnmeasuredCompact(previous, facts);
   const stale = resolveStaleCompact(previous, facts, compactPolicy(policy), now());
   const staleShared = stale && prior && ["ATTEMPTING", "VERIFIED"].includes(prior.status)

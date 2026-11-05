@@ -63,7 +63,7 @@ const CONTENT = {
 
 // Build the injected deps. `state.content` is read fresh each capture so a
 // test can simulate a compact succeeding (context drops) mid-run.
-function harness({ height = 50, content = CONTENT.full100, maxTokens = DEFAULT_CONFIG.maxTokens, running = true, fleetPanes = undefined } = {}) {
+function harness({ height = 50, content = CONTENT.full100, maxTokens = DEFAULT_CONFIG.maxTokens, running = true, fleetPanes = undefined, store = true } = {}) {
   const { path, dir } = writeYaml();
   const state = { content, fires: 0, rootDir: dir };
   const agent = {
@@ -77,8 +77,13 @@ function harness({ height = 50, content = CONTENT.full100, maxTokens = DEFAULT_C
   const tmux = async () => ({ stdout: `0 ${height}` });
   const discord = { send: async () => {} };
   const config = { ...DEFAULT_CONFIG, maxTokens, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
+  // Synthetic maintenance boundary: the real shared-store integration is exercised by auto-compact-account-transfer.test.mjs.
+  const attempted = new Set();
+  const contextMaintenance = store ? { canAttempt: (name, pane) => !attempted.has(`${name}:${pane}`), run: async (name, pane) => {
+    attempted.add(`${name}:${pane}`); await agent.sendOnly(name, "/compact", pane); return { ok: true, compacted: true };
+  } } : null;
   const ac = createAutoCompact({
-    agent, agentsYamlPath: path, discord, tmux, config, log: () => {}, fleetPanes,
+    agent, agentsYamlPath: path, discord, tmux, config, contextMaintenance, log: () => {}, fleetPanes,
   });
   return { ac, state, agent };
 }
@@ -133,6 +138,11 @@ function kimiHarness({ percentTokens = 900_000, maxContext = 1_000_000 } = {}) {
 }
 
 feature("automatic paid compact requires supported exact receipts", () => {
+  component("an unavailable receipt store never sends a paid compact", {
+    given: ["an idle large pane without shared maintenance", () => harness({ store: false })],
+    when: ["the automatic poll reaches the compact step", async ({ ac, state }) => { await ticks(ac, 3); return state; }],
+    then: ["no compact input is sent", state => expect(state.fires).toBe(0)],
+  });
   unit("Kimi is not auto-compacted without an exact-receipt implementation", {
     given: ["a Kimi pane whose journal reports 90% context", () => kimiHarness()],
     when: ["running the warn+compact ticks", async ({ ac, state }) => {
@@ -493,7 +503,11 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       const tmux = async () => ({ stdout: `0 50` });
       const discord = { send: async () => {} };
       const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
-      const ac = createAutoCompact({ agent, agentsYamlPath: path, discord, tmux, config, log: () => {} });
+      const attempted = new Set();
+      const contextMaintenance = { canAttempt: (name, pane) => !attempted.has(`${name}:${pane}`), run: async (name, pane) => {
+        attempted.add(`${name}:${pane}`); await agent.sendOnly(name, "/compact", pane); return { ok: true, compacted: true };
+      } };
+      const ac = createAutoCompact({ agent, agentsYamlPath: path, discord, tmux, config, contextMaintenance, log: () => {} });
       return { ac, state, oldHome, fakeHome };
     }],
     when: ["running 3 poll ticks", async ({ ac, state, oldHome, fakeHome }) => {

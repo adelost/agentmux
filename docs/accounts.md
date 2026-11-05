@@ -196,13 +196,15 @@ on the limits `policies/context-cost.mjs` documents (80k tokens, one hour):
 | warm and above 80k, source stopped at its limit | restart without compact; the source cannot answer | `would-running (source-limited:…)` |
 | compact not admissible or context unknown | stays on its source | `blocked (compact-refused:…)` / `blocked (context-unknown)` |
 
-The compact is the verified nightly pass on its own pane lease, outside the
-project's rotation lease, with receipts under
-`~/.agentmux/account-switch-compact/`. A failed or unverified compact blocks
-that pane only. An abandoned `attempting` record older than 40 minutes is
-resolved from a fresh measurement of the same idle session; when above budget,
-one further compact is allowed. A context that grew again between its compact
-and the restart is blocked rather than compacted twice.
+The compact runs on its own pane lease, outside the project's rotation lease.
+Manual, auto, nightly, pause, quota-floor, self and rotation share the pane's
+`context_maintenance_by_pane_v1` receipt. Nightly run files are reports, not
+independent attempt fences; existing files and quota episodes are read during
+the transition so earlier attempts are not forgotten. After 40 minutes an
+unfinished intent becomes a fresh exact-session measurement or `UNKNOWN`;
+unknown evidence never authorizes another model call. A stopped writer with a
+fresh above-budget rotation measurement can be retried once. A context that
+grew again before restart is held rather than compacted twice.
 
 An explicit rotate prints `pending (...; request=ID)` when a blocked pane has
 a durable follow-up, and `blocked` when none was saved. The watcher retries

@@ -10,7 +10,6 @@ import {
   decideAutoCompactAction,
   formatWarningMessage,
   refusalNeedsHeldNotice,
-  formatCompactedMessage,
   formatCompactFailedMessage,
   formatCompactPostponedMessage,
 } from "../core/auto-compact.mjs";
@@ -20,10 +19,8 @@ import { notifyUser } from "../cli/send-notify.mjs";
 import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { detectPaneStatus, LIMIT_BANNER } from "../cli/format.mjs";
 import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
-import { sendSlashVerified } from "../core/delivery.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { latestConversationActivityMs } from "../core/pane-activity.mjs";
-import { compactReceiptIsAuthoritative } from "../core/dialects.mjs";
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
 import { formatLimitedAlert } from "../core/quota-format.mjs";
 import { parseQuotaRecoveryConfig } from "./quota-recovery.mjs";
@@ -39,7 +36,6 @@ import { processStateOf } from '../core/pulse/pane-snapshot.mjs';
 /** WHAT: Builds the idle compaction controller. WHY: Keeps quota alerts, admission and compaction effects on the shared pane evidence. */
 export function createAutoCompact({
   agent,
-  deliveryBroker = null,
   agentsYamlPath,
   discord,
   tmux,      // tmux exec function, same signature as createTmuxContext provides
@@ -156,66 +152,18 @@ export function createAutoCompact({
   }
 
   /** WHAT: Sends one maintenance compact and returns why it was refused before sending, if it was. WHY: Lets the poll loop retry a refusal that spent nothing instead of mistaking it for an ineffective compact. */
-  async function fireCompact(agentName, paneIdx, paneKey, contextPercent, dialect) {
+  async function fireCompact(agentName, paneIdx, paneKey) {
     if (compacting.has(paneKey)) return null;
     compacting.add(paneKey);
     let refusal = null;
     try {
-      if (contextMaintenance) {
-        const result = await contextMaintenance.run(agentName, paneIdx);
-        log(`${paneKey}: ${result.compacted ? "compact verified" : result.reason || result.cell || "within policy"}`);
-        if (result.attempted && !result.ok) await postCompactFailed(agentName, paneIdx, paneKey, result.detail || result.reason, result.retryAt);
-        if (Number.isFinite(result.retryAt)) compactFloors.delete(paneKey); // refused unspent by a limit: warned again after its reset
-        if (!result.ok && !result.attempted) refusal = result.reason ?? "refused before sending";
-        return refusal;
-      }
-      const result = deliveryBroker
-        ? await deliveryBroker.enqueueAndWait({
-            agentName,
-            pane: paneIdx,
-            text: "/compact",
-            kind: "slash",
-            source: "auto-compact",
-            idempotencyKey: `auto-compact:${paneKey}:${Date.now()}`,
-          })
-        : await sendSlashVerified(agent, agentName, paneIdx, "/compact",
-            { settleMs: config.slashSettleMs ?? 1200 });
-      if (!result.delivered) {
-        // The broker owns the durable retry. Do not enqueue a competing
-        // compact command merely because the TUI acknowledgement is late.
-        log(`/compact ${result.pending ? "durably queued" : "NOT acknowledged"} on ${paneKey}`);
-        return;
-      }
-      const authoritative = compactReceiptIsAuthoritative(dialect);
-      log(`${authoritative ? "fired" : "requested"} /compact on ${paneKey} (was ${contextPercent}%)${result.rescues ? ` (rescued x${result.rescues})` : ""}`);
-
-      // No current engine's slash ACK proves compaction. Claude can return a
-      // no-op too; actual journal events own the completion notice. Keep the
-      // floor to prevent another request while context remains unchanged.
-      if (!authoritative) return;
-
-      const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
-      if (channelId && discord) {
-        try {
-          await discord.send(channelId, formatCompactedMessage(paneKey, contextPercent));
-        } catch (err) {
-          log(`compacted-notice send failed for ${paneKey}: ${err.message}`);
-        }
-        // Refresh channel topic on compact — the only trigger that hits
-        // Discord's topic-PATCH API. Auto-compact is rare per pane (hours
-        // between events), so 2-edits-per-10min limit stays comfortable.
-        try {
-          const { setChannelTopicThrottled } = await import("../cli/send-notify.mjs");
-          const stamp = new Date().toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
-          const topic = `[${paneKey}] compacted · ${stamp}`;
-          const r = await setChannelTopicThrottled(channelId, topic);
-          if (r && !r.updated && r.reason && !r.reason.startsWith("throttled") && !r.reason.startsWith("unchanged")) {
-            log(`topic ${paneKey} → ${channelId}: ${r.reason}`);
-          }
-        } catch (err) {
-          log(`topic patch failed for ${paneKey}: ${err.message}`);
-        }
-      }
+      if (!contextMaintenance) return (refusal = "compact-store-unavailable");
+      const result = await contextMaintenance.run(agentName, paneIdx);
+      log(`${paneKey}: ${result.compacted ? "compact verified" : result.reason || result.cell || "within policy"}`);
+      if (result.attempted && !result.ok) await postCompactFailed(agentName, paneIdx, paneKey, result.detail || result.reason, result.retryAt);
+      if (Number.isFinite(result.retryAt)) compactFloors.delete(paneKey);
+      if (!result.ok && !result.attempted) refusal = result.reason ?? "refused before sending";
+      return refusal;
     } catch (err) {
       log(`fire failed for ${paneKey}: ${err.message}`);
     } finally {
@@ -432,7 +380,7 @@ export function createAutoCompact({
           // "suppress" instead of firing again.
           compactFloors.set(paneKey, contextTokens);
           attemptedActivity.set(paneKey, lastActivityMs);
-          const refusal = await fireCompact(a.name, i, paneKey, contextPercent, paneDialect(a, i));
+          const refusal = await fireCompact(a.name, i, paneKey);
           if (refusal) keepWarningForRetry(paneKey, warning, refusal);
           if (refusal && refusalNeedsHeldNotice(lastActivityMs, now, config)) {
             await postCompactHeld(a.name, i, paneKey, `the compact was refused: ${refusal}`, { lastActivityMs, contextTokens, sessionId: contextSession });

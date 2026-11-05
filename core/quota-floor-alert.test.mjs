@@ -29,17 +29,50 @@ function world() {
 }
 
 describe("one durable notification per account's continuous floor hold", () => {
+  it("the existing heartbeat expires an abandoned shared compact even when its pane is idle", async () => {
+    const w = world(), state = createState(w.path);
+    state.set("context_maintenance_by_pane_v1", { "claw:2": { sessionId: "old", status: "ATTEMPTING",
+      at: w.now - 41 * 60000, pid: 99999999 } });
+    await w.controller().tick();
+    expect(state.get("context_maintenance_by_pane_v1")["claw:2"]).toMatchObject({ status: "UNKNOWN", afterTokens: null });
+  });
   it("retains compact attempt evidence in the same episode and sends no extra notification on reload", async () => {
     const w = world(); await w.controller().tick();
     const state = createState(w.path), id = w.data().id;
     for (let i = 0; i < 2; i++) {
-      const hold = warmQuotaHold(state, "claw", 2, w.jobs.filter(job => job.pane === 2));
+      const hold = warmQuotaHold(state, "claw", 2, w.jobs.filter(job => job.pane === 2), w.now + i);
       const claim = claimQuotaCompact(state, hold, "original-session", w.now + i);
       expect(claim).toBeTruthy(); finishQuotaCompact(state, claim, "not-sent", "fixture pre-submit refusal", w.now + i);
     }
     w.now += 60000; await w.controller().tick(); await w.controller().tick();
-    expect(w.data().id).toBe(id); expect(w.data().warmCompactions["claw:2"].attempts).toHaveLength(2);
+    expect(w.data().id).toBe(id); expect(w.data().warmCompactions).toBeUndefined();
+    expect(warmQuotaHold(state, "claw", 2, w.jobs.filter(job => job.pane === 2), w.now).attempts).toHaveLength(2);
     expect(w.human).toHaveBeenCalledTimes(1); expect(w.dispatcher).toHaveBeenCalledTimes(1);
+  });
+  it("resolves an abandoned quota attempt to unknown without granting another call", async () => {
+    const w = world(); await w.controller().tick();
+    const state = createState(w.path), jobs = w.jobs.filter(job => job.pane === 2);
+    const hold = warmQuotaHold(state, "claw", 2, jobs, w.now);
+    expect(claimQuotaCompact(state, hold, "original-session", w.now)).toBeTruthy();
+    w.now += 41 * 60000;
+    const recovered = warmQuotaHold(state, "claw", 2, jobs, w.now);
+    expect(recovered.attempts[0].status).toBe("unknown");
+    expect(claimQuotaCompact(state, recovered, "original-session", w.now)).toBeNull();
+  });
+  it("merges old episode attempts into the shared history without losing either writer's evidence", async () => {
+    const w = world(); await w.controller().tick();
+    const state = createState(w.path), jobs = w.jobs.filter(job => job.pane === 2), id = w.data().id;
+    const prior = { number: 1, at: w.now - 2, sessionId: "old", status: "not-sent" };
+    const newer = { number: 2, at: w.now - 1, sessionId: "new", status: "unknown" };
+    state.updateAll(data => {
+      Object.values(data.quota_floor_alert_v1.accounts)[0].warmCompactions = { "claw:2": { attempts: [prior] } };
+      data.context_maintenance_by_pane_v1 = { "claw:2": { quotaCompactions: { [id]: [newer] } } };
+    });
+    const hold = warmQuotaHold(state, "claw", 2, jobs, w.now);
+    expect(hold.attempts).toHaveLength(2);
+    expect(hold.attempts.map(item => item.sessionId).sort()).toEqual(["new", "old"]);
+    expect(w.data().warmCompactions).toBeUndefined();
+    expect(claimQuotaCompact(state, hold, "another", w.now)).toBeNull();
   });
   it("uses first refusal rather than job age, strictly after 30 minutes, aggregating queued jobs", async () => {
     const w = world(), c = w.controller();
