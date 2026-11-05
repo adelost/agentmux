@@ -199,8 +199,18 @@ on the limits `policies/context-cost.mjs` documents (80k tokens, one hour):
 The compact is the verified nightly pass on its own pane lease, outside the
 project's rotation lease, with receipts under
 `~/.agentmux/account-switch-compact/`. A failed or unverified compact blocks
-that pane only; it is never retried automatically. A context that grew again
-between its compact and the restart is blocked rather than compacted twice.
+that pane only. An abandoned `attempting` record older than 40 minutes is
+resolved from a fresh measurement of the same idle session; when above budget,
+one further compact is allowed. A context that grew again between its compact
+and the restart is blocked rather than compacted twice.
+
+An explicit rotate prints `pending (...; request=ID)` when a blocked pane has
+a durable follow-up, and `blocked` when none was saved. The watcher retries
+pending requests at an idle boundary on their original session. Read the
+outcome with `amux accounts rotate-status --request-id ID --json`: `status`
+is `pending`, `complete`, `blocked`, `superseded`, or `not-found`; `reason`
+explains a stop. `--only agent:pane` reads the latest request for that pane.
+The ID receipt survives a later request for the same pane.
 
 The real switch then requires idle/empty-composer observations, no pending
 delivery and an exact complete persisted session. Prompts the quota floor holds

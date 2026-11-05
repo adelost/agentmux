@@ -46,10 +46,21 @@ feature("nightly context budget", () => {
         resolveStaleCompact(record, { ...facts(), sessionId: "other" }, policy, now()),
         resolveStaleCompact(record, { ...facts(), tokens: null }, policy, now()),
         resolveStaleCompact(record, { ...facts(), status: "working" }, policy, now()),
-        resolveStaleCompact({ ...record, staleRetryUsed: true }, facts(), policy, now()),
       ];
     }],
-    then: ["none can authorize another attempt", result => expect(result).toEqual([null, null, null, null])],
+    then: ["none can authorize another attempt", result => expect(result).toEqual([null, null, null])],
+  });
+  unit("an abandoned retry resolves as failed without admitting a third call", {
+    when: ["the measured exact session still exceeds its limit", () => {
+      const record = { status: "attempting", staleRetryUsed: true, sessionId: "same-session", sessionPath: "/exact.jsonl",
+        attemptedAt: "2026-09-07T01:00:00Z" };
+      const resolved = resolveStaleCompact(record, facts(), policy, now());
+      return { resolved, decision: nightlyCompactDecision(facts(), policy, resolved, { retryStale: true }) };
+    }],
+    then: ["the receipt is failed and no further compact is admitted", result => {
+      expect(result.resolved).toMatchObject({ status: "failed", staleRetryUsed: true });
+      expect(result.decision).toBe("already-attempted:failed");
+    }],
   });
   unit("an unmeasured result cannot repeat the one stale-intent retry", {
     when: ["the retry returned a compact boundary without a token reading", () => isUnmeasuredCompact({

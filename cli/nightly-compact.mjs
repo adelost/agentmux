@@ -193,7 +193,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       continue;
     }
     const retryStale = retryUnmeasured && (resolved?.status === "failed" || previous?.reason === "stale-attempt-above-budget");
-    const reason = resolved?.status === "within-budget" ? null
+    const reason = resolved ? null
       : nightlyCompactDecision(first, policy, resolved || previous, { force: dependencies.force, retryUnmeasured, retryStale });
     if (reason) { rows.push({ pane: key, status: "skipped", reason, beforeTokens: first.tokens }); continue; }
     if (flags.dry) { rows.push({ pane: key, status: "eligible", beforeTokens: first.tokens }); continue; }
@@ -227,6 +227,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
           save(recovery);
           current = recovery;
           if (recovery.status === "within-budget") { rows.push({ pane: key, ...recovery }); continue; }
+          if (recovery.staleRetryUsed) { rows.push({ pane: key, ...recovery }); continue; }
         }
       }
       const check = async () => {

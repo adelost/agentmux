@@ -47,7 +47,7 @@ export function nightlyCompactDecision(facts, policy, previous = null, { force =
 /** WHAT: Resolves an abandoned account-switch intent from a fresh exact-session measurement. WHY: Prevents an interrupted writer from holding a pane for the rest of the day. */
 export function resolveStaleCompact(record, facts, policy, now) {
   const at = Date.parse(record?.attemptedAt);
-  if (record?.status !== "attempting" || record.staleRetryUsed || record.sessionId !== facts.sessionId
+  if (record?.status !== "attempting" || record.sessionId !== facts.sessionId
       || record.sessionPath !== facts.sessionPath || !Number.isFinite(at) || now - at < 40 * 60_000
       || facts.engine !== "claude" || facts.backend !== "tmux" || facts.running !== true || facts.blocker
       || facts.status !== "idle" || !facts.composerEmpty || facts.queued !== 0

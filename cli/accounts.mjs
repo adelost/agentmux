@@ -15,12 +15,14 @@ import { readClaudeProfileIdentity } from "../core/claude-account-quota.mjs";
 import { rotateClaudeFleet } from "./account-rotation.mjs";
 import { switchStatusCommand } from "./codex-account-status.mjs";
 import { switchCodexAccounts } from "./codex-account-switch.mjs";
+import { claudeRotationStatusCommand } from "./claude-rotation-status.mjs";
 
 const usage = `Usage:
   amux accounts                                  same view as amux quota
   amux accounts login <codex|kimi>:<1|2>
   amux accounts login claude:<1|2|login|email>   a new login name gets its own dir
   amux accounts rotate claude:<1|2|login|email> [--dry] [--only agent:pane,...]
+  amux accounts rotate-status (--request-id ID | --only agent:pane) [--json]
   amux accounts switch codex:<1|2> PROJECT [-p N] [--dry] [--continue-file PATH]
   amux accounts switch codex:<1|2> --all [--dry] [--json] [--request-id ID]
   amux accounts switch-status [--json] [--request-id ID]
@@ -108,6 +110,10 @@ export async function cmdAccounts(args, ctxOrOptions = null, suppliedOptions = {
   if (args[0] === "switch-status") {
     if (!ctx) throw new Error(usage);
     return switchStatusCommand(ctx, args.slice(1), { output });
+  }
+  if (args[0] === "rotate-status") {
+    if (!ctx) throw new Error(usage);
+    return claudeRotationStatusCommand(ctx, args.slice(1), output);
   }
   if (args[0] === "switch") {
     if (!ctx) throw new Error(usage);

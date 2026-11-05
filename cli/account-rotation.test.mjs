@@ -86,6 +86,7 @@ feature("Claude fleet account rotation", () => {
     then: ["the same target remains durably pending", (result, fx) => {
       expect(result.rows[0].status).toBe("blocked");
       expect(fx.state.get("claude_account_request_v1:lsrc:0")).toMatchObject({ target: "2", phase: "pending" });
+      expect(fx.output.join("\n")).toMatch(/lsrc:0 pending .*request=/u);
     }],
   });
   component("the pending rotation moves only the original session when it becomes idle", {

@@ -35,9 +35,10 @@ import { accountSwitchPlan } from "../policies/account-switch-cost.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
 import { waitForSessionLease } from "../core/session-lease.mjs";
 import { compactBeforeSwitch, observeSwitchContext } from "./account-switch-compact.mjs";
+import { claudeRotationKey, saveClaudeRotation } from "./claude-rotation-status.mjs";
 
 const paneKey = (agentName, pane) => `${agentName}:${pane}`;
-const requestKey = (name, pane) => `claude_account_request_v1:${paneKey(name, pane)}`;
+const requestKey = claudeRotationKey;
 // Modes whose switch is only a new selection: an ordinary wake or quota recovery starts the process.
 const SELECT_ONLY = new Set(["dormant", "quota-stopped"]);
 
@@ -188,7 +189,8 @@ function paneChangeReason(before, after, deps) {
 function report(output, status, target, rows, reason = null) {
   output(`${status} claude:${target.id}${reason ? ` reason=${reason}` : ""}`);
   for (const row of rows) {
-    output(`  ${row.key} ${row.status || row.mode}${row.reason ? ` (${row.reason})` : ""}`);
+    output(`  ${row.key} ${row.followupId ? "pending" : row.status || row.mode}${row.reason || row.followupId
+      ? ` (${[row.reason, row.followupId ? `request=${row.followupId}` : null].filter(Boolean).join("; ")})` : ""}`);
   }
 }
 
@@ -447,13 +449,14 @@ export async function rotateClaudeFleet(ctx, requested, {
       const key = requestKey(entry.agentName, entry.pane), prior = previousRequests.get(key);
       if (ctx.state.get(key, null)?.id !== prior?.id) continue;
       if (row.status !== "blocked") {
-        if (prior?.phase === "pending") ctx.state.set(key, { ...prior, phase: "superseded", reason: "newer-rotation" });
+        if (prior?.phase === "pending") saveClaudeRotation(ctx.state, { ...prior, phase: "superseded", reason: "newer-rotation" }, prior.id);
         continue;
       }
       const identity = entry && deps.latestIdentity(join(entry.agent.dir, ".agents", String(entry.pane)));
       if (!identity?.sessionId || !identity?.path) continue;
-      ctx.state.set(key, { id: randomUUID(), phase: "pending", target: target.id,
-        name: entry.agentName, pane: entry.pane, sessionId: identity.sessionId, sessionPath: identity.path, reason: row.reason });
+      const request = { id: randomUUID(), phase: "pending", target: target.id,
+        name: entry.agentName, pane: entry.pane, sessionId: identity.sessionId, sessionPath: identity.path, reason: row.reason };
+      if (saveClaudeRotation(ctx.state, request, prior?.id || null)) row.followupId = request.id;
     }
   }
   const outcome = accountRotationOutcome(rows);
@@ -471,14 +474,17 @@ export async function runRequestedClaudeRotation(ctx, name, pane, dependencies =
   const agents = dependencies.agents || listAgents(ctx.configPath);
   const entry = configuredClaudePanes(agents).find(item => item.agentName === name && item.pane === pane);
   const identity = entry && (dependencies.latestIdentity || latestClaudeSessionIdentity)(join(entry.agent.dir, ".agents", String(pane)));
-  if (!identity || identity.sessionId !== request.sessionId || identity.path !== request.sessionPath) return null;
+  if (!identity || identity.sessionId !== request.sessionId || identity.path !== request.sessionPath) {
+    saveClaudeRotation(ctx.state, { ...request, phase: "blocked", reason: "session-changed-or-unavailable" }, request.id);
+    return null;
+  }
   const result = await rotateClaudeFleet(ctx, request.target, { only: [paneKey(name, pane)] },
     { ...dependencies, agents, persistBlocked: false, leaseWaitMs: 0, output: () => {}, setExitCode: () => {} });
   const row = result.rows?.[0];
   const latest = ctx.state.get(key, null);
   if (latest?.id === request.id && row && row.status !== "blocked") {
-    ctx.state.set(key, { ...request, phase: ["switched", "already-selected", "selected-for-quota-recovery", "selected-for-next-wake"].includes(row.status)
-      ? "complete" : "blocked", reason: row.reason || null });
+    saveClaudeRotation(ctx.state, { ...request, phase: ["switched", "already-selected", "selected-for-quota-recovery", "selected-for-next-wake"].includes(row.status)
+      ? "complete" : "blocked", reason: row.reason || null }, request.id);
   }
   return row || null;
 }
