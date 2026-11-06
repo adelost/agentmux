@@ -175,7 +175,7 @@ export const isSyntheticClaudeReply = (record) => record?.message?.model === "<s
  *
  * @returns boolean or null (no jsonl file → caller should fall back)
  */
-const CLAUDE_PROMPT_CURSOR_KIND = "claude-prompt-events-v1";
+/** WHAT: Names the Claude prompt-event cursor. WHY: Prevents another engine's cursor from reading Claude journals from byte zero. */ export const CLAUDE_PROMPT_CURSOR_KIND = "claude-prompt-events-v1";
 const CLAUDE_SLASH_CURSOR_KIND = "claude-slash-events-v1";
 const promptReceipt = createJsonlReceiptProbe(); // 30 Oct: rescanning a replaced 11.6 MB journal per check read 30 MB per 10 s
 

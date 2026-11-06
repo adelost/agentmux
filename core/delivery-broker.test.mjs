@@ -1617,6 +1617,42 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  // Row 149, Mattias via skyvw:0 6 Nov 03:17Z: job 1abd84aa was read by sandman:0, restarted, retyped, then held eight messages.
+  component("an idle Claude pane that read the prompt in other words releases its FIFO without a retype", {
+    given: ["a submitted Claude prompt whose pane recorded a prompt after the cursor and stands idle", () => {
+      const rootDir = tempRoot();
+      const clock = 200_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const head = queue.enqueue({ agentName: "sandman", pane: 0, text: "Music by ‪@novoamor‬", orderKey: "001", createdAt: 1_000 });
+      queue.update(head, {
+        status: "submitted", submittedAt: 1_000, attempts: 1, nextAttemptAt: 0,
+        echoCursor: { kind: "claude-prompt-events-v1", positions: {} },
+      });
+      const follower = queue.enqueue({ agentName: "sandman", pane: 0, text: "next message", orderKey: "002", createdAt: 2_000 });
+      let restarts = 0;
+      const agent = acceptingAgent();
+      agent.promptRecordedAfterCursor = async () => true;
+      agent.paneProcessState = async () => ({ running: true, shell: false, dead: false, command: "claude" });
+      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false, dialect: "claude" });
+      agent.restartPaneExact = async () => { restarts++; return { ok: true, dialect: "claude" }; };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, head, follower, agent, broker, restarts: () => restarts };
+    }],
+    when: ["the broker reconciles the head, then takes its next pass", async ({ broker }) => {
+      await broker.kickTarget("sandman", 0);
+      await broker.kickTarget("sandman", 0);
+    }],
+    then: ["the head ends consumed-unverified untyped and the follower is delivered", (_, ctx) => {
+      expect(ctx.restarts()).toBe(0);
+      expect(ctx.queue.read("sandman", 0, ctx.head.id)).toMatchObject({
+        status: "delivered_unverified", attempts: 1, metadata: { deliveryAmbiguity: "read-prompt-unmatched" },
+      });
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["next message"]);
+      expect(ctx.queue.read("sandman", 0, ctx.follower.id).status).toBe("acknowledged");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("a fresh Claude submission keeps its no-retype grace period", {
     given: ["an empty idle Claude composer before the grace period expires", () => {
       const rootDir = tempRoot();

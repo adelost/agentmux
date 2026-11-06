@@ -5,6 +5,8 @@
 // width tricks, no wordwrap to fight, and no generic busy signal pretending
 // that unrelated keystrokes were accepted.
 
+import { isAnyPromptInJsonlAfterCursor } from "./claude-read-prompt.mjs";
+
 /** WHAT: Builds the dialect-dispatching prompt-echo check over the journal readers. WHY: Keeps receipt semantics out of the agent facade. */
 export function createPromptEcho({
   paneDir,
@@ -56,4 +58,10 @@ export function createPromptEcho({
     }
     return false;
   };
+}
+
+/** WHAT: Builds the check for any prompt a pane recorded after a delivery cursor. WHY: Keeps engines without that reader at false. */
+export function createReadPromptCheck({ paneDir, agentConfig, paneDialectName }) {
+  return (agentName, pane, cursor) => paneDialectName(agentName, pane) === "claude"
+    && isAnyPromptInJsonlAfterCursor(paneDir(agentConfig(agentName).dir, pane), cursor);
 }

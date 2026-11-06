@@ -371,7 +371,7 @@ export function createDeliveryBroker({
         job.submittedAt || job.submitFenceAt || job.lastAttemptAt || job.createdAt || now(),
       );
       const inspectTui = submittedTuiInspectionDue(job, submittedAge, now());
-      const recoveredTui = inspectTui && await recoverSubmittedTui({ job, agent, queue, exactEcho, acknowledge, now, log,
+      const recoveredTui = inspectTui && await recoverSubmittedTui({ job, agent, queue, exactEcho, acknowledge, terminalizeUnverified, now, log,
         onRecovered: (value) => queueEvent(value, "submit_recovered_after_stall") });
       if (recoveredTui) return recoveredTui;
       const submittedExpired = submittedAge >= submittedTerminalMs(job);

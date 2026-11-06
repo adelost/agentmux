@@ -37,7 +37,7 @@ import { createGeminiRuntime } from "./core/gemini-runtime.mjs";
 import { captureGeminiPromptCursor, geminiPromptAccepted } from "./core/gemini-prompt-echo.mjs";
 import { isBusyFromTmux, geminiReplyTurn, tmuxDialectFor } from "./core/tmux-busy.mjs";
 import { createKimiIngestProbe } from "./core/kimi-ingest-probe.mjs";
-import { createPromptEcho } from "./core/prompt-echo.mjs";
+import { createPromptEcho, createReadPromptCheck } from "./core/prompt-echo.mjs";
 import { createPaneMemorySnapshot, resolveMemoryResponsePrompt } from "./core/delivery-memory-context.mjs";
 import { createClaudeSubmitRescue } from "./core/claude-submit-rescue.mjs";
 import { rebootedClaudeIsIdle } from "./core/claude-reboot-idle.mjs";
@@ -1759,7 +1759,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
     promptTransportState, codexVocabularyDrift, settleClaudePaste: claudeGuards.settlePaste,
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
-    dismissBlockingPrompt, waitForPromptEcho, probeIngest,
+    dismissBlockingPrompt, waitForPromptEcho, promptRecordedAfterCursor: createReadPromptCheck({ paneDir, agentConfig, paneDialectName }), probeIngest,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession, paneProcessState: tuiRecovery.paneProcessState,
     sanitizeTmuxGlobalEnv, restartCodex, compactCodex, restartKimi, restartQwen, restartClaudeAccount: tuiRecovery.restartClaudeAccount, restartPaneExact, restartFleet,
   };

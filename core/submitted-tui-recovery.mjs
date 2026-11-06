@@ -30,6 +30,28 @@ export async function submittedTransportHint(agent, job, submittedAge) {
   return transport?.state ? `TUI hint: ${transport.state}${transport.detail ? ` (${transport.detail})` : ""}` : null;
 }
 
+// sandman:0, 2026-11-06: Claude read job 1abd84aa at 03:04Z but dropped its bidi marks, so the exact
+// receipt never matched; at two minutes the live-idle path restarted the pane and typed it again, and the
+// resent job then held eight messages, Mattias's among them, toward the 60-minute verdict.
+/**
+ * WHAT: Ends a submitted prompt as consumed and unverified once its idle pane recorded a prompt after the cursor.
+ * WHY: Prevents a restart, retype and hour-long FIFO hold once an idle pane read the prompt reworded.
+ */
+async function settleReadPrompt({ job, agent, submittedAge, terminalizeUnverified }) {
+  if (job.status !== "submitted" || job.kind !== "prompt" || !job.echoCursor
+      || submittedAge < MIN_RECOVERY_AGE_MS || typeof terminalizeUnverified !== "function"
+      || typeof agent.promptRecordedAfterCursor !== "function"
+      || typeof agent.promptTransportState !== "function") return null;
+  if (!await agent.promptRecordedAfterCursor(job.agentName, job.pane, job.echoCursor)) return null;
+  const transport = await agent.promptTransportState(job.agentName, job.pane, job.text, ownPaste(job)).catch(() => null);
+  if (transport?.state !== "empty-idle") return null;
+  // terminalizeUnverified still looks for the exact receipt first and acknowledges it when found.
+  return terminalizeUnverified(job, {
+    ambiguity: "read-prompt-unmatched",
+    reason: "the idle pane recorded a prompt after this submit, but not in this job's exact words; consumed and unverified, not retyped",
+  });
+}
+
 /** WHAT: Proves one pane has no coding process. WHY: Makes post-Enter redispatch depend on process truth, not pixels. */
 function isProvenDeadRuntime(runtime) {
   return runtime?.running === false && (runtime.dead === true || runtime.shell === true);
@@ -40,8 +62,12 @@ function isProvenDeadRuntime(runtime) {
  * WHY: Recovers an Enter consumed by a crashing TUI without duplicating a live or ingested turn.
  */
 export async function recoverSubmittedTui({
-  job, agent, queue, exactEcho, acknowledge, now, onRecovered, log = () => {},
+  job, agent, queue, exactEcho, acknowledge, terminalizeUnverified, now, onRecovered, log = () => {},
 }) {
+  // Before any restart or retype, and also after an earlier one: a read prompt needs neither.
+  const read = await settleReadPrompt({ job, agent, terminalizeUnverified,
+    submittedAge: now() - Number(job.submittedAt || job.submitFenceAt || now()) });
+  if (read) return read;
   const recoveryKind = job.metadata?.submittedRecoveryKind || null;
   if (job.status !== "submitted" || job.kind !== "prompt"
       || job.metadata?.deliveryTransport === "native" || !job.echoCursor
