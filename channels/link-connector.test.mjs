@@ -16,7 +16,7 @@ import {
 const NOW = Date.now();
 
 feature("151 terminal PTT speech outcomes", () => {
-  for (const code of ["no_speech", "too_short", "unknown"]) component(`${code} fails once without a prompt or reclaim loop`, {
+  for (const code of ["no_speech", "too_short", "unknown", "refused"]) component(`${code} fails once without a prompt or reclaim loop`, {
     given: ["a mailbox voice turn and a typed transcriber", () => {
       const ctx = harness({ responses: { "/api/link/connector/poll?source=wsl": {
         messages: [message({ kind: "voice", body: "", voiceRef: "voice/terminal.m4a" })],

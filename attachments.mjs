@@ -177,9 +177,10 @@ export function createAttachmentHandler({
     } catch (err) {
       // UNKNOWN was submitted, and can be billed. Cache its terminal outcome
       // with the existing transcript receipt so a REST scan cannot resend it.
-      if (Number(err.code) === 22) {
-        msg.saveTranscript?.(att.id, "[stt:unknown]");
-        return "[stt:unknown]";
+      if ([22, 23].includes(Number(err.code))) {
+        const terminal = Number(err.code) === 22 ? "[stt:unknown]" : "[stt:refused]";
+        msg.saveTranscript?.(att.id, terminal);
+        return terminal;
       }
       if (att.durablePath) {
         err.retryable = true;

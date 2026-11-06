@@ -142,6 +142,7 @@ export function planClaimedMessage({ message, journalEntry }) {
 export function connectorFailureStage(error) {
   if (["no_speech", "too_short"].includes(error?.code)) return "no-speech";
   if (error?.code === "unknown") return "transcription-unknown";
+  if (error?.code === "refused") return "transcription-refused";
   const text = String(error?.message || error || "unknown");
   if (/transcri(?:be|ption)/iu.test(text)) return "transcription-failed";
   if (/fetch|network|ECONN|timeout|5\d\d/u.test(text)) return "link-unavailable";
@@ -158,7 +159,7 @@ export function connectorFailureDisposition(error, attempts = 1) {
   return {
     stage,
     terminal: stage === "pane-delivery-failed" ||
-      stage === "no-speech" || stage === "transcription-unknown" ||
+      ["no-speech", "transcription-unknown", "transcription-refused"].includes(stage) ||
       invalidAudio ||
       (stage === "transcription-failed" && attempts >= 3),
   };

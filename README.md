@@ -283,14 +283,17 @@ with a short channel notice, never a pane prompt. Accompanying text survives.
 
 An unknown submitted outcome is terminal and cached in the existing inbound
 receipt, including failure of any part or Whisper call. It is never resent.
-Only a verified `provider_unavailable` admission can use labelled Whisper
+Known access, quota and content refusals are terminal known errors, with a
+channel notice. Only the public `provider_unavailable` admission type, without a run identity, can use labelled Whisper
 fallback. Other pre-submit infrastructure failures retain the separate error
 notice and pending-record recovery. Recipient-resolved records suppress late
 results. PTT returns terminal codes without enqueuing a pane prompt; the Link
 connector journals these outcomes without a reclaim loop.
 
 The v1d wrapper splits messages over 240 seconds into 240-second parts; its
-CLI bounds public API requests to 19 seconds. The legacy Gemini selection uses
+CLI bounds public API requests to 19 seconds and selects the existing
+`standard-guard-1` preset for WAV. A plain HTTP 503 does not qualify; an unknown outcome or run identity
+never permits fallback. The legacy Gemini selection uses
 25-second parts above 45 seconds. All parts must succeed; fallback is labelled
 in both the pane and Discord transcript.
 

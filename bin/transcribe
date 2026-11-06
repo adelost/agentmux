@@ -555,6 +555,8 @@ for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
     else:  # transcribe's audio port takes {type, data}; words takes {media, data}
         body.update({'tidy': True, 'file': {'type': 'audio/' + ext, 'data': body['file']['data']},
                      'hints': [h.strip() for h in os.environ['V1D_HINTS'].split(',') if h.strip()]})
+        if not dictation:
+            body['preset'] = 'standard-guard-1'
     if lang != 'auto':
         body['language'] = lang
     status, run = call('POST', '/v1/transcribe', body)
@@ -565,8 +567,12 @@ for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
             return 20
         # A refused admission or explicit unavailable response proves that no
         # supplier job ran. Poll/transport/unknown outcomes never qualify.
-        if not run.get('id') and not error.get('run_id') and error.get('type') == 'provider_unavailable' and status == 503 and code == 'provider_unavailable':
+        if not run.get('id') and not error.get('run_id') and error.get('type') == 'provider_unavailable' and status == 503:
             return 21
+        if error.get('type') == 'unknown_outcome' or run.get('status') == 'unknown' or run.get('id') or error.get('run_id'):
+            return 22
+        if status >= 400 and error:
+            return 23  # A known refusal, not an uncertain supplier outcome.
         return 22
     if status >= 400:
         rc = outcome_exit(status, run)

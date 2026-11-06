@@ -123,6 +123,7 @@ transcribe_clip() { # $1=clip $2=start $3=end
   log_primary_failure 1 "$rc" "$((SECONDS - started))" "$errlog" "$2" "$3"
   rm -f "$errlog"
   if [ "$rc" -eq 20 ]; then echo '[stt:no_speech]'; return 0; fi
+  if [ "$rc" -eq 23 ]; then return 23; fi
   if [ "$rc" -ne 21 ]; then
     echo '[stt] primary outcome is not verified unavailable; no fallback' >&2
     return 22
@@ -169,7 +170,7 @@ wait_batch() {
   for pid in "${pids[@]}"; do
     if wait "$pid"; then :; else
       rc=$?
-      if [ "$rc" -eq 22 ] || [ "$failed" -eq 0 ]; then failed=$rc; fi
+      if [ "$rc" -eq 22 ] || [ "$failed" -eq 0 ] || { [ "$rc" -eq 23 ] && [ "$failed" -ne 22 ]; }; then failed=$rc; fi
     fi
   done
   pids=()

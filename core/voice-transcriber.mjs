@@ -12,6 +12,7 @@ export function terminalVoiceOutcome(text) {
   const value = String(text || "").trim();
   if (!value || value === "[stt:no_speech]") return { code: "no_speech", notice: "Inget tal hördes." };
   if (value === "[stt:unknown]") return { code: "unknown", notice: "Transkriberingens utfall är okänt. Ljudet skickas inte igen." };
+  if (value === "[stt:refused]") return { code: "refused", notice: "Transkriberingen avvisades av tjänsten. Ingen automatisk omsändning." };
   return null;
 }
 
@@ -61,6 +62,9 @@ export async function transcribeVoiceBuffer({
     if (error.status) throw error;
     if (Number(error.code) === 22) {
       throw Object.assign(withStatus("Transkriberingens utfall är okänt. Ljudet skickas inte igen.", 422), { code: "unknown" });
+    }
+    if (Number(error.code) === 23) {
+      throw Object.assign(withStatus("Transkriberingen avvisades av tjänsten. Ingen automatisk omsändning.", 422), { code: "refused" });
     }
     throw withStatus(`transcription failed: ${error.message}`, 500);
   } finally {

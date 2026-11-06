@@ -7,14 +7,14 @@ import { createInboundReconciler } from "./inbound-reconciler.mjs";
 import { createAttachmentHandler } from "../attachments.mjs";
 
 describe("voice failure is still delivered", () => {
-  for (const outcome of ["no_speech", "unknown"]) for (const text of ["", "Behåll min skrivna text"]) {
+  for (const outcome of ["no_speech", "unknown", "refused"]) for (const text of ["", "Behåll min skrivna text"]) {
     it(`terminal ${outcome} posts a notice once, keeps accompanying text and never retries STT`, async () => {
       const root = mkdtempSync(join(tmpdir(), "voice-terminal-"));
       const store = createDiscordInboundStore({ rootDir: root, downloadBuffer: async () => Buffer.from("audio") });
       let calls = 0;
       const handler = createAttachmentHandler({ transcribeScript: "/transcribe", run: async () => {
         calls++;
-        if (outcome === "unknown") throw Object.assign(new Error("submitted outcome unknown"), { code: 22 });
+        if (outcome !== "no_speech") throw Object.assign(new Error("terminal outcome"), { code: outcome === "unknown" ? 22 : 23 });
         return { stdout: "[stt:no_speech]" };
       } });
       const delivered = [], posted = [];

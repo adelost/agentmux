@@ -285,13 +285,13 @@ echo "401 insufficient_quota" >&2; exit 1`);
 });
 
 describe("151 terminal speech outcomes", () => {
-  for (const code of [20, 22]) it(`does not fall back for terminal exit ${code}`, () => {
+  for (const code of [20, 22, 23]) it(`does not fall back for terminal exit ${code}`, () => {
     const fx = providerFixture(`[ "$backend" = v1d ] && exit ${code}\necho invented`);
     try {
       const result = fx.run({ AMUX_STT_PRIMARY: "v1d" });
       expect(fx.calls()).toEqual(["v1d"]);
       expect(result.stdout.trim()).toBe(code === 20 ? "[stt:no_speech]" : "");
-      expect(result.status).toBe(code === 20 ? 0 : 22);
+      expect(result.status).toBe(code === 20 ? 0 : code);
     } finally { fx.close(); }
   });
   it("blocks real silence and noise before Whisper, but preserves short and quiet speech", () => {
@@ -317,7 +317,7 @@ describe("151 terminal speech outcomes", () => {
 describe("151 gateway adapter contract, real codec and stubbed HTTP only", () => {
   for (const [scenario, expected, text] of [
     ["no_speech", 0, ""], ["too_short", 0, ""], ["unknown", 22, null],
-    ["outage", 21, null], ["content", 22, null], ["proofread", 0, "ja"],
+    ["outage", 21, null], ["content", 23, null], ["auth", 23, null], ["quota", 23, null], ["outage_run", 22, null], ["http_unknown", 22, null], ["proofread", 0, "ja"],
   ]) it(`preserves ${scenario} semantics`, () => {
     const root = mkdtempSync(join(tmpdir(), "voice-adapter-"));
     try {
@@ -325,7 +325,7 @@ describe("151 gateway adapter contract, real codec and stubbed HTTP only", () =>
       writeFileSync(key, "stub-key");
       execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "flite=text=ya:voice=slt", audio]);
       const code = readFileSync(process.env.AMUX_TRANSCRIBE_SOURCE || resolve("bin/transcribe"), "utf8").split("<<'PY'\nimport base64,")[1].split("\nPY\n}")[0];
-      const runner = `import json, sys, io, urllib.request, urllib.error\nfrom unittest.mock import patch\nscenario=sys.argv[3]\ncalls=[]\nclass Response(io.BytesIO):\n status=200\ndef request(req, **kwargs):\n calls.append(req.method)\n if req.full_url.endswith('/v1/proofread'): raise TimeoutError('secondary only')\n if scenario in ('no_speech','too_short','outage','content'):\n  code=scenario if scenario != 'outage' else 'provider_unavailable'\n  status=503 if scenario == 'outage' else 422\n  body={'error':{'type':'provider_unavailable' if scenario == 'outage' else 'invalid_request','code':code}}\n  raise urllib.error.HTTPError(req.full_url,status,'stub',{},io.BytesIO(json.dumps(body).encode()))\n return Response(json.dumps({'id':'run_stub','status':'unknown' if scenario == 'unknown' else 'succeeded','error':None,'output':None if scenario == 'unknown' else {'text':'ja'}}).encode())\ntry:\n with patch('urllib.request.urlopen', request): exec('import base64,'+sys.stdin.read())\nfinally:\n print(json.dumps({'http_calls':calls}))\n`;
+      const runner = `import json, sys, io, urllib.request, urllib.error\nfrom unittest.mock import patch\nscenario=sys.argv[3]\ncalls=[]\nclass Response(io.BytesIO):\n status=200\ndef request(req, **kwargs):\n calls.append(req.method)\n if req.full_url.endswith('/v1/transcribe'): assert json.loads(req.data)['preset'] == 'standard-guard-1'\n if req.full_url.endswith('/v1/proofread'): raise TimeoutError('secondary only')\n if scenario in ('no_speech','too_short','outage','content','auth','quota','outage_run','http_unknown'):\n  code=scenario if scenario != 'outage' else 'provider_unavailable'\n  status={'auth':401,'quota':429,'outage':503,'outage_run':503,'http_unknown':503}.get(scenario,422)\n  body={'error':{'type':'unknown_outcome' if scenario == 'http_unknown' else 'provider_unavailable' if scenario in ('outage','outage_run') else 'invalid_request','code':code}}\n  if scenario in ('outage','outage_run'):\n   body['error']={'type':'provider_unavailable','message':'The provider could not be reached; the run did not start (ledger-unavailable).'}\n   if scenario == 'outage_run': body['error']['run_id']='run_unknown'\n  raise urllib.error.HTTPError(req.full_url,status,'stub',{},io.BytesIO(json.dumps(body).encode()))\n return Response(json.dumps({'id':'run_stub','status':'unknown' if scenario == 'unknown' else 'succeeded','error':None,'output':None if scenario == 'unknown' else {'text':'ja'}}).encode())\ntry:\n with patch('urllib.request.urlopen', request): exec('import base64,'+sys.stdin.read())\nfinally:\n print(json.dumps({'http_calls':calls}))\n`;
       const result = spawnSync("python3", ["-c", runner, audio, out, scenario], {
         input: code, encoding: "utf8", timeout: 20000,
         env: { ...process.env, WORK: root, V1D_KEY_FILE: key, LANG: "sv", V1D_CONTEXT: "ja", V1D_HINTS: "" },
