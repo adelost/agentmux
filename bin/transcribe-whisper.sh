@@ -23,27 +23,6 @@ if [ -z "$AUDIO_FILE" ]; then
   exit 1
 fi
 
-# Keep the existing -75 dB whole-file floor. A fixed -50 dB rule swallowed
-# genuine quiet speech in the public dialogue counterexample (2026-10-17).
-# Parts also compare with this message's strongest part: at least 30 dB down.
-# A peak at -20 dB or above still reaches STT, preserving brief audible sounds.
-audio_levels() {
-  local levels
-  levels=$(ffmpeg -hide_banner -i "$1" -af volumedetect -f null /dev/null 2>&1) || return 1
-  awk '/mean_volume/{mean=$5} /max_volume/{peak=$5} END {
-    if (mean == "" || peak == "") exit 1
-    print mean, peak
-  }' <<< "$levels"
-}
-
-is_silent() {
-  awk -v mean="$1" -v peak="$2" -v strongest="${3:-}" 'BEGIN {
-    floor = (mean == "-inf" || mean+0 < -75)
-    relative = (strongest != "" && strongest+0 - mean+0 >= 30 && (peak == "-inf" || peak+0 < -20))
-    exit !(floor || relative)
-  }'
-}
-
 range_marker() { # $1=label $2=start $3=end
   printf '[%s %d:%02d–%d:%02d]\n' "$1" "$(($2 / 60))" "$(($2 % 60))" "$(($3 / 60))" "$(($3 % 60))"
 }
@@ -51,29 +30,10 @@ range_marker() { # $1=label $2=start $3=end
 DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO_FILE") || exit 1
 TOTAL_SECONDS="${DURATION%.*}"
 [[ "$TOTAL_SECONDS" =~ ^[0-9]+$ ]] || { echo "[stt] invalid audio duration" >&2; exit 1; }
-LEVELS=$(audio_levels "$AUDIO_FILE") || { echo "[stt] audio level check failed" >&2; exit 1; }
-read -r MEAN PEAK <<< "$LEVELS"
-if is_silent "$MEAN" "$PEAK"; then
-  echo "[preflight] silent clip, skipping API call" >&2
-  range_marker tyst 0 "$TOTAL_SECONDS"
-  exit 0
-fi
-
-# Kedja: gemini → whisper1 (märkt fallback) → ärligt fel. Gemini får ett andra
-# försök bara efter ett snabbt fel. Ett försök som körde HUNG_AFTER_S eller
-# längre hängde, och samma klipp hängde igen i 5 av 7 andra försök (18-19 okt),
-# så whisper1 tar över direkt i stället för att låta klippet hänga en gång till.
-# Gemini-anrop kan stalla helt (2026-07-11: samma klipp hängde 10+ min i ett
-# anrop, tog 13 s i nästa) — därför hårt väggklockstak per försök utöver
-# SDK-timeouten (90 s) inne i transcribe. Fallbacken är ALDRIG tyst: whisper1-text
-# prefixas med en markör så mottagaren ser vilken motor som transkriberade
-# (whisper1 hör tech-termer sämre än gemini, se benchmark 2026-05-27).
-# Lokal faster-whisper är medvetet INTE i kedjan: den är hårdkodad mot delade
-# 3090:n (cuda) och en automatisk fallback kan inte invänta GPU-clearance.
-# API keys auto-load from ~/.env inside transcribe.
-
+# One primary attempt. A verified unavailable admission may use Whisper once,
+# after CPU VAD; a timeout, UNKNOWN, refusal or empty answer never resends audio.
+# Keys load inside transcribe. No GPU or local ASR is used by this wrapper. CPU VAD precedes every call.
 GEMINI_CAP_S="${AMUX_STT_GEMINI_CAP_S:-100}"
-HUNG_AFTER_S="${AMUX_STT_HUNG_AFTER_S:-60}"
 # A clip of at most 45 s needs about 400 answer tokens, so a thinking or
 # repetition loop stops at these caps instead of running on to the deadline.
 GEMINI_LIMITS=(--thinking-budget 1024 --max-output-tokens 2048)
@@ -118,49 +78,62 @@ PY
 
 has_words() { [ -n "${1//[[:space:]]/}" ]; }
 
-# A primary that answers with no words can still have missed clear speech:
-# the API answered a 13 s message at -20 LUFS without words (1 Nov 20:40Z).
-# So whisper1 hears it too, and the range is marked only when neither heard
-# words, or whisper1 could not answer after the primary did. Failing the
-# message only made every retry repeat it (2026-10-17). Only an unanswered
-# call fails.
-transcribe_clip() { # $1=clip $2=start $3=end, in seconds of the whole message
-  local clip="$1" attempt TEXT rc started temperature=0 heard_no_words=false tries=2
-  local errlog
-  # A second API call is a second paid run, and an unknown outcome may already
-  # be billed, so the API gets one try and whisper1 takes over after it.
-  [ "$PRIMARY" = v1d ] && tries=1
+# Keep the VAD inside this pinned helper: the bridge copies only this file.
+has_speech() {
+  python3 - "$1" <<'PYVAD'
+import sys
+import numpy as np
+from faster_whisper.audio import decode_audio
+from faster_whisper.vad import VadOptions, get_speech_timestamps
+
+audio = decode_audio(sys.argv[1], sampling_rate=16000)
+peak = float(np.max(np.abs(audio))) if audio.size else 0
+if not peak:
+    sys.exit(20)
+audio = audio * (0.9 / peak)
+speech = get_speech_timestamps(audio, VadOptions(min_speech_duration_ms=0,
+                                              min_silence_duration_ms=100,
+                                              speech_pad_ms=0))
+sys.exit(0 if speech else 20)
+PYVAD
+}
+
+# Empty/typed no-speech is an answer. UNKNOWN may already be paid: never
+# resend it to another provider. Exit 21 alone proves primary unavailable.
+transcribe_clip() { # $1=clip $2=start $3=end
+  local clip="$1" TEXT rc errlog started
+  # An RMS/peak test cannot distinguish noise from speech. Silero runs on CPU
+  # and normalizes relative amplitude, preserving short and quiet utterances.
+  if has_speech "$clip"; then :; else
+    rc=$?
+    if [ "$rc" -eq 20 ]; then echo '[stt:no_speech]'; return 0; fi
+    echo '[stt] speech detection unavailable; refusing transcription' >&2
+    return "$rc"
+  fi
   errlog=$(mktemp) || return 1
-  for ((attempt = 1; attempt <= tries; attempt++)); do
-    started=$SECONDS
-    if TEXT=$(try_primary "$clip" "$temperature" 2> "$errlog"); then
-      cat "$errlog" >&2
-      if has_words "$TEXT"; then rm -f "$errlog"; printf '%s\n' "$TEXT"; return 0; fi
-      heard_no_words=true
-      echo "[stt] $PRIMARY attempt $attempt/$tries heard no words" >&2
-      continue
-    else
-      rc=$?
-      cat "$errlog" >&2
-    fi
-    echo "[stt] $PRIMARY attempt $attempt/$tries failed (exit $rc) after $((SECONDS - started)) s" >&2
-    log_primary_failure "$attempt" "$rc" "$((SECONDS - started))" "$errlog" "$2" "$3"
-    if [ $((SECONDS - started)) -ge "$HUNG_AFTER_S" ]; then
-      echo "[stt] $PRIMARY hung; whisper1 takes over now" >&2
-      break
-    fi
-    # Only a fast failure reaches a second try; at temperature 0 the same clip
-    # would take the same path again.
-    temperature=0.3
-  done
+  started=$SECONDS
+  if TEXT=$(try_primary "$clip" 0 2> "$errlog"); then
+    cat "$errlog" >&2; rm -f "$errlog"
+    if has_words "$TEXT"; then printf '%s\n' "$TEXT"; else echo '[stt:no_speech]'; fi
+    return 0
+  else
+    rc=$?
+  fi
+  cat "$errlog" >&2
+  log_primary_failure 1 "$rc" "$((SECONDS - started))" "$errlog" "$2" "$3"
   rm -f "$errlog"
+  if [ "$rc" -eq 20 ]; then echo '[stt:no_speech]'; return 0; fi
+  if [ "$rc" -ne 21 ]; then
+    echo '[stt] primary outcome is not verified unavailable; no fallback' >&2
+    return 22
+  fi
+  echo '[stt] primary unavailable; using Whisper after speech detection' >&2
   if TEXT=$(try_backend whisper1 60s "$clip"); then
-    if has_words "$TEXT"; then printf '[stt-fallback:whisper1] %s\n' "$TEXT"; else range_marker ohörbart "$2" "$3"; fi
+    if has_words "$TEXT"; then printf '[stt-fallback:whisper1] %s\n' "$TEXT"; else echo '[stt:no_speech]'; fi
     return 0
   fi
-  if $heard_no_words; then range_marker ohörbart "$2" "$3"; return 0; fi
-  echo "[stt] $PRIMARY x$tries + whisper1 all failed for $clip" >&2
-  return 1
+  echo '[stt] Whisper outcome unknown; no retry' >&2
+  return 22
 }
 
 # A 110-second voice note repeatedly hit DEADLINE_EXCEEDED; its short
@@ -189,41 +162,31 @@ fi
 ffmpeg -nostdin -loglevel error -i "$AUDIO_FILE" -map 0:a:0 -vn "${CODEC_ARGS[@]}" \
   -f segment -segment_time "$PART_S" -reset_timestamps 1 "$PARTS/part-%04d.$EXT" || exit 1
 
-strongest=-1000
-for clip in "$PARTS"/part-*."$EXT"; do
-  [ -f "$clip" ] || { echo "[stt] audio split produced no parts" >&2; exit 1; }
-  LEVELS=$(audio_levels "$clip") || { echo "[stt] segment level check failed" >&2; exit 1; }
-  printf '%s\n' "$LEVELS" > "$clip.levels"
-  read -r mean peak <<< "$LEVELS"
-  strongest=$(awk -v current="$strongest" -v mean="$mean" 'BEGIN { print (mean != "-inf" && mean+0 > current+0) ? mean : current }')
-done
-
 pids=()
 failed=0
 wait_batch() {
-  local pid
-  for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+  local pid rc
+  for pid in "${pids[@]}"; do
+    if wait "$pid"; then :; else
+      rc=$?
+      if [ "$rc" -eq 22 ] || [ "$failed" -eq 0 ]; then failed=$rc; fi
+    fi
+  done
   pids=()
 }
 part_index=0
 for clip in "$PARTS"/part-*."$EXT"; do
   [ -f "$clip" ] || { echo "[stt] audio split produced no parts" >&2; exit 1; }
-  read -r mean peak < "$clip.levels"
   start=$((part_index * PART_S)); end=$((start + PART_S))
   [ "$end" -le "$TOTAL_SECONDS" ] || end="$TOTAL_SECONDS"
-  if is_silent "$mean" "$peak" "$strongest"; then
-    range_marker tyst "$start" "$end" > "$clip.txt"
-    echo "[preflight] silent segment, skipping API call" >&2
-  else
-    transcribe_clip "$clip" "$start" "$end" > "$clip.txt" 2> "$clip.log" &
-    pids+=("$!")
-  fi
+  transcribe_clip "$clip" "$start" "$end" > "$clip.txt" 2> "$clip.log" &
+  pids+=("$!")
   part_index=$((part_index + 1))
   if [ "${#pids[@]}" -eq 3 ]; then wait_batch; fi
 done
 wait_batch
 for log in "$PARTS"/*.log; do cat "$log" >&2; done
-[ "$failed" -eq 0 ] || exit 1
+[ "$failed" -eq 0 ] || exit "$failed"
 
 fallback=false
 joined=""
@@ -233,10 +196,13 @@ for result in "$PARTS"/part-*."$EXT".txt; do
     fallback=true
     TEXT="${TEXT#'[stt-fallback:whisper1] '}"
   fi
+  [[ "$TEXT" == "[stt:no_speech]" || "$TEXT" == '[tyst '* ]] && continue
   [ -n "${TEXT//[[:space:]]/}" ] || { echo "[stt] empty segment transcript" >&2; exit 1; }
   joined="${joined}${joined:+ }${TEXT}"
 done
-if $fallback; then
+if [ -z "$joined" ]; then
+  echo '[stt:no_speech]'
+elif $fallback; then
   printf '[stt-fallback:whisper1] %s\n' "$joined"
 else
   printf '%s\n' "$joined"

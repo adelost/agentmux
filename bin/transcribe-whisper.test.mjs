@@ -1,11 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { createAttachmentHandler } from "../attachments.mjs";
+import { createDiscordInboundStore } from "../core/discord-inbound-store.mjs";
+import { createInboundReconciler } from "../core/inbound-reconciler.mjs";
+
+const wrapperPath = process.env.AMUX_TRANSCRIBE_SCRIPT || resolve("bin/transcribe-whisper.sh");
 
 describe("the existing voice wrapper bounds long clips", () => {
-  it("joins all 110 seconds in order, marks any fallback, and refuses partial success", () => {
+  it("joins 110 seconds in order and durably fences a partial UNKNOWN without replay", async () => {
     const root = mkdtempSync(join(tmpdir(), "voice-parts-"));
     try {
       mkdirSync(join(root, "bin"));
@@ -16,24 +21,39 @@ duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$file")
 awk -v d="$duration" 'BEGIN { exit !(d <= 25.1) }' || { echo '504 DEADLINE_EXCEEDED' >&2; exit 1; }
 part=$(basename "$file"); part="\${part%.*}"
 case "$part:$*:$(printenv FAIL_PART)" in
-  part-0001:*gemini*) echo '504 DEADLINE_EXCEEDED' >&2; exit 1 ;;
   part-0002:*:yes) echo 'provider unavailable' >&2; exit 1 ;;
 esac
 echo "$part"
 `, { mode: 0o700 });
       const audio = join(root, "long.ogg");
-      execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=110", "-c:a", "libopus", audio]);
-      const run = fail => spawnSync("bash", [resolve("bin/transcribe-whisper.sh"), audio], {
-        env: { ...process.env, HOME: root, AMUX_STT_PRIMARY: "gemini", FAIL_PART: fail ? "yes" : "no" }, encoding: "utf8", timeout: 10000,
+      execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "flite=text=This is a short spoken sentence:voice=slt,aloop=loop=-1:size=32000", "-t", "110", "-c:a", "libopus", audio]);
+      const run = (fail, input = audio) => spawnSync("bash", [wrapperPath, input], {
+        env: { ...process.env, HOME: root, PYTHONUSERBASE: join(homedir(), ".local"), AMUX_STT_PRIMARY: "gemini", FAIL_PART: fail ? "yes" : "no" }, encoding: "utf8", timeout: 20000,
       });
       const complete = run(false);
       expect(complete.status, complete.stderr).toBe(0);
-      expect(complete.stdout.trim()).toBe("[stt-fallback:whisper1] part-0000 part-0001 part-0002 part-0003 part-0004");
-      const partial = run(true);
-      expect(partial.status).toBe(1);
-      expect(partial.stdout).toBe("");
+      expect(complete.stdout.trim()).toBe("part-0000 part-0001 part-0002 part-0003 part-0004");
+      let attempts = 0, partial;
+      const store = createDiscordInboundStore({ rootDir: join(root, "inbound"), downloadBuffer: async () => readFileSync(audio) });
+      const handler = createAttachmentHandler({ transcribeScript: wrapperPath, run: async command => {
+        attempts++;
+        partial = run(true, command.match(/'([^']+)'\s*$/)[1]);
+        if (partial.status) throw Object.assign(new Error("partial STT outcome"), { code: partial.status });
+        return partial;
+      } });
+      const prompts = [], notices = [];
+      const reconciler = createInboundReconciler({ store, resolveTarget: () => ({ agentName: "lsrc", pane: 7 }),
+        onMessage: async msg => { const prompt = await handler.buildPrompt(msg, []); if (prompt) prompts.push(prompt); return { delivered: true }; } });
+      const voice = { id: "long", channelId: "channel", text: "", attachments: [
+        { id: "long-audio", name: "long.ogg", contentType: "audio/ogg", url: "fixture" },
+      ] };
+      const channel = { async send(_id, payload) { notices.push(payload); } };
+      await reconciler.enqueue(voice, channel); await reconciler.enqueue(voice, channel);
+      expect(partial.status).toBe(22); expect(partial.stdout).toBe("");
+      expect(attempts).toBe(1); expect(prompts).toEqual([]); expect(notices).toHaveLength(1);
+      expect(store.read("channel", "long").status).toBe("completed");
     } finally { rmSync(root, { recursive: true, force: true }); }
-  });
+  }, 60000);
 });
 
 function silenceFixture() {
@@ -46,8 +66,8 @@ echo "$part" >> "$HOME/calls"
 if [[ "$part" == "$EMPTY_PART" || "$EMPTY_AUDIBLE" == yes ]]; then exit 0; fi
 echo "$part"
 `, { mode: 0o700 });
-  const run = (audio, env = {}, script = resolve("bin/transcribe-whisper.sh")) => spawnSync("bash", [script, audio], {
-    env: { ...process.env, HOME: root, AMUX_STT_PRIMARY: "gemini", ...env }, encoding: "utf8", timeout: 15_000,
+  const run = (audio, env = {}, script = wrapperPath) => spawnSync("bash", [script, audio], {
+    env: { ...process.env, HOME: root, PYTHONUSERBASE: join(homedir(), ".local"), AMUX_STT_PRIMARY: "gemini", ...env }, encoding: "utf8", timeout: 15_000,
   });
   const calls = () => { try { return readFileSync(join(root, "calls"), "utf8").trim().split("\n"); } catch { return []; } };
   return { root, run, calls, close: () => rmSync(root, { recursive: true, force: true }) };
@@ -59,16 +79,16 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
     try {
       const audio = join(fx.root, "mixed.wav");
       execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i",
-        "aevalsrc=if(between(t\\,24.8\\,50.2)\\,0.0005\\,0.1)*sin(440*2*PI*t):s=16000:d=75", audio]);
+        "flite=text=This is a short spoken sentence:voice=slt,aloop=loop=-1:size=32000", "-t", "75", "-af", "volume=if(between(t\\,24.8\\,50.2)\\,0\\,1):eval=frame", audio]);
       const mixed = fx.run(audio, { EMPTY_PART: "part-0001" });
       expect(mixed.status, mixed.stderr).toBe(0);
-      expect(mixed.stdout.trim()).toBe("part-0000 [tyst 0:25–0:50] part-0002");
+      expect(mixed.stdout.trim()).toBe("part-0000 part-0002");
       expect(fx.calls()).not.toContain("part-0001");
       const quiet = join(fx.root, "quiet.wav");
       execFileSync("ffmpeg", ["-v", "error", "-i", audio, "-ss", "25", "-t", "25", quiet]);
       const before = fx.calls().length, silent = fx.run(quiet);
-      expect(silent.status, silent.stderr).toBe(0); expect(silent.stdout.trim()).toBe("quiet");
-      expect(fx.calls()).toHaveLength(before + 1);
+      expect(silent.status, silent.stderr).toBe(0); expect(silent.stdout.trim()).toBe("[stt:no_speech]");
+      expect(fx.calls()).toHaveLength(before);
     } finally { fx.close(); }
   });
   // Mattias 2026-10-17: "fixar så inte meddelandena failar på samma sätt igen". Gemini answering
@@ -78,31 +98,31 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
     const fx = silenceFixture();
     try {
       const audio = join(fx.root, "audible.wav");
-      execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", audio]);
+      execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "flite=text=ya:voice=slt", audio]);
       const result = fx.run(audio, { EMPTY_AUDIBLE: "yes" });
-      expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe("[ohörbart 0:00–0:01]");
-      expect(fx.calls()).toEqual(["audible", "audible", "audible"]);
+      expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe("[stt:no_speech]");
+      expect(fx.calls()).toEqual(["audible"]);
     } finally { fx.close(); }
   });
   it("delivers the rest of a long message around an audible part without words", () => {
     const fx = silenceFixture();
     try {
       const audio = join(fx.root, "noisy.wav");
-      execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=75", audio]);
+      execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "flite=text=This is a short spoken sentence:voice=slt,aloop=loop=-1:size=32000", "-t", "75", audio]);
       const result = fx.run(audio, { EMPTY_PART: "part-0001" });
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout.trim()).toBe("part-0000 [ohörbart 0:25–0:50] part-0002");
+      expect(result.stdout.trim()).toBe("part-0000 part-0002");
     } finally { fx.close(); }
   });
-  it("keeps a short audible peak even with a low whole-file mean", () => {
+  it("does not treat an isolated click as speech", () => {
     const fx = silenceFixture();
     try {
       const audio = join(fx.root, "brief.wav");
       execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i",
         "aevalsrc=if(lt(t\\,0.00001)\\,0.2\\,0):s=16000:d=25", audio]);
       const result = fx.run(audio);
-      expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe("brief");
-      expect(fx.calls()).toEqual(["brief"]);
+      expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe("[stt:no_speech]");
+      expect(fx.calls()).toEqual([]);
     } finally { fx.close(); }
   });
   it("preserves uniformly quiet audio before and after splitting", () => {
@@ -110,7 +130,7 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
     try {
       for (const duration of [2, 56]) {
         const audio = join(fx.root, `quiet-${duration}.wav`);
-        execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `sine=frequency=440:duration=${duration}`,
+        execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "flite=text=This is a short spoken sentence:voice=slt,aloop=loop=-1:size=32000", "-t", String(duration),
           "-af", "volume=-33dB", audio]);
         const result = fx.run(audio);
         expect(result.status, result.stderr).toBe(0);
@@ -124,7 +144,7 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
     try {
       for (const file of ["dialogue.wav", "dialogue-30.wav", "dialogue-33.wav", "dialogue-36.wav", "long-33.wav"]) {
         const before = fx.calls().length;
-        const result = fx.run(join(process.env.AMUX_QUIET_SPEECH_DIR, file), {}, process.env.AMUX_TRANSCRIBE_SCRIPT || resolve("bin/transcribe-whisper.sh"));
+        const result = fx.run(join(process.env.AMUX_QUIET_SPEECH_DIR, file), {}, process.env.AMUX_TRANSCRIBE_SCRIPT || wrapperPath);
         expect(result.status, result.stderr).toBe(0);
         expect(result.stdout).not.toContain("[tyst"); expect(fx.calls().length).toBeGreaterThan(before);
       }
@@ -134,7 +154,7 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
     it.skipIf(!process.env[key])(`replays private original ${key} without provider calls or transcript logging`, () => {
       const fx = silenceFixture();
       try {
-        const result = fx.run(process.env[key], { EMPTY_PART: emptyPart }, process.env.AMUX_TRANSCRIBE_SCRIPT || resolve("bin/transcribe-whisper.sh"));
+        const result = fx.run(process.env[key], { EMPTY_PART: emptyPart }, process.env.AMUX_TRANSCRIBE_SCRIPT || wrapperPath);
         expect(result.status, result.stderr).toBe(0);
         const expected = Array.from({ length: count }, (_, i) => `part-${String(i).padStart(4, "0")}`).filter(name => name !== emptyPart);
         const marker = key === "AMUX_VOICE_FIXTURE" ? "[tyst 1:40–2:05]" : "[tyst 0:50–1:15]";
@@ -146,8 +166,6 @@ describe("silent voice parts, skyvw:0 2026-10-17", () => {
   }
 });
 
-// Mattias 2026-10-18: "det är bättre att Whisper kör så fort den kan". A Gemini call that runs
-// into its cap hung; the same clip hung again in 5 of 7 second tries, so whisper1 takes over at once.
 function providerFixture(fakeTranscribe, seconds = 3) {
   const root = mkdtempSync(join(tmpdir(), "voice-provider-"));
   mkdirSync(join(root, "bin"));
@@ -157,86 +175,33 @@ echo "$backend" >> "$HOME/calls"
 ${fakeTranscribe}
 `, { mode: 0o700 });
   const audio = join(root, "clip.ogg");
-  execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `sine=frequency=440:duration=${seconds}`, "-c:a", "libopus", audio]);
-  const run = (env = {}) => spawnSync("bash", [resolve("bin/transcribe-whisper.sh"), audio], {
-    env: { ...process.env, HOME: root, AMUX_STT_PRIMARY: "gemini", ...env }, encoding: "utf8", timeout: 10_000,
+  execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "flite=text=This is a short spoken sentence:voice=slt,aloop=loop=-1:size=32000", "-t", String(seconds), "-c:a", "libopus", audio]);
+  const run = (env = {}, input = audio) => spawnSync("bash", [wrapperPath, input], {
+    env: { ...process.env, HOME: root, PYTHONUSERBASE: join(homedir(), ".local"), AMUX_STT_PRIMARY: "gemini", ...env }, encoding: "utf8", timeout: 20_000,
   });
   const calls = () => readFileSync(join(root, "calls"), "utf8").trim().split("\n");
   const args = () => readFileSync(join(root, "args"), "utf8").trim().split("\n");
   const failures = (backend = "gemini") => readFileSync(join(root, `.agentmux/stt-${backend}-failures.jsonl`), "utf8")
     .trim().split("\n").map((line) => JSON.parse(line));
-  return { run, calls, args, failures, close: () => rmSync(root, { recursive: true, force: true }) };
+  return { run, calls, args, failures, root, audio, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-describe("a hung Gemini call, sandman:0 2026-10-18", () => {
-  it("falls back to whisper1 at once instead of hanging a second time", () => {
-    // exec: the wall cap's SIGTERM must reach the hanging call itself, not only its shell.
-    const fx = providerFixture(`[ "$backend" = gemini ] && exec sleep 30
-echo "whisper words"`);
+// Row 151 supersedes retry-on-empty and retry-on-timeout: neither proves an outage.
+describe("primary calls are never repeated after uncertain outcomes", () => {
+  it("does not replace a timed-out Gemini job", () => {
+    const fx = providerFixture(`[ "$backend" = gemini ] && exec sleep 30`);
     try {
-      // The call list is the proof: this host's wall clock can jump seconds, so no duration bound.
-      const result = fx.run({ AMUX_STT_GEMINI_CAP_S: "1", AMUX_STT_HUNG_AFTER_S: "1" });
-      expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout.trim()).toBe("[stt-fallback:whisper1] whisper words");
-      expect(fx.calls()).toEqual(["gemini", "whisper1"]);
+      const result = fx.run({ AMUX_STT_GEMINI_CAP_S: "1" });
+      expect(result.status).toBe(22); expect(result.stdout).toBe("");
+      expect(fx.calls()).toEqual(["gemini"]);
     } finally { fx.close(); }
   });
-  it("still gives Gemini a second try after a fast failure", () => {
-    const fx = providerFixture(`if [ "$backend" = gemini ] && [ "$(grep -c gemini "$HOME/calls")" -eq 1 ]; then
-  echo "503 UNAVAILABLE" >&2; exit 1
-fi
-echo "$backend words"`);
+  it("does not infer unavailability from a generic provider error", () => {
+    const fx = providerFixture(`echo "503 UNAVAILABLE" >&2; exit 1`);
     try {
       const result = fx.run();
-      expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout.trim()).toBe("gemini words");
-      expect(fx.calls()).toEqual(["gemini", "gemini"]);
-    } finally { fx.close(); }
-  });
-});
-
-// sandman:0's proposal 2026-10-19, decided by lsrc:0 on Mattias' delegation: keep why each Gemini
-// try failed, cap thinking and answer length, and vary a second try only after a fast failure.
-describe("Gemini tries are capped, logged when they fail, and varied only after a fast failure", () => {
-  it("logs why each Gemini try failed, without the words", () => {
-    const fx = providerFixture(`if [ "$backend" = gemini ]; then
-  echo "google.genai.errors.ServerError: 503 UNAVAILABLE. {'error': {'code': 503}}" >&2; echo "Gemini error" >&2; exit 1
-fi
-echo "whisper words"`);
-    try {
-      const result = fx.run();
-      expect(result.status, result.stderr).toBe(0);
-      const log = fx.failures();
-      expect(log.map((entry) => entry.attempt)).toEqual([1, 2]);
-      expect(log[0]).toMatchObject({ backend: "gemini", exit: 1, reason: expect.stringContaining("503 UNAVAILABLE") });
-      expect(JSON.stringify(log)).not.toContain("whisper words");
-    } finally { fx.close(); }
-  });
-  it("caps thinking and answer length on every try and varies only the second", () => {
-    const fx = providerFixture(`echo "$*" >> "$HOME/args"
-if [ "$backend" = gemini ] && [ "$(grep -c gemini "$HOME/calls")" -eq 1 ]; then
-  echo "503 UNAVAILABLE" >&2; exit 1
-fi
-echo "$backend words"`);
-    try {
-      const result = fx.run();
-      expect(result.status, result.stderr).toBe(0);
-      const [first, second] = fx.args();
-      for (const line of [first, second]) expect(line).toContain("--thinking-budget 1024 --max-output-tokens 2048");
-      expect(first).toContain("--temperature 0 ");
-      expect(second).toContain("--temperature 0.3 ");
-    } finally { fx.close(); }
-  });
-  it("repeats a try that heard no words unchanged", () => {
-    const fx = providerFixture(`echo "$*" >> "$HOME/args"
-[ "$backend" = gemini ] && exit 0
-echo "whisper words"`);
-    try {
-      const result = fx.run();
-      expect(result.status, result.stderr).toBe(0);
-      // whisper1 follows the two wordless Gemini tries (sandman:0 1 Nov); only Gemini's tries are compared.
-      const gemini = fx.args().filter((line) => line.includes("--backend gemini"));
-      expect(gemini.map((line) => line.includes("--temperature 0 "))).toEqual([true, true]);
+      expect(result.status).toBe(22); expect(fx.calls()).toEqual(["gemini"]);
+      expect(fx.failures()).toHaveLength(1);
     } finally { fx.close(); }
   });
 });
@@ -264,7 +229,7 @@ describe("api.v1d.io is the primary transcriber", () => {
   });
   it("hands a failed call to whisper1 at once, logs why without the words, and never sends it again", () => {
     const fx = providerFixture(`if [ "$backend" = v1d ]; then
-  echo "v1d 503 provider_unavailable: The provider could not be reached; the run did not start (provider_refused)." >&2; exit 1
+  echo "v1d 503 provider_unavailable: refused before submit" >&2; exit 21
 fi
 echo "whisper words"`);
     try {
@@ -274,20 +239,20 @@ echo "whisper words"`);
       expect(fx.calls()).toEqual(["v1d", "whisper1"]);
       const log = fx.failures("v1d");
       expect(log).toHaveLength(1);
-      expect(log[0]).toMatchObject({ backend: "v1d", attempt: 1, exit: 1, reason: expect.stringContaining("503 provider_unavailable") });
+      expect(log[0]).toMatchObject({ backend: "v1d", attempt: 1, exit: 21, reason: expect.stringContaining("503 provider_unavailable") });
       expect(JSON.stringify(log)).not.toContain("whisper words");
     } finally { fx.close(); }
   });
   // sandman:0 1 Nov: the API answered Mattias' clear 13 s message of 20:40Z without words, and it
   // reached his pane as [ohörbart 0:00–0:12]. whisper1 hears a wordless answer before it is marked.
-  it("gives whisper1 a clip the API heard without words, marked as the fallback", () => {
+  it("stops a wordless primary answer without a second provider", () => {
     const fx = providerFixture(`[ "$backend" = v1d ] && exit 0
 echo "whisper words"`);
     try {
       const result = fx.run(v1d);
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout.trim()).toBe("[stt-fallback:whisper1] whisper words");
-      expect(fx.calls()).toEqual(["v1d", "whisper1"]);
+      expect(result.stdout.trim()).toBe("[stt:no_speech]");
+      expect(fx.calls()).toEqual(["v1d"]);
     } finally { fx.close(); }
   });
   it("marks a clip inaudible only when whisper1 hears no words either", () => {
@@ -295,8 +260,8 @@ echo "whisper words"`);
     try {
       const result = fx.run(v1d);
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout.trim()).toBe("[ohörbart 0:00–0:03]");
-      expect(fx.calls()).toEqual(["v1d", "whisper1"]);
+      expect(result.stdout.trim()).toBe("[stt:no_speech]");
+      expect(fx.calls()).toEqual(["v1d"]);
     } finally { fx.close(); }
   });
   it("still marks a clip the API heard without words when whisper1 cannot answer", () => {
@@ -305,8 +270,8 @@ echo "401 insufficient_quota" >&2; exit 1`);
     try {
       const result = fx.run(v1d);
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout.trim()).toBe("[ohörbart 0:00–0:03]");
-      expect(fx.calls()).toEqual(["v1d", "whisper1"]);
+      expect(result.stdout.trim()).toBe("[stt:no_speech]");
+      expect(fx.calls()).toEqual(["v1d"]);
     } finally { fx.close(); }
   });
   it("refuses an unknown primary instead of guessing one", () => {
@@ -316,5 +281,58 @@ echo "401 insufficient_quota" >&2; exit 1`);
       expect(result.status).toBe(2);
       expect(result.stderr).toContain("unknown AMUX_STT_PRIMARY");
     } finally { fx.close(); }
+  });
+});
+
+describe("151 terminal speech outcomes", () => {
+  for (const code of [20, 22]) it(`does not fall back for terminal exit ${code}`, () => {
+    const fx = providerFixture(`[ "$backend" = v1d ] && exit ${code}\necho invented`);
+    try {
+      const result = fx.run({ AMUX_STT_PRIMARY: "v1d" });
+      expect(fx.calls()).toEqual(["v1d"]);
+      expect(result.stdout.trim()).toBe(code === 20 ? "[stt:no_speech]" : "");
+      expect(result.status).toBe(code === 20 ? 0 : 22);
+    } finally { fx.close(); }
+  });
+  it("blocks real silence and noise before Whisper, but preserves short and quiet speech", () => {
+    const fx = providerFixture(`[ "$backend" = v1d ] && exit 21\necho ja`);
+    try {
+      for (const [name, source] of [["noise", "anoisesrc=color=white:amplitude=0.1:sample_rate=16000"], ["silence", "anullsrc=r=16000:cl=mono"]]) {
+        const audio = join(fx.root, `${name}.wav`);
+        execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", source, "-t", "1", audio]);
+        const result = fx.run({ AMUX_STT_PRIMARY: "v1d" }, audio);
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout.trim()).toBe("[stt:no_speech]");
+      }
+      const quiet = join(fx.root, "quiet-speech.wav");
+      execFileSync("ffmpeg", ["-v", "error", "-i", fx.audio, "-af", "volume=-33dB", quiet]);
+      const result = fx.run({ AMUX_STT_PRIMARY: "v1d" }, quiet);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("[stt-fallback:whisper1] ja");
+      expect(fx.calls().filter(x => x === "whisper1")).toHaveLength(1);
+    } finally { fx.close(); }
+  }, 15000);
+});
+
+describe("151 gateway adapter contract, real codec and stubbed HTTP only", () => {
+  for (const [scenario, expected, text] of [
+    ["no_speech", 0, ""], ["too_short", 0, ""], ["unknown", 22, null],
+    ["outage", 21, null], ["content", 22, null], ["proofread", 0, "ja"],
+  ]) it(`preserves ${scenario} semantics`, () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-adapter-"));
+    try {
+      const audio = join(root, "input.wav"), out = join(root, "out.json"), key = join(root, "key");
+      writeFileSync(key, "stub-key");
+      execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "flite=text=ya:voice=slt", audio]);
+      const code = readFileSync(process.env.AMUX_TRANSCRIBE_SOURCE || resolve("bin/transcribe"), "utf8").split("<<'PY'\nimport base64,")[1].split("\nPY\n}")[0];
+      const runner = `import json, sys, io, urllib.request, urllib.error\nfrom unittest.mock import patch\nscenario=sys.argv[3]\ncalls=[]\nclass Response(io.BytesIO):\n status=200\ndef request(req, **kwargs):\n calls.append(req.method)\n if req.full_url.endswith('/v1/proofread'): raise TimeoutError('secondary only')\n if scenario in ('no_speech','too_short','outage','content'):\n  code=scenario if scenario != 'outage' else 'provider_unavailable'\n  status=503 if scenario == 'outage' else 422\n  body={'error':{'type':'provider_unavailable' if scenario == 'outage' else 'invalid_request','code':code}}\n  raise urllib.error.HTTPError(req.full_url,status,'stub',{},io.BytesIO(json.dumps(body).encode()))\n return Response(json.dumps({'id':'run_stub','status':'unknown' if scenario == 'unknown' else 'succeeded','error':None,'output':None if scenario == 'unknown' else {'text':'ja'}}).encode())\ntry:\n with patch('urllib.request.urlopen', request): exec('import base64,'+sys.stdin.read())\nfinally:\n print(json.dumps({'http_calls':calls}))\n`;
+      const result = spawnSync("python3", ["-c", runner, audio, out, scenario], {
+        input: code, encoding: "utf8", timeout: 20000,
+        env: { ...process.env, WORK: root, V1D_KEY_FILE: key, LANG: "sv", V1D_CONTEXT: "ja", V1D_HINTS: "" },
+      });
+      expect(result.status, result.stderr).toBe(expected);
+      if (text !== null) expect(JSON.parse(readFileSync(out)).text).toBe(text);
+      expect(JSON.parse(result.stdout.trim().split("\n").at(-1)).http_calls).toEqual(scenario === "proofread" ? ["POST", "POST"] : ["POST"]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

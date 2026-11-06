@@ -46,7 +46,7 @@ export function createVoiceInput({
     try {
       parsed = await transcribe(body, { name, pane });
     } catch (error) {
-      return json(res, error.status || 400, { error: error.message });
+      return json(res, error.status || 400, { error: error.message, code: error.code || null, retryable: false });
     }
     // Correlate the eventual pane response with this exact phone turn. The
     // marker changes no response policy (and notably does not request voice),

@@ -7,6 +7,14 @@ import { voiceContextEnv } from "./pane-latest-reply.mjs";
 export const TRANSCRIPT_PREFIX =
   "[transcribed voice, may contain speech-to-text errors; interpret intent]";
 
+/** WHAT: Maps terminal STT control output. WHY: Keeps status out of spoken content. */
+export function terminalVoiceOutcome(text) {
+  const value = String(text || "").trim();
+  if (!value || value === "[stt:no_speech]") return { code: "no_speech", notice: "Inget tal hördes." };
+  if (value === "[stt:unknown]") return { code: "unknown", notice: "Transkriberingens utfall är okänt. Ljudet skickas inte igen." };
+  return null;
+}
+
 function withStatus(message, status) {
   return Object.assign(new Error(message), { status });
 }
@@ -41,8 +49,9 @@ export async function transcribeVoiceBuffer({
       voiceContextEnv(context),
     );
     const transcript = String(stdout || "").trim();
-    if (!transcript) {
-      throw withStatus("transcription empty; audio may have been silent or unintelligible", 422);
+    const terminal = terminalVoiceOutcome(transcript);
+    if (terminal) {
+      throw Object.assign(withStatus(`transcription empty: ${terminal.notice}`, 422), { code: terminal.code });
     }
     return {
       text: `${TRANSCRIPT_PREFIX} ${transcript}`,
@@ -50,6 +59,9 @@ export async function transcribeVoiceBuffer({
     };
   } catch (error) {
     if (error.status) throw error;
+    if (Number(error.code) === 22) {
+      throw Object.assign(withStatus("Transkriberingens utfall är okänt. Ljudet skickas inte igen.", 422), { code: "unknown" });
+    }
     throw withStatus(`transcription failed: ${error.message}`, 500);
   } finally {
     try { unlinkSync(tmpPath); } catch {}

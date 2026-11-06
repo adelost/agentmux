@@ -544,7 +544,7 @@ for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
     data = open(part, 'rb').read()
     seconds = float(subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', part],
                                    capture_output=True, text=True, check=True).stdout.strip() or 0)
-    if seconds < 0.4:  # the catalog's minimum; a split can leave a sliver
+    if seconds < 0.4:  # A terminal too-short sliver, never a fallback.
         continue
     whole.update(data)
     heard_seconds += seconds
@@ -558,15 +558,32 @@ for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
     if lang != 'auto':
         body['language'] = lang
     status, run = call('POST', '/v1/transcribe', body)
-    if status >= 400:
+    def outcome_exit(status, run):
         error = run.get('error') or {}
-        sys.exit(f"v1d {status} {error.get('type')}: {error.get('message')} {error.get('run_id') or ''}".strip())
+        code = error.get('code') or error.get('type')
+        if code in ('no_speech', 'too_short'):
+            return 20
+        # A refused admission or explicit unavailable response proves that no
+        # supplier job ran. Poll/transport/unknown outcomes never qualify.
+        if not run.get('id') and not error.get('run_id') and error.get('type') == 'provider_unavailable' and status == 503 and code == 'provider_unavailable':
+            return 21
+        return 22
+    if status >= 400:
+        rc = outcome_exit(status, run)
+        if rc == 20:
+            continue
+        print(f"v1d {status} {run.get('error')}", file=sys.stderr)
+        sys.exit(rc)
     deadline = time.time() + 120
     while run.get('status') in ('queued', 'running') and time.time() < deadline:
         time.sleep(1)
         status, run = call('GET', '/v1/runs/' + run['id'])
     if run.get('status') != 'succeeded':
-        sys.exit(f"v1d run {run.get('id')} ended {run.get('status')}: {run.get('error')}")
+        rc = outcome_exit(status, run)
+        if rc == 20:
+            continue
+        print(f"v1d run {run.get('id')} ended {run.get('status')}: {run.get('error')}", file=sys.stderr)
+        sys.exit(22)  # A submitted run is never safe to replace with another call.
     output = run.get('output') or {}
     proofread = output.get('proofread') or {}
     print(f"[v1d] {run['id']} {seconds:.1f} s, {run.get('cost_usd')} USD, "
@@ -585,7 +602,7 @@ if $LOCAL_MODE; then
   : # response.json already produced by local pipeline above
 elif [[ "$BACKEND" == "v1d" ]]; then
   log "api.v1d.io transcribe (lang=$LANG, word times ${V1D_WORD_TIMES:-0})..."
-  call_v1d "$SRC" "$WORK/response.json" || exit 1  # call_v1d already printed why
+  call_v1d "$SRC" "$WORK/response.json" || exit $?  # call_v1d already printed why
 elif [[ "$BACKEND" == "gemini" ]] && $TIMESTAMPS; then
   call_gemini_timestamped "$UPLOAD" "$WORK/response.json" || {
     echo "Gemini error" >&2; head -c 500 "$WORK/response.json" >&2; exit 1;

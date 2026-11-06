@@ -15,6 +15,25 @@ import {
 
 const NOW = Date.now();
 
+feature("151 terminal PTT speech outcomes", () => {
+  for (const code of ["no_speech", "too_short", "unknown"]) component(`${code} fails once without a prompt or reclaim loop`, {
+    given: ["a mailbox voice turn and a typed transcriber", () => {
+      const ctx = harness({ responses: { "/api/link/connector/poll?source=wsl": {
+        messages: [message({ kind: "voice", body: "", voiceRef: "voice/terminal.m4a" })],
+      } } });
+      ctx.attempts = 0;
+      ctx.deps.transcribe = async () => { ctx.attempts++; throw Object.assign(new Error("terminal speech outcome"), { code }); };
+      return ctx;
+    }],
+    when: ["the mailbox is polled twice", async ctx => { await cycleWithReplies(ctx.deps); await cycleWithReplies(ctx.deps); }],
+    then: ["nothing reaches the pane and the journal stops transcription", (_result, ctx) => {
+      expect(ctx.attempts).toBe(1); expect(ctx.calls.enqueued).toEqual([]);
+      expect(ctx.calls.posts.filter(p => p.url.includes("/connector/fail"))).toHaveLength(1);
+      ctx.cleanup();
+    }],
+  });
+});
+
 /** Row 186: the cycle hands each reply wait off and returns. A test that wants
  *  the reply posted joins the waits that cycle started. */
 async function cycleWithReplies(deps) {

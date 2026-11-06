@@ -7,6 +7,33 @@ import { createInboundReconciler } from "./inbound-reconciler.mjs";
 import { createAttachmentHandler } from "../attachments.mjs";
 
 describe("voice failure is still delivered", () => {
+  for (const outcome of ["no_speech", "unknown"]) for (const text of ["", "Behåll min skrivna text"]) {
+    it(`terminal ${outcome} posts a notice once, keeps accompanying text and never retries STT`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-terminal-"));
+      const store = createDiscordInboundStore({ rootDir: root, downloadBuffer: async () => Buffer.from("audio") });
+      let calls = 0;
+      const handler = createAttachmentHandler({ transcribeScript: "/transcribe", run: async () => {
+        calls++;
+        if (outcome === "unknown") throw Object.assign(new Error("submitted outcome unknown"), { code: 22 });
+        return { stdout: "[stt:no_speech]" };
+      } });
+      const delivered = [], posted = [];
+      const reconciler = createInboundReconciler({ store, resolveTarget: () => ({ agentName: "claw", pane: 0 }),
+        onMessage: async msg => { const prompt = await handler.buildPrompt(msg, []); if (prompt) delivered.push(prompt); return { delivered: true }; } });
+      const voice = { id: "terminal", channelId: "channel", text, attachments: [
+        { id: "audio", name: "voice.ogg", contentType: "audio/ogg", url: "fixture" },
+      ] };
+      const channel = { async send(_id, payload) { posted.push(payload); } };
+      try {
+        await reconciler.enqueue(voice, channel);
+        await reconciler.enqueue(voice, channel);
+        expect(calls).toBe(1);
+        expect(posted).toHaveLength(1);
+        expect(delivered).toEqual(text ? [text] : []);
+        expect(store.read("channel", "terminal").status).toBe("completed");
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    });
+  }
   it.each(["success", "failure"])("suppresses an in-flight provider %s after the recipient resolves the message", async result => {
     const root = mkdtempSync(join(tmpdir(), "voice-resolved-"));
     const store = createDiscordInboundStore({ rootDir: root, downloadBuffer: async () => Buffer.from("audio") });

@@ -9,6 +9,21 @@ import {
 import { createPaneReplyReader } from "./pane-latest-reply.mjs";
 
 feature("shared voice transcriber", () => {
+  for (const outcome of ["no_speech", "unknown"]) component(`terminal ${outcome} cannot become a PTT prompt`, {
+    when: ["the script returns its terminal result", async () => {
+      try {
+        return await transcribeVoiceBuffer({ audioBuffer: Buffer.from("audio"), filename: "voice.wav", transcribeScript: "/stub",
+          run: async () => {
+            if (outcome === "unknown") throw Object.assign(new Error("unknown"), { code: 22 });
+            return { stdout: "[stt:no_speech]" };
+          } });
+      } catch (error) { return error; }
+    }],
+    then: ["the caller receives terminal semantics without content", result => {
+      expect(result.code).toBe(outcome); expect(result.status).toBe(422);
+      expect(result.text).toBeUndefined();
+    }],
+  });
   component("one buffer becomes the same prefixed transcript for every host", {
     given: ["a local script runner and audio bytes", () => {
       const tempDir = mkdtempSync(join(tmpdir(), "amux-transcriber-"));

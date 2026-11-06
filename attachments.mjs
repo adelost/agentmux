@@ -6,6 +6,7 @@ import { extname } from "path";
 import { splitMessage } from "./lib.mjs";
 import { downloadDiscordAttachment } from "./core/discord-attachment-download.mjs";
 import { createPaneReplyReader, voiceContextEnv } from "./core/pane-latest-reply.mjs";
+import { terminalVoiceOutcome } from "./core/voice-transcriber.mjs";
 
 // No whitelist needed. All non-audio attachments are downloaded and passed
 // to Claude, which can read most file types (PDF, images, text, archives, etc).
@@ -106,6 +107,13 @@ export function createAttachmentHandler({
         let transcribed = await takeTranscription(msg, att, tmpFiles);
         if (msg.isInboundCompleted?.()) return null;
         if (transcribed === null) return null;
+        const terminal = terminalVoiceOutcome(transcribed);
+        if (terminal) {
+          if (typeof msg.sendTranscriptOnce === "function") {
+            await msg.sendTranscriptOnce(att.id, [terminal.notice], { kind: "notice" });
+          } else await msg.reply(terminal.notice);
+          continue;
+        }
         // The wrapper marks fallback-engine transcripts (the primary failed →
         // whisper1 took over). The mark must survive into BOTH destinations:
         // whisper1 mishears technical terms, and a silent fallback would be
@@ -159,15 +167,20 @@ export function createAttachmentHandler({
       if (msg.isInboundCompleted?.()) return null;
       const text = stdout.trim();
       if (!text) {
-        if (att.durablePath) throw new Error("transcription returned no text");
-        await msg.reply("*(could not transcribe voice message)*");
-        return null;
+        msg.saveTranscript?.(att.id, "[stt:no_speech]");
+        return "[stt:no_speech]";
       }
       if (typeof msg.saveTranscript === "function") msg.saveTranscript(att.id, text);
       // Reply with the tagged transcript is done by the caller (buildPrompt)
       // so the Discord reply and pane-bound text share one source of truth.
       return text;
     } catch (err) {
+      // UNKNOWN was submitted, and can be billed. Cache its terminal outcome
+      // with the existing transcript receipt so a REST scan cannot resend it.
+      if (Number(err.code) === 22) {
+        msg.saveTranscript?.(att.id, "[stt:unknown]");
+        return "[stt:unknown]";
+      }
       if (att.durablePath) {
         err.retryable = true;
         err.voiceFailure = { attachmentId: att.id, path: att.durablePath };

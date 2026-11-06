@@ -274,17 +274,25 @@ Manual and intentionally stopped bridges stay user-owned. Rate-limited, logged t
 - Agent-generated image attachments through `[image: /absolute/path.png]`.
 - Optional Voice PWA endpoint for trusted local or tailnet clients.
 
-Discord voice notes are stored privately before transcription. If STT fails,
-the pane receives one separate notice with the error and audio path; the
-original stays pending for transcript retries. The notice and transcript have
-different durable identities, so a notice cannot suppress the eventual words.
-There is one failure notice per message, including messages with several audio
-files. Recipient-resolved records suppress late STT results and notices.
-Later text messages can pass a failed voice note. Clips over 45 seconds are
-split into ordered 25-second parts by the existing wrapper, preserving Opus
-or Vorbis bytes in Ogg (otherwise WAV), with at most
-three concurrent calls to `~/bin/transcribe`. All parts must succeed; any
-Whisper fallback is labelled in both the pane and Discord transcript.
+Discord voice notes are stored privately before transcription. CPU Silero VAD
+uses the existing Python `faster-whisper`/NumPy installation and its packaged
+ONNX model, without GPU or downloads. Relative normalization preserves quiet
+speech; there is no minimum utterance length or loudness cutoff. Silence,
+noise rejected by VAD, typed `no_speech`/`too_short`, and wordless answers end
+with a short channel notice, never a pane prompt. Accompanying text survives.
+
+An unknown submitted outcome is terminal and cached in the existing inbound
+receipt, including failure of any part or Whisper call. It is never resent.
+Only a verified `provider_unavailable` admission can use labelled Whisper
+fallback. Other pre-submit infrastructure failures retain the separate error
+notice and pending-record recovery. Recipient-resolved records suppress late
+results. PTT returns terminal codes without enqueuing a pane prompt; the Link
+connector journals these outcomes without a reclaim loop.
+
+The v1d wrapper splits messages over 240 seconds into 240-second parts; its
+CLI bounds public API requests to 19 seconds. The legacy Gemini selection uses
+25-second parts above 45 seconds. All parts must succeed; fallback is labelled
+in both the pane and Discord transcript.
 
 ### Shared search model owner
 

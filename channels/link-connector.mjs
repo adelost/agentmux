@@ -140,13 +140,15 @@ export function planClaimedMessage({ message, journalEntry }) {
 
 /** WHAT: Maps a fetch or pane failure to an honest connector report. WHY: Keeps a dead mailbox or pane from masquerading as a delivered turn. */
 export function connectorFailureStage(error) {
+  if (["no_speech", "too_short"].includes(error?.code)) return "no-speech";
+  if (error?.code === "unknown") return "transcription-unknown";
   const text = String(error?.message || error || "unknown");
   if (/transcri(?:be|ption)/iu.test(text)) return "transcription-failed";
   if (/fetch|network|ECONN|timeout|5\d\d/u.test(text)) return "link-unavailable";
   return "pane-delivery-failed";
 }
 
-/** WHAT: Decides whether one failure is terminal or retryable. WHY: Invalid audio stops once while transient infrastructure gets a strict retry bound. */
+/** WHAT: Maps one failure to terminal or retryable. WHY: Invalid audio stops once while transient infrastructure gets a strict retry bound. */
 export function connectorFailureDisposition(error, attempts = 1) {
   const stage = connectorFailureStage(error);
   const status = Number(error?.status || 0);
@@ -156,6 +158,7 @@ export function connectorFailureDisposition(error, attempts = 1) {
   return {
     stage,
     terminal: stage === "pane-delivery-failed" ||
+      stage === "no-speech" || stage === "transcription-unknown" ||
       invalidAudio ||
       (stage === "transcription-failed" && attempts >= 3),
   };
