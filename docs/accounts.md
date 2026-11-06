@@ -203,9 +203,13 @@ model changes share the pane's
 independent attempt fences; existing files and quota episodes are read during
 the transition so earlier attempts are not forgotten. After 40 minutes an
 unfinished intent becomes a fresh exact-session measurement or `UNKNOWN`;
-unknown evidence never authorizes another model call. A stopped writer with a
-fresh above-budget rotation measurement can be retried once. A context that
-grew again before restart is held rather than compacted twice.
+unknown evidence never authorizes another model call. Each switch request claims
+at most one compact on its source account and exact session. A verified boundary
+satisfies that request even when the after size is unknown or above 80k; unknown
+size stays `null`, and a later measured value is retained. The same request waits
+for idle, an empty composer and clear delivery without compacting new activity
+again. Failed or unknown provider outcomes keep their attempt fence. A completed
+request does not prevent a new account-switch request after more work.
 
 An explicit rotate prints `pending (...; request=ID)` when a blocked pane has
 a durable follow-up, and `blocked` when none was saved. The watcher retries

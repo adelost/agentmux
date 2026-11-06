@@ -74,7 +74,7 @@ export async function observeSwitchContext(ctx, entry, {
       && await hasEmptyClaudeEpoch({ sessionId: facts.sessionId, path: facts.sessionPath })) {
     return { target, facts, compactRefusal: null, compacted: true };
   }
-  if (prior?.status === "VERIFIED" && !unmeasured && !staleShared) return { target, facts, compactRefusal: null, compacted: true };
+  if (prior?.status === "VERIFIED" && !staleShared) return { target, facts, compactRefusal: null, compacted: true, receipt: prior };
   const refusal = prior && !staleShared && !(unmeasured && prior.status === "VERIFIED") ? `previous-compact-${String(prior.status).toLowerCase()}`
     : nightlyCompactDecision(facts, compactPolicy(policy), null);
   return { target, facts, compactRefusal: refusal === "within-budget" ? null : refusal, compacted: false };
@@ -96,15 +96,13 @@ export async function compactBeforeSwitch(ctx, target, {
   };
   const pass = await run(ctx, {}, {
     targets: [target], queue, now, observe, livePending: (name, pane) => liveQueued(queue, name, pane, undefined) !== 0,
-    mirror: mirrorSwitchCompact, force, retryUnmeasured: target.engine === "claude",
+    mirror: mirrorSwitchCompact, force,
     label: `Compact before account switch (${key})`,
     policy: compactPolicy(policy),
     path: reportDirectory(now()),
   });
   const row = pass.rows.find((candidate) => candidate.pane === key) || pass.rows[0] || null;
-  if (target.engine === "claude" && row?.status === "compacted-unmeasured") {
-    return { ok: false, reason: "compact-size-unmeasured" };
-  }
-  if (row && VERIFIED_COMPACT.has(row.status)) return { ok: true, status: row.status, afterTokens: row.afterTokens ?? null };
+  if (row && VERIFIED_COMPACT.has(row.status)) return { ok: true, status: row.status, afterTokens: row.afterTokens ?? null,
+    sessionId: row.sessionId ?? null, attemptId: row.attemptId ?? null, compactBoundary: row.compactBoundary === true };
   return { ok: false, reason: `compact-${row?.status || "missing"}${row?.reason ? `:${row.reason}` : ""}` };
 }

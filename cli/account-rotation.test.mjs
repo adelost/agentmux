@@ -81,6 +81,61 @@ function fixture({ busy = false, restart = async () => ({ ok: true }) } = {}) {
 }
 
 feature("Claude fleet account rotation", () => {
+  for (const outcome of ["verified", "unknown"]) {
+    component(`a pending switch retains its ${outcome} compact after new work`, {
+      given: ["one switch compact followed by a busy pane", () => {
+        const fx = fixture();
+        fx.deps.observeContext = async () => ({ facts: { tokens: 116_000, idleMs: 60_000 }, compacted: false,
+          target: { agent: { name: "lsrc" }, pane: { index: 0 } } });
+        fx.deps.compactPane = vi.fn(async () => {
+          fx.ctx.agent.isBusy = async () => true;
+          return { ok: outcome === "verified", status: "compacted-unmeasured", afterTokens: null, reason: "unmeasured" };
+        });
+        return fx;
+      }],
+      when: ["new activity ends and the same request retries twice", async fx => {
+        await rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps);
+        fx.requestId = fx.state.get("claude_account_request_v1:lsrc:0").id;
+        fx.ctx.agent.isBusy = async () => false;
+        const row = await runRequestedClaudeRotation(fx.ctx, "lsrc", 0, fx.deps);
+        await runRequestedClaudeRotation(fx.ctx, "lsrc", 0, fx.deps);
+        return row;
+      }],
+      then: ["only the verified boundary moves; neither outcome buys another compact", (row, fx) => {
+        expect(fx.deps.compactPane).toHaveBeenCalledTimes(1);
+        expect(row.status).toBe(outcome === "verified" ? "switched" : "blocked");
+        const request = fx.state.get("claude_account_request_v1:lsrc:0");
+        expect(request.id).toBe(fx.requestId);
+        expect(request.compact.afterTokens).toBeNull();
+        expect(request.phase).toBe(outcome === "verified" ? "complete" : "pending");
+      }],
+    });
+  }
+  component("a new request after a completed switch may compact new work", {
+    given: ["a finished move to account 2", async () => {
+      const fx = fixture();
+      await rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps);
+      fx.firstRequest = fx.state.get("claude_account_request_v1:lsrc:0").id;
+      fx.deps.observeContext = async () => ({ facts: { tokens: 116_000, idleMs: 60_000 }, compacted: false,
+        target: { agent: { name: "lsrc" }, pane: { index: 0 } } });
+      return fx;
+    }],
+    when: ["the operator requests account 1 after new work", fx => rotateClaudeFleet(fx.ctx, "1", { only: ["lsrc:0"] }, fx.deps)],
+    then: ["a new episode owns its one compact and successful switch", (result, fx) => {
+      expect(result.rows[0].status).toBe("switched");
+      expect(fx.deps.compactPane).toHaveBeenCalledTimes(1);
+      expect(fx.state.get("claude_account_request_v1:lsrc:0").id).not.toBe(fx.firstRequest);
+    }],
+  });
+  component("the stop mover keeps the public pending status", {
+    given: ["an automatic move held by an active turn", () => fixture({ busy: true })],
+    when: ["the stop mover records its episode", fx => rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] },
+      { ...fx.deps, persistBlocked: false })],
+    then: ["Stats sees pending and the generic watcher does not duplicate the mover", async (_result, fx) => {
+      expect(claudeRotationStatus(fx.state, { pane: "lsrc:0" }).status).toBe("pending");
+      expect(await runRequestedClaudeRotation(fx.ctx, "lsrc", 0, fx.deps)).toBeNull();
+    }],
+  });
   component("a busy Claude pane keeps its account request for an idle retry", {
     given: ["an explicit rotation blocked by a working pane", () => fixture({ busy: true })],
     when: ["the operator rotates only that pane", fx => rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps)],

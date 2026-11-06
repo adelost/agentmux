@@ -1,14 +1,16 @@
+import { randomUUID } from "node:crypto";
+
 // Durable operator requests and their read-only receipts.
 /** WHAT: Names a pane's Claude rotation request. WHY: Keeps unrelated pane requests in separate keys. */
 export const claudeRotationKey = (name, pane) => `claude_account_request_v1:${name}:${pane}`;
 const receiptKey = id => `claude_account_receipt_v1:${id}`;
 
 /** WHAT: Stores one session-bound rotation and its receipt atomically. WHY: Keeps an older retry from overwriting a newer request. */
-export function saveClaudeRotation(state, request, expectedId = null) {
+export function saveClaudeRotation(state, request, expectedId = null, accepts = () => true) {
   const key = claudeRotationKey(request.name, request.pane);
   const write = data => {
     const prior = data[key];
-    if ((prior?.id || null) !== expectedId) return false;
+    if ((prior?.id || null) !== expectedId || !accepts(prior)) return false;
     if (prior?.id && prior.id !== request.id) data[receiptKey(prior.id)] = prior.phase === "pending"
       ? { ...prior, phase: "superseded", reason: "newer-rotation" } : prior;
     data[key] = request;
@@ -45,4 +47,56 @@ export function claudeRotationStatusCommand(ctx, args, output = console.log) {
   const result = claudeRotationStatus(ctx.state, { id, pane });
   output(json ? JSON.stringify(result) : `${result.pane || result.requestId} ${result.status}${result.reason ? ` (${result.reason})` : ""}`);
   return result;
+}
+
+/** WHAT: Stores or reuses one exact-session switch episode. WHY: Keeps a busy retry bound to its compact outcome after more work. */
+export function beginClaudeRotation(state, entry, target, identity, { automatic = false } = {}) {
+  if (!state?.set || !identity?.sessionId || !identity.path) return null;
+  const key = claudeRotationKey(entry.agentName, entry.pane), prior = state.get(key, null);
+  if (automatic && prior?.phase === "pending" && prior.target !== target) return null;
+  if (prior?.phase === "pending" && prior.target === target
+      && prior.sessionId === identity.sessionId && prior.sessionPath === identity.path) {
+    if (!automatic && prior.automatic) {
+      const explicit = { ...prior, automatic: false };
+      return saveClaudeRotation(state, explicit, prior.id) ? explicit : null;
+    }
+    return prior;
+  }
+  const request = { id: randomUUID(), phase: "pending", automatic, target,
+    name: entry.agentName, pane: entry.pane, sessionId: identity.sessionId, sessionPath: identity.path };
+  return saveClaudeRotation(state, request, prior?.id || null) ? request : null;
+}
+
+/** WHAT: Reads the compact belonging to this switch request and source account. WHY: Prevents another request, session or account from borrowing its boundary. */
+export function rotationCompact(state, entry, request) {
+  const current = request && state?.get?.(claudeRotationKey(entry.agentName, entry.pane), null);
+  if (!current || !request || current.id !== request.id || current.sessionId !== entry.identity?.sessionId
+      || current?.sessionPath !== entry.identity?.path || current?.target !== request?.target) return null;
+  const proof = current.compact;
+  return proof?.sourceProfileId === entry.currentProfile?.id ? proof : null;
+}
+
+/** WHAT: Saves a switch's compact claim or result on its existing receipt. WHY: Prevents activity or controller restart from unlocking an unknown provider outcome. */
+export function saveRotationCompact(state, entry, request, compact) {
+  if (!request) return true;
+  const current = state.get(claudeRotationKey(entry.agentName, entry.pane), null);
+  if (current?.id !== request.id) return false;
+  return saveClaudeRotation(state, { ...current, compact: { ...compact, sourceProfileId: entry.currentProfile?.id } }, request.id,
+    prior => compact.status === "attempting" ? !prior.compact
+      : !prior.compact || prior.compact.sourceProfileId === entry.currentProfile?.id
+        && (prior.compact.status === "attempting" || prior.compact.status === "verified" && prior.compact.afterTokens === null
+          && compact.status === "verified" && Number.isFinite(compact.afterTokens)));
+}
+
+/** WHAT: Stores the original rotation request. WHY: Keeps busy retries on one identity and preserves successful outcomes. */
+export function finishClaudeRotations(state, rows, requests) {
+  for (const row of rows) {
+    const request = requests.get(row.key), key = `claude_account_request_v1:${row.key}`;
+    const current = request && state.get(key, null);
+    if (current?.id !== request?.id || !current) continue;
+    const success = ["switched", "already-selected", "selected-for-quota-recovery", "selected-for-next-wake"].includes(row.status);
+    const phase = row.status === "blocked" ? current.phase : success ? "complete" : "blocked";
+    if (saveClaudeRotation(state, { ...current, phase, outcome: row.status === "blocked" ? null : row.status,
+      reason: row.reason || null }, request.id, live => JSON.stringify(live.compact) === JSON.stringify(current.compact)) && row.status === "blocked" && phase === "pending" && !current.automatic) row.followupId = request.id;
+  }
 }

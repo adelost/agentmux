@@ -1,11 +1,12 @@
 import { feature, unit, component, expect } from "bdd-vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compactBeforeSwitch, observeSwitchContext } from "./account-switch-compact.mjs";
+import { beginContextCompact, rememberContextCompact } from "../core/context-maintenance.mjs";
 import { accountSwitchPlan } from "../policies/account-switch-cost.mjs";
 
-const target = { agent: { name: "lsrc" }, pane: { index: 0 } };
+const target = { agent: { name: "lsrc" }, pane: { index: 0 }, engine: "claude" };
 const runReturning = (row) => async () => ({ rows: [{ pane: "lsrc:0", ...row }] });
 
 feature("the compact step of an account switch", () => {
@@ -98,6 +99,32 @@ feature("the compact step of an account switch", () => {
         try { expect(plan.action).toBe(newWork ? "HOLD" : "RESTART"); }
         finally { rmSync(fx.root, { recursive: true, force: true }); }
       }],
+    });
+  }
+  component("a completed pause compact also satisfies a switch with unknown after size", {
+    given: ["the shared receipt and its exact journal boundary", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-switch-pause-")), path = join(root, "s.jsonl");
+      writeFileSync(path, "");
+      const data = {}, state = { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => data[key] = value };
+      const intent = beginContextCompact(state, "test", 0, { sessionId: "s", path });
+      appendFileSync(path, JSON.stringify({ type: "system", subtype: "compact_boundary", sessionId: "s" }) + "\n");
+      rememberContextCompact(state, "test", 0, { ...intent, ok: true, compactBoundary: true });
+      return { root, state, facts: { engine: "claude", backend: "tmux", running: true, sessionId: "s", sessionPath: path,
+        status: "idle", composerEmpty: true, queued: 0, tokens: null, idleMs: 60_000 } };
+    }],
+    when: ["the switch reads the pause receipt", fx => observeSwitchContext({ state: fx.state, deliveryQueue: {} },
+      { agent: {}, agentName: "test", pane: 0 }, { discover: async () => [{ engine: "claude", agent: {}, pane: { index: 0 } }],
+        observe: async () => fx.facts })],
+    then: ["the existing compact is used without inventing a size", (result, fx) => {
+      try { expect(result.compacted).toBe(true); expect(result.facts.tokens).toBeNull(); }
+      finally { rmSync(fx.root, { recursive: true, force: true }); }
+    }],
+  });
+  for (const afterTokens of [null, 116_000]) {
+    unit(`a verified switch compact accepts its real after size ${afterTokens}`, {
+      when: ["the exact boundary is verified", () => compactBeforeSwitch({ deliveryQueue: {} }, target,
+        { run: runReturning({ status: afterTokens === null ? "compacted-unmeasured" : "compacted-above-budget", afterTokens }) })],
+      then: ["the switch proceeds without another size-chasing attempt", result => expect(result).toMatchObject({ ok: true, afterTokens })],
     });
   }
   unit("a session with nothing to compact may switch: there is no cache to lose", {

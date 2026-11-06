@@ -2,7 +2,6 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import { listAgents } from "./config.mjs";
 import { externalClaudeMdImports } from "../core/claude-md-imports.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue.mjs";
@@ -35,7 +34,7 @@ import { accountSwitchPlan } from "../policies/account-switch-cost.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
 import { waitForSessionLease } from "../core/session-lease.mjs";
 import { compactBeforeSwitch, observeSwitchContext } from "./account-switch-compact.mjs";
-import { claudeRotationKey, saveClaudeRotation } from "./claude-rotation-status.mjs";
+import { beginClaudeRotation, finishClaudeRotations, rotationCompact, saveRotationCompact, claudeRotationKey, saveClaudeRotation } from "./claude-rotation-status.mjs";
 
 const paneKey = (agentName, pane) => `${agentName}:${pane}`;
 const requestKey = claudeRotationKey;
@@ -173,6 +172,9 @@ function cachedImportScan(scan = externalClaudeMdImports) {
 }
 
 function paneChangeReason(before, after, deps) {
+  const request = deps.requests?.get(before.key);
+  if (request && (deps.requestCurrent?.(request)?.id !== request.id || before.mode === "running"
+      && (request.sessionId !== after.identity?.sessionId || request.sessionPath !== after.identity?.path))) return "rotation-request-changed";
   if (!after.allow) return after.reason;
   if (after.currentProfile?.id !== before.currentProfile?.id) return "rotation-profile-changed";
   if (after.mode !== before.mode) return "rotation-pane-changed";
@@ -224,9 +226,21 @@ async function planPanes(ctx, observed, target, deps, compactedKeys = new Set())
   const planned = [];
   for (const pane of observed) {
     const alreadySelected = onTargetAccount(pane, target, deps.identityOf);
+    const request = deps.requests?.get(pane.key), proof = rotationCompact(ctx.state, pane, request);
     const context = pane.mode === "running" && !alreadySelected ? await deps.observeContext(ctx, pane) : null;
-    const plan = accountSwitchPlan({ mode: pane.mode, alreadySelected, facts: context?.facts,
-      compactRefusal: context?.compactRefusal, compacted: context?.compacted || compactedKeys.has(pane.key) }, deps.policy);
+    if (proof?.status === "verified" && proof.afterTokens === null && Number.isFinite(context?.facts?.tokens)
+        && Date.parse(context.facts.tokensObservedAt) >= proof.verifiedAt) {
+      saveRotationCompact(ctx.state, pane, request, { ...proof, afterTokens: context.facts.tokens });
+    }
+    if (context?.compacted && request && !proof) saveRotationCompact(ctx.state, pane, request,
+      { status: "verified", verifiedAt: Date.now(), attemptId: context.receipt?.attemptId ?? null,
+        compactBoundary: context.receipt?.compactBoundary === true, afterTokens: context.facts?.tokens ?? null });
+    const changed = request && pane.mode === "running" && (request.sessionId !== pane.identity?.sessionId
+      || request.sessionPath !== pane.identity?.path || deps.requestCurrent(request)?.id !== request.id);
+    const plan = changed ? { action: "HOLD", reason: "rotation-session-or-request-changed" }
+      : accountSwitchPlan({ mode: pane.mode, alreadySelected, facts: context?.facts,
+      compactRefusal: proof && proof.status !== "verified" ? `previous-switch-compact-${proof.status}` : context?.compactRefusal,
+      compacted: proof?.status === "verified" || context?.compacted || compactedKeys.has(pane.key) }, deps.policy);
     planned.push({ ...pane, plan, compactTarget: context?.target || null, contextTokens: context?.facts?.tokens ?? null });
   }
   return planned;
@@ -236,7 +250,14 @@ async function planPanes(ctx, observed, target, deps, compactedKeys = new Set())
 async function compactMovers(ctx, movers, deps, rows) {
   const compacted = new Set();
   for (const pane of movers.filter((candidate) => candidate.plan.action === "COMPACT_THEN_RESTART")) {
+    const request = deps.requests?.get(pane.key);
+    if (ctx.state?.set && !request || !saveRotationCompact(ctx.state, pane, request, { status: "attempting", afterTokens: null })) {
+      rows.push({ ...pane, status: "blocked", reason: "rotation-request-changed" }); continue;
+    }
     const result = await deps.compactPane(ctx, pane.compactTarget).catch((error) => ({ ok: false, reason: error.message }));
+    saveRotationCompact(ctx.state, pane, request, { status: result.ok ? "verified" : "unknown",
+      verifiedAt: result.ok ? Date.now() : null, attemptId: result.attemptId ?? null, compactBoundary: result.compactBoundary === true,
+      afterTokens: Number.isFinite(result.afterTokens) ? result.afterTokens : null, reason: result.reason || null });
     deps.recordCompact({ at: new Date().toISOString(), pane: pane.key, engine: "claude", source: "account-switch",
       outcome: result.ok ? result.status || "compacted" : "failed", reason: result.reason || null,
       beforeTokens: pane.contextTokens, afterTokens: result.afterTokens ?? null,
@@ -389,6 +410,7 @@ export async function rotateClaudeFleet(ctx, requested, {
   only = null,
 } = {}, dependencies = {}) {
   const deps = {
+    requestCurrent: request => ctx.state?.get?.(requestKey(request.name, request.pane), null),
     agents: dependencies.agents || listAgents(ctx.configPath),
     leaseWaitMs: dependencies.leaseWaitMs ?? 30_000,
     leaseSleep: dependencies.leaseSleep,
@@ -435,35 +457,13 @@ export async function rotateClaudeFleet(ctx, requested, {
     prepared = true;
   };
   const chosen = configuredClaudePanes(deps.agents).filter((pane) => !only || only.includes(paneKey(pane.agentName, pane.pane)));
-  const previousRequests = new Map(chosen.map(entry => {
-    const key = requestKey(entry.agentName, entry.pane);
-    return [key, ctx.state?.get?.(key, null)];
-  }));
+  deps.requests = new Map(chosen.map(entry => [paneKey(entry.agentName, entry.pane), dry ? null
+    : beginClaudeRotation(ctx.state, entry, target.id,
+      deps.latestIdentity(join(entry.agent.dir, ".agents", String(entry.pane))), { automatic: dependencies.persistBlocked === false })]));
   for (const [agentName, panes] of projectsFor(chosen)) {
     await rotateProject(ctx, agentName, panes, target, deps, { dry, rows, prepareOnce });
   }
-  if (!dry && dependencies.persistBlocked !== false && ctx.state?.set) {
-    for (const row of rows) {
-      const entry = chosen.find(item => paneKey(item.agentName, item.pane) === row.key);
-      if (!entry) continue;
-      const key = requestKey(entry.agentName, entry.pane), prior = previousRequests.get(key);
-      if (ctx.state.get(key, null)?.id !== prior?.id) continue;
-      if (row.status !== "blocked") {
-        if (prior?.phase === "pending") {
-          const sameTarget = prior.target === target.id;
-          const successful = ["switched", "already-selected", "selected-for-quota-recovery", "selected-for-next-wake"].includes(row.status);
-          saveClaudeRotation(ctx.state, { ...prior, phase: sameTarget ? successful ? "complete" : "blocked" : "superseded",
-            outcome: sameTarget ? row.status : null, reason: sameTarget ? row.reason || null : "newer-rotation" }, prior.id);
-        }
-        continue;
-      }
-      const identity = entry && deps.latestIdentity(join(entry.agent.dir, ".agents", String(entry.pane)));
-      if (!identity?.sessionId || !identity?.path) continue;
-      const request = { id: randomUUID(), phase: "pending", target: target.id,
-        name: entry.agentName, pane: entry.pane, sessionId: identity.sessionId, sessionPath: identity.path, reason: row.reason };
-      if (saveClaudeRotation(ctx.state, request, prior?.id || null)) row.followupId = request.id;
-    }
-  }
+  if (!dry) finishClaudeRotations(ctx.state, rows, deps.requests);
   const outcome = accountRotationOutcome(rows);
   const status = dry && outcome.status === "RECOVERED" ? "DRY-RUN" : outcome.status;
   const reason = outcome.status === "BLOCKED" ? "preflight-failed" : null;
@@ -475,7 +475,7 @@ export async function rotateClaudeFleet(ctx, requested, {
 /** WHAT: Routes one pending Claude switch on its original session. WHY: Keeps an idle retry from moving a different session or its neighbours. */
 export async function runRequestedClaudeRotation(ctx, name, pane, dependencies = {}) {
   const key = requestKey(name, pane), request = ctx.state?.get?.(key, null);
-  if (!request || request.phase !== "pending") return null;
+  if (!request || request.phase !== "pending" || request.automatic) return null;
   const agents = dependencies.agents || listAgents(ctx.configPath);
   const entry = configuredClaudePanes(agents).find(item => item.agentName === name && item.pane === pane);
   const identity = entry && (dependencies.latestIdentity || latestClaudeSessionIdentity)(join(entry.agent.dir, ".agents", String(pane)));
@@ -488,7 +488,7 @@ export async function runRequestedClaudeRotation(ctx, name, pane, dependencies =
   const row = result.rows?.[0];
   const latest = ctx.state.get(key, null);
   if (latest?.id === request.id && row && row.status !== "blocked") {
-    saveClaudeRotation(ctx.state, { ...request, phase: ["switched", "already-selected", "selected-for-quota-recovery", "selected-for-next-wake"].includes(row.status)
+    saveClaudeRotation(ctx.state, { ...latest, phase: ["switched", "already-selected", "selected-for-quota-recovery", "selected-for-next-wake"].includes(row.status)
       ? "complete" : "blocked", outcome: row.status, reason: row.reason || null }, request.id);
   }
   return row || null;
