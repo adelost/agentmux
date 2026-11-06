@@ -21,6 +21,21 @@ feature("Claude pasted-content delivery receipts", () => {
       exactVisibleText: true, changedHyphen: false, changedJoiner: false,
     })],
   });
+  // Job 1abd84aa to sandman:0 on 2026-11-06: a YouTube text with U+202A/U+202C around each @name arrived
+  // at 03:04Z and 03:06Z without them, got no receipt and held eight messages behind it.
+  unit("Claude's removed bidi embedding marks do not hide the whole received prompt", {
+    given: ["a complete paste recorded without the U+202A/U+202C marks copied around @names", () => ({
+      sent: "Music by ‪@novoamorofficial‬ & ‪‪@yvetteyoung‬‬",
+      received: userEvent(pasted("Music by @novoamorofficial & @yvetteyoung")),
+    })],
+    when: ["matching the actual recorded paste", ({ sent, received }) => ({
+      exactVisibleText: promptEventMatches(received, sent),
+      changedName: promptEventMatches(received, sent.replace("yvette", "yvete")),
+    })],
+    then: ["only the observed direction-mark removal is accepted", (result) => expect(result).toEqual({
+      exactVisibleText: true, changedName: false,
+    })],
+  });
   for (const [name, event] of [
     ["direct user text", userEvent(pasted(prompt))],
     ["text content parts", { type: "user", message: { content: [{ type: "text", text: pasted(prompt) }] } }],
