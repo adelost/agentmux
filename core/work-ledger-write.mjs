@@ -47,6 +47,9 @@ export function ledgerAlarm(message) {
 /** WHAT: Fetches a shared mirror through fast-forward only. WHY: Preserves local edits and reports the blocking filenames instead of merging them. */
 export function updateLedgerMirror(repo, branch, { alarm = ledgerAlarm } = {}) {
   try {
+    const gitDir = git(repo, ["rev-parse", "--absolute-git-dir"]);
+    const commonDir = git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    if (gitDir !== commonDir) return { ok: true, skipped: "linked-worktree" };
     const dirty = dirtyLedgers(repo);
     if (dirty.length) throw new Error(`uncommitted ledger: ${dirty.join(", ")}; use push_ledger.sh`);
     const current = git(repo, ["symbolic-ref", "--short", "HEAD"]);

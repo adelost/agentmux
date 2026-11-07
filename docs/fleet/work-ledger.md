@@ -25,6 +25,10 @@ Use the repository's actual default branch (`main` for gateway). Huset's existin
 with its workspace and ledger path. A new checkout gets the same command from
 the normal AMUX installation; no Git hook or separate service is needed.
 
+A linked worktree is a writer, not a mirror: publication silently skips its
+mirror step and leaves its branch, index and workfiles unchanged. Only the
+shared primary checkout on the default branch advances.
+
 After a confirmed push, the shared mirror advances only with
 `git merge --ff-only origin/BRANCH`. The backup uses the same fast-forward
 rule. Local edits, a wrong branch or divergence stop the mirror and send an

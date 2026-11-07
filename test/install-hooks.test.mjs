@@ -36,6 +36,27 @@ it("publishes without touching a dirty ledger or another staged file and alarms 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+it("publishes from a linked branch without treating it as a shared mirror", () => {
+  const root = mkdtempSync(join(tmpdir(), "amux-ledger-branch-")), repo = join(root, "mirror"), work = join(root, "work");
+  try {
+    mkdirSync(repo); mkdirSync(join(repo, "docs")); git(root, "init", "--bare", "origin.git"); git(repo, "init", "-b", "master");
+    git(repo, "config", "user.name", "Fixture"); git(repo, "config", "user.email", "fixture@example.invalid");
+    writeFileSync(join(repo, "docs/TASKS.md"), "| 1 | open |\n"); git(repo, "add", "."); git(repo, "commit", "-m", "initial");
+    git(repo, "remote", "add", "origin", join(root, "origin.git")); git(repo, "push", "origin", "master");
+    git(repo, "worktree", "add", "-b", "fix/timeline", work);
+    const before = git(work, "rev-parse", "HEAD"), alarms = [];
+    const result = publishLedger({ repo: work, path: "docs/TASKS.md", branch: "master", subject: "row 1", alarm: m => alarms.push(m),
+      command: [process.execPath, "-e", "process.stdin.on('data',d=>process.stdout.write(d.toString().replace('open','done')))"] });
+    expect(result.published).toBe(true); expect(result.ok).toBe(true); expect(alarms).toEqual([]);
+    expect(git(work, "rev-parse", "HEAD")).toBe(before);
+    expect(readFileSync(join(work, "docs/TASKS.md"), "utf8")).toContain("open");
+    expect(git(repo, "show", "origin/master:docs/TASKS.md")).toContain("done");
+    expect(updateLedgerMirror(repo, "master", { alarm: m => alarms.push(m) }).ok).toBe(true);
+    expect(git(repo, "rev-parse", "HEAD")).toBe(result.sha);
+    expect(readFileSync(join(repo, "docs/TASKS.md"), "utf8")).toContain("done"); expect(alarms).toEqual([]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 it("uses the same publisher for a backup script and preserves its executable mode", () => {
   const root = mkdtempSync(join(tmpdir(), "amux-ledger-source-")), repo = join(root, "mirror");
   try {
