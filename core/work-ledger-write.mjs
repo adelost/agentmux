@@ -71,9 +71,10 @@ function checkedLedger(previous, next) {
 }
 
 /** WHAT: Builds a generator commit above origin and retries rejected pushes. WHY: Keeps concurrent writers from replacing each other's rows or touching the shared index. */
-export function publishLedger({ repo, path, branch, subject, command, alarm = ledgerAlarm }) {
-  if (!path || path.startsWith("/") || path.split("/").includes("..") || basename(path) !== "TASKS.md"
-    || path !== askRowLedger(git(repo, ["rev-parse", "--show-toplevel"]))) {
+export function publishLedger({ repo, path, branch, subject, command, file = false, alarm = ledgerAlarm }) {
+  if (!path || path.startsWith("/") || path.split("/").some(p => !p || p === ".." || p === ".git")) throw new Error("repository-relative file path required");
+  if ((!file || basename(path) === "TASKS.md") && (basename(path) !== "TASKS.md"
+    || path !== askRowLedger(git(repo, ["rev-parse", "--show-toplevel"])))) {
     throw new Error("--path must name the repository's configured TASKS.md ledger");
   }
   if (!subject || !command?.length) throw new Error("subject and generator command required");
@@ -85,19 +86,22 @@ export function publishLedger({ repo, path, branch, subject, command, alarm = le
       git(repo, ["fetch", "origin", `+refs/heads/${branch}:${ref}`]);
       const base = git(repo, ["rev-parse", ref]);
       const previous = git(repo, ["show", `${base}:${path}`], { raw: true });
+      const mode = git(repo, ["ls-tree", base, "--", path]).split(" ")[0];
+      if (!["100644", "100755"].includes(mode)) throw new Error("writer requires an existing regular file");
       const generated = spawnSync(command[0], command.slice(1), {
         cwd: repo, input: previous, encoding: "utf8", timeout: 60_000, maxBuffer: 16 * 1024 * 1024,
         env: { ...process.env, AMUX_LEDGER_BASE: base, AMUX_LEDGER_PATH: path },
       });
       if (generated.status !== 0) throw new Error(`generator failed: ${generated.stderr || generated.error?.message}`);
-      const next = checkedLedger(previous, generated.stdout);
+      const next = file && basename(path) !== "TASKS.md" ? generated.stdout : checkedLedger(previous, generated.stdout);
+      if (!next.trim()) throw new Error("generator returned an empty file");
       // Legacy generators read origin/master themselves; ref movement invalidates that snapshot.
       if (git(repo, ["rev-parse", ref]) !== base) continue;
       if (next === previous) return { published: false, ...updateLedgerMirror(repo, branch, { alarm }) };
       const blob = git(repo, ["hash-object", "-w", "--stdin"], { input: next });
       const env = { GIT_INDEX_FILE: join(scratch, `index-${attempt}`) };
       git(repo, ["read-tree", base], { env });
-      git(repo, ["update-index", "--add", "--cacheinfo", `100644,${blob},${path}`], { env });
+      git(repo, ["update-index", "--add", "--cacheinfo", `${mode},${blob},${path}`], { env });
       const tree = git(repo, ["write-tree"], { env });
       const sha = git(repo, ["commit-tree", tree, "-p", base], { input: `${subject}\n` });
       let pushError;

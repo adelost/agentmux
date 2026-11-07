@@ -5,6 +5,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, statSync } from "node:fs";
 import { publishLedger, updateLedgerMirror } from "../core/work-ledger-write.mjs";
 import { it } from "vitest";
 
@@ -32,6 +33,23 @@ it("publishes without touching a dirty ledger or another staged file and alarms 
     expect(readFileSync(join(repo, "docs/TASKS.md"), "utf8")).toContain("uncommitted");
     expect(git(repo, "diff", "--cached")).toBe(index);
     expect(alarms).toHaveLength(1); expect(alarms[0]).toContain("docs/TASKS.md");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+it("uses the same publisher for a backup script and preserves its executable mode", () => {
+  const root = mkdtempSync(join(tmpdir(), "amux-ledger-source-")), repo = join(root, "mirror");
+  try {
+    mkdirSync(repo); git(root, "init", "--bare", "origin.git"); git(repo, "init", "-b", "master");
+    git(repo, "config", "user.name", "Fixture"); git(repo, "config", "user.email", "f@example.invalid");
+    writeFileSync(join(repo, "backup.sh"), "#!/bin/sh\necho before\n"); chmodSync(join(repo, "backup.sh"), 0o755);
+    git(repo, "add", "."); git(repo, "commit", "-m", "initial"); git(repo, "remote", "add", "origin", join(root, "origin.git")); git(repo, "push", "origin", "master");
+    const alarms = [];
+    const result = publishLedger({ repo, path: "backup.sh", file: true, branch: "master", subject: "backup fix", alarm: m => alarms.push(m),
+      command: [process.execPath, "-e", "process.stdin.on('data',d=>process.stdout.write(d.toString().replace('before','after')))"] });
+    expect(result.ok).toBe(true); expect(alarms).toEqual([]);
+    expect(readFileSync(join(repo, "backup.sh"), "utf8")).toContain("echo after");
+    expect(statSync(join(repo, "backup.sh")).mode & 0o111).toBe(0o111);
+    expect(git(repo, "ls-tree", "HEAD", "backup.sh")).toMatch(/^100755 /);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

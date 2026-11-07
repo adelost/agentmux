@@ -39,6 +39,9 @@ sandman:0. This finding cannot be baselined. Run lint in the normal repository
 checks; it also catches a local row unrelated to the selected source diff.
 Ledger discovery reuses Stats' `ledger-sources.json` and its `docs/TASKS.md`
 default. Reference copies named TASKS-*.md are outside this control.
+Source maintenance such as the backup script uses this same publisher with
+`--file --path dotfiles/backup-agent-knowledge.sh`; file mode is preserved.
+The flag never bypasses the registered-ledger check for TASKS.md.
 
 ## Staffing and review economics
 
