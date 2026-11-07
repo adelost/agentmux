@@ -24,8 +24,21 @@ const ownPane = () => detectPaneAddress(process.env, command => execSync(command
 /** WHAT: Routes manual and nightly compaction. WHY: Keeps explicit targeting separate from absolute-token admission. */
 export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions = {}) {
   if (flags.help || flags.h) {
-    console.log(`Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --self [-m HANDOFF | --continue-file FILE] [--no-resume]\n       amux compact --nightly [AGENT -p N] [--dry]\nBulk default: over ${COMPACT_MIN_TOKENS} tokens. Percent thresholds are not supported.\n--self: this pane asks to be compacted when its turn ends (a stage boundary), from ${SELF_COMPACT_POLICY.minTokens} tokens,\nat most once per ${SELF_COMPACT_POLICY.spacingMs / 60_000} minutes, never while a subagent or job writes.\nAfter a verified compact, its saved handoff continues once through the durable queue. New input supersedes it.\n--no-resume requests maintenance only. Targeting your own pane also uses this safe path, even with --force.`);
+    console.log(`Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --self [-m HANDOFF | --continue-file FILE] [--no-resume]\n       amux compact --nightly [AGENT -p N] [--dry]\n--override-failed "reason": targeted emergency retry, human or sandman:0 only; exact FAILED/UNVERIFIED receipt audited.\nBulk default: over ${COMPACT_MIN_TOKENS} tokens. Percent thresholds are not supported.\n--self: this pane asks to be compacted when its turn ends (a stage boundary), from ${SELF_COMPACT_POLICY.minTokens} tokens,\nat most once per ${SELF_COMPACT_POLICY.spacingMs / 60_000} minutes, never while a subagent or job writes.\nAfter a verified compact, its saved handoff continues once through the durable queue. New input supersedes it.\n--no-resume requests maintenance only. Targeting your own pane also uses this safe path, even with --force.`);
     return { help: true };
+  }
+  let override = null;
+  if (flags["override-failed"] !== undefined) {
+    const caller = (selfOptions.detect ?? ownPane)();
+    if (caller && caller.key !== "sandman:0" || !caller && (process.env.TMUX || process.env.AMUX_AGENT_NAME)) {
+      throw new Error("override-failed is only for a human or sandman:0, never an automatic caller");
+    }
+    const reason = flags["override-failed"];
+    if (typeof reason !== "string" || !reason.trim() || reason.length > 500 || flags.self || flags.nightly
+        || positional.length !== 1 || !Number.isSafeInteger(flags.p)) {
+      throw new Error('Use amux compact AGENT -p N --override-failed "reason"');
+    }
+    override = { actor: caller?.key || "human", reason };
   }
   if (flags.self) return requestSelfCompact(ctx, flags, selfOptions);
   if (flags.nightly) {
@@ -52,7 +65,7 @@ export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions =
     if (caller?.session === positional[0] && caller.pane === (Number.isFinite(flags.p) ? flags.p : 0)) {
       return requestSelfCompact(ctx, flags, selfOptions);
     }
-    return compactOnePane(ctx, String(positional[0]), flags, compactText);
+    return compactOnePane(ctx, String(positional[0]), flags, compactText, override);
   }
 
   if (positional[0] != null) throw new Error("Percentage thresholds are no longer supported; use --min-tokens N");
@@ -125,9 +138,9 @@ export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions =
       // Mirror to Discord with an "amux:compact" source tag so channel
       // watchers can tell this was a bulk-compact action vs a manual
       // /compact somebody typed. Transparency without noise.
-      const sent = await sendRecordedCompact(ctx, t.agentConfig, t.pane, t.dialect, compactText);
+      const sent = await sendRecordedCompact(ctx, t.agentConfig, t.pane, t.dialect, compactText, { override });
       if (sent?.delivered) console.log(`✓ ${t.agent} p${t.pane}: ${compactText} sent`);
-      else console.log(`✗ ${t.agent} p${t.pane}: ${sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged"}`);
+      else console.log(`✗ ${t.agent} p${t.pane}: ${sent?.reason || (sent?.blocked ? "delivery blocked" : "delivery not acknowledged")}`);
     } catch (err) {
       console.log(`✗ ${t.agent} p${t.pane}: ${err.message}`);
     }
@@ -157,7 +170,7 @@ function compactAttemptWithoutNewWork(state, agent, paneIndex, engine) {
  * gate here (the human/orchestrator chose the pane); the working-pane guard
  * still does, because compacting mid-turn drops in-flight work.
  */
-async function compactOnePane(ctx, name, flags, compactText) {
+async function compactOnePane(ctx, name, flags, compactText, override = null) {
   const paneIdx = Number.isFinite(flags.p) ? flags.p : 0;
   const agents = listAgents(ctx.configPath);
   const a = agents.find((x) => x.name === name);
@@ -202,9 +215,9 @@ async function compactOnePane(ctx, name, flags, compactText) {
   if (dialect === "codex" && compactText !== "/compact") {
     throw new Error("Codex /compact takes no focus. The pane must use amux compact --self -m HANDOFF or --continue-file FILE.");
   }
-  const sent = await sendRecordedCompact(ctx, a, paneIdx, dialect, compactText);
+  const sent = await sendRecordedCompact(ctx, a, paneIdx, dialect, compactText, { override });
   if (!sent?.delivered) {
-    console.error(`${name} p${paneIdx}: ${sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged"}`);
+    console.error(`${name} p${paneIdx}: ${sent?.reason || (sent?.blocked ? "delivery blocked" : "delivery not acknowledged")}`);
     process.exitCode = 1;
     return;
   }

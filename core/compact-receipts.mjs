@@ -1,3 +1,8 @@
+import { claudeCompactRefusalAfterSubmit } from "./claude-submit-boundary.mjs";
+import { compactAccessBlocker } from "./nightly-compact.mjs";
+import { selectedRuntimeProfile } from "./runtime-account-profiles.mjs";
+import { readClaudeQuotaBudgeted } from "./claude-quota-budget.mjs";
+
 /** WHAT: Names the shared compact receipt store. WHY: Keeps every trigger's evidence in one state key. */
 export const COMPACT_RECEIPTS_STATE = "context_maintenance_by_pane_v1";
 /** WHAT: Defines the compact writer timeout. WHY: Keeps stale attempts from remaining in flight indefinitely. */
@@ -20,7 +25,9 @@ export function compactReceipt(state, pane) {
 export function updateCompactReceipt(state, pane, change) {
   const update = records => {
     const next = { ...(records || {}) };
-    next[pane] = change(next[pane] || {});
+    const prior = next[pane] || {};
+    next[pane] = change(prior);
+    for (const field of ["overrides", "authRefusals"]) if (prior[field] && !next[pane][field]) next[pane][field] = prior[field];
     return next;
   };
   if (state.updateKey) return state.updateKey(COMPACT_RECEIPTS_STATE, update);
@@ -99,4 +106,44 @@ export function expireCompactReceipts(state, now) {
       resolveExpiredCompact(state, pane, { now });
     }
   }
+}
+
+/** WHAT: Resolves a journal-proven login refusal after authentication recovers. WHY: Keeps generic failures and unknown submissions fenced while a refused call spent nothing. */
+export async function recoverLoginRefusedCompact(state, name, pane, identity, { now = Date.now(),
+  profile = selectedRuntimeProfile({ state, agentName: name, pane, provider: "claude" }),
+  readQuota = readClaudeQuotaBudgeted } = {}) {
+  const key = `${name}:${pane}`, prior = compactReceipt(state, key);
+  if (prior?.status !== "FAILED" || prior.sessionId !== identity?.sessionId || !identity?.path
+      || !prior.cursor?.positions || !(identity.path in prior.cursor.positions) || !Number.isFinite(prior.at)) return false;
+  const refusal = claudeCompactRefusalAfterSubmit({ ...prior.cursor, kind: "claude-prompt-events-v1" }, prior.at);
+  if (compactAccessBlocker(refusal) !== "claude-login-required" || !profile) return false;
+  const after = prior.finishedAt || prior.at;
+  const quota = await readQuota({ profile, notBefore: after });
+  if (quota?.ok !== true || quota.profile?.id !== profile.id || Date.parse(quota.fetchedAt) <= after) return false;
+  let recovered = false;
+  updateCompactReceipt(state, key, current => {
+    if (current.status !== "FAILED" || current.sessionId !== prior.sessionId || current.at !== prior.at) return current;
+    recovered = true;
+    return { ...current, status: "NOT_SENT", spentNothing: true, reason: "login-authentication-recovered",
+      authRefusals: [...(current.authRefusals || []), { profileId: profile.id, observedAt: quota.fetchedAt, at: now,
+        priorAt: current.at, reason: "claude-login-required", spentNothing: true }] };
+  });
+  return recovered;
+}
+
+/** WHAT: Stores an explicitly authorized failed-receipt override. WHY: Keeps an emergency retry bound to its exact session without weakening unknown or in-flight fences. */
+export function overrideFailedCompact(state, key, identity, { actor, reason, at = Date.now() }) {
+  if (!["human", "sandman:0"].includes(actor) || typeof reason !== "string" || !reason.trim() || reason.length > 500) {
+    throw new Error("override-failed requires a human or sandman:0 and a reason of 1 to 500 characters");
+  }
+  let saved = false;
+  updateCompactReceipt(state, key, current => {
+    if (!["FAILED", "UNVERIFIED"].includes(current.status) || current.sessionId !== identity?.sessionId
+        || !identity?.path || !(identity.path in (current.cursor?.positions || {}))) return current;
+    saved = true;
+    return { ...current, status: "NOT_SENT", reason: "explicit-failed-override", overrides: [...(current.overrides || []),
+      { actor, at, reason: reason.trim(), sessionId: identity.sessionId, priorStatus: current.status, priorAt: current.at,
+        priorReason: current.reason || null }] };
+  });
+  if (!saved) throw new Error("override-failed refused: receipt is not FAILED/UNVERIFIED for this exact session");
 }

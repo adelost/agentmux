@@ -304,3 +304,9 @@ episode. The existing compact-held metadata and canonical posted notices own
 its source/time. Cache age remains unknown without activity evidence; no
 compaction or move rule changes. Detailed evidence remains in state when a
 notice summarises several compact holds. Stats has a separate builder/release.
+
+### Refused compacts and emergency recovery
+
+A journal-confirmed login refusal spent nothing. The existing maintenance gate may retry that exact session only after a newer successful authentication/usage reading for its selected account. UNKNOWN and in-flight calls remain fenced.
+
+For a FAILED or UNVERIFIED receipt, a human or sandman:0 may run `amux compact AGENT -p N --override-failed "reason"`. It records the actor, time, reason and prior receipt in the same receipts store. Other agent callers, bulk/self/nightly use, changed sessions, UNKNOWN and ATTEMPTING are refused. This overrides only the old failed receipt; normal idle, session, delivery and model guards still apply.

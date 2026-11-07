@@ -3,6 +3,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
+import { overrideFailedCompact } from "../core/compact-receipts.mjs";
 import { cmdCompact } from "./compact.mjs";
 import { createState } from "../core/state.mjs";
 import { rememberContextCompact } from "../core/context-maintenance.mjs";
@@ -47,6 +48,50 @@ function fleetWithCompactedPane2(afterCompact) {
 }
 
 feature("bulk compact skips a context compacted with no work since", () => {
+  for (const status of ["FAILED", "UNVERIFIED", "UNKNOWN", "ATTEMPTING"]) {
+    component(`an emergency override preserves exact-session audit for ${status}`, {
+      given: ["an untouched failed generation", () => {
+        const fx = fleetWithCompactedPane2("/compact"), identity = journals[join(fx.root, ".agents", "2")];
+        const all = fx.ctx.state.get("context_maintenance_by_pane_v1");
+        fx.ctx.state.set("context_maintenance_by_pane_v1", { ...all, "api:2": { ...all["api:2"], status, at: 123 } });
+        return { ...fx, identity };
+      }],
+      when: ["the authorized operator names a reason", fx => {
+        const run = () => overrideFailedCompact(fx.ctx.state, "api:2", fx.identity,
+          { actor: "sandman:0", reason: "Explicit recovery after verified source failure", at: 456 });
+        if (["FAILED", "UNVERIFIED"].includes(status)) run(); else expect(run).toThrow("not FAILED/UNVERIFIED");
+      }],
+      then: ["unknown or in-flight stays fenced and an accepted override survives the next receipt", (_, fx) => {
+        let receipt = fx.ctx.state.get("context_maintenance_by_pane_v1")["api:2"];
+        if (!["FAILED", "UNVERIFIED"].includes(status)) { expect(receipt.status).toBe(status); return; }
+        expect(receipt).toMatchObject({ status: "NOT_SENT", overrides: [{ actor: "sandman:0", at: 456,
+          sessionId: fx.identity.sessionId, priorStatus: status, priorAt: 123 }] });
+        rememberContextCompact(fx.ctx.state, "api", 2, { ok: true, sessionId: fx.identity.sessionId, cursor: receipt.cursor });
+        receipt = fx.ctx.state.get("context_maintenance_by_pane_v1")["api:2"];
+        expect(receipt.status).toBe("VERIFIED"); expect(receipt.overrides).toHaveLength(1);
+      }], cleanup: fx => rmSync(fx.root, { recursive: true, force: true }),
+    });
+  }
+  component("sandman can request one audited emergency compact through the targeted CLI", {
+    given: ["a failed exact session", () => {
+      const fx = fleetWithCompactedPane2("/compact"), all = fx.ctx.state.get("context_maintenance_by_pane_v1");
+      fx.ctx.state.set("context_maintenance_by_pane_v1", { ...all, "api:2": { ...all["api:2"], status: "FAILED" } });
+      return fx;
+    }],
+    when: ["the authorized caller invokes the emergency path", fx => cmdCompact(fx.ctx,
+      { p: 2, "override-failed": "Operator accepted retry after checking the refused call" }, ["api"],
+      { detect: () => ({ key: "sandman:0", session: "sandman", pane: 0 }) })],
+    then: ["one slash command and its audit are durable", (_, fx) => {
+      expect(sent).toEqual(["api:2 /compact"]);
+      expect(fx.ctx.state.get("context_maintenance_by_pane_v1")["api:2"]).toMatchObject({
+        status: "ATTEMPTING", sessionId: "session-2", overrides: [{ actor: "sandman:0", sessionId: "session-2" }] });
+    }], cleanup: fx => rmSync(fx.root, { recursive: true, force: true }),
+  });
+  component("a worker cannot invoke the emergency override", {
+    when: ["a worker calls the CLI", () => cmdCompact({}, { p: 2, "override-failed": "retry" }, ["api"],
+      { detect: () => ({ key: "lsrc:7", session: "lsrc", pane: 7 }) }).then(() => null, error => error.message)],
+    then: ["the caller is refused before reading or changing a receipt", result => expect(result).toContain("only for a human or sandman:0")],
+  });
   component("a queued manual compact fences another bulk pass", {
     given: ["a pane eligible for one compact and a second pane already compacted", () => fleetWithCompactedPane2("/compact")],
     when: ["the operator invokes bulk compact twice before a native boundary arrives", async fx => {

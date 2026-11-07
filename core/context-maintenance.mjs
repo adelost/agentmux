@@ -21,7 +21,7 @@ import { QUOTA_PARK_ORIGIN } from "./quota-park.mjs";
 import { QUOTA_WIND_DOWN_ORIGIN } from "./quota-wind-down.mjs";
 import { withdrawDraft } from "./draft-withdrawal.mjs";
 import { assertDeliveryPreparation, onUnsentPreparationTimeout } from "./delivery-preparation.mjs";
-import { COMPACT_RECEIPTS_STATE, compactWriterGone, resolveExpiredCompact, updateCompactReceipt } from "./compact-receipts.mjs";
+import { COMPACT_RECEIPTS_STATE, recoverLoginRefusedCompact, compactWriterGone, resolveExpiredCompact, updateCompactReceipt } from "./compact-receipts.mjs";
 import { randomUUID } from "node:crypto";
 
 const STATE_KEY = COMPACT_RECEIPTS_STATE;
@@ -124,7 +124,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   recordCompact = recordCompactCall, accountOf = async () => null,
   identityFor = latestPaneSessionIdentity, activityFor = latestConversationActivityMs, journalFor = getContextPercent,
   compactFor = engine => engine === "codex" ? verifiedCodexCompact : verifiedClaudeCompact, coldBeforeDelivery = null,
-  selfRequests = null, notify = async () => {}, quotaRecoveryFor = () => ({ options: { queue } }), writerAlive = processAlive }) {
+  selfRequests = null, notify = async () => {}, quotaRecoveryFor = () => ({ options: { queue } }), loginRecoveryFor = () => ({}), writerAlive = processAlive }) {
   const existing = (name, pane, identity) => contextMaintenanceAttempt(state, name, pane, identity, now());
 
   // skyvw:3 2026-10-20 12:23Z: a bridge restart ended the idle compact between typing /compact and its Enter. Its intent
@@ -226,6 +226,8 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       write(state, paneKey(name, pane), { ...prior, status: "NOT_SENT", reason: "quota-window-recovered", recoveredAt: now() });
       prior = null;
     }
+    if (prior && safe && target.engine === "claude" && await recoverLoginRefusedCompact(state, name, pane, identity,
+      { now: now(), ...loginRecoveryFor(name, pane) })) prior = null;
     const attempt = prior ? "FAILED" : "NEW";
     const facts = { tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, pauseTokens,
       ...(pauseSettleMs != null ? { pauseSettleMs } : {}), safe, attempt, required };

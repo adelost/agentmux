@@ -36,6 +36,30 @@ function fixture({ fail = false, jobs = [] } = {}) {
 }
 
 feature("warm and cold compaction share a durable one-attempt fence", () => {
+  for (const [status, refusal, authenticated, expected] of [
+    ["FAILED", "Login expired · Please run /login", true, true],
+    ["FAILED", "Login expired · Please run /login", false, false],
+    ["FAILED", "Login expired · Please run /login", "stale", false],
+    ["UNKNOWN", "Login expired · Please run /login", true, false],
+    ["FAILED", "unknown provider outcome", true, false],
+  ]) component(`login refusal recovery ${status}/${authenticated}/${expected}/${refusal}`, {
+    given: ["a failed compact and a later account authentication observation", () => {
+      const ctx = fixture(), identity = ctx.identityFor(), at = ctx.now() - 1000;
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [identity.path]);
+      ctx.state.set("context_maintenance_by_pane_v1", { "claw:2": { sessionId: identity.sessionId,
+        cursor, status, at, finishedAt: at, reason: "compact-refused" } });
+      ctx.append({ type: "system", subtype: "local_command", commandRun: { command: "compact" },
+        commandOutcome: { kind: "failed" }, timestamp: new Date(at).toISOString(),
+        content: `<local-command-stderr>Error during compaction: ${refusal}</local-command-stderr>` });
+      ctx.loginRecoveryFor = () => ({ profile: { id: "io" }, readQuota: async () => ({ ok: authenticated !== false,
+        fetchedAt: new Date(authenticated === "stale" ? at - 1 : ctx.now()).toISOString(), profile: { id: "io" } }) });
+      return ctx;
+    }],
+    when: ["the existing delivery admission runs", ctx => createContextMaintenance(ctx).run("claw", 2, { cold: true })],
+    then: ["only a known refusal plus later authentication releases one compact", (result, ctx) => {
+      expect(result.ok).toBe(expected); expect(ctx.calls).toEqual(expected ? ["compact"] : []);
+    }], cleanup: ctx => ctx.cleanup(),
+  });
   component("an abandoned compact becomes unknown or a fresh exact-session measurement", {
     given: ["an expired attempting receipt with no live writer", () => {
       const ctx = fixture(), identity = ctx.identityFor(), now = 100_000_000;

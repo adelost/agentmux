@@ -2666,7 +2666,7 @@ const FLAG_SPECS = {
     list: "boolean", "per-agent": "number",
     "per-pane": "number",
   },
-  compact: { dry: "boolean", nightly: "boolean", self: "boolean", help: "boolean", h: "boolean", force: "boolean", "no-resume": "boolean", "continue-file": "string", "min-tokens": "number", p: "number", m: "string", message: "string" },
+  compact: { "override-failed": "string", dry: "boolean", nightly: "boolean", self: "boolean", help: "boolean", h: "boolean", force: "boolean", "no-resume": "boolean", "continue-file": "string", "min-tokens": "number", p: "number", m: "string", message: "string" },
   janitor: { dry: "boolean", days: "number" },
   trim: { dry: "boolean", "max-files": "number", "min-stable-minutes": "number" },
   "playwright-reap": { dry: "boolean", minutes: "number" },
