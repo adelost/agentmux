@@ -93,14 +93,14 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null, no
   if (!cursor) return { ...record, status: "UNKNOWN", reason: "journal-copy-unverified" };
   if (!copied && !readOnly) write(state, paneKey(name, pane), { ...record, cursor });
   const files = Object.keys(cursor.positions);
-  if (hasWorkAfter(files, cursor)) return null;
   if (record.status !== "VERIFIED" && hasJsonlEventAfterCursor(files, cursor, compactEvent)) {
     const verified = { ...record, cursor, status: "VERIFIED", compactBoundary: true,
       ...(["attempting", "unverified", "measured"].includes(record.nightlyStatus)
         && { nightlyStatus: "compacted-unmeasured", afterTokens: null, reason: "native-compact-boundary" }) };
     if (!readOnly) write(state, paneKey(name, pane), verified);
-    return verified;
+    return hasWorkAfter(files, cursor) ? null : verified;
   }
+  if (hasWorkAfter(files, cursor)) return null;
   // A compact the provider's usage limit refused spent nothing, so its fence ends when that limit resets.
   if (record.status === "FAILED" && now >= record.retryAt) return null;
   if (record.status === "VERIFIED" && record.compactBoundary == null) {

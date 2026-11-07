@@ -60,6 +60,23 @@ feature("warm and cold compaction share a durable one-attempt fence", () => {
       expect(result.ok).toBe(expected); expect(ctx.calls).toEqual(expected ? ["compact"] : []);
     }], cleanup: ctx => ctx.cleanup(),
   });
+  component("a completed manual compact is recorded before subsequent work releases its fence", {
+    given: ["a submitted compact whose boundary is followed immediately by the queued brief", () => {
+      const ctx = fixture(), identity = ctx.identityFor();
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [identity.path]);
+      ctx.state.set("context_maintenance_by_pane_v1", { "claw:2": { sessionId: identity.sessionId,
+        cursor, status: "ATTEMPTING", at: ctx.now(), pid: process.pid } });
+      ctx.append({ type: "system", subtype: "compact_boundary" });
+      ctx.append({ type: "user", message: { content: "Continue the existing task" } });
+      return ctx;
+    }],
+    when: ["the ordinary receipt reader reconciles the exact journal", ctx =>
+      contextMaintenanceAttempt(ctx.state, "claw", 2, ctx.identityFor(), ctx.now())],
+    then: ["new work releases the old fence but the completed call remains VERIFIED", (result, ctx) => {
+      expect(result).toBe(null);
+      expect(ctx.state.get("context_maintenance_by_pane_v1")["claw:2"]).toMatchObject({ status: "VERIFIED", compactBoundary: true });
+    }], cleanup: ctx => ctx.cleanup(),
+  });
   component("an abandoned compact becomes unknown or a fresh exact-session measurement", {
     given: ["an expired attempting receipt with no live writer", () => {
       const ctx = fixture(), identity = ctx.identityFor(), now = 100_000_000;
