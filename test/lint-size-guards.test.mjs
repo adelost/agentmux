@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { lintRoot, lintRoots, findingFingerprint } from "../core/contract-lint.mjs";
@@ -28,15 +28,24 @@ afterEach(() => {
 describe("mandatory trunk-anchored size guards", () => {
   it("rejects staged and unstaged ledgers even in changed mode and names the writer", () => {
     const root = fixture();
-    writeFileSync(join(root, "TASKS.md"), "| 1 | open |\n");
-    git(root, "add", "TASKS.md"); git(root, "commit", "-m", "ledger");
-    writeFileSync(join(root, "TASKS.md"), "| 1 | done |\n");
+    mkdirSync(join(root, "docs"));
+    writeFileSync(join(root, "docs/TASKS.md"), "| 1 | open |\n");
+    git(root, "add", "docs/TASKS.md"); git(root, "commit", "-m", "ledger");
+    writeFileSync(join(root, "docs/TASKS.md"), "| 1 | done |\n");
     const dirty = () => lintRoots([root], { changed: true, strict: true })[0].activeFindings;
     expect(dirty()).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "LEDGER001", msg: expect.stringContaining("push_ledger.sh") }),
     ]));
-    git(root, "add", "TASKS.md");
+    git(root, "add", "docs/TASKS.md");
     expect(dirty().some(f => f.code === "LEDGER001")).toBe(true);
+  });
+  it("leaves saved ledger reference copies outside the live-ledger guard", () => {
+    const root = fixture();
+    mkdirSync(join(root, "reference"));
+    writeFileSync(join(root, "reference/TASKS.md"), "| saved | unregistered |\n");
+    writeFileSync(join(root, "TASKS-frozen.md"), "| saved | reference |\n");
+    writeFileSync(join(root, "TASKS-origin-master.md"), "| saved | reference |\n");
+    expect(lintRoots([root], { changed: true, strict: true })[0].activeFindings).toEqual([]);
   });
   it("uses default 500 when known trunk has no policy", () => {
     const root = fixture(); grow(root, 501);

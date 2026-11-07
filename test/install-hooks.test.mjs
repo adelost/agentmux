@@ -17,29 +17,29 @@ const git = (repo, ...args) => {
 it("publishes without touching a dirty ledger or another staged file and alarms on the blocked mirror", () => {
   const root = mkdtempSync(join(tmpdir(), "amux-ledger-write-")), repo = join(root, "mirror"), remote = join(root, "origin.git");
   try {
-    mkdirSync(repo); git(root, "init", "--bare", remote); git(repo, "init", "-b", "master");
+    mkdirSync(repo); mkdirSync(join(repo, "docs")); git(root, "init", "--bare", remote); git(repo, "init", "-b", "master");
     git(repo, "config", "user.name", "Fixture"); git(repo, "config", "user.email", "fixture@example.invalid");
-    writeFileSync(join(repo, "TASKS.md"), "| 1 | open |\n| 2 | open |\n");
+    writeFileSync(join(repo, "docs/TASKS.md"), "| 1 | open |\n| 2 | open |\n");
     writeFileSync(join(repo, "code.txt"), "code\n"); git(repo, "add", "."); git(repo, "commit", "-m", "initial");
     git(repo, "remote", "add", "origin", remote); git(repo, "push", "-u", "origin", "master");
     writeFileSync(join(repo, "code.txt"), "staged unrelated\n"); git(repo, "add", "code.txt");
-    writeFileSync(join(repo, "TASKS.md"), "| 1 | uncommitted |\n| 2 | open |\n");
+    writeFileSync(join(repo, "docs/TASKS.md"), "| 1 | uncommitted |\n| 2 | open |\n");
     const index = git(repo, "diff", "--cached"), alarms = [];
-    const result = publishLedger({ repo, path: "TASKS.md", branch: "master", subject: "row 2", alarm: m => alarms.push(m),
+    const result = publishLedger({ repo, path: "docs/TASKS.md", branch: "master", subject: "row 2", alarm: m => alarms.push(m),
       command: [process.execPath, "--input-type=module", "-e", "let s='';for await(const c of process.stdin)s+=c;process.stdout.write(s.replace('| 2 | open |','| 2 | done |'))"] });
     expect(result.published).toBe(true); expect(result.ok).toBe(false);
-    expect(git(repo, "show", "origin/master:TASKS.md")).toContain("| 2 | done |");
-    expect(readFileSync(join(repo, "TASKS.md"), "utf8")).toContain("uncommitted");
+    expect(git(repo, "show", "origin/master:docs/TASKS.md")).toContain("| 2 | done |");
+    expect(readFileSync(join(repo, "docs/TASKS.md"), "utf8")).toContain("uncommitted");
     expect(git(repo, "diff", "--cached")).toBe(index);
-    expect(alarms).toHaveLength(1); expect(alarms[0]).toContain("TASKS.md");
+    expect(alarms).toHaveLength(1); expect(alarms[0]).toContain("docs/TASKS.md");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 it("alarms without merging when the mirror has diverged", () => {
   const root = mkdtempSync(join(tmpdir(), "amux-ledger-diverged-"));
   try {
-    git(root, "init", "-b", "master"); git(root, "config", "user.name", "Fixture"); git(root, "config", "user.email", "f@example.invalid");
-    writeFileSync(join(root, "TASKS.md"), "| 1 | open |\n"); git(root, "add", "."); git(root, "commit", "-m", "initial");
+    git(root, "init", "-b", "master"); mkdirSync(join(root, "docs")); git(root, "config", "user.name", "Fixture"); git(root, "config", "user.email", "f@example.invalid");
+    writeFileSync(join(root, "docs/TASKS.md"), "| 1 | open |\n"); git(root, "add", "."); git(root, "commit", "-m", "initial");
     git(root, "init", "--bare", "origin.git"); git(root, "remote", "add", "origin", join(root, "origin.git"));
     writeFileSync(join(root, ".git", "info", "exclude"), "origin.git/\n");
     git(root, "checkout", "-b", "other"); writeFileSync(join(root, "remote.txt"), "remote"); git(root, "add", "."); git(root, "commit", "-m", "remote");
@@ -55,21 +55,21 @@ it("alarms without merging when the mirror has diverged", () => {
 it("keeps both simultaneous generated rows on origin and fast-forwards their mirror", async () => {
   const root = mkdtempSync(join(tmpdir(), "amux-ledger-concurrent-")), repo = join(root, "mirror");
   try {
-    mkdirSync(repo); git(root, "init", "--bare", "origin.git"); git(repo, "init", "-b", "master");
+    mkdirSync(repo); mkdirSync(join(repo, "docs")); git(root, "init", "--bare", "origin.git"); git(repo, "init", "-b", "master");
     git(repo, "config", "user.name", "Fixture"); git(repo, "config", "user.email", "f@example.invalid");
-    writeFileSync(join(repo, "TASKS.md"), "| 1 | open |\n| 2 | open |\n");
+    writeFileSync(join(repo, "docs/TASKS.md"), "| 1 | open |\n| 2 | open |\n");
     git(repo, "add", "."); git(repo, "commit", "-m", "initial");
     git(repo, "remote", "add", "origin", join(root, "origin.git")); git(repo, "push", "-u", "origin", "master");
     const run = row => new Promise(resolveResult => {
       const generator = `let s='';for await(const c of process.stdin)s+=c;await new Promise(r=>setTimeout(r,150));process.stdout.write(s.replace('| ${row} | open |','| ${row} | done |'));`;
-      const entry = `import {publishLedger} from ${JSON.stringify(new URL("../core/work-ledger-write.mjs", import.meta.url).href)};try{console.log(JSON.stringify(publishLedger({repo:${JSON.stringify(repo)},path:'TASKS.md',branch:'master',subject:'row ${row}',command:${JSON.stringify([process.execPath, "--input-type=module", "-e", generator])},alarm:m=>console.error('STUB ALARM: '+m)})))}catch(e){console.error(e.message);process.exitCode=1}`;
+      const entry = `import {publishLedger} from ${JSON.stringify(new URL("../core/work-ledger-write.mjs", import.meta.url).href)};try{console.log(JSON.stringify(publishLedger({repo:${JSON.stringify(repo)},path:'docs/TASKS.md',branch:'master',subject:'row ${row}',command:${JSON.stringify([process.execPath, "--input-type=module", "-e", generator])},alarm:m=>console.error('STUB ALARM: '+m)})))}catch(e){console.error(e.message);process.exitCode=1}`;
       const child = spawn(process.execPath, ["--input-type=module", "-e", entry]);
       let out = ""; child.stdout.on("data", d => out += d); child.stderr.on("data", d => out += d);
       child.on("close", code => resolveResult({ code, out }));
     });
     const results = await Promise.all([run(1), run(2)]);
     expect(results.map(r => r.code), JSON.stringify(results)).toEqual([0, 0]);
-    expect(readFileSync(join(repo, "TASKS.md"), "utf8")).toBe("| 1 | done |\n| 2 | done |\n");
+    expect(readFileSync(join(repo, "docs/TASKS.md"), "utf8")).toBe("| 1 | done |\n| 2 | done |\n");
     expect(git(repo, "rev-parse", "HEAD")).toBe(git(repo, "rev-parse", "origin/master"));
     expect(git(repo, "rev-list", "--count", "HEAD")).toBe("3");
   } finally { rmSync(root, { recursive: true, force: true }); }

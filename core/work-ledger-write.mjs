@@ -2,7 +2,8 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { askRowLedger } from "./ask-row-ledger.mjs";
 
 function git(repo, args, options = {}) {
   const { raw, ...runOptions } = options;
@@ -21,7 +22,9 @@ export function dirtyLedgers(repo) {
   try {
     const directory = statSync(repo).isFile() ? dirname(repo) : repo;
     const root = git(directory, ["rev-parse", "--show-toplevel"]);
-    const paths = [":(glob)**/TASKS*.md", "TASKS.md"];
+    const ledger = askRowLedger(root);
+    if (basename(ledger) !== "TASKS.md") throw new Error("Configured live ledger must be named TASKS.md");
+    const paths = [ledger];
     return [...new Set([
       ...git(root, ["diff", "--name-only", "-z", "HEAD", "--", ...paths]).split("\0"),
       ...git(root, ["ls-files", "--others", "--exclude-standard", "-z", "--", ...paths]).split("\0"),
@@ -69,8 +72,9 @@ function checkedLedger(previous, next) {
 
 /** WHAT: Builds a generator commit above origin and retries rejected pushes. WHY: Keeps concurrent writers from replacing each other's rows or touching the shared index. */
 export function publishLedger({ repo, path, branch, subject, command, alarm = ledgerAlarm }) {
-  if (!path || path.startsWith("/") || path.split("/").includes("..") || !/(^|\/)TASKS[^/]*\.md$/.test(path)) {
-    throw new Error("--path must name a repository-relative TASKS markdown file");
+  if (!path || path.startsWith("/") || path.split("/").includes("..") || basename(path) !== "TASKS.md"
+    || path !== askRowLedger(git(repo, ["rev-parse", "--show-toplevel"]))) {
+    throw new Error("--path must name the repository's configured TASKS.md ledger");
   }
   if (!subject || !command?.length) throw new Error("subject and generator command required");
   branch ||= git(repo, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).replace(/^origin\//, "");

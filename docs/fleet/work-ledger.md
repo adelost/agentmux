@@ -34,9 +34,11 @@ again. Repair the named obstruction with its owner, preserving all edits.
 Never stash, reset or create a merge commit to make a mirror catch up.
 
 `amux lint REPOSITORY --changed --strict` refuses staged, unstaged and untracked
-TASKS Markdown changes with `LEDGER001`, names `push_ledger.sh` and alarms to
+changes to the repository's configured `TASKS.md` with `LEDGER001`, names `push_ledger.sh` and alarms to
 sandman:0. This finding cannot be baselined. Run lint in the normal repository
 checks; it also catches a local row unrelated to the selected source diff.
+Ledger discovery reuses Stats' `ledger-sources.json` and its `docs/TASKS.md`
+default. Reference copies named TASKS-*.md are outside this control.
 
 ## Staffing and review economics
 
