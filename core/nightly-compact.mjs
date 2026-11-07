@@ -82,7 +82,7 @@ export function nightlyCompactOutcome(receipt, before, after, maxTokens) {
   };
 }
 
-const UNRESOLVED_SKIP = /^(claude-subscription-access-disabled|provider-usage-limited|activity-unknown|already-attempted:(failed|attempting|unverified|unknown|measured|compacted-))/u;
+const UNRESOLVED_SKIP = /^(claude-subscription-access-disabled|claude-login-required|provider-usage-limited|activity-unknown|already-attempted:(failed|attempting|unverified|unknown|measured|compacted-))/u;
 
 /** WHAT: Calculates how many rows leave tonight's budget work undone. WHY: Keeps one definition behind the report, the exit code and Dream's maintenance state. */
 export function nightlyUnresolvedCount(rows, policy) {
@@ -111,6 +111,7 @@ export function compactAccessBlocker(screen) {
   const lines = String(screen || "").split("\n");
   const lastTurn = lines.findLastIndex((line) => /^\s*[❯›]\s*\S/u.test(line));
   const text = lines.slice(Math.max(0, lastTurn)).join("\n");
+  if (/(?:Login expired|Not logged in)\s*·\s*Please run \/login\b/iu.test(text)) return "claude-login-required";
   if (/organization has disabled Claude subscription access/iu.test(text)) return "claude-subscription-access-disabled";
   if (CLAUDE_STOP_BANNER.test(text) || /usage limit reached|out of extra usage/iu.test(text)) return "provider-usage-limited";
   return null;

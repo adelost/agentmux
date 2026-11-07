@@ -395,6 +395,16 @@ feature("nightly context budget", () => {
     }],
     then: ["only the current refusal blocks", (result) => expect(result).toEqual(["claude-subscription-access-disabled", null])],
   });
+  unit("recognizes a current login refusal without accepting generic errors or old scrollback", {
+    when: ["reading the refused source turn", () => [
+      "❯ /compact\nError during compaction: Login expired · Please run /login\n❯ ",
+      "Login expired · Please run /login\n❯ new task\n● finished\n❯ ",
+      "❯ /compact\nError during compaction: unknown provider outcome\n❯ ",
+      "❯ /compact\nNot logged in · Please run /login\n❯ ",
+    ].map(compactAccessBlocker)],
+    then: ["only known current login refusals identify a source unable to answer", result =>
+      expect(result).toEqual(["claude-login-required", null, null, "claude-login-required"])],
+  });
   unit("reads Claude's current stop wording as a usage limit", {
     when: ["a refused /compact under a weekly and a spend-limit stop", () => [
       "You've hit your weekly limit · resets Sep 30, 9am (Europe/Stockholm)",

@@ -11,7 +11,7 @@ import { CONTEXT_COST_POLICY } from "./context-cost.mjs";
 // A cold cache is re-read in full whichever account the next prompt goes to,
 // so moving a cold pane costs nothing extra. A dormant pane only gets its new
 // selection for its next ordinary wake. A source that can no longer answer
-// (usage limit, access disabled) cannot compact; restarting there is the only
+// (usage limit, access disabled, login refused) cannot compact; restarting there is the only
 // way back to work, and the plan says so instead of blocking the pane forever.
 // A pane with a persisted limit receipt is planned like a dormant one: the
 // switch only selects the target, and quota recovery resumes its exact session.
@@ -56,7 +56,7 @@ export const accountSwitchCostRules = defineDecisionTable({
   ],
 });
 
-const SOURCE_LIMITS = new Set(["provider-usage-limited", "claude-subscription-access-disabled"]);
+const SOURCE_LIMITS = new Set(["provider-usage-limited", "claude-subscription-access-disabled", "claude-login-required"]);
 
 /**
  * WHAT: Maps one pane's observed facts to its switch action and the cell that chose it.

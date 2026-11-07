@@ -645,6 +645,27 @@ feature("Claude fleet account rotation", () => {
     }],
   });
 
+  unit("an expired login releases the existing failed switch without another compact", {
+    given: ["the same pending session with a refused compact on its source", () => {
+      const fx = fixture();
+      const identity = fx.deps.latestIdentity();
+      fx.state.set("claude_account_request_v1:lsrc:0", { id: "existing-login-switch", phase: "pending",
+        target: "2", name: "lsrc", pane: 0, sessionId: identity.sessionId, sessionPath: identity.path,
+        compact: { sourceProfileId: "1", status: "unknown" } });
+      fx.deps.observeContext.mockResolvedValueOnce({ facts: { tokens: 699_000, idleMs: 60_000,
+        blocker: "claude-login-required" }, compactRefusal: "previous-compact-failed", compacted: false, target: null });
+      fx.ctx.agent.restartClaudeAccount = vi.fn(async () => ({ ok: true }));
+      return fx;
+    }],
+    when: ["resuming the instructed rotation", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["it switches with the same request and session, without retrying the refused source", (result, fx) => {
+      expect(result.rows.find(row => row.key === "lsrc:0")).toMatchObject({ status: "switched" });
+      expect(claudeRotationStatus(fx.state, { pane: "lsrc:0" })).toMatchObject({
+        requestId: "existing-login-switch", status: "complete", sessionId: fx.deps.latestIdentity().sessionId });
+      expect(fx.deps.compactPane).not.toHaveBeenCalled();
+    }],
+  });
+
   unit("a source that can no longer answer moves its warm large context without a compact", {
     given: ["a warm large pane stopped at its usage limit", () => {
       const fx = fixture();
