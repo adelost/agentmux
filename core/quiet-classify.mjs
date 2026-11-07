@@ -81,7 +81,8 @@ function handsIn(lines) {
   return { line, what };
 }
 
-// `LEFT: text` on its own line, with or without bold marks; an empty label takes the next line that has text.
+// A label on its own line, with or without bold marks; retain its position so later reports can end earlier work.
+// An empty label takes the next line that has text.
 function labelValue(reply, label) {
   const lines = reply.split("\n");
   const own = new RegExp(`^[\\s>*_\`#-]*${label}:[*_]*\\s*(.*)$`, "u");
@@ -89,20 +90,22 @@ function labelValue(reply, label) {
   if (index < 0) return null;
   const value = plainLine(own.exec(lines[index])[1]);
   const next = lines.slice(index + 1).find((line) => line.trim()) ?? "";
-  return value || (/^[\s>*_]*[A-Z]{3,}:/u.test(next) ? "" : plainLine(next));
+  return { index, value: value || (/^[\s>*_]*[A-Z]{3,}:/u.test(next) ? "" : plainLine(next)) };
 }
 
 const isNothing = (value) => !value || NOTHING.test(value);
 
 function leftWork(reply) {
-  const value = labelValue(reply, "LEFT");
-  if (isNothing(value) || BLOCKER.some((word) => word.test(reply))) return null;
-  return `LEFT: ${value}`;
+  const left = labelValue(reply, "LEFT");
+  if (isNothing(left?.value) || BLOCKER.some((word) => word.test(reply))) return null;
+  const done = labelValue(reply, "DONE"), open = labelValue(reply, "OPEN");
+  if ((done && done.index > left.index) || (open && open.index > left.index && isNothing(open.value))) return null;
+  return `LEFT: ${left.value}`;
 }
 
 function isDone(reply) {
   const open = labelValue(reply, "OPEN");
-  return labelValue(reply, "DONE") !== null || (open !== null && isNothing(open)) || looksDone(reply);
+  return labelValue(reply, "DONE") !== null || (open !== null && isNothing(open.value)) || looksDone(reply);
 }
 
 const verdict = (cls, line = null, what = null) => ({ class: cls, line, what });

@@ -3,8 +3,8 @@ import { classifyQuiet } from "./quiet-classify.mjs";
 import { AMUX_PANE_TAGS, isHumanAsk } from "./ask-origin.mjs";
 import { LINES, replyEndingWith } from "../test/fixtures/quiet-ledger.mjs";
 
-// Guards UC-1, UC-2, UC-4, UC-5, UC-3, R-1 and R-3 of docs/DESIGN-quiet-panes.md. Every reply here is invented; the
-// shapes are the ones the panes write (a status block, then the line the pane ends with).
+// Guards UC-1, UC-2, UC-4, UC-5, UC-3, R-1 and R-3 of docs/DESIGN-quiet-panes.md. Replies are invented except the
+// sourced lsrc:7 completion regression (a progress block followed by its final report).
 const OPERATOR = "Mattias";
 const classify = (reply, options = {}) => classifyQuiet(reply, { operator: OPERATOR, ...options });
 
@@ -105,6 +105,37 @@ feature("quiet: why a pane went quiet", () => {
       expect(classes.waitsOnPane).not.toBe("left");
       expect(classes.empty).not.toContain("left");
     }],
+  });
+
+  unit("lsrc:7's 10:03:52Z final report ends its earlier LEFT", {
+    // 7 Nov 2026, posted reply 92bd8c770e05648c2997c958ab9b2705ef50c230db0746250f927b02fc3e6e94.
+    given: ["the actual progress block and final completion report", () => `SUMMARY: Den installerade 1.25.455 publicerar från arbetsgrenen utan larmanrop. Huvudcheckoutens skrivning tar sedan med båda raderna och når 0/0 mot origin.
+GOAL: Rättningen används i den vanliga skrivvägen.
+NOW: Jag verifierar installationen och avslutar raden.
+LEFT: Slutkvitto till sandman:0.
+NEXT: Kontrollera den verkliga huvudcheckoutens fast-forward.
+
+SUMMARY: Rättat och installerat, AMUX 1.25.455.
+DONE: 4e19a814 hoppar tyst över spegelsteget i länkade worktrees.
+VERIFIED: lsrc:4:s rad 1737 finns på origin. Installerat skrivprov utan larm; huvudcheckout 0/0. Sju kontroller gröna, lint 0.
+OPEN: inget.
+NEXT: inget.`],
+    when: ["classifying the published reply", (reply) => classify(reply)],
+    then: ["it is done, without a line to nudge", (verdict) => expect(verdict).toEqual({ class: "done", line: null, what: null })],
+  });
+
+  unit("completion labels only close LEFT when they follow its last occurrence", {
+    given: ["DONE, empty OPEN, and a later reopened LEFT", () => [
+      "LEFT: release\nDONE: installed",
+      "LEFT: release\nOPEN: none",
+      "LEFT: release\n**OPEN:** inget.",
+      "DONE: built\nLEFT: install",
+      "OPEN: none\nLEFT: install",
+      "LEFT: build\nDONE: built\nLEFT: install",
+      "LEFT: install\nOPEN: release",
+    ]],
+    when: ["classifying the label order", (replies) => replies.map((reply) => classify(reply).class)],
+    then: ["completion ends earlier work, while new work remains open", (classes) => expect(classes).toEqual(["done", "done", "done", "left", "left", "left", "left"])],
   });
 
   unit("DONE with OPEN none is done", {
