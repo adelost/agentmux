@@ -10,6 +10,44 @@ import {
 } from "./speech.mjs";
 
 feature("explicit speech synthesis", () => {
+  component("one long spoken message keeps its ending and gets time for synthesis", {
+    given: ["1600 characters ending with a recognizable final word", () => "a".repeat(1596) + "slut"],
+    when: ["the public synthesis seam calls its process runner", (text) => {
+      let call;
+      const speech = synthesizeSpeech(text, { run: (...args) => { call = args; } });
+      try { return { text, clean: speech.clean, call }; }
+      finally { speech.cleanup(); }
+    }],
+    then: ["all characters reach edge-tts with a 126 second deadline", ({ text, clean, call }) => {
+      expect(clean).toBe(text);
+      expect(call[1][call[1].indexOf("--text") + 1]).toBe(text);
+      expect(call[2].timeout).toBe(126_000);
+    }],
+  });
+
+  component("the synthesis deadline grows but never exceeds five minutes", {
+    given: ["short and much longer explicit messages", () => ["Hej", "a".repeat(1000)]],
+    when: ["both messages are passed to the synthesis seam", (texts) => texts.map(text => {
+      let timeout;
+      const speech = synthesizeSpeech(text, { run: (_command, _args, options) => { timeout = options.timeout; } });
+      speech.cleanup();
+      return timeout;
+    })],
+    then: ["their deadlines use the length allowance and the hard ceiling", (timeouts) => {
+      expect(timeouts).toEqual([30_180, 90_000]);
+    }],
+  });
+
+  component("a very long message cannot hold synthesis beyond five minutes", {
+    given: ["5000 explicit characters", () => "a".repeat(5000)],
+    when: ["speech is synthesized", (text) => {
+      let timeout;
+      const speech = synthesizeSpeech(text, { run: (_command, _args, options) => { timeout = options.timeout; } });
+      speech.cleanup();
+      return timeout;
+    }],
+    then: ["the synthesis process has the hard deadline", (timeout) => expect(timeout).toBe(300_000)],
+  });
   component("voice and text are passed as process arguments without a shell", {
     given: ["a voice containing shell syntax and formatted Swedish text", () => ({
       calls: [],
@@ -38,8 +76,8 @@ feature("explicit speech synthesis", () => {
   });
 
   // Defect 31 Oct 2026: two spoken status summaries (2 785 and 2 364 chars) were cut to 1 500
-  // without a word, so their endings never reached Mattias. Over the limit the caller must
-  // shorten or split; the boundary itself stays.
+  // without a word, so their endings never reached Mattias. Explicit long messages now
+  // have a larger shared bound; over that bound they are still refused, never cut.
   component("spoken text over one clip's limit is refused, not cut", {
     given: ["markdown and more text than a mobile clip permits", () =>
       `*${"a".repeat(MAX_SPEECH_CHARS + 20)}*`],

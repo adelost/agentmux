@@ -2249,7 +2249,7 @@ async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
 }
 
 /**
- * Speak a short string into the calling pane's bound Discord channel.
+ * Speak an explicitly requested message into the calling pane's bound Discord channel.
  * This is an explicit one-shot action and is never called automatically.
  *
  * Usage:
@@ -2257,8 +2257,7 @@ async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
  *   amux say -c <channelId> "..."           # explicit channel
  *   amux say -p project:2 "..."              # explicit agent:pane
  *   amux say --voice 'sv-SE-SofieNeural' "..."  # different voice
- *
- * Refuses text over 1500 chars (about 90 seconds of speech) instead of cutting it.
+ * Refuses text over the shared speech limit instead of cutting it.
  */
 async function cmdSay(args, ctx) {
   const { execSync: execSyncFn } = await import("child_process");
@@ -2312,7 +2311,7 @@ async function cmdSay(args, ctx) {
   let speech;
   try {
     const spoken = cleanSpeechText(text); // refuses an over-long text before the phone event is published
-    const audioEvent = publishSpeechEvent(text, channelId);
+    const audioEvent = publishSpeechEvent(spoken, channelId);
     speech = synthesizeSpeech(spoken, { voice });
     await sendFileToChannelId(channelId, speech.mediaPath, speech.clean, { kind: "voice" });
     console.log(`spoken (${speech.clean.length} chars) → ${channelId} · audio event ${audioEvent.eventId}`);

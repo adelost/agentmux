@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAudioOutbox } from "../core/audio-outbox.mjs";
+import { createAudioOutbox, MAX_AUDIO_TEXT_CHARS } from "../core/audio-outbox.mjs";
 import { DEFAULT_TTS_VOICE } from "../core/runtime-defaults.mjs";
 
 /**
@@ -12,19 +12,19 @@ import { DEFAULT_TTS_VOICE } from "../core/runtime-defaults.mjs";
 export const DEFAULT_SPEECH_VOICE = DEFAULT_TTS_VOICE;
 
 /**
- * WHAT: Defines the maximum length of one spoken mobile update.
- * WHY: Keeps accidental long replies from becoming long audio broadcasts.
+ * WHAT: Defines the durable event limit for one explicit spoken message.
+ * WHY: Keeps long requested audio and its phone event whole at the same boundary.
  */
-export const MAX_SPEECH_CHARS = 1500;
+export const MAX_SPEECH_CHARS = MAX_AUDIO_TEXT_CHARS;
 
 /**
  * WHAT: Normalizes display text for one spoken update and refuses text over its limit.
- * WHY: Prevents the silent cut that lost two summaries' endings on 31 Oct 2026; callers shorten or split.
+ * WHY: Prevents the silent cut that lost two summaries' endings on 31 Oct 2026.
  */
 export function cleanSpeechText(text) {
   const clean = String(text ?? "").replace(/[`*_~|]/g, "").trim();
   if (clean.length > MAX_SPEECH_CHARS) {
-    throw new Error(`speech text is ${clean.length} chars, max ${MAX_SPEECH_CHARS}: shorten it or send several clips`);
+    throw new Error(`speech text is ${clean.length} chars, max ${MAX_SPEECH_CHARS}: shorten it`);
   }
   return clean;
 }
@@ -65,7 +65,7 @@ export function synthesizeSpeech(text, {
       "--text", clean,
       "--write-media", mediaPath,
     ], {
-      timeout: 30_000,
+      timeout: Math.min(300_000, 30_000 + clean.length * 60),
       stdio: ["ignore", "ignore", "pipe"],
     });
   } catch (error) {

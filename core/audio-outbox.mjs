@@ -50,7 +50,8 @@ const RECEIPT_TRANSITIONS = new Map([
   ["failed", new Set()],
 ]);
 const MAX_JOURNAL_BYTES = 2 * 1024 * 1024;
-const MAX_TEXT_CHARS = 1500;
+/** WHAT: Defines one explicit spoken message limit. WHY: Allows long requested speech without unbounded journal records. */
+export const MAX_AUDIO_TEXT_CHARS = 10_000;
 const LOCK_TIMEOUT_MS = 2000;
 const STALE_LOCK_MS = 30_000;
 
@@ -190,7 +191,7 @@ export function createAudioOutbox({
   id = randomUUID,
 } = {}) {
   function publish({ text, target, eventId = id(), ttlMs = AUDIO_EVENT_TTL_MS }) {
-    const clean = String(text || "").trim().slice(0, MAX_TEXT_CHARS);
+    const clean = String(text || "").trim().slice(0, MAX_AUDIO_TEXT_CHARS);
     if (!clean) throw new Error("audio event text is empty");
     const safeEventId = validateIdentity(eventId, "eventId");
     const safeTarget = targetId(target);

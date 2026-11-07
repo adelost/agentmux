@@ -23,6 +23,20 @@ function fixture() {
 }
 
 feature("durable explicit-audio outbox", () => {
+  component("a long explicit message keeps its final words after durable replay", {
+    given: ["a real journal and 1600 characters", () => ({ fx: fixture(), text: "a".repeat(1596) + "slut" })],
+    when: ["the message is published and replayed after restart", ({ fx, text }) => {
+      try {
+        const event = fx.outbox.publish({ text, target: "channel-1" }).event;
+        const replay = fx.restart().listPending({ consumerId: "phone-1", target: "channel-1" });
+        return { text, event, replay };
+      } finally { rmSync(fx.root, { recursive: true, force: true }); }
+    }],
+    then: ["publication and replay preserve every character", ({ text, event, replay }) => {
+      expect(event.text).toBe(text);
+      expect(replay[0].text).toBe(text);
+    }],
+  });
   component("one publish survives restart and replay is bounded by event identity", {
     given: ["an empty versioned journal", () => fixture()],
     when: ["one explicit event is published and the bridge-facing reader restarts", (fx) => {
