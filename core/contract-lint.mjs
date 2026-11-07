@@ -7,6 +7,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { basename, extname, isAbsolute, join, relative, resolve } from "path";
 import { changedSourceLineNumbers, changedSourcePaths, isMandatorySizeFinding, lintFileSizes, lintStringStyle, loadLintPolicy } from "./lint-ratchet.mjs";
 import { changedSymbols } from "./lint-symbol-scope.mjs";
+import { dirtyLedgers } from "./work-ledger-write.mjs";
 
 // WHAT: Names the contract check used by CLI include and exclude filters.
 // WHY: Keeps command routing independent from the check implementation.
@@ -522,11 +523,11 @@ export function collectSourceFiles(root, options = {}) {
 export function lintRoot(root, options = {}) {
   const resolvedRoot = resolve(expandHome(root));
   const files = collectSourceFiles(resolvedRoot, options);
-  // A selected diff base may narrow symbol checks, never the mandatory size gate.
-  // The trunk selector also includes staged, working and untracked source files.
   const sizeFiles = options.strict && options.changed ? collectSourceFiles(resolvedRoot, { ...options, policy: true }) : files;
   const lintConfig = options.lintConfig || loadLintConfig(resolvedRoot);
   const findings = lintFileSizes(resolvedRoot, sizeFiles, lintConfig, options);
+  findings.push(...dirtyLedgers(resolvedRoot).map(path => ({ sev: "error", code: "LEDGER001", path, line: 1,
+    msg: "Uncommitted ledger; use push_ledger.sh --repo REPO --path PATH SUBJECT GENERATOR; never edit the mirror" })));
   let symbols = 0;
   for (const file of files) {
     const source = readFileSync(file, "utf-8");
@@ -538,7 +539,6 @@ export function lintRoot(root, options = {}) {
   }
   return { root: resolvedRoot, files: [...new Set([...files, ...sizeFiles])], symbols, findings };
 }
-
 /** WHAT: Formats a line-stable baseline key for one finding. WHY: Keeps unrelated line shifts from reopening accepted legacy debt. */
 export function findingFingerprint(finding, root) {
   // Line number is deliberately excluded: the message already carries the symbol
@@ -580,7 +580,7 @@ export function lintRoots(roots, options = {}) {
   const baseline = loadBaseline(options.baselinePath);
   return results.map((result) => ({
     ...result,
-    activeFindings: result.findings.filter((f) => isMandatorySizeFinding(f) || !baseline.has(findingFingerprint(f, result.root))),
+    activeFindings: result.findings.filter((f) => f.code === "LEDGER001" || isMandatorySizeFinding(f) || !baseline.has(findingFingerprint(f, result.root))),
   }));
 }
 

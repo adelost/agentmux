@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parseFlags } from "./command-args.mjs";
 import { getAgent, listAgents } from "./config.mjs";
 import { CONTRACT_CHECK_ID, formatLintReport, lintRoots, resolvePathTarget } from "../core/contract-lint.mjs";
+import { ledgerAlarm } from "../core/work-ledger-write.mjs";
 
 const FLAGS = {
   "all-agents": "boolean", changed: "boolean", strict: "boolean", baseline: "string",
@@ -72,5 +73,7 @@ Policy history always uses actual trunk, independent of AMUX_LINT_BASE_REF.`);
   });
   if (flags["update-baseline"]) console.log(`Updated non-size baseline: ${baselinePath}\n`);
   console.log(formatLintReport(results, { baselinePath, limit: flags.limit || 80 }));
+  const dirty = results.flatMap(result => result.activeFindings.filter(f => f.code === "LEDGER001"));
+  if (dirty.length) ledgerAlarm(`uncommitted ledgers: ${dirty.map(f => f.path).join(", ")}; use push_ledger.sh`);
   if (flags.strict && results.some((r) => r.activeFindings.some((f) => f.sev !== "warn"))) process.exitCode = 1;
 }

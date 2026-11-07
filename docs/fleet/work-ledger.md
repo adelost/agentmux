@@ -1,5 +1,43 @@
 # Work ledger and queue
 
+## One ledger writer, shared checkouts are mirrors
+
+Every TASKS change in every repository uses the installed `push_ledger.sh`.
+It generates the new ledger from fetched origin, commits through a temporary
+index, and pushes in one operation. A rejected concurrent push regenerates
+above the new origin. It never edits the shared ledger or uses its index.
+Do not edit TASKS in a checkout, commit a local-only row, or use a post-commit
+merge hook. This replaces the earlier post-commit proposal (sandman:0,
+7 Nov 2026 05:14Z, delivery:59ed5b51ec444a587b0012f065e458cc).
+
+The generator reads the latest full ledger on stdin and prints its replacement.
+It must change only its own rows. `AMUX_LEDGER_BASE` is the immutable parent SHA;
+legacy generators reading origin/master are checked for concurrent ref movement.
+For example, save the row transformer outside the mirror, then run:
+
+```bash
+push_ledger.sh --repo /shared/repository --path docs/TASKS.md --branch master \
+  'docs(ROW): claim or close outcome' python3 /path/to/row-transformer.py
+```
+
+Use the repository's actual default branch (`main` for gateway). Huset's existing
+`.agents/0/briefs/push_ledger.sh SUBJECT GENERATOR...` delegates to this writer
+with its workspace and ledger path. A new checkout gets the same command from
+the normal AMUX installation; no Git hook or separate service is needed.
+
+After a confirmed push, the shared mirror advances only with
+`git merge --ff-only origin/BRANCH`. The backup uses the same fast-forward
+rule. Local edits, a wrong branch or divergence stop the mirror and send an
+immediate AMUX alarm to sandman:0 naming the path and Git's blocking files.
+A published row remains published even when its mirror stops; do not submit it
+again. Repair the named obstruction with its owner, preserving all edits.
+Never stash, reset or create a merge commit to make a mirror catch up.
+
+`amux lint REPOSITORY --changed --strict` refuses staged, unstaged and untracked
+TASKS Markdown changes with `LEDGER001`, names `push_ledger.sh` and alarms to
+sandman:0. This finding cannot be baselined. Run lint in the normal repository
+checks; it also catches a local row unrelated to the selected source diff.
+
 ## Staffing and review economics
 
 5. **A configured board is a shared work list, not an orchestration ceremony.**

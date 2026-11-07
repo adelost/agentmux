@@ -26,6 +26,18 @@ afterEach(() => {
   vi.restoreAllMocks(); vi.unstubAllEnvs(); process.exitCode = 0;
 });
 describe("mandatory trunk-anchored size guards", () => {
+  it("rejects staged and unstaged ledgers even in changed mode and names the writer", () => {
+    const root = fixture();
+    writeFileSync(join(root, "TASKS.md"), "| 1 | open |\n");
+    git(root, "add", "TASKS.md"); git(root, "commit", "-m", "ledger");
+    writeFileSync(join(root, "TASKS.md"), "| 1 | done |\n");
+    const dirty = () => lintRoots([root], { changed: true, strict: true })[0].activeFindings;
+    expect(dirty()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "LEDGER001", msg: expect.stringContaining("push_ledger.sh") }),
+    ]));
+    git(root, "add", "TASKS.md");
+    expect(dirty().some(f => f.code === "LEDGER001")).toBe(true);
+  });
   it("uses default 500 when known trunk has no policy", () => {
     const root = fixture(); grow(root, 501);
     expect(lintRoot(root, { changed: true, strict: true }).findings).toEqual(expect.arrayContaining([
