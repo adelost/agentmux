@@ -9,8 +9,7 @@ import {
 import { isAutocompactOffer } from "../core/dismiss.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
-import { sessionReaderForCommand } from "../core/alternate-session-reader.mjs";
-import { latestPaneStatesCached } from "../core/events.mjs";
+import { createCaptureDue, paneActivityStamp } from "../core/pulse/capture-due.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
 import { execFileSync } from "node:child_process";
@@ -82,10 +81,7 @@ export function createPermissionWatchdog({
   // The bridge's agent has no paneDirectory: every prompt threw here from 2026-09-15 to 1.25.402.
   sessionIdentity = (agentConfig, paneIdx) => latestClaudeSessionIdentity(panePathFor(agentConfig, paneIdx))?.sessionId || null,
   // A prompt follows its tool call into the journal (and a Claude hook), so these stamps say when a capture can matter.
-  activityOf = (agentConfig, paneIdx) => {
-    const journal = sessionReaderForCommand(agentConfig.panes?.[paneIdx]?.cmd || "").latestInfo(panePathFor(agentConfig, paneIdx));
-    return JSON.stringify([journal, latestPaneStatesCached().get(`${agentConfig.name}:${paneIdx}`)?.ts ?? null]);
-  },
+  activityOf = paneActivityStamp,
   activeMs = 60_000,
   quietRecheckMs = 120_000,
 }) {
@@ -96,21 +92,9 @@ export function createPermissionWatchdog({
   let publishedPrompts = null;
   let ticking = false;
   let lastBeatAt = -Infinity;
-  const activity = new Map();
-
-  /**
-   * WHAT: Checks whether a pane needs a capture this round: an open prompt, recent journal or hook activity, or a quiet
-   * pane's two-minute recheck. WHY: Prevents idle panes from costing a capture every 10 s (pulse-10).
-   */
-  function captureDue(agentConfig, paneIdx, at) {
-    const paneKey = `${agentConfig.name}:${paneIdx}`;
-    const stamp = activityOf(agentConfig, paneIdx);
-    const last = activity.get(paneKey);
-    const changedAt = !last || last.stamp !== stamp ? at : last.changedAt;
-    const due = seen.has(paneKey) || at - changedAt < activeMs || !last || at - last.capturedAt >= quietRecheckMs;
-    activity.set(paneKey, { stamp, changedAt, capturedAt: due ? at : last.capturedAt });
-    return due;
-  }
+  // An open prompt, recent journal or hook activity, or a quiet pane's two-minute recheck (pulse-10; the recheck is row 116e's to remove)
+  const due = createCaptureDue({ activityOf, activeMs, quietRecheckMs });
+  const captureDue = (agentConfig, paneIdx, at) => due(agentConfig, paneIdx, at, { tracking: seen.has(`${agentConfig.name}:${paneIdx}`) });
 
   // A pane whose capture never returns must not hold every other pane's prompt:
   // on 2026-09-29 no round had finished since the bridge restarted the day before.

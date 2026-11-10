@@ -5,6 +5,7 @@ import {
 } from "../core/playwright-watchdog.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
+import { createCaptureDue } from "../core/pulse/capture-due.mjs";
 
 export function createPlaywrightWatchdog({
   agent,
@@ -14,6 +15,9 @@ export function createPlaywrightWatchdog({
   config,
   log = (msg) => console.log(`playwright-watchdog | ${msg}`),
   reap = reapStalePlaywrightProcesses,
+  // Row 116c: a Playwright call is written to the journal before it runs, so a pane with no activity for a minute and no call being timed
+  // has nothing new to inspect (an idle pane cost a capture every round, 10 in 10 min, 10 Nov)
+  captureDue = createCaptureDue(),
 }) {
   const seen = new Map();
   const escaped = new Map();
@@ -96,6 +100,7 @@ export function createPlaywrightWatchdog({
       if (a.backend === "native") continue;
       const panes = Array.isArray(a.panes) ? a.panes : [];
       for (let i = 0; i < panes.length; i++) {
+        if (!captureDue(a, i, now, { tracking: seen.has(`${a.name}:${i}`) })) continue;
         await inspectPane(a, i, now);
       }
     }
