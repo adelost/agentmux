@@ -237,3 +237,34 @@ feature("existing Codex composer placeholders", () => {
       expect(prompt).toMatchObject({ name: "codex-paused-goal", keys: "Down Enter" })],
   });
 });
+
+// Recorded from a pane at 581.8k tokens on 2026-11-09 23:56Z (Claude Code 2.1.312), transcript line replaced. The offer
+// shows no cursor: text typed into it hides the cursor until the next key (row 157).
+const autocompactOffer = `
+✻ Worked for 40m 3s · done 12:51 AM
+──────────────────────────────────────────────────────────────────
+ We recommend compacting earlier
+   Each message re-sends the whole conversation, so long conversations use up your plan's usage limits
+   faster. With your current settings, Claude Code autocompacts (replaces older messages with a summary) at
+   1m tokens (default via auto setting). Compacting earlier can reduce usage, but it happens more often, and
+   some details can be lost each time.
+   Want to autocompact at 400k tokens instead? Your model doesn't change. Switch back any time with
+   /autocompact.
+     Autocompact at ‹ 400k › tokens
+       This conversation is at 581.8k, so it will be summarized on your next message.
+     Keep auto (1m tokens)
+   ↑/↓ choose · ←/→ change size · enter confirm · esc not now
+`;
+
+feature("Claude's autocompact offer is answered Keep (row 157)", () => {
+  component("each screen gets the one key toward Keep, and Enter only on Keep", {
+    when: ["the recorded offer, its cursor on the lower size, on Keep, and with a composer below it", () => [
+      autocompactOffer,
+      autocompactOffer.replace("     Autocompact at", "   ❯ Autocompact at"),
+      autocompactOffer.replace("     Keep auto", "   ❯ Keep auto"),
+      `${autocompactOffer}  Autocompact unchanged · /autocompact to change it\n❯ \n`,
+    ].map(screen => findBlockingPrompt(screen)?.keys ?? null)],
+    then: ["Escape shows the cursor, Down moves to Keep, Enter keeps, a closed offer gets nothing", keys =>
+      expect(keys).toEqual(["Escape", "Down", "Enter", null])],
+  });
+});

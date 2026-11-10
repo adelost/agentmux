@@ -6,6 +6,7 @@ import {
   openPromptsSnapshot,
   permissionDecisionLine,
 } from "../core/permission-watchdog.mjs";
+import { isAutocompactOffer } from "../core/dismiss.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import { sessionReaderForCommand } from "../core/alternate-session-reader.mjs";
@@ -148,6 +149,29 @@ export function createPermissionWatchdog({
       : run();
   }
 
+  /**
+   * Answers Claude's autocompact offer as a delivery would, so a pane no delivery reaches does not wait behind it. Under
+   * the delivery lock: a paste typed into the offer hides its cursor and is lost (row 157).
+   */
+  async function keepAutocompact(agentConfig, paneIdx, at) {
+    const paneKey = `${agentConfig.name}:${paneIdx}`;
+    const dismiss = () => agent.dismissBlockingPrompt(`${agentConfig.name}:.${paneIdx}`);
+    let action = "answered", why = "Keep: the compaction rules stay as they are";
+    try {
+      await (deliveryBroker ? deliveryBroker.runExclusive(agentConfig.name, paneIdx, dismiss) : dismiss());
+      if (isAutocompactOffer(await capture(agentConfig, paneIdx))) [action, why] = ["answer-uncertain", "the offer is still open"];
+    } catch (err) {
+      [action, why] = ["answer-uncertain", err.message];
+    }
+    log(`autocompact offer in ${paneKey}: ${action}, ${why}`);
+    try {
+      recordDecision(permissionDecisionLine({ at, paneKey, signature: "autocompact-offer", action, reason: "We recommend compacting earlier", why }));
+    } catch (err) {
+      log(`decision log write failed for ${paneKey}: ${err.message}`);
+    }
+    return { paneKey, action };
+  }
+
   async function routeToOrchestrator(agentConfig, paneIdx, prompt, ageMs) {
     const ownerPane = agentConfig.orchestrator;
     const text = formatPermissionAlert({
@@ -170,6 +194,7 @@ export function createPermissionWatchdog({
       seen.delete(paneKey);
       return null;
     }
+    if (isAutocompactOffer(content)) return keepAutocompact(agentConfig, paneIdx, at);
     // detectPermissionPrompt is the gate on its own: it requires the question,
     // its numbered options and "Esc to cancel" in the last lines with no
     // composer below, so a footer-less capture is still recognised.

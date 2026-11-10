@@ -55,6 +55,32 @@ export function isClaudeLimitChoiceMenu(paneText) {
     && /1\.\s*Stop and wait for limit to reset/u.test(block);
 }
 
+// Claude Code 2.1.312 offers a lower autocompact size after a turn once a conversation passes about 580k tokens, and
+// the pane takes no input until it is answered (row 157: deep:0 and skydive:1 stood 10-15 min, 10 Nov). Keep leaves
+// the compaction rules as they are. Its list refuses a key within 500 ms of opening, any key for 600 ms after a refused
+// one, and Enter within 250 ms of an arrow; typed text (a paste, the draft probe) hides the cursor and the next key only
+// shows it again. So one key per pass, from what the screen shows: Escape shows a hidden cursor (or says "not now" when
+// the list does not fit), an arrow moves to Keep, and Enter confirms only a visible cursor on Keep.
+const AUTOCOMPACT_OFFER_TITLE = "We recommend compacting earlier";
+const AUTOCOMPACT_OFFER_FOOTER = /enter confirm\s*·\s*esc not now$/u;
+const AUTOCOMPACT_OFFER_OPTION = /^\s*(❯\s*)?(Autocompact at\b.*\btokens|Keep\b.*)$/u;
+
+/** WHAT: Returns the one key that moves a live autocompact offer toward Keep, or null. WHY: Never confirms the lower size. */
+function autocompactOfferKey(text) {
+  const lines = tailLines(String(text || ""), 24);
+  if (!AUTOCOMPACT_OFFER_FOOTER.test(lines.at(-1)?.trim() || "")) return null;
+  if (!lines.some(line => line.trim() === AUTOCOMPACT_OFFER_TITLE)) return null;
+  const options = lines.map(line => line.match(AUTOCOMPACT_OFFER_OPTION)).filter(Boolean);
+  const keep = options.findIndex(option => option[2].startsWith("Keep"));
+  const cursor = options.findIndex(option => option[1]);
+  if (options.length !== 2 || keep < 0 || cursor < 0) return "Escape";
+  if (cursor === keep) return "Enter";
+  return cursor < keep ? "Down" : "Up";
+}
+
+/** WHAT: Checks for Claude's live autocompact offer. WHY: Lets the watchdog answer it on a pane no delivery reaches. */
+export const isAutocompactOffer = text => autocompactOfferKey(text) !== null;
+
 // Codex overlays put the hint above the composer (0.162), or inside the
 // status row below a composer shared with option 2 (0.163).
 const OVERLAY_HINT = /\benter select\s*·\s*esc back\b/iu;
@@ -200,6 +226,12 @@ export const BLOCKING_PROMPTS = [
     keys: "Enter",
     waitMs: 2000,
   },
+  { name: "autocompact-offer", match: text => autocompactOfferKey(text) === "Enter", keys: "Enter", waitMs: 1000, multiStep: true },
+  // The waits outlast the list's 600 ms refusal and its 250 ms arrow-then-Enter guard. multiStep: dismissBlockingPrompts
+  // reads the screen again for the next key; every other prompt gets one pass, so a late repaint never resends its keys.
+  { name: "autocompact-offer", match: text => autocompactOfferKey(text) === "Down", keys: "Down", waitMs: 700, multiStep: true },
+  { name: "autocompact-offer", match: text => autocompactOfferKey(text) === "Up", keys: "Up", waitMs: 700, multiStep: true },
+  { name: "autocompact-offer", match: text => autocompactOfferKey(text) === "Escape", keys: "Escape", waitMs: 800, multiStep: true },
   {
     name: "resume",
     // Claude 2.1.212 changed this from one confirmation line to a three-choice
@@ -273,6 +305,33 @@ export function findBlockingPrompt(paneText) {
     if (prompt.match(paneText)) return prompt;
   }
   return null;
+}
+
+/**
+ * WHAT: Dispatches a blocking prompt's keys, and reads the screen again only after a multi-step prompt's key.
+ * WHY: Keeps a late repaint from resending a prompt's keys, while Claude's autocompact offer is answered in one call.
+ */
+export async function dismissBlockingPrompts({ target, capture, sendKeys, wait, log = console.log, warn = console.warn }) {
+  const sent = [];
+  let name = null;
+  for (let pass = 0; pass < 4; pass++) {
+    let paneText;
+    try {
+      paneText = await capture(target);
+    } catch (err) {
+      warn(`dismiss: capture failed for ${target}: ${err.message}`);
+      break;
+    }
+    const prompt = findBlockingPrompt(paneText);
+    if (!prompt) break;
+    await sendKeys(target, prompt.keys);
+    await wait(prompt.waitMs);
+    sent.push(prompt.keys);
+    name = prompt.name;
+    if (!prompt.multiStep) break;
+  }
+  if (name) log(`dismiss | ${target} ${name}: ${sent.join(", ")}`);
+  return name;
 }
 
 /** WHAT: Checks for an empty Claude composer. WHY: Keeps stale JSONL idle state from faking readiness. */

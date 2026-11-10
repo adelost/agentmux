@@ -42,7 +42,7 @@ import { createPaneMemorySnapshot, resolveMemoryResponsePrompt } from "./core/de
 import { createClaudeSubmitRescue } from "./core/claude-submit-rescue.mjs";
 import { rebootedClaudeIsIdle } from "./core/claude-reboot-idle.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
-import { findBlockingPrompt } from "./core/dismiss.mjs";
+import { dismissBlockingPrompts } from "./core/dismiss.mjs";
 import { claudeProjectDir, classifyHistoryRead } from "./core/claude-paths.mjs";
 import { appendEvent } from "./core/events.mjs";
 import { resolveTmuxLayout } from "./core/layout.mjs";
@@ -705,23 +705,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   // --- Dismiss ---
 
-  async function dismissBlockingPrompt(target) {
-    let paneText;
-    try {
-      // The whole screen: Codex 0.162 menus show the full goal text, which
-      // pushes their header past the last 20 lines.
-      paneText = await t.captureScreen(target);
-    } catch (err) {
-      console.warn(`dismiss: capture failed for ${target}: ${err.message}`);
-      return null;
-    }
-
-    const prompt = findBlockingPrompt(paneText);
-    if (!prompt) return null;
-
-    await t.sendKeys(target, prompt.keys);
-    await wait(prompt.waitMs);
-    return prompt.name;
+  // The whole screen: Codex 0.162 menus show the full goal text, which pushes their header past the last 20 lines.
+  function dismissBlockingPrompt(target) {
+    return dismissBlockingPrompts({ target, capture: x => t.captureScreen(x), sendKeys: (x, keys) => t.sendKeys(x, keys), wait });
   }
 
   // --- Query ---
