@@ -7,6 +7,7 @@ import { createSpentWindows, withSpentWindows } from "./codex-spent-windows.mjs"
 import { createDeliveryBroker } from "./delivery-broker.mjs";
 import { deliveryStateNotice } from "./delivery-notices.mjs";
 import { composerAgent } from "../test/fixtures/composer-agent.mjs";
+import { restartAfterDeliveries } from "../bot.mjs";
 
 const tempRoot = () => join(tmpdir(), `amux-delivery-broker-${process.pid}-${Math.random().toString(36).slice(2)}`);
 
@@ -172,6 +173,43 @@ feature("single-writer delivery broker", () => {
     }],
     then: ["nothing writes early and source order wins", (_, ctx) => {
       expect(ctx.agent.sends.map((send) => send.text)).toEqual(["older", "newer"]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a bridge restart waits for a paste in progress (row 116d)", {
+    given: ["a running broker whose pane takes its time to paste one message", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const agent = acceptingAgent();
+      let finishPaste, pasting;
+      const pasteOpen = new Promise((resolve) => { finishPaste = resolve; });
+      const pasteStarted = new Promise((resolve) => { pasting = resolve; });
+      const sendOnly = agent.sendOnly;
+      agent.sendOnly = async (name, text, pane, options = {}) => sendOnly(name, text, pane, {
+        ...options,
+        onPasteStarted: async () => { await options.onPasteStarted?.(); pasting(); await pasteOpen; },
+      });
+      const broker = createDeliveryBroker({ agent, queue, intervalMs: 60_000, notify: async () => {} });
+      broker.start();
+      const job = broker.enqueue({ agentName: "skyvw", pane: 0, text: "line one\nline two\nline three\nline four" });
+      return { rootDir, queue, broker, job, finishPaste, pasteStarted };
+    }],
+    when: ["`amux restart` arrives while the message is half pasted, and the paste ends 50 ms later", async (ctx) => {
+      await ctx.pasteStarted;
+      const exits = [];
+      const restarting = restartAfterDeliveries({
+        settleDeliveries: () => ctx.broker.stop(), delayMs: 0, timeoutMs: 5_000, log: () => {},
+        exit: (code) => exits.push({ code, status: ctx.queue.read("skyvw", 0, ctx.job.id).status }),
+      });
+      setTimeout(ctx.finishPaste, 50);
+      await restarting;
+      return exits;
+    }],
+    then: ["the bridge exits once, after the message left the composer", (exits, ctx) => {
+      expect(exits).toHaveLength(1);
+      expect(exits[0].code).toBe(75);
+      expect(["submitted", "acknowledged"]).toContain(exits[0].status);
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });

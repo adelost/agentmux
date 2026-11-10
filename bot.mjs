@@ -34,6 +34,26 @@ function markReady() {
 }
 
 /**
+ * WHAT: Restarts the bridge (exit 75) once the deliveries in progress have finished, waiting at most `timeoutMs`.
+ * WHY: A restart 8 s into a paste left skyvw:0 a draft the new bridge did not own, and its queue waited 20 min (10 Nov 22:40Z, row 116d).
+ */
+export async function restartAfterDeliveries({
+  settleDeliveries = async () => {}, delayMs = 200, timeoutMs = 120_000, exit = (code) => process.exit(code), log = console.log,
+} = {}) {
+  const startedAt = Date.now();
+  let timer;
+  const settled = await Promise.race([
+    Promise.resolve().then(settleDeliveries).then(() => true, () => true),
+    new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+  ]);
+  clearTimeout(timer);
+  log(settled ? `restart: deliveries settled after ${Date.now() - startedAt} ms`
+    : `restart: deliveries still running after ${timeoutMs} ms; restarting anyway`);
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  exit(75);
+}
+
+/**
  * @param {{ channels: import('./channels/channel.mjs').Channel[], agentsYaml, whisperUrl, agent, tts, state, onMessage }} config
  * WHAT: Schedules channel startup, reconciliation, health checks, and shutdown.
  * WHY: Keeps the bridge lifecycle under one owner.
@@ -41,7 +61,7 @@ function markReady() {
 export function startBot({
   channels, agentsYaml, whisperUrl, agent, tts, state, onMessage, inboundStore = null,
   prepareMessage = null, onHumanMessage = warnQuotaOnHumanMessage,
-  onClaimGuardHumanMessage = () => {},
+  onClaimGuardHumanMessage = () => {}, settleDeliveries = async () => {},
 }) {
   ensureSingleInstance();
 
@@ -70,11 +90,14 @@ export function startBot({
   // SIGUSR2 = "restart yourself" signal from the CLI (`amux restart`).
   // Mirrors the Discord /restart handler: clear restart-channel (no
   // Discord notify since signal can come from anywhere), then exit
-  // with code 75 which start.sh's loop interprets as respawn.
+  // with code 75 which start.sh's loop interprets as respawn, once
+  // no paste is in progress.
+  let restarting = null;
+  const restart = (delayMs = 200) => restarting ??= restartAfterDeliveries({ settleDeliveries, delayMs });
   process.on("SIGUSR2", () => {
-    console.log("SIGUSR2 received, restarting (exit 75)");
+    console.log("SIGUSR2 received, restarting (exit 75) after deliveries in progress");
     state.set("restartChannel", null);
-    setTimeout(() => process.exit(75), 200);
+    void restart();
   });
 
   // --- Preflight ---
@@ -249,7 +272,7 @@ export function startBot({
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  return { getMapping, overrides, channelMap: () => channelMap, reloadConfig, ready };
+  return { getMapping, overrides, channelMap: () => channelMap, reloadConfig, ready, restart };
 }
 
 /** WHAT: Loads Discord-to-pane bindings. WHY: Keeps malformed config from crashing bridge startup. */

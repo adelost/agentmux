@@ -109,6 +109,7 @@ Requirements, one testable line each:
 - **pulse-11** Link, drift-guard and auto-compact read pane processes from one shared `list-panes -a`, at most 2 s old, instead of two questions per pane; drift-guard captures only panes whose engine runs. Source: own (askers 2026-10-28 11:15-11:20Z: drift-guard 170 and auto-compact 91 of 621 a minute)
 - **pulse-10** permission-watchdog captures a pane only while it has an open prompt, within 60 s of its journal or Claude hook moving, or once every 2 min when quiet. Source: own (askers 2026-10-28 10:52-10:55Z: permission-watchdog 415 of 857 tmux questions a minute)
 - **pulse-9** Link's target models cost one pane listing per cycle; a pane whose process, journal, Claude statusline bridge and model config did not change is not inspected again. Source: own (askers 2026-10-28 10:36-10:46Z: Link 669 of 1,594 tmux questions a minute; 2026-11-10 23:03-23:24Z: the 5 min recheck gave 4 Link captures each to 57 quiet panes in 20.9 min, against UC-1's 0)
+- **pulse-12** A bridge restart (`amux restart`, Discord `/restart`, sync) starts no new delivery and exits only once a paste in progress has left the composer, waiting at most 2 min. Source: delivery:2d6b052aa38c9893dc7b22eac78022c6 (sandman:0, 2026-11-10 23:17Z, row 116d)
 
 ## 4. Architecture
 
@@ -373,6 +374,7 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 | `core/pulse/control-transport.mjs` | `core/pulse/control-transport.test.mjs::logs a shadow disagreement with both answers`, `core/pulse/control-transport.test.mjs::answers the same as exec`, `core/pulse/control-transport.test.mjs::starts no process for read-only questions`, `core/pulse/control-transport.test.mjs::routes writes and multi-line commands to exec`, `core/pulse/control-transport.test.mjs::matches replies in order under a burst of 200 questions`, `core/pulse/control-transport.test.mjs::a slow reply fails only its own question and keeps the client`, `core/pulse/control-transport.test.mjs::fails pending questions and degrades to exec when the client stops replying`, `core/pulse/control-transport.test.mjs::reconnects after its session is killed`, `core/pulse/control-transport.test.mjs::never starts a tmux server` |
 | `core/pulse/io-counters.mjs` | `core/pulse/control-transport.test.mjs::starts no process for read-only questions`, `cli/pulse.test.mjs::shows counts per verb and pane`, `cli/pulse.test.mjs::names who asked each question` |
 | `index.mjs` | `core/pulse/control-transport.test.mjs::answers the same as exec`, `core/tmux.test.mjs` |
+| `bot.mjs` | `core/delivery-broker.test.mjs::a bridge restart waits for a paste in progress (row 116d)` |
 | `cli/pulse.mjs` | `cli/pulse.test.mjs::shows counts per verb and pane` |
 | `docs/fleet/maintenance.md` | n/a: documentation |
 | `channels/permission-watchdog.mjs` | n/a: changes in B2 and B4; their tests are added to this table in that step's design delta |
@@ -391,6 +393,7 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 
 | Test | Guards | Level | Write min | Run s |
 |---|---|---|---|---|
+| `core/delivery-broker.test.mjs::a bridge restart waits for a paste in progress (row 116d)` | pulse-12 | component | 20 | 1 |
 | `cli/config.test.mjs::parses agentmux.yaml again only when it changes` | pulse-8 | unit | 10 | 1 |
 | `core/pulse/control-transport.test.mjs::answers the same as exec` | pulse-2, R-2, R-3 | integration | 30 | 5 |
 | `core/pulse/control-transport.test.mjs::starts no process for read-only questions` | pulse-1, pulse-5 | integration | 15 | 3 |

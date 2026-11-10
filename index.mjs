@@ -265,7 +265,7 @@ const deliveryBroker = createDeliveryBroker({
 if (!TOKEN) {
   const localBridge = startBot({
     channels: [], agentsYaml: AGENTS_YAML, whisperUrl: WHISPER_URL, agent, tts, state: appState,
-    inboundStore,
+    inboundStore, settleDeliveries: () => deliveryBroker.stop(),
     onMessage: async () => {},
   });
   await localBridge.ready;
@@ -281,7 +281,7 @@ if (!TOKEN) {
 const claimGuard = createClaimGuardRuntime({ discord, broker: deliveryBroker, configPath: AGENTS_YAML });
 // --- Wire up ---
 
-const { getMapping, overrides, channelMap, reloadConfig, ready: bridgeReady } = startBot({
+const { getMapping, overrides, channelMap, reloadConfig, ready: bridgeReady, restart: restartBridge } = startBot({
   channels: [discord],
   agentsYaml: AGENTS_YAML,
   whisperUrl: WHISPER_URL,
@@ -290,6 +290,7 @@ const { getMapping, overrides, channelMap, reloadConfig, ready: bridgeReady } = 
   state: appState,
   inboundStore,
   onClaimGuardHumanMessage: message => claimGuard?.humanMessage(message),
+  settleDeliveries: () => deliveryBroker.stop(),
   prepareMessage: (msg) => attachments.transcribeAhead(msg),
   // onMessage is set below after handlers are created (circular dep)
   onMessage: (...args) => handlers.onMessage(...args),
@@ -309,6 +310,7 @@ const handlers = createHandlers({
   agentsYamlPath: AGENTS_YAML,
   recorder,
   deliveryBroker,
+  scheduleBridgeRestart: restartBridge,
 });
 
 // SIGUSR1 = "run sync" trigger from the CLI (`amux sync`). Same body as
