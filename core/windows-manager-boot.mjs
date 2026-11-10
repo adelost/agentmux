@@ -2,6 +2,7 @@
 // not order (a manual wsl --shutdown, a Windows reboot, a crash) and says so
 // once in the rescue channel. It never enters a WSL that is not already running.
 
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { planBootNotice } from "./windows-manager-commands.mjs";
 import { deliverReply } from "./windows-manager-discord.mjs";
@@ -9,8 +10,6 @@ import { trackManagerBootId } from "./windows-manager.mjs";
 
 const BOOT_WATCH_MS = 60_000;
 const PROBE_TIMEOUT_MS = 20_000;
-// execFile kills a child only for a timeout above 0.
-const NEVER_KILLED = 0;
 const BOOT_ID_TIMEOUT = Object.freeze({ ok: false, reason: "boot-id-timeout" });
 const BOOT_ID_PENDING = Object.freeze({ ok: false, reason: "boot-id-pending" });
 const WSL_IDENTIFIER = /^[A-Za-z0-9._-]{1,64}$/u;
@@ -23,30 +22,35 @@ function settleWithin(promise, timeoutMs, onTimeout) {
   return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
-function toBootObservation(read) {
-  const bootId = read.stdout.trim();
-  return read.ok && BOOT_ID.test(bootId) ? { ok: true, running: true, bootId } : { ok: false, reason: "boot-id-unreadable" };
+function toBootObservation(text) {
+  const bootId = String(text).trim();
+  return BOOT_ID.test(bootId) ? { ok: true, running: true, bootId } : { ok: false, reason: "boot-id-unreadable" };
 }
 
+/** WHAT: Reads a Windows path as text. WHY: The boot id comes through WSL's 9p share, a file read on the Windows side. */
+const readWindowsText = (path) => readFile(path, "utf8");
+
 /** WHAT: Builds a reader for the WSL boot id that only runs while the distro is up. WHY: Prevents the boot watch from starting a WSL the human shut down. */
-export function createRunningBootReader({ rootDir, run, readJson, log = () => {}, systemRoot = process.env.SystemRoot || "C:\\Windows" }) {
+export function createRunningBootReader({ rootDir, run, readJson, readText = readWindowsText, log = () => {},
+  systemRoot = process.env.SystemRoot || "C:\\Windows" }) {
   const wslExe = join(systemRoot, "System32", "wsl.exe");
   let slowRead = null;
   return async () => {
     if (slowRead) return BOOT_ID_PENDING;
     const restarter = readJson(join(rootDir, "config.json"));
-    if (!WSL_IDENTIFIER.test(restarter?.distro || "") || !WSL_IDENTIFIER.test(restarter?.linuxUser || "")) {
+    if (!WSL_IDENTIFIER.test(restarter?.distro || "")) {
       return { ok: false, reason: "restarter-config-missing-distro" };
     }
     // wsl.exe lists in UTF-16LE. A failed list reads as not running: only a listed distro is ever entered.
     const listed = await run(wslExe, ["--list", "--running", "--quiet"], PROBE_TIMEOUT_MS);
     const names = listed.stdout.replace(/[\0\uFEFF\uFFFD]/gu, "").split(/\r?\n/u).map((line) => line.trim());
     if (!names.includes(restarter.distro)) return { ok: true, running: false };
-    // The read is never killed: WSL's relay for a wsl.exe killed before it connected waits forever
-    // (95 of the 101 relays left waiting in the 28 to 30 Oct boot). Only the turn is released at the deadline.
+    // The id is read through WSL's 9p share, never by `wsl.exe -- cat`: a wsl.exe started a Linux process whose relay waits with no limit
+    // once wsl.exe goes, whether it was killed (95 of 101 relays, 28 to 30 Oct) or gave up by itself after 30 s (5 of 6 slow reads,
+    // 10 Nov 11:38-11:55Z; row 123). A slow read is waited out alone; only the turn is released at the deadline.
     const startedAt = performance.now();
-    const read = run(wslExe, ["-d", restarter.distro, "-u", restarter.linuxUser, "--", "cat", "/proc/sys/kernel/random/boot_id"], NEVER_KILLED)
-      .then(toBootObservation);
+    const read = Promise.resolve(readText(`\\\\wsl.localhost\\${restarter.distro}\\proc\\sys\\kernel\\random\\boot_id`))
+      .then(toBootObservation, (error) => ({ ok: false, reason: `boot-id-unreadable: ${error?.code || error?.message || error}` }));
     const first = await settleWithin(read, PROBE_TIMEOUT_MS, BOOT_ID_TIMEOUT);
     if (first === BOOT_ID_TIMEOUT) {
       slowRead = read

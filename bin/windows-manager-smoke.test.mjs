@@ -463,8 +463,8 @@ feature("windows manager smoke", () => {
   });
 
   unit("the boot watch reads the boot id only from a WSL that is already running", {
-    then: ["a stopped distro is never entered, a running one is read through wsl.exe's UTF-16 list", async () => {
-      const calls = [];
+    then: ["a stopped distro is never entered, a running one is listed through wsl.exe's UTF-16 list and read through its 9p share", async () => {
+      const calls = [], reads = [];
       let listed = "";
       const run = async (file, args) => {
         calls.push(args.join(" "));
@@ -472,13 +472,17 @@ feature("windows manager smoke", () => {
           ? { ok: true, stdout: listed }
           : { ok: true, stdout: "d4528e2a-fb97-4544-b3c7-0a24eb4af1c2" };
       };
-      const read = createRunningBootReader({ rootDir: "C:\\AgentmuxRestarter", run, readJson: () => ({ distro: "Ubuntu-22.04", linuxUser: "adelost" }), systemRoot: "C:\\Windows" });
+      const readText = async (path) => { reads.push(path); return "d4528e2a-fb97-4544-b3c7-0a24eb4af1c2\n"; };
+      const read = createRunningBootReader({ rootDir: "C:\\AgentmuxRestarter", run, readText, systemRoot: "C:\\Windows",
+        readJson: () => ({ distro: "Ubuntu-22.04", linuxUser: "adelost" }) });
       expect(await read()).toEqual({ ok: true, running: false });
       expect(calls).toEqual(["--list --running --quiet"]);
       // execFile decodes wsl.exe's UTF-16LE output as UTF-8, leaving a NUL after every letter.
       listed = Buffer.from("Ubuntu-22.04\r\n", "utf16le").toString("utf8");
       expect(await read()).toEqual({ ok: true, running: true, bootId: "d4528e2a-fb97-4544-b3c7-0a24eb4af1c2" });
-      expect(calls.at(-1)).toBe("-d Ubuntu-22.04 -u adelost -- cat /proc/sys/kernel/random/boot_id");
+      // row 123: no wsl.exe enters the distro, whose relay would wait with no limit once wsl.exe gives up
+      expect(calls).toEqual(["--list --running --quiet", "--list --running --quiet"]);
+      expect(reads).toEqual(["\\\\wsl.localhost\\Ubuntu-22.04\\proc\\sys\\kernel\\random\\boot_id"]);
     }],
   });
 
