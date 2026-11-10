@@ -22,7 +22,9 @@ export function createCaptureDue({ activityOf = paneActivityStamp, activeMs = 60
     const paneKey = `${agentConfig.name}:${paneIdx}`;
     const stamp = activityOf(agentConfig, paneIdx);
     const last = activity.get(paneKey);
-    const changedAt = !last || last.stamp !== stamp ? at : last.changedAt;
+    // First sight is captured once (!last) but is no change: counted as one, every pane was captured each round for its first minute
+    // after a bridge start, 6 times, before its quiet recheck began (row 116c, 10 Nov)
+    const changedAt = !last ? -Infinity : last.stamp !== stamp ? at : last.changedAt;
     const due = tracking || at - changedAt < activeMs || !last || at - last.capturedAt >= quietRecheckMs;
     activity.set(paneKey, { stamp, changedAt, capturedAt: due ? at : last.capturedAt });
     return due;

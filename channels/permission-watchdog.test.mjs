@@ -74,7 +74,8 @@ describe("permission watchdog", () => {
       if (capturesOfPane0() > before) captured.push(at / 1000);
       h.advance(10_000);
     }
-    expect(captured).toEqual([0, 10, 20, 30, 40, 50, 170, 200, 210, 220, 230, 240, 250]);
+    // First sight is one capture, not a minute of them: [0, 10, 20, 30, 40, 50, 170] read a quiet pane as active for its first minute (row 116c)
+    expect(captured).toEqual([0, 120, 200, 210, 220, 230, 240, 250]);
   });
 
   it("answers the safe rm prompt once after the short answer delay, not after two minutes", async () => {
@@ -182,10 +183,12 @@ describe("permission watchdog", () => {
 
   it("forgets a prompt that disappears and restarts the clock if it returns", async () => {
     const screens = { 0: PROMPT };
-    const h = harness({ screens });
+    const world = { stamp: "j1" };
+    const h = harness({ screens, activityOf: () => world.stamp });
     await h.wd.tick(); h.advance(8_000);
     screens[0] = IDLE; await h.wd.tick();
-    screens[0] = PROMPT; await h.wd.tick(); h.advance(8_000);
+    // The tool call behind a returning prompt reaches the journal first (DESIGN-pulse UC-1)
+    world.stamp = "j2"; screens[0] = PROMPT; await h.wd.tick(); h.advance(8_000);
     expect(await h.wd.tick()).toEqual([]);
     h.advance(3_000);
     expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:0", action: "answered" }]);
