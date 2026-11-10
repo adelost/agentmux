@@ -9,8 +9,8 @@
 // tmux-continuum restore of the whole fleet.
 
 import { spawn } from "child_process";
-import { fileURLToPath } from "url";
 import { esc } from "../../lib.mjs";
+import { askerOf } from "./asker.mjs";
 
 /** WHAT: Names the session the control client attaches to. WHY: Keeps agent sessions' attached-client counts unchanged. */
 export const PULSE_SESSION = "amux-pulse";
@@ -21,32 +21,8 @@ const READ_ONLY_VERBS = new Set(["display-message", "capture-pane", "list-panes"
 const PRINTS_ONLY_WITH_P = new Set(["display-message", "capture-pane"]);
 const MAX_REPLY_BYTES = 1024 * 1024;
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 32000, 60000];
-const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-// Frames that only carry a question to tmux; the frames above them are the asker.
+// Frames that only carry a question to tmux; the frames above them are the asker (pulse-5).
 const CARRIERS = new Set(["core/pulse/control-transport.mjs", "core/pulse/start-pulse.mjs", "core/tmux.mjs", "index.mjs", "lib.mjs"]);
-const ASKER_FRAMES = 3;
-
-/**
- * WHAT: Names who asked: up to three agentmux functions above the tmux adapter, innermost first.
- * WHY: Keeps `amux pulse io` able to say which watcher costs the questions (pulse-5).
- */
-function askerOf() {
-  const limit = Error.stackTraceLimit;
-  Error.stackTraceLimit = 20;
-  const stack = new Error().stack ?? "";
-  Error.stackTraceLimit = limit;
-  const names = [];
-  for (const line of stack.split("\n").slice(1)) {
-    const frame = /at (?:async )?(?:(\S+) \()?((?:file:\/\/)?\/[^)]+?):\d+:\d+\)?$/u.exec(line.trim());
-    const path = frame && (frame[2].startsWith("file:") ? fileURLToPath(frame[2]) : frame[2]);
-    if (!path?.startsWith(PACKAGE_ROOT)) continue;
-    const file = path.slice(PACKAGE_ROOT.length);
-    if (file.startsWith("node_modules/") || CARRIERS.has(file)) continue;
-    names.push(`${frame[1] ?? "(anon)"} ${file}`);
-    if (names.length === ASKER_FRAMES) break;
-  }
-  return names.length ? names.join(" < ") : "unknown";
-}
 
 /**
  * WHAT: Parses an adapter-built command into words; null means a shell would treat it specially.
@@ -284,7 +260,7 @@ export function createControlTransport({
 
   /** WHAT: Runs one tmux command line the way tmuxExec did. WHY: Keeps every caller unchanged while the path changes. */
   function exec(cmd) {
-    const asker = askerOf();
+    const asker = askerOf(CARRIERS);
     const question = mode === "exec" ? null : readOnlyQuestion(cmd, socket);
     if (!question) { record("process", null, asker); return processExec(cmd); }
     if (mode === "shadow") return shadow(cmd, question, asker);

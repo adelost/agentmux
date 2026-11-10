@@ -72,6 +72,7 @@ import { cmdSleepWatch } from "./cli/sleep.mjs";
 import { createAudioOutbox } from "./core/audio-outbox.mjs";
 import { DEFAULT_TMUX_SOCKET, DEFAULT_TTS_VOICE, runtimeAgentsPath } from "./core/runtime-defaults.mjs";
 import { startPulse } from "./core/pulse/start-pulse.mjs";
+import { startReadMeter } from "./core/pulse/read-meter.mjs";
 import { ensureRuntimeConfig } from "./core/runtime-config.mjs";
 // --- Config ---
 
@@ -135,6 +136,7 @@ for (const failure of startupHints.errors) {
 const exec = promisify(execCb);
 const run = (cmd, timeoutMs = TIMEOUT, env = {}) =>
   exec(cmd, { timeout: timeoutMs, env: { ...process.env, ...env, PATH: SHELL_PATH }, maxBuffer: 1024 * 1024 });
+startReadMeter();   // row 124: the bytes the bridge reads, by reader, while ~/.agentmux/read-meter.on exists (`amux pulse reads`)
 const { exec: tmuxExec, fleet: fleetPanes } = startPulse({ socket: TMUX_SOCKET, processExec: (cmd) =>
   exec(cmd, { timeout: 3000, env: { ...process.env, PATH: SHELL_PATH } }) });
 
