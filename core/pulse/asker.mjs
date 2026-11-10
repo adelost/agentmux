@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const ASKER_FRAMES = 3;
+const SELF = "core/pulse/asker.mjs";   // its own frame names no one
 
 /** WHAT: Names the caller chain of the current call, skipping `carriers` (paths from the package root) and node_modules. WHY: Shows which watcher pays. */
 export function askerOf(carriers) {
@@ -18,7 +19,7 @@ export function askerOf(carriers) {
     const path = frame && (frame[2].startsWith("file:") ? fileURLToPath(frame[2]) : frame[2]);
     if (!path?.startsWith(PACKAGE_ROOT)) continue;
     const file = path.slice(PACKAGE_ROOT.length);
-    if (file.startsWith("node_modules/") || carriers.has(file)) continue;
+    if (file.startsWith("node_modules/") || file === SELF || carriers.has(file)) continue;
     names.push(`${frame[1] ?? "(anon)"} ${file}`);
     if (names.length === ASKER_FRAMES) break;
   }
