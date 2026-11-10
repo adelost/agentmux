@@ -11,7 +11,11 @@ import { latestPaneStatesCached } from "../core/events.mjs";
 import { readParkState } from "../core/pane-park.mjs";
 
 vi.mock("../cli/config.mjs", () => ({ listAgents: vi.fn(), findChannelForPane: () => "fake-channel" }));
-vi.mock("../core/reminder-activity.mjs", () => ({ readReminderActivity: vi.fn() }));
+// Delivery cases set each round's activity themselves, so the reader passes every call through (row 116d's holding is tested in core/reminder-activity.test.mjs).
+vi.mock("../core/reminder-activity.mjs", () => {
+  const readReminderActivity = vi.fn();
+  return { readReminderActivity, createReminderActivityReader: () => (...args) => readReminderActivity(...args) };
+});
 vi.mock("../core/events.mjs", async (original) => ({ ...await original(), latestPaneStatesCached: vi.fn() }));
 vi.mock("../core/pane-park.mjs", () => ({ readParkState: vi.fn() }));
 

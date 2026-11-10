@@ -10,7 +10,7 @@
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
-import { readReminderActivity } from "../core/reminder-activity.mjs";
+import { createReminderActivityReader } from "../core/reminder-activity.mjs";
 import { dialectFor } from "../cli/inspect-pane.mjs";
 import { isCodingDialect } from "../core/dialects.mjs";
 import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
@@ -35,6 +35,7 @@ export function createDriftGuard({
   config,
   fleetPanes = null,
   log = (msg) => console.log(`drift-guard | ${msg}`),
+  readActivity = createReminderActivityReader(),
 }) {
   let intervalId = null;
   let ticking = false;
@@ -125,7 +126,7 @@ export function createDriftGuard({
 
         // Step 1: detect new /compact. If so, advance lastCompactTsMs AND
         // skip reminder this tick — the pane just refreshed its rules.
-        const turnActivity = readReminderActivity(paneDir, panes[i].cmd, cutoffFor(paneState));
+        const turnActivity = readActivity(paneDir, panes[i].cmd, cutoffFor(paneState));
         const latestCompactTs = turnActivity.latestCompactTs;
         if (latestCompactTs != null &&
             (paneState.lastCompactTsMs == null || latestCompactTs > paneState.lastCompactTsMs)) {

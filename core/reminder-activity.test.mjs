@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { claudeProjectDir } from "./claude-paths.mjs";
-import { readReminderActivity } from "./reminder-activity.mjs";
+import { createReminderActivityReader, readReminderActivity } from "./reminder-activity.mjs";
 
 let home, pane;
 const stamp = (n) => new Date(Date.UTC(2026, 8, 5, 10, n)).toISOString();
@@ -47,6 +47,18 @@ describe("real engine journals for drift activity", () => {
     expect(readReminderActivity(pane, engine, null)).toMatchObject({ count: 2, latest: stamp(3), latestCompactTs: Date.parse(stamp(4)) });
     expect(readReminderActivity(pane, engine, Date.parse(stamp(0)))).toMatchObject({ count: 1, latest: stamp(3) });
     expect(readReminderActivity(pane, engine, Date.parse(stamp(4)))).toMatchObject({ count: 0, latest: null });
+  });
+  it("an idle journal is read once, then again only after it grows or the cutoff moves (row 116d)", () => {
+    const file = join(claudeProjectDir(pane), "fixture.jsonl");
+    journal(file, prompts.map((text, n) => ({ type: "user", message: { content: text }, timestamp: stamp(n) })));
+    const read = vi.fn(readReminderActivity);
+    const activity = createReminderActivityReader({ read });
+    for (let round = 0; round < 5; round += 1) activity(pane, "claude", null);
+    expect(read).toHaveBeenCalledTimes(1);
+    journal(file, [...prompts, "one more task"].map((text, n) => ({ type: "user", message: { content: text }, timestamp: stamp(n) })));
+    expect(activity(pane, "claude", null)).toMatchObject({ count: 3, latest: stamp(4) });
+    expect(activity(pane, "claude", Date.parse(stamp(3)))).toMatchObject({ count: 1, latest: stamp(4) });
+    expect(read).toHaveBeenCalledTimes(3);
   });
   it("missing engine journals cannot become work", () => {
     for (const engine of ["claude", "codex", "kimi"]) {
