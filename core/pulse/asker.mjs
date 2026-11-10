@@ -8,7 +8,7 @@ const ASKER_FRAMES = 3;
 const SELF = "core/pulse/asker.mjs";   // its own frame names no one
 
 /** WHAT: Names the caller chain of the current call, skipping `carriers` (paths from the package root) and node_modules. WHY: Shows which watcher pays. */
-export function askerOf(carriers) {
+export function askerOf(carriers, { frames = ASKER_FRAMES } = {}) {
   const limit = Error.stackTraceLimit;
   Error.stackTraceLimit = 20;
   const stack = new Error().stack ?? "";
@@ -21,7 +21,7 @@ export function askerOf(carriers) {
     const file = path.slice(PACKAGE_ROOT.length);
     if (file.startsWith("node_modules/") || file === SELF || carriers.has(file)) continue;
     names.push(`${frame[1] ?? "(anon)"} ${file}`);
-    if (names.length === ASKER_FRAMES) break;
+    if (names.length === frames) break;
   }
   return names.length ? names.join(" < ") : "unknown";
 }

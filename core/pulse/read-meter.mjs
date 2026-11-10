@@ -16,6 +16,8 @@ export const READ_METER_PATH = join(homedir(), ".agentmux", "read-meter.json");
 const WRITE_EVERY_MS = 15_000;
 const MAX_READERS = 200;
 const CARRIERS = new Set(["core/pulse/read-meter.mjs", "index.mjs", "lib.mjs"]);
+// A journal read passes three reader functions before the watcher that pays for it (readTailWindow < parseJsonlTail < readLastTurns).
+const READER_FRAMES = 6;
 
 /** WHAT: Names a file by its kind, never its own name: a Claude journal, a Codex rollout, an agentmux state file. WHY: Groups the cost by what is read. */
 export function kindOf(file) {
@@ -32,7 +34,7 @@ export function kindOf(file) {
  * WHAT: Wraps node's file reads once (sync, callback, promise and FileHandle) and counts their bytes while the flag file exists.
  * WHY: Keeps the count in the bridge's own process, where the reads are; nothing else changes about any read.
  */
-export function startReadMeter({ flag = READ_METER_FLAG, out = READ_METER_PATH, everyMs = WRITE_EVERY_MS, asker = () => askerOf(CARRIERS),
+export function startReadMeter({ flag = READ_METER_FLAG, out = READ_METER_PATH, everyMs = WRITE_EVERY_MS, asker = () => askerOf(CARRIERS, { frames: READER_FRAMES }),
   now = () => Date.now() } = {}) {
   let on = existsSync(flag), since = now(), total = 0, calls = 0;
   let byReader = {}, byKind = {};
