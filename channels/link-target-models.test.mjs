@@ -140,6 +140,36 @@ feature("Link target model truth", () => {
     }],
   });
 
+  component("a quiet pane is not inspected again as time passes (row 116c)", {
+    given: ["one mapped pane whose process and journal never move", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.parse("2026-11-11T00:00:00Z"));
+      const fleetPanes = { panes: vi.fn(async () => new Map([
+        ["lsrc:3", { index: 3, id: "%9", dead: false, command: "node", path: "/w", pid: 4101 }],
+      ])) };
+      const inspect = vi.fn(async () => ({
+        modelView: { running: true, currentSessionId: "s2", observed: observed("s2"), configured: null },
+      }));
+      const read = createLinkTargetModels({
+        agents: () => [{ name: "lsrc", dir: "/workspace", panes: [{}, {}, {}, { cmd: "claude" }] }],
+        agent: { paneProcessState: vi.fn() }, state: { get: () => ({}) }, fleetPanes, inspect, journalStamp: () => "j1",
+      });
+      return { inspect, read };
+    }],
+    when: ["Link reads once a minute for 12 minutes", async ({ inspect, read }) => {
+      try {
+        for (let minute = 0; minute <= 12; minute += 1) {
+          await read([{ id: "lsrc:3", agent: "lsrc", pane: 3 }]);
+          vi.advanceTimersByTime(60_000);
+        }
+      } finally { vi.useRealTimers(); }
+      return inspect.mock.calls.length;
+    }],
+    then: ["the pane's screen was read once, at first sight", (inspections) => {
+      expect(inspections).toBe(1);
+    }],
+  });
+
   component("targets without pane model evidence stay model-free", {
     given: ["one pane target and one Windows target", () => ({
       targets: [{ id: "lsrc:3" }, { id: "windows" }],

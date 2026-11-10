@@ -1,14 +1,14 @@
 // Link target model projection. It reads the same pane evidence as `amux ps`;
 // no target is started, resumed, prompted or asked to identify itself.
 
+import { statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { inspectPane } from "../cli/inspect-pane.mjs";
 import { paneModelSelection } from "../core/pane-model-state.mjs";
 import { codexModelOverride } from "../core/codex-profiles.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { sessionReaderForCommand } from "../core/alternate-session-reader.mjs";
-
-// A model change that moves neither the pane's process nor its journal still shows within this long.
-const RECHECK_MS = 5 * 60_000;
 
 const modelValue = (value) => {
   const model = String(value?.model || "").trim();
@@ -82,17 +82,24 @@ export async function observeLinkTargetModels({
   return new Map(entries.filter(([id, model]) => id && model));
 }
 
-/** WHAT: Returns a pane's journal stamps as inspectPane reads them. WHY: Keeps the reuse rule on the same files. */
-export function paneJournalStamp(configured, pane) {
-  return sessionReaderForCommand(configured.panes?.[pane]?.cmd || "").latestInfo(panePathFor(configured, pane));
+/**
+ * WHAT: Returns a pane's journal stamps as inspectPane reads them, with the mtime of Claude's statusline bridge for that session.
+ * WHY: Keeps the reuse rule on the same files: a Claude /model switch rewrites the bridge before its journal moves, and a Codex
+ * reading takes its model from the journal alone, so no timer is needed to see a switch (row 116c).
+ */
+export function paneJournalStamp(configured, pane, { bridgeDirectory = tmpdir() } = {}) {
+  const journal = sessionReaderForCommand(configured.panes?.[pane]?.cmd || "").latestInfo(panePathFor(configured, pane));
+  if (!journal?.path) return journal;
+  try { return [journal, statSync(join(bridgeDirectory, `claude-ctx-${basename(journal.path, ".jsonl")}.json`)).mtimeMs]; }
+  catch { return [journal, null]; }
 }
 
 /**
  * WHAT: Builds Link's model reader that inspects a pane again only after its inputs change.
- * WHY: Prevents idle panes from costing a capture and two tmux questions every 15 s (pulse-9).
+ * WHY: Prevents idle panes from costing a capture every 15 s (pulse-9), and a timed recheck from costing one every 5 min (row 116c).
  */
 export function createLinkTargetModels({
-  agents, agent, state, fleetPanes, inspect = inspectPane, journalStamp = paneJournalStamp, now = Date.now,
+  agents, agent, state, fleetPanes, inspect = inspectPane, journalStamp = paneJournalStamp,
 } = {}) {
   const readings = new Map();
   return async (targets) => {
@@ -107,9 +114,9 @@ export function createLinkTargetModels({
         configured.panes?.[process.index], configured.claudeModel, configured.codexModel,
         codexModelOverride(state, configured.name, process.index)]);
       const held = readings.get(key);
-      if (held?.stamp === stamp && now() - held.at < RECHECK_MS) return held.reading;
+      if (held?.stamp === stamp) return held.reading;
       const reading = await inspect(ctx, configured, process);
-      readings.set(key, { stamp, at: now(), reading });
+      readings.set(key, { stamp, reading });
       return reading;
     };
     return observeLinkTargetModels({ targets, agents: agents(), agent, state, inspect: reuse, paneProcess });
