@@ -13,6 +13,9 @@ import { normalizePrompt, promptAppearsInEvents, promptEventMatches } from "./cl
 // Long sessions require bounded tail reads to stay below Node string limits.
 const DEFAULT_JSONL_WINDOW_BYTES = 8 * 1024 * 1024; // 8 MiB tail: thousands of turns
 const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024; // hard cap, well under the string limit
+const PROMPT_FIRST_BYTES = 256 * 1024;        // a prompt's search starts at the last 256 KiB and doubles
+const PROMPT_MAX_BYTES = 16 * 1024 * 1024;     // up to 16 MiB of a file
+const PROMPT_SEARCH_FILES = 2;                 // in the two newest files
 
 /**
  * Claude Code's path encoding: every `/` and `.` becomes a `-`.
@@ -51,20 +54,19 @@ function findJsonlAndEvents(projectDir, needle, { notBeforeMs = 0 } = {}) {
   const files = listJsonlFiles(projectDir);
   if (files.length === 0) return null;
 
-  if (!needle) {
-    const events = parseJsonl(files[0].path);
-    return { jsonl: files[0].path, events };
-  }
-
-  for (const { path } of files) {
-    const events = parseJsonl(path);
-    const eligible = notBeforeMs
-      ? events.filter((event) => {
-        const eventMs = Date.parse(event?.timestamp || "");
-        return Number.isFinite(eventMs) && eventMs >= notBeforeMs;
-      })
-      : events;
-    if (promptAppearsInEvents(eligible, needle)) return { jsonl: path, events };
+  // Row 124: a busy or reply check reads the latest turns, never the whole journal (a 130 MB journal was read whole at every poll of a delivery,
+  // 141 MB per 10 s of the bridge's 270 on 10 Nov). A prompt is looked for from the end in a window that doubles until it is found, in the two
+  // newest files (a /clear or /compact starts a new one): a prompt the bridge is waiting on was written moments ago.
+  if (!needle) return { jsonl: files[0].path, events: parseJsonlWindow(files[0].path) };
+  const found = (events) => promptAppearsInEvents(notBeforeMs
+    ? events.filter((event) => {
+      const eventMs = Date.parse(event?.timestamp || "");
+      return Number.isFinite(eventMs) && eventMs >= notBeforeMs;
+    })
+    : events, needle);
+  for (const { path } of files.slice(0, PROMPT_SEARCH_FILES)) {
+    const events = parseJsonlWindow(path, { initialBytes: PROMPT_FIRST_BYTES, maxBytes: PROMPT_MAX_BYTES, enough: found });
+    if (found(events)) return { jsonl: path, events };
   }
   return null;
 }

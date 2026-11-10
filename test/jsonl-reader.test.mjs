@@ -1,5 +1,6 @@
-import { feature, unit, expect } from "bdd-vitest";
-import { appendFileSync, mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFileSync, utimesSync } from "fs";
+import { component, feature, unit, expect } from "bdd-vitest";
+import { appendFileSync, mkdtempSync, mkdirSync, copyFileSync, readFileSync, rmSync, writeFileSync, utimesSync } from "fs";
+import { startReadMeter } from "../core/pulse/read-meter.mjs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
@@ -206,6 +207,31 @@ feature("extractFromJsonl: session rotation (/clear or /compact mid-turn)", () =
     then: ["reports busy, old session still streaming", (r, { cleanup }) => {
       expect(r).toBe(true);
       cleanup();
+    }],
+  });
+});
+
+// Row 124: a delivery polls isBusy every few seconds; each poll parsed the whole journal, 130 MB on a long pane (10 Nov, 141 MB per 10 s of
+// the bridge's 270). The prompt the bridge waits on was written last, so the check reads from the end and stops once it has it.
+feature("isBusyFromJsonl: a long journal is read from its end, not whole", () => {
+  component("finds a streaming prompt at the end of a 40 MB journal reading under 1 MB", {
+    given: ["40 MB of earlier events, then the prompt still streaming", () => {
+      const ctx = setupFakeProject("busy-streaming.jsonl");
+      const journal = join(ctx.projectDir, "session-abc123.jsonl"), tail = readFileSync(journal);
+      const filler = `${JSON.stringify({ type: "system", subtype: "note", content: "x".repeat(10_000), timestamp: "2026-11-10T20:00:00.000Z" })}\n`;
+      writeFileSync(journal, filler.repeat(4_000)); appendFileSync(journal, tail);
+      const meterDir = mkdtempSync(join(tmpdir(), "agentmux-read-meter-"));
+      writeFileSync(join(meterDir, "on"), "");
+      const meter = startReadMeter({ flag: join(meterDir, "on"), out: join(meterDir, "reads.json"), everyMs: 3_600_000, asker: () => "test" });
+      return { ...ctx, meter, meterDir };
+    }],
+    when: ["checking busy for the prompt", ({ paneDir, meter }) => {
+      const before = meter.totals().total;
+      return { busy: isBusyFromJsonl(paneDir, "write a long story"), read: meter.totals().total - before };
+    }],
+    then: ["busy, and the 40 MB were not read", ({ busy, read }, { cleanup, meter, meterDir }) => {
+      meter.stop(); rmSync(meterDir, { recursive: true, force: true }); cleanup();
+      expect({ busy, readUnder1MB: read < 1_000_000 }).toEqual({ busy: true, readUnder1MB: true });
     }],
   });
 });
