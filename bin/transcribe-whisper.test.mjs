@@ -50,7 +50,10 @@ echo "$part"
       const channel = { async send(_id, payload) { notices.push(payload); } };
       await reconciler.enqueue(voice, channel); await reconciler.enqueue(voice, channel);
       expect(partial.status).toBe(22); expect(partial.stdout).toBe("");
-      expect(attempts).toBe(1); expect(prompts).toEqual([]); expect(notices).toHaveLength(1);
+      // The unknown outcome is not transcribed again, but its audio reaches the pane (10 Nov 21:55Z).
+      expect(attempts).toBe(1);
+      expect(prompts).toEqual([expect.stringMatching(/^\[voice message not transcribed \(outcome unknown\); audio attached: \S+\]$/u)]);
+      expect(notices).toHaveLength(1);
       expect(store.read("channel", "long").status).toBe("completed");
     } finally { rmSync(root, { recursive: true, force: true }); }
   }, 60000);

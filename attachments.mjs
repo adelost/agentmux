@@ -95,6 +95,42 @@ export function createAttachmentHandler({
     }
   }
 
+  /** WHAT: One audio attachment's line for the pane: its transcript, or its audio when the outcome is unknown; "" when a notice is all, null to stop.
+   *  WHY: Keeps the voice rules in one place; they took five fixes in sixty days inside buildPrompt (agentmux churn, 10 Nov). */
+  async function voiceLine(msg, att, tmpFiles) {
+    let transcribed = await takeTranscription(msg, att, tmpFiles);
+    if (msg.isInboundCompleted?.() || transcribed === null) return null;
+    const terminal = terminalVoiceOutcome(transcribed);
+    if (terminal) {
+      const notice = terminal.code === "unknown" ? `${terminal.notice} The audio goes to the pane as a file.` : terminal.notice;
+      if (typeof msg.sendTranscriptOnce === "function") {
+        await msg.sendTranscriptOnce(att.id, [notice], { kind: "notice" });
+      } else await msg.reply(notice);
+      // An unknown outcome is never transcribed again, but the message still reaches its pane: the audio goes as a file
+      // (10 Nov 21:55Z: Mattias's 57 s voice message to deep:0 was dropped here).
+      if (terminal.code !== "unknown") return "";
+      const path = await downloadToTmp(msg, att, tmpFiles);
+      return path ? `[voice message not transcribed (outcome unknown); audio attached: ${path}]` : null;
+    }
+    // The wrapper marks fallback-engine transcripts (the primary failed →
+    // whisper1 took over). The mark must survive into BOTH destinations:
+    // whisper1 mishears technical terms, and a silent fallback would be
+    // a quality downgrade nobody knows to compensate for.
+    const FALLBACK_MARK = "[stt-fallback:whisper1] ";
+    const viaFallback = transcribed.startsWith(FALLBACK_MARK);
+    if (viaFallback) transcribed = transcribed.slice(FALLBACK_MARK.length).trim();
+    // Same disclaimer in both destinations: the agent (via pane text)
+    // and the Discord reply. The "interpret intent" hint is as useful
+    // for the human reading the reply as it is for the agent reading
+    // the prompt — anyone seeing it knows this is AI-transcribed and
+    // may have word-level errors.
+    const tagged = viaFallback
+      ? `[transcribed voice via whisper1 FALLBACK (primary transcription failed); extra error-prone on technical terms, interpret intent${lateVoiceNote(msg)}] ${transcribed}`
+      : `[transcribed voice, may contain speech-to-text errors; interpret intent${lateVoiceNote(msg)}] ${transcribed}`;
+    await replyWithTranscript(msg, att.id, transcribed, viaFallback);
+    return tagged;
+  }
+
   async function buildPrompt(msg, tmpFiles) {
     if (msg.isInboundCompleted?.()) return null;
     let rawText = msg.text.trim();
@@ -104,34 +140,9 @@ export function createAttachmentHandler({
       const isImage = att.contentType?.startsWith("image/");
 
       if (isAudio) {
-        let transcribed = await takeTranscription(msg, att, tmpFiles);
-        if (msg.isInboundCompleted?.()) return null;
-        if (transcribed === null) return null;
-        const terminal = terminalVoiceOutcome(transcribed);
-        if (terminal) {
-          if (typeof msg.sendTranscriptOnce === "function") {
-            await msg.sendTranscriptOnce(att.id, [terminal.notice], { kind: "notice" });
-          } else await msg.reply(terminal.notice);
-          continue;
-        }
-        // The wrapper marks fallback-engine transcripts (the primary failed →
-        // whisper1 took over). The mark must survive into BOTH destinations:
-        // whisper1 mishears technical terms, and a silent fallback would be
-        // a quality downgrade nobody knows to compensate for.
-        const FALLBACK_MARK = "[stt-fallback:whisper1] ";
-        const viaFallback = transcribed.startsWith(FALLBACK_MARK);
-        if (viaFallback) transcribed = transcribed.slice(FALLBACK_MARK.length).trim();
-        // Same disclaimer in both destinations: the agent (via pane text)
-        // and the Discord reply. The "interpret intent" hint is as useful
-        // for the human reading the reply as it is for the agent reading
-        // the prompt — anyone seeing it knows this is AI-transcribed and
-        // may have word-level errors.
-        const tagged = viaFallback
-          ? `[transcribed voice via whisper1 FALLBACK (primary transcription failed); extra error-prone on technical terms, interpret intent${lateVoiceNote(msg)}] ${transcribed}`
-          : `[transcribed voice, may contain speech-to-text errors; interpret intent${lateVoiceNote(msg)}] ${transcribed}`;
-        await replyWithTranscript(msg, att.id, transcribed, viaFallback);
-        if (!rawText) rawText = tagged;
-        else rawText = `${rawText}\n${tagged}`;
+        const line = await voiceLine(msg, att, tmpFiles);
+        if (line === null) return null;
+        if (line) rawText = rawText ? `${rawText}\n${line}` : line;
       } else {
         const path = await downloadToTmp(msg, att, tmpFiles);
         if (!path) return null;

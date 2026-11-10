@@ -8,7 +8,8 @@ import { createAttachmentHandler } from "../attachments.mjs";
 
 describe("voice failure is still delivered", () => {
   for (const outcome of ["no_speech", "unknown", "refused"]) for (const text of ["", "Behåll min skrivna text"]) {
-    it(`terminal ${outcome} posts a notice once, keeps accompanying text and never retries STT`, async () => {
+    const audio = outcome === "unknown" ? " and sends the audio" : "";
+    it(`terminal ${outcome} posts a notice once, keeps accompanying text${audio} and never retries STT`, async () => {
       const root = mkdtempSync(join(tmpdir(), "voice-terminal-"));
       const store = createDiscordInboundStore({ rootDir: root, downloadBuffer: async () => Buffer.from("audio") });
       let calls = 0;
@@ -29,7 +30,10 @@ describe("voice failure is still delivered", () => {
         await reconciler.enqueue(voice, channel);
         expect(calls).toBe(1);
         expect(posted).toHaveLength(1);
-        expect(delivered).toEqual(text ? [text] : []);
+        // An unknown outcome still reaches the pane as its audio (10 Nov 21:55Z: a voice message to deep:0 was dropped here).
+        if (outcome === "unknown") expect(delivered).toEqual([expect.stringMatching(new RegExp(
+          `^${text ? `${text}\\n` : ""}\\[voice message not transcribed \\(outcome unknown\\); audio attached: \\S+\\]$`, "u"))]);
+        else expect(delivered).toEqual(text ? [text] : []);
         expect(store.read("channel", "terminal").status).toBe("completed");
       } finally { rmSync(root, { recursive: true, force: true }); }
     });

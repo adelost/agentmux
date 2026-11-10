@@ -7,12 +7,16 @@ import { voiceContextEnv } from "./pane-latest-reply.mjs";
 export const TRANSCRIPT_PREFIX =
   "[transcribed voice, may contain speech-to-text errors; interpret intent]";
 
+// System words are English (Mattias, 10 Nov 22:0xZ). An unknown outcome is not resent; Discord's path sends the audio itself (attachments.mjs).
+const UNKNOWN_NOTICE = "The transcription's outcome is unknown, so it is not sent again.";
+const REFUSED_NOTICE = "The transcription service refused the audio; it is not sent again automatically.";
+
 /** WHAT: Maps terminal STT control output. WHY: Keeps status out of spoken content. */
 export function terminalVoiceOutcome(text) {
   const value = String(text || "").trim();
-  if (!value || value === "[stt:no_speech]") return { code: "no_speech", notice: "Inget tal hördes." };
-  if (value === "[stt:unknown]") return { code: "unknown", notice: "Transkriberingens utfall är okänt. Ljudet skickas inte igen." };
-  if (value === "[stt:refused]") return { code: "refused", notice: "Transkriberingen avvisades av tjänsten. Ingen automatisk omsändning." };
+  if (!value || value === "[stt:no_speech]") return { code: "no_speech", notice: "No speech was heard." };
+  if (value === "[stt:unknown]") return { code: "unknown", notice: UNKNOWN_NOTICE };
+  if (value === "[stt:refused]") return { code: "refused", notice: REFUSED_NOTICE };
   return null;
 }
 
@@ -61,10 +65,10 @@ export async function transcribeVoiceBuffer({
   } catch (error) {
     if (error.status) throw error;
     if (Number(error.code) === 22) {
-      throw Object.assign(withStatus("Transkriberingens utfall är okänt. Ljudet skickas inte igen.", 422), { code: "unknown" });
+      throw Object.assign(withStatus(UNKNOWN_NOTICE, 422), { code: "unknown" });
     }
     if (Number(error.code) === 23) {
-      throw Object.assign(withStatus("Transkriberingen avvisades av tjänsten. Ingen automatisk omsändning.", 422), { code: "refused" });
+      throw Object.assign(withStatus(REFUSED_NOTICE, 422), { code: "refused" });
     }
     throw withStatus(`transcription failed: ${error.message}`, 500);
   } finally {

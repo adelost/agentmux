@@ -181,7 +181,7 @@ feature("buildPrompt: audio attachment transcription", () => {
       ctx.handler.buildPrompt(msg, tmpFiles)],
     then: ["null and user gets a feedback reply", (result, { msg }) => {
       expect(result).toBeNull();
-      expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("Inget tal hördes"));
+      expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("No speech was heard"));
     }],
   });
 

@@ -462,7 +462,7 @@ word_times = os.environ.get('V1D_WORD_TIMES') == '1'
 # MAX_HOLD_S), so 19 s parts. V1D_DICTATION=1 sends WebM/Opus instead, which the gateway routes to
 # gemini-dictation (Flash-Lite, up to 600 s a call), once this key's product holds that route.
 dictation = not word_times and os.environ.get('V1D_DICTATION') == '1'
-api, version = 'https://api.v1d.io', '2026-10-28'
+api, version = os.environ.get('V1D_API', 'https://api.v1d.io'), '2026-10-28'   # V1D_API: a local stand-in for a proof, never set in use
 part_seconds = 240 if word_times else 590 if dictation else 19
 ext = 'webm' if dictation else 'wav'
 key = open(os.environ['V1D_KEY_FILE']).read().strip()
@@ -589,7 +589,11 @@ for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
         if rc == 20:
             continue
         print(f"v1d run {run.get('id')} ended {run.get('status')}: {run.get('error')}", file=sys.stderr)
-        sys.exit(22)  # A submitted run is never safe to replace with another call.
+        # A submitted run is never safe to replace with another call, unless the gateway ended it failed as provider_unavailable at no cost:
+        # that is a known refusal, nothing was billed, so the caller may take its fallback (10 Nov 21:55Z: provider_limit on a 57 s voice
+        # message read as unknown, and the message was lost).
+        known = run.get('status') == 'failed' and (run.get('error') or {}).get('type') == 'provider_unavailable' and run.get('cost_usd') == 0
+        sys.exit(21 if known else 22)
     output = run.get('output') or {}
     proofread = output.get('proofread') or {}
     print(f"[v1d] {run['id']} {seconds:.1f} s, {run.get('cost_usd')} USD, "
