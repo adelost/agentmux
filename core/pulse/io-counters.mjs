@@ -7,6 +7,7 @@ import { dirname } from "path";
 const MAX_TARGETS = 200;
 const MAX_ASKERS = 100;
 const MAX_DISAGREEMENTS = 20;
+const MAX_ASKERS_PER_TARGET = 20;
 const emptyPaths = () => ({ control: 0, process: 0, degraded: 0, shadow: 0, connect: 0 });
 
 /** WHAT: Builds an in-memory counter set for one bridge process. WHY: Separates counting from where counts are shown. */
@@ -16,6 +17,7 @@ export function createIoCounters({ now = () => Date.now() } = {}) {
   const byVerb = {};
   const byTarget = {};
   const byAsker = {};
+  const byTargetAsker = {};   // row 116c: who asks each pane, so an idle pane's askers are named
   const disagreements = [];
   const replies = { count: 0, over1s: 0, maxMs: 0, late: 0 };
   const disagreementKinds = {};
@@ -29,6 +31,8 @@ export function createIoCounters({ now = () => Date.now() } = {}) {
       (byVerb[verbKey] ??= emptyPaths())[path]++;
       if (target && (byTarget[target] || Object.keys(byTarget).length < MAX_TARGETS)) (byTarget[target] ??= emptyPaths())[path]++;
       if (asker && (byAsker[asker] || Object.keys(byAsker).length < MAX_ASKERS)) (byAsker[asker] ??= emptyPaths())[path]++;
+      const asks = target && asker && byTarget[target] ? (byTargetAsker[target] ??= {}) : null;
+      if (asks && (asks[asker] || Object.keys(asks).length < MAX_ASKERS_PER_TARGET)) asks[asker] = (asks[asker] ?? 0) + 1;
     },
     setTransport(next) { transport = { ...next, at: now() }; },
     reply({ ms, late }) {
@@ -45,7 +49,8 @@ export function createIoCounters({ now = () => Date.now() } = {}) {
     },
     snapshot() {
       return { v: 1, since, at: now(), transport, totals: { ...totals }, byVerb: structuredClone(byVerb),
-        byTarget: structuredClone(byTarget), byAsker: structuredClone(byAsker), replies: { ...replies }, disagreementCount,
+        byTarget: structuredClone(byTarget), byAsker: structuredClone(byAsker), byTargetAsker: structuredClone(byTargetAsker),
+        replies: { ...replies }, disagreementCount,
         disagreementKinds: { ...disagreementKinds }, disagreements: [...disagreements] };
     },
   };
