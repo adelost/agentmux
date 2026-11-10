@@ -201,6 +201,28 @@ feature("disk cleanup removes only what regenerates and prunes old artifacts to 
     cleanup: ({ root }) => rmSync(root, { recursive: true, force: true }),
   });
 
+  // Row 162: retention kept only an exactly linked file, so the image pairs a closed ledger row linked as folders went on 9 Nov.
+  component("a folder a ledger links inside an artifact folder keeps every file, and the folder itself still prunes to its receipts", {
+    given: ["an old folder whose ledger links two of its subfolders, one with a trailing slash", () => {
+      const root = mkdtempSync(join(tmpdir(), "artifacts-")), artifacts = join(root, ".artifacts"), folder = join(artifacts, "row-2");
+      for (const dir of ["out/pairs", "out/pairs-b", "out/other"]) mkdirSync(join(folder, dir), { recursive: true });
+      for (const name of ["out/pairs/a.png", "out/pairs/b.mp4", "out/pairs-b/c.png", "out/other/d.png", "shot.png", "notes.md"]) writeFileSync(join(folder, name), "x");
+      return { root, artifacts, folder };
+    }],
+    when: ["pruning a plan that admits it", ({ root, artifacts }) => {
+      const settled = (paths) => Object.fromEntries(paths.map((path) => [path, { bytes: 6, files: 1, newestModifiedMs: Date.now() - 20 * DAY }]));
+      const docs = ["| 1698 | done | [pairs](.artifacts/row-2/out/pairs), [more](.artifacts/row-2/out/pairs-b/), [all](.artifacts/row-2/) |"];
+      const plan = planArtifactRetention({ roots: [artifacts], docs, references: idle, measure: settled });
+      return pruneArtifacts(plan, { sampleDisk: () => ({ availableBytes: 0 }), references: idle, measure: settled, journalPath: join(root, "journal.jsonl") });
+    }],
+    then: ["the linked folders keep every file; the unlinked folder and the loose image go", (pruned, { folder }) => {
+      expect(pruned.map(({ mode }) => mode)).toEqual(["pruned"]);
+      expect(readdirSync(folder, { recursive: true }).filter((name) => name.includes(".")).sort())
+        .toEqual(["PRUNED.md", "notes.md", "out/pairs-b/c.png", "out/pairs/a.png", "out/pairs/b.mp4"]);
+    }],
+    cleanup: ({ root }) => rmSync(root, { recursive: true, force: true }),
+  });
+
   // 2026-10-28: the worktree step kept 8 dirty or unpushed checkouts inside artifact folders, which retention then emptied.
   component("a git checkout in an old artifact folder keeps every file and its .git, and loses only its dependency folders", {
     given: ["an old folder with a video, a linked worktree and a clone", () => {

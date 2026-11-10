@@ -99,7 +99,7 @@ export function linkedArtifacts({ roots, docs }) {
   const linked = new Set();
   for (const text of docs) {
     for (const [, link] of text.matchAll(ARTIFACT_LINK)) {
-      for (const root of roots) linked.add(join(root, link.replace(/[.,:;]+$/u, "")));
+      for (const root of roots) linked.add(join(root, link.replace(/[.,:;]+$/u, "").replace(/\/+$/u, "")));
     }
   }
   return linked;
@@ -112,13 +112,15 @@ export function testLaneProfiles(path, tree) {
   return basename(dirname(path)) === RELEASE_ROW && profiles.length && profiles.every(inLane) ? profiles : [];
 }
 
-/** WHAT: Collects the files and copied dependency trees retention deletes in one folder, with `profiles` deleted whole. WHY: Keeps the plan and the deletion on one rule. */
+/** WHAT: Collects the files and copied dependency trees retention deletes in one folder, with `profiles` deleted whole. WHY: Keeps the plan and the deletion on one rule.
+ *  A folder linked inside the unit keeps every file under it (row 162: image pairs a closed ledger row linked as folders went on 9 Nov); a link to the unit
+ *  itself keeps its exactly linked files and receipts only, or every linked evidence folder (490 on 10 Nov) would never shrink. */
 export function prunableEntries(unit, linked = new Set(), profiles = []) {
   const files = [], trees = [];
   let bytes = 0, keptFiles = 0;
-  const pending = [{ path: unit, copied: false, inCheckout: false }];
+  const pending = [{ path: unit, copied: false, inCheckout: false, inLinked: false }];
   while (pending.length) {
-    const { path: folder, copied, inCheckout } = pending.pop();
+    const { path: folder, copied, inCheckout, inLinked } = pending.pop();
     const entries = readdirSync(folder, { withFileTypes: true });
     const checkout = inCheckout || (!copied && entries.some(({ name }) => name === ".git"));
     for (const entry of entries) {
@@ -127,10 +129,10 @@ export function prunableEntries(unit, linked = new Set(), profiles = []) {
       if (entry.isDirectory()) {
         const tree = !copied && (COPIED_TREES.has(entry.name) || profiles.includes(path));
         if (tree) trees.push(path);
-        pending.push({ path, copied: copied || tree, inCheckout: checkout });
+        pending.push({ path, copied: copied || tree, inCheckout: checkout, inLinked: inLinked || linked.has(path) });
       } else if (entry.isFile()) {
         const size = lstatSync(path).size;
-        if (!copied && (checkout || isKeptFile(entry.name, size) || linked.has(path))) keptFiles++;
+        if (!copied && (checkout || inLinked || isKeptFile(entry.name, size) || linked.has(path))) keptFiles++;
         else { bytes += size; if (!copied) files.push(path); }
       }
     }
