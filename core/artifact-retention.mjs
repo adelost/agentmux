@@ -4,7 +4,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { resolveDreamWorkspace } from "./dream.mjs";
 import { processPathReferences } from "./process-path-references.mjs";
 import { measureTrees } from "./tree-usage.mjs";
@@ -28,6 +28,8 @@ const ALWAYS_KEPT = new Set([".mp3", ".wav", ".m4a", ".flac", ".ogg", ".glb", ".
 // A git checkout keeps every file and its .git: on 2026-10-28 the worktree step kept 8 dirty or unpushed checkouts in
 // artifact folders, and retention emptied them. Its dependency folders still go, since installs recreate them.
 const COPIED_TREES = new Set(["node_modules", ".venv", "venv", "__pycache__"]);
+// A release-row run's test lanes, its Chrome lane and its browser tests, hold test persons' profiles, never his account (row 158).
+const RELEASE_ROW = "release-row", TEST_LANES = ["chrome-lane", "tests"];
 
 /** WHAT: Checks whether retention keeps a file. WHY: Separates receipts and possibly paid media from regenerable bulk. */
 export function isKeptFile(name, bytes) {
@@ -103,8 +105,15 @@ export function linkedArtifacts({ roots, docs }) {
   return linked;
 }
 
-/** WHAT: Collects the files and copied dependency trees retention deletes in one folder. WHY: Keeps the plan and the deletion on one rule. */
-export function prunableEntries(unit, linked = new Set()) {
+/** WHAT: Names a release-row run's profiles when all lie in its own test lanes. WHY: Keeps any other profile from pruning while 254 old runs held 14.9 GB (row 158). */
+export function testLaneProfiles(path, tree) {
+  const profiles = tree?.browserProfiles ?? [], lanes = TEST_LANES.map((lane) => join(path, lane));
+  const inLane = (profile) => lanes.some((lane) => profile === lane || profile.startsWith(`${lane}/`));
+  return basename(dirname(path)) === RELEASE_ROW && profiles.length && profiles.every(inLane) ? profiles : [];
+}
+
+/** WHAT: Collects the files and copied dependency trees retention deletes in one folder, with `profiles` deleted whole. WHY: Keeps the plan and the deletion on one rule. */
+export function prunableEntries(unit, linked = new Set(), profiles = []) {
   const files = [], trees = [];
   let bytes = 0, keptFiles = 0;
   const pending = [{ path: unit, copied: false, inCheckout: false }];
@@ -116,7 +125,7 @@ export function prunableEntries(unit, linked = new Set()) {
       if (entry.name === ".git") continue;
       const path = join(folder, entry.name);
       if (entry.isDirectory()) {
-        const tree = !copied && COPIED_TREES.has(entry.name);
+        const tree = !copied && (COPIED_TREES.has(entry.name) || profiles.includes(path));
         if (tree) trees.push(path);
         pending.push({ path, copied: copied || tree, inCheckout: checkout });
       } else if (entry.isFile()) {
@@ -134,7 +143,7 @@ function heldReasons(path, tree, holders, { nowMs, days }) {
   const reasons = [];
   if (!tree || tree.error) reasons.push(`unreadable folder: ${tree?.error ?? "not measured"}`);
   else if (nowMs - tree.newestModifiedMs < days * DAY) reasons.push(`modified within ${days} days`);
-  if (tree?.browserProfile) reasons.push("holds a browser profile");
+  if (tree?.browserProfile && !testLaneProfiles(path, tree).length) reasons.push("holds a browser profile");
   if (tree?.lockedFolders) reasons.push("holds folders this user cannot change");
   if (existsSync(join(path, KEEP_MARKER))) reasons.push(`marked with ${KEEP_MARKER}`);
   if (holders.errors.length) reasons.push("unreadable process evidence");
@@ -152,7 +161,7 @@ export function planArtifactRetention({ roots = artifactRoots(), docs = [...repo
     const reasons = heldReasons(path, usage[path], safety, { nowMs, days });
     if (reasons.length) { skipped.push({ path, reasons }); continue; }
     let doomed;
-    try { doomed = prunableEntries(path, linked); } catch (error) { skipped.push({ path, reasons: [`unreadable folder: ${error.message}`] }); continue; }
+    try { doomed = prunableEntries(path, linked, testLaneProfiles(path, usage[path])); } catch (error) { skipped.push({ path, reasons: [`unreadable folder: ${error.message}`] }); continue; }
     if (doomed.files.length || doomed.trees.length) candidates.push({ path, ...usage[path], pruneBytes: doomed.bytes, keptFiles: doomed.keptFiles });
   }
   return { candidates, skipped, errors: safety.errors, linked, pruneBytes: candidates.reduce((sum, { pruneBytes }) => sum + pruneBytes, 0) };
@@ -170,7 +179,8 @@ function notePruned(folder, entry, days) {
   const note = join(folder, "PRUNED.md");
   if (!existsSync(note)) appendFileSync(note, `# Pruned by the agentmux disk cleanup\n\nThe folder was unchanged for ${days} days, so its work had stopped. Kept: text files up to 1 MB, audio, 3D models, files a repository document or memory note links to, and every file of a git checkout.\n`
     + `A folder holding \`${KEEP_MARKER}\` is never pruned.\n\n`);
-  appendFileSync(note, `- ${entry.at.slice(0, 10)}: deleted ${entry.deletedFiles} files plus ${entry.deletedTrees} node_modules or venv folders, ${(entry.deletedBytes / 1e9).toFixed(2)} GB; kept ${entry.keptFiles} files.\n`);
+  const profiles = entry.deletedProfiles ? `, ${entry.deletedProfiles} test lane browser profiles` : "";
+  appendFileSync(note, `- ${entry.at.slice(0, 10)}: deleted ${entry.deletedFiles} files plus ${entry.deletedTrees} node_modules or venv folders${profiles}, ${(entry.deletedBytes / 1e9).toFixed(2)} GB; kept ${entry.keptFiles} files.\n`);
 }
 
 /** WHAT: Dispatches the deletions for planned folders after checking each again. WHY: Keeps a folder that changed or opened since planning whole. */
@@ -180,12 +190,13 @@ export function pruneArtifacts(plan, { nowMs = Date.now(), days = RETENTION_DAYS
   if (plan.errors.length) return results;
   for (const planned of plan.candidates) {
     const entry = { at: new Date(nowMs).toISOString(), path: planned.path, mode: "skipped" };
-    const reasons = heldReasons(planned.path, measure([planned.path])[planned.path], references([planned.path]), { nowMs, days });
+    const tree = measure([planned.path])[planned.path], reasons = heldReasons(planned.path, tree, references([planned.path]), { nowMs, days });
     if (reasons.length) { journal({ ...entry, reasons }, journalPath); results.push({ ...entry, reasons }); continue; }
     entry.before = sampleDisk();
     try {
-      const doomed = prunableEntries(planned.path, plan.linked);
-      Object.assign(entry, { deletedBytes: doomed.bytes, deletedFiles: doomed.files.length, deletedTrees: doomed.trees.length, keptFiles: doomed.keptFiles });
+      const profiles = testLaneProfiles(planned.path, tree), doomed = prunableEntries(planned.path, plan.linked, profiles);
+      Object.assign(entry, { deletedBytes: doomed.bytes, deletedFiles: doomed.files.length, deletedTrees: doomed.trees.length - profiles.length,
+        deletedProfiles: profiles.length, keptFiles: doomed.keptFiles });
       for (const file of doomed.files) rmSync(file, { force: true });
       for (const tree of doomed.trees) rmSync(tree, { recursive: true, force: true });
       // Git needs its empty refs folders, so the sweep stays out of .git.

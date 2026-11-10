@@ -3,15 +3,21 @@ import { execFileSync } from "node:child_process";
 // One pass per tree: inodes count once, and only single-link files count as
 // freeable, because removing a hardlinked file frees nothing while another
 // link survives. ctime counts as a change, matching worktree retirement.
-// Chromium's cookie and login stores mark a browser profile, which cleanup never touches. A folder this
+// Chromium's cookie and login stores mark a browser profile, which cleanup touches only in a release-row run's own
+// test lane; each profile is named by its user-data folder, above Default (or Profile N) and Network. A folder this
 // user cannot write is counted, because a move cannot remove the files inside it.
 const MEASURE_TREES = String.raw`
-import json, os, stat, sys
+import json, os, re, stat, sys
 PROFILE_FILES = {"Cookies", "Login Data", "Web Data"}
+PROFILE_LEVELS = re.compile(r"Network|Default|Profile \d+|Guest Profile|System Profile")
+def user_data(folder):
+    while PROFILE_LEVELS.fullmatch(os.path.basename(folder)):
+        folder = os.path.dirname(folder)
+    return folder
 request = json.load(sys.stdin)
 result = {}
 for root in request["paths"]:
-    seen, total, unique, files, newest, modified, profile, locked = set(), 0, 0, 0, 0, 0, False, 0
+    seen, total, unique, files, newest, modified, profiles, locked = set(), 0, 0, 0, 0, 0, set(), 0
     try:
         item = os.lstat(root)
         if not stat.S_ISDIR(item.st_mode):
@@ -33,7 +39,8 @@ for root in request["paths"]:
                         locked += 0 if os.access(entry.path, os.W_OK | os.X_OK) else 1
                     elif stat.S_ISREG(item.st_mode):
                         files += 1
-                        profile = profile or entry.name in PROFILE_FILES
+                        if entry.name in PROFILE_FILES:
+                            profiles.add(user_data(os.path.dirname(entry.path)))
                         if (item.st_dev, item.st_ino) in seen:
                             continue
                         seen.add((item.st_dev, item.st_ino))
@@ -41,7 +48,7 @@ for root in request["paths"]:
                         if item.st_nlink == 1:
                             unique += item.st_blocks * 512
         result[root] = {"bytes": total, "freeableBytes": unique, "files": files, "newestChangeMs": newest / 1000000,
-            "newestModifiedMs": modified / 1000000, "browserProfile": profile, "lockedFolders": locked}
+            "newestModifiedMs": modified / 1000000, "browserProfile": bool(profiles), "browserProfiles": sorted(profiles), "lockedFolders": locked}
     except (OSError, ValueError) as error:
         result[root] = {"error": str(error)}
 print(json.dumps(result))

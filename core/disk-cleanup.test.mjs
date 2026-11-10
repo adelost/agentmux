@@ -129,6 +129,55 @@ feature("disk cleanup removes only what regenerates and prunes old artifacts to 
     cleanup: ({ root, artifacts }) => { chmodSync(join(artifacts, "locked", "deep"), 0o755); rmSync(root, { recursive: true, force: true }); },
   });
 
+  // Row 158 (sandman:0 2026-11-10): 254 old release-row runs stayed whole for the test person's profile in their own lane, 14.9 GB of chrome-lane/.
+  component("an old release-row run is planned when every profile it holds is in its own test lane, and a profile anywhere else still holds it", {
+    given: ["old release-row runs with a profile under chrome-lane/, under tests/, beside the lanes, and an old non-release folder with a lane-like profile", () => {
+      const root = mkdtempSync(join(tmpdir(), "artifacts-")), artifacts = join(root, ".artifacts");
+      const write = (path, text = "c") => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
+      write(join(artifacts, "release-row", "chrome-run", "chrome-lane", "chrome-profile", "Default", "Cookies"));
+      write(join(artifacts, "release-row", "tests-run", "tests", "deliver.mjs", "profile", "Default", "Network", "Cookies"));
+      write(join(artifacts, "release-row", "odd-run", "profile", "Default", "Login Data"));
+      write(join(artifacts, "other", "chrome-lane", "chrome-profile", "Default", "Cookies"));
+      for (const name of ["release-row/chrome-run", "release-row/tests-run", "release-row/odd-run", "other"]) {
+        const past = new Date(Date.now() - 20 * DAY), age = (path) => { if (statSync(path).isDirectory()) for (const child of readdirSync(path)) age(join(path, child)); utimesSync(path, past, past); };
+        age(join(artifacts, name));
+      }
+      return { root, artifacts };
+    }],
+    when: ["planning", ({ artifacts }) => planArtifactRetention({ roots: [artifacts], docs: [], references: idle })],
+    then: ["the two lane runs are planned; the run with a profile beside its lanes and the other folder stay whole", (plan, { artifacts }) => {
+      const named = (path) => path.replace(`${artifacts}/`, "");
+      expect(plan.candidates.map(({ path }) => named(path)).sort()).toEqual(["release-row/chrome-run", "release-row/tests-run"]);
+      expect(Object.fromEntries(plan.skipped.map(({ path, reasons }) => [named(path), reasons])))
+        .toEqual({ "release-row/odd-run": ["holds a browser profile"], other: ["holds a browser profile"] });
+    }],
+    cleanup: ({ root }) => rmSync(root, { recursive: true, force: true }),
+  });
+
+  component("pruning an old release-row run deletes its lane's browser profile whole and keeps the run's receipts", {
+    given: ["an old run with its plan, logs, a lane receipt, a test picture and the lane's profile, beside a new run", () => {
+      const root = mkdtempSync(join(tmpdir(), "artifacts-")), artifacts = join(root, ".artifacts"), run = join(artifacts, "release-row", "run");
+      const write = (path, text = "x") => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
+      for (const [path, body] of [["plan.json", "{}"], ["outcome.json", "{}"], ["lint.log", "ok"], ["chrome-lane/lane-ready.json", "{}"], ["tests/deliver.mjs/green.png", "p"],
+        ["chrome-lane/chrome-profile/Default/Cookies", "c"], ["chrome-lane/chrome-profile/Default/Local Storage/leveldb/000003.log", "l"],
+        ["chrome-lane/chrome-profile/Local State", "{}"]]) write(join(run, path), body);
+      write(join(artifacts, "release-row", "new-run", "plan.json"), "{}");
+      const past = new Date(Date.now() - 20 * DAY), age = (path) => { if (statSync(path).isDirectory()) for (const child of readdirSync(path)) age(join(path, child)); utimesSync(path, past, past); };
+      age(run);
+      return { root, artifacts, run };
+    }],
+    when: ["pruning a plan that admits it", ({ root, artifacts }) => {
+      const plan = planArtifactRetention({ roots: [artifacts], docs: [], references: idle });
+      return pruneArtifacts(plan, { sampleDisk: () => ({ availableBytes: 0 }), references: idle, journalPath: join(root, "journal.jsonl") });
+    }],
+    then: ["the receipts stay, the profile and the picture go, and the note counts the profile", (pruned, { run }) => {
+      expect(pruned.map(({ mode }) => mode)).toEqual(["pruned"]);
+      expect(readdirSync(run, { recursive: true }).sort()).toEqual(["PRUNED.md", "chrome-lane", "chrome-lane/lane-ready.json", "lint.log", "outcome.json", "plan.json"]);
+      expect(readFileSync(join(run, "PRUNED.md"), "utf8")).toContain("1 test lane browser profiles");
+    }],
+    cleanup: ({ root }) => rmSync(root, { recursive: true, force: true }),
+  });
+
   // 2026-10-28: evidence is needed only while its row runs; the small images kept were mostly video frames.
   component("pruning keeps text receipts, linked files, audio and 3D models and deletes video, unlinked images, builds and copied trees", {
     given: ["an old folder with each kind of file and a ledger that links its big image", () => {
