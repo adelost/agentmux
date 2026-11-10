@@ -14,6 +14,7 @@ import { codexSessionDirs } from "./codex-profiles.mjs";
 import { readSessionMeta } from "./codex-session-catalog.mjs";
 import { getContextFromKimiJsonl } from "./kimi-jsonl-reader.mjs";
 import { normalizeClaudeEffort, readClaudeFooterModel, readClaudeScreenStatus, readClaudeStatuslineBridge } from "./claude-statusline.mjs";
+import { createJournalHold, fileStamp } from "./pulse/journal-hold.mjs";
 /**
  * Read only the last `maxBytes` of a file and return its complete trailing
  * lines (the partial leading line is dropped). Claude session jsonl grows to
@@ -153,9 +154,16 @@ function readLatestClaudeModel(paneDir) {
 
 // --- Claude path: encoding truth lives in core/claude-paths.mjs ---------
 
+const heldContextStates = createJournalHold();
+
+// Link, auto-compact and every mirrored turn ask this per pane; an unchanged journal is answered without a read (row 116d).
 function readClaudeContextState(paneDir) {
   const session = newestSessionFile(paneDir);
   if (!session) return { session: null, usage: null, compactMs: null };
+  return heldContextStates(paneDir, fileStamp(session.path), () => scanClaudeContextState(session));
+}
+
+function scanClaudeContextState(session) {
   const lines = readTailLines(session.path);
   let usage = null, compactMs = null;
   // A boundary invalidates every earlier usage, including preserved messages

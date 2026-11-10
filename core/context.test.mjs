@@ -17,6 +17,7 @@ import * as fsExtra from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { getContextPercent, getContextFromPane, getContextPushed, resetCodexSessionIndexForTests } from "./context.mjs";
+import { claudeProjectDir } from "./claude-paths.mjs";
 
 const usageEntry = (model, total) => JSON.stringify({
   timestamp: "2026-07-08T16:49:00.000Z",
@@ -348,6 +349,28 @@ feature("golden fixtures — every context source", () => {
       expect(ctx.percent).toBe(25);
       expect(ctx.model).toBeNull();
       expect(ctx.effort).toBeNull();
+    }],
+  });
+});
+
+feature("an idle journal costs no reads (row 116d)", () => {
+  component("a journal whose path, size and mtime stand still is answered from the last reading", {
+    given: ["a journal at 351k tokens with a fixed mtime", () => [usageEntry("claude-fable-5", 351_000)]],
+    when: ["it is read, rewritten in place at 452k with the same size and mtime, read, then grown and read", (lines) =>
+      withSessionJsonl(lines, (paneDir) => {
+        const projectDir = claudeProjectDir(paneDir);
+        const file = join(projectDir, fsExtra.readdirSync(projectDir).find((name) => name.endsWith(".jsonl")));
+        const still = new Date("2026-11-10T23:00:00Z");
+        fsExtra.utimesSync(file, still, still);
+        const first = getContextPercent(paneDir, "claude")?.percent;
+        writeFileSync(file, usageEntry("claude-fable-5", 452_000) + "\n");
+        fsExtra.utimesSync(file, still, still);
+        const unchanged = getContextPercent(paneDir, "claude")?.percent;
+        fsExtra.appendFileSync(file, usageEntry("claude-fable-5", 452_000) + "\n");
+        return [first, unchanged, getContextPercent(paneDir, "claude")?.percent];
+      })],
+    then: ["the unchanged journal kept its reading; the grown one was read again", (percents) => {
+      expect(percents).toEqual([35, 35, 45]);
     }],
   });
 });

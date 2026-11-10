@@ -3,11 +3,12 @@
 // while idle, so only a real turn may refresh an established session.
 
 import { statSync } from "node:fs";
-import { isSyntheticClaudeReply, readLastTurns, readTailWindow, parseJsonlText } from "./jsonl-reader.mjs";
-import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
+import { isSyntheticClaudeReply, latestJsonlInfo, readLastTurns, readTailWindow, parseJsonlText } from "./jsonl-reader.mjs";
+import { latestCodexJsonlInfo, readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
 import { readLastTurnsQwen } from "./qwen-jsonl-reader.mjs";
 import { resolveActivityMs } from "./auto-compact.mjs";
+import { createJournalHold } from "./pulse/journal-hold.mjs";
 
 // A measured 201 MB Claude journal needed a 256 KiB tail to recover its last
 // complete turn. Stop at 1 MiB: parsing an 8 MiB tail across the fleet expanded
@@ -21,6 +22,9 @@ const DEFAULT_READERS = Object.freeze({
   kimi: readLastTurnsKimi,
   qwen: readLastTurnsQwen,
 });
+// The journal each default reader reads, so auto-compact and the quota warning reread an idle pane only after it changes (row 116d).
+const DEFAULT_STAMPS = Object.freeze({ claude: latestJsonlInfo, codex: latestCodexJsonlInfo });
+const heldActivity = createJournalHold();
 
 // A long Claude turn (screenshots, big tool results) can push its own prompt
 // more than 1 MiB back, so the tail holds no whole turn. Its user and
@@ -59,7 +63,13 @@ function recoverColdCodexTurn(reader, paneDir, path, stat) {
 }
 
 /** WHAT: Reads the last conversational activity time. WHY: Keeps housekeeping writes from extending idle timers. */
-export function latestConversationActivityMs(paneDir, dialect, {
+export function latestConversationActivityMs(paneDir, dialect, options = {}) {
+  const stamp = !options.readers && !options.stat && !options.readTail ? DEFAULT_STAMPS[dialect]?.(paneDir) : null;
+  return heldActivity(JSON.stringify([dialect, paneDir, Boolean(options.recoverCodexHistory)]), stamp,
+    () => readConversationActivityMs(paneDir, dialect, options));
+}
+
+function readConversationActivityMs(paneDir, dialect, {
   readers = DEFAULT_READERS,
   stat = statSync,
   readTail = readTailWindow,

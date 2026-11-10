@@ -1,6 +1,7 @@
 import { countWorkTurnsSince, findLatestCompactTs } from "./jsonl-reader.mjs";
 import { alternateSessionReader, sessionReaderForCommand } from "./alternate-session-reader.mjs";
 import { isWorkDirective } from "./system-noise.mjs";
+import { createJournalHold } from "./pulse/journal-hold.mjs";
 
 /** WHAT: Reads bounded reminder activity through existing journal readers. WHY: Keeps engine formats and maintenance filtering owned by their canonical modules. */
 export function readReminderActivity(paneDir, command, cutoffMs) {
@@ -34,13 +35,9 @@ function journalStamp(paneDir, command) {
  * WHY: drift-guard read every idle pane's journal twice a round, 8 MB a read and 32 MB per 10 s (read meter 2026-11-10 23:41Z, row 116d).
  */
 export function createReminderActivityReader({ read = readReminderActivity, stamp = journalStamp } = {}) {
-  const held = new Map();
+  const hold = createJournalHold();
   return (paneDir, command, cutoffMs) => {
-    const key = JSON.stringify([stamp(paneDir, command), cutoffMs ?? null]);
-    const last = held.get(`${command}\0${paneDir}`);
-    if (last?.key === key) return last.activity;
-    const activity = read(paneDir, command, cutoffMs);
-    held.set(`${command}\0${paneDir}`, { key, activity });
-    return activity;
+    const journal = stamp(paneDir, command);
+    return hold(`${command}\0${paneDir}`, journal && [journal, cutoffMs ?? null], () => read(paneDir, command, cutoffMs));
   };
 }

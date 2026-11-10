@@ -1,6 +1,6 @@
 import { expect, feature, unit } from "bdd-vitest";
 import { it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeProjectDir } from "./claude-paths.mjs";
@@ -139,6 +139,33 @@ feature("a resumed Claude session", () => {
     when: ["reading activity through the production reader", ({ paneDir }) => latestConversationActivityMs(paneDir, "claude")],
     then: ["idle time counts from the last real reply", (value, { home }) => {
       try { expect(value).toBe(Date.parse(lastReply)); } finally { vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); }
+    }],
+  });
+
+  unit("an idle journal is answered from its last reading until it changes (row 116d)", {
+    given: ["the same journal with a fixed mtime", () => {
+      const home = mkdtempSync(join(tmpdir(), "amux-held-idle-"));
+      const paneDir = join(home, "repo", ".agents", "3");
+      mkdirSync(claudeProjectDir(paneDir, home), { recursive: true });
+      const file = join(claudeProjectDir(paneDir, home), "4eb7d6c9-067e-49b3-a074-c0a780c3572b.jsonl");
+      writeFileSync(file, journal);
+      vi.stubEnv("HOME", home);
+      return { home, paneDir, file, still: new Date("2026-11-10T23:00:00Z") };
+    }],
+    when: ["it is read, rewritten in place with the same size and mtime, read, then grown and read", ({ paneDir, file, still }) => {
+      utimesSync(file, still, still);
+      const first = latestConversationActivityMs(paneDir, "claude");
+      writeFileSync(file, journal.replace(lastReply, "2026-10-10T08:09:56.000Z"));
+      utimesSync(file, still, still);
+      const unchanged = latestConversationActivityMs(paneDir, "claude");
+      appendFileSync(file, JSON.stringify({ type: "assistant", timestamp: "2026-10-10T09:30:00.000Z",
+        message: { model: "claude-opus-5-5", stop_reason: "end_turn", content: [{ type: "text", text: "Next." }] } }) + "\n");
+      return [first, unchanged, latestConversationActivityMs(paneDir, "claude")];
+    }],
+    then: ["the unchanged journal kept its answer; the grown one was read again", (values, { home }) => {
+      try {
+        expect(values).toEqual([Date.parse(lastReply), Date.parse(lastReply), Date.parse("2026-10-10T09:30:00.000Z")]);
+      } finally { vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); }
     }],
   });
 
