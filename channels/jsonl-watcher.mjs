@@ -63,6 +63,8 @@ const TURN_LOOKBACK = 20;
 const WATCHER_TAIL_BYTES = 4 * 1024 * 1024;
 // Working journals are followed from their offsets; a parsed 4 MiB tail holds about 6 MB, so at most this many are held (row 116d).
 const FOLLOWED_JOURNALS = 10;
+// How long after a Stop hook a journal write skips the 500 ms debounce.
+const STOP_FOLLOW_MS = 3_000;
 // Startup is the one chance to reconcile output written while the bridge was
 // down. Browser screenshots can add several MB of base64 tool output per line,
 // so the normal 4MB hot-path window is too small for this bounded audit.
@@ -128,7 +130,7 @@ export function createJsonlWatcher({
   const paneKey = (name, idx) => `${name}:${idx}`;
   const geminiMirror = createGeminiTmuxMirror({ agent, state, post: request => postTurn(request) });
   const queue = createPaneQueue({
-    worker: ({ name, idx, agentDir, sharedConfig }) => processPane(name, idx, agentDir, sharedConfig),
+    worker: ({ name, idx, agentDir, sharedConfig, trigger }) => processPane(name, idx, agentDir, sharedConfig, trigger),
     maxConcurrency: MAX_CONCURRENT_PANES,
     backoffMs: RETRY_BACKOFF_MS,
     log,
@@ -619,7 +621,7 @@ export function createJsonlWatcher({
     });
   }
 
-  async function processPane(name, idx, agentDir, sharedConfig = null) {
+  async function processPane(name, idx, agentDir, sharedConfig = null, trigger = null) {
     try {
       const config = sharedConfig || loadConfig(agentsYamlPath);
       const channelId = channelForPane(config, name, idx);
@@ -737,7 +739,7 @@ export function createJsonlWatcher({
         if (action.reason === "stop_reason" && Number.isFinite(action.endMs)) {
           const after = (at) => (Number.isFinite(at) ? at - action.endMs : null);
           const wake = wokenAt.get(key);
-          recordTurnEnd({ pane: key, endAt: new Date(action.endMs).toISOString(), woken: after(wake?.at), wake: wake ? `${wake.status}, ${wake.active} active` : null, began: after(began),
+          recordTurnEnd({ pane: key, endAt: new Date(action.endMs).toISOString(), trigger, woken: after(wake?.at), wake: wake ? `${wake.status}, ${wake.active} active` : null, began: after(began),
             progressed: after(now), read: after(readAt), planned: after(plannedAt), post: after(postAt), posted: after(Date.now()), ok: !!result?.ok });
         }
         if (!result?.ok) {
@@ -781,12 +783,12 @@ export function createJsonlWatcher({
     const entry = config?.[name];
     if (!entry?.dir || entry.backend === "native" || !entry.panes?.[idx]) return;
     const at = Date.now();
-    const { status } = queue.enqueue(paneKey(name, idx), { name, idx, agentDir: entry.dir, sharedConfig: config }, { first: true });
+    const { status } = queue.enqueue(paneKey(name, idx), { name, idx, agentDir: entry.dir, sharedConfig: config, trigger: "stop" }, { first: true });
     wokenAt.set(paneKey(name, idx), { at, status, active: queue.stats().active });
   }
 
-  function enqueuePane(name, idx, agentDir, sharedConfig = null) {
-    return queue.enqueue(paneKey(name, idx), { name, idx, agentDir, sharedConfig });
+  function enqueuePane(name, idx, agentDir, sharedConfig = null, trigger = "poll") {
+    return queue.enqueue(paneKey(name, idx), { name, idx, agentDir, sharedConfig, trigger });
   }
 
   // --- fs.watch wiring -----------------------------------------------------
@@ -809,9 +811,15 @@ export function createJsonlWatcher({
       // latency from agent-write to Discord typing dot.
       maybeSendTyping(name, idx);
       if (debounceTimer) clearTimeout(debounceTimer);
+      // Claude can run its Stop hook before the turn's last record reaches the journal; that write is read at once (row 116d).
+      if (Date.now() - (wokenAt.get(key)?.at ?? -Infinity) < STOP_FOLLOW_MS) {
+        debounceTimer = null;
+        enqueuePane(name, idx, agentDir, null, "journal after stop");
+        return;
+      }
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
-        enqueuePane(name, idx, agentDir);
+        enqueuePane(name, idx, agentDir, null, "journal");
       }, 500); // debounce — claude often writes 5-50 events per burst within 100-300ms
     };
 
