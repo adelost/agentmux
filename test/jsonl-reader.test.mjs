@@ -1,10 +1,11 @@
 import { component, feature, unit, expect } from "bdd-vitest";
 import { appendFileSync, mkdtempSync, mkdirSync, copyFileSync, readFileSync, rmSync, writeFileSync, utimesSync } from "fs";
 import { startReadMeter } from "../core/pulse/read-meter.mjs";
+import { createJournalFollower } from "../core/pulse/journal-follower.mjs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
-import { captureClaudePromptEchoCursor, captureClaudeSlashReceiptCursor, extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, isSlashReceiptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, countTurnsSince, countWorkTurnsSince } from "../core/jsonl-reader.mjs";
+import { parseJsonlText, readTailWindow, captureClaudePromptEchoCursor, captureClaudeSlashReceiptCursor, extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, isSlashReceiptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, countTurnsSince, countWorkTurnsSince } from "../core/jsonl-reader.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixtureFile = (name) => join(__dir, "fixtures/jsonl", name);
@@ -232,6 +233,76 @@ feature("isBusyFromJsonl: a long journal is read from its end, not whole", () =>
     then: ["busy, and the 40 MB were not read", ({ busy, read }, { cleanup, meter, meterDir }) => {
       meter.stop(); rmSync(meterDir, { recursive: true, force: true }); cleanup();
       expect({ busy, readUnder1MB: read < 1_000_000 }).toEqual({ busy: true, readUnder1MB: true });
+    }],
+  });
+});
+
+// Row 116d, pulse-7: the watcher reread a 4 MiB tail on every change of a working journal, 38.7 MB per 10 s (10 Nov 23:55Z).
+feature("a followed journal is read from its saved offset", () => {
+  component("the follower returns what a fresh window read returns, through growth, cut lines, truncation and replacement", {
+    given: ["a journal and a follower", () => {
+      const dir = mkdtempSync(join(tmpdir(), "agentmux-follower-")), path = join(dir, "s.jsonl");
+      writeFileSync(path, "");
+      return { dir, path, follower: createJournalFollower({ maxJournals: 2 }) };
+    }],
+    when: ["lines of uneven size are appended, a line arrives in two writes, and the file is cut and replaced", ({ dir, path, follower }) => {
+      const mismatches = [];
+      let seed = 7;
+      const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+      const line = (n) => JSON.stringify({ n, pad: "é".repeat(Math.floor(random() * 300)) }) + "\n";
+      const compare = (step) => {
+        for (const window of [64, 700, 4096, 1 << 20]) {
+          const expected = parseJsonlText(readTailWindow(path, window).text);
+          const got = follower.tail(path, window);
+          if (JSON.stringify(got) !== JSON.stringify(expected)) mismatches.push(`${step} window ${window}`);
+        }
+      };
+      for (let n = 0; n < 60; n++) {
+        const text = line(n);
+        if (n % 9 === 4) { appendFileSync(path, text.slice(0, 20)); compare(`half ${n}`); appendFileSync(path, text.slice(20)); }
+        else appendFileSync(path, text);
+        if (n % 3 === 0) appendFileSync(path, "\n");
+        compare(`line ${n}`);
+      }
+      writeFileSync(path, line(100) + line(101)); compare("truncated");
+      const other = join(dir, "other.jsonl");
+      writeFileSync(other, line(200)); rmSync(path); copyFileSync(other, path); compare("replaced");
+      return mismatches;
+    }],
+    then: ["no step differs from a fresh read", (mismatches, { dir }) => {
+      rmSync(dir, { recursive: true, force: true });
+      expect(mismatches).toEqual([]);
+    }],
+  });
+
+  component("a turn appended to a 6 MB journal is read as its own bytes, not as a new 4 MiB tail", {
+    given: ["a 6 MB journal the watcher has read once through a follower", () => {
+      const ctx = setupFakeProject("busy-streaming.jsonl");
+      const journal = join(ctx.projectDir, "session-abc123.jsonl"), tail = readFileSync(journal);
+      const filler = `${JSON.stringify({ type: "system", subtype: "note", content: "x".repeat(10_000), timestamp: "2026-11-10T20:00:00.000Z" })}\n`;
+      writeFileSync(journal, filler.repeat(600)); appendFileSync(journal, tail);
+      const follower = createJournalFollower();
+      const options = { limit: 20, tailBytes: 4 * 1024 * 1024, headless: true, follower };
+      readLastTurns(ctx.paneDir, options);
+      const meterDir = mkdtempSync(join(tmpdir(), "agentmux-read-meter-"));
+      writeFileSync(join(meterDir, "on"), "");
+      const meter = startReadMeter({ flag: join(meterDir, "on"), out: join(meterDir, "reads.json"), everyMs: 3_600_000, asker: () => "test" });
+      return { ...ctx, journal, options, meter, meterDir };
+    }],
+    when: ["the pane answers a new prompt and the watcher reads again", ({ paneDir, journal, options, meter }) => {
+      appendFileSync(journal, [
+        { type: "user", message: { role: "user", content: "add the offset test" }, timestamp: "2026-11-11T00:10:00.000Z", uuid: "u-116d" },
+        { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Added." }], stop_reason: "end_turn" },
+          timestamp: "2026-11-11T00:10:05.000Z", uuid: "a-116d" },
+      ].map((record) => JSON.stringify(record)).join("\n") + "\n");
+      const before = meter.totals().total;
+      const turns = readLastTurns(paneDir, options).turns;
+      return { last: turns.at(-1), read: meter.totals().total - before };
+    }],
+    then: ["the new turn is seen, complete, from under 10 kB read", ({ last, read }, { cleanup, meter, meterDir }) => {
+      meter.stop(); rmSync(meterDir, { recursive: true, force: true }); cleanup();
+      expect({ prompt: last?.userPrompt, complete: last?.isComplete, readUnder10kB: read < 10_000 })
+        .toEqual({ prompt: "add the offset test", complete: true, readUnder10kB: true });
     }],
   });
 });

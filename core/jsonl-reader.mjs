@@ -634,7 +634,7 @@ export function groupIntoTurns(events, { headless = false } = {}) {
  *   null when paneDir has no jsonl store (caller should fall back to tmux).
  */
 export function readLastTurns(paneDir, opts = {}) {
-  const { limit = 3, since = null, grep = null, tailBytes = null, headless = false } = opts;
+  const { limit = 3, since = null, grep = null, tailBytes = null, headless = false, follower = null } = opts;
   const projectDir = claudeProjectDir(paneDir);
   if (!existsSync(projectDir)) return null;
   const files = listJsonlFiles(projectDir);
@@ -643,8 +643,9 @@ export function readLastTurns(paneDir, opts = {}) {
   // tailBytes: only the file's tail is needed when the caller just wants the
   // last few turns (no since/grep that could match older history). Bounds
   // cost on 100MB+ session files. since/grep force a full scan for correctness.
+  // A follower (core/pulse/journal-follower.mjs) returns the same tail from the bytes appended since its last read (row 116d).
   const events = (tailBytes && !since && !grep)
-    ? parseJsonlTail(files[0].path, tailBytes)
+    ? (follower ? follower.tail(files[0].path, tailBytes) : parseJsonlTail(files[0].path, tailBytes))
     : parseJsonl(files[0].path);
   let turns = groupIntoTurns(events, { headless });
   const compactions = events

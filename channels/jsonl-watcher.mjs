@@ -39,6 +39,7 @@ import { runRequestedClaudeRotation } from "../cli/account-rotation.mjs";
 import { bridgeRotationRuntime } from "./account-switch-command.mjs";
 import { isPaneModelSwitchReading, paneModelSelection, recordPaneModelReading, setPaneModelSelection } from "../core/pane-model-state.mjs";
 import { settleLandedClaudeModelSwitch } from "../core/claude-model-command.mjs";
+import { createJournalFollower } from "../core/pulse/journal-follower.mjs";
 const DEFAULT_POLL_MS = 15_000;
 // Polling backs up fs.watch where events are dropped.
 
@@ -58,6 +59,8 @@ const COMPLETION_GRACE_MS = 5_000;
 // missed turns at restart, not the entire history.
 const TURN_LOOKBACK = 20;
 const WATCHER_TAIL_BYTES = 4 * 1024 * 1024;
+// Working journals are followed from their offsets; a parsed 4 MiB tail holds about 6 MB, so at most this many are held (row 116d).
+const FOLLOWED_JOURNALS = 10;
 // Startup is the one chance to reconcile output written while the bridge was
 // down. Browser screenshots can add several MB of base64 tool output per line,
 // so the normal 4MB hot-path window is too small for this bounded audit.
@@ -106,6 +109,7 @@ export function createJsonlWatcher({
   const lastTypingAt = new Map();
   // Cache journal identity, recovery evidence and the next mirror deadline.
   const readSnapshots = new Map();
+  const follower = createJournalFollower({ maxJournals: FOLLOWED_JOURNALS, log });
   // Panes audited since THIS bridge started — the startup self-heal runs once
   // per pane, then the normal cursor engine owns the stream again.
   const auditedPanes = new Set();
@@ -646,7 +650,8 @@ export function createJsonlWatcher({
       // so the leading turn may be head-cut — the engine holds it instead of
       // advancing past it (belt-and-suspenders on top of id-based dedupe).
       const tailBytes = startupAudit ? STARTUP_AUDIT_TAIL_BYTES : WATCHER_TAIL_BYTES;
-      const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes, headless: true });
+      // The startup audit's 16 MiB window is read once and never held.
+      const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes, headless: true, ...(!startupAudit && { follower }) });
       await timedWatcherStep(`${key} recovery`, () => codexRecovery.tick({ name, pane: idx, dir, result }), log);
       await timedWatcherStep(`${key} progress-read`, () => progress.reconcile(channelId, result?.turns || []), log);
       const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
