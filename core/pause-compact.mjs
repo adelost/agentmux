@@ -9,6 +9,7 @@ import { basename, dirname, join } from "node:path";
 import { PAUSE_COMPACT_POLICY } from "../policies/context-cost.mjs";
 import { isCompactUnsafe, isLiveStatus } from "./pane-status.mjs";
 import { parseJsonlText, readTailWindow } from "./jsonl-reader.mjs";
+import { createJournalHold, fileStamp } from "./pulse/journal-hold.mjs";
 
 export const PAUSE_COMPACT_MODES = Object.freeze(["off", "dry", "on"]);
 
@@ -138,8 +139,16 @@ export function sessionBackgroundActivity({ sessionPath, sessionId, now, policy 
   return now - youngest < policy.hungJobMs ? `a background job has run for ${Math.round((now - youngest) / 60_000)} min` : null;
 }
 
+// pause-compact asks this for every pane each poll; an unchanged journal kept costing 1 MiB a read (11 Nov 01:14Z, row 116d).
+const heldCompacts = createJournalHold();
+
 /** WHAT: Reads the newest compact in the session journal's tail. WHY: Keeps manual and the engine's own compacts inside the spacing window too. */
 export function latestJournalCompactMs(sessionPath, { readTail = readTailWindow, tailBytes = 1024 * 1024 } = {}) {
+  const stamp = readTail === readTailWindow ? fileStamp(sessionPath) : null;
+  return heldCompacts(sessionPath, stamp && [stamp, tailBytes], () => scanJournalCompactMs(sessionPath, readTail, tailBytes));
+}
+
+function scanJournalCompactMs(sessionPath, readTail, tailBytes) {
   const records = parseJsonlText(readTail(sessionPath, tailBytes).text);
   // Claude writes a compact_boundary; Codex a "compacted" record and a context_compacted event.
   const times = records.filter((record) => (record?.type === "system" && record.subtype === "compact_boundary")
