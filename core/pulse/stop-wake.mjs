@@ -9,13 +9,20 @@ import { eventsPath } from "../events.mjs";
 const NEWLINE = 0x0a;
 
 /**
- * WHAT: Starts following: each appended `stop` event calls `wake(session, pane)`. Events written before the start are not replayed.
+ * WHAT: Marks where the hook ledger ends now, so a follower started later reads the stops written in between.
+ * WHY: The watcher starts only after Discord is ready (index.mjs:457), 16 s and more after the bridge (skybar:2, 11 Nov 01:52Z).
+ */
+export function stopLedgerMark(path = eventsPath()) {
+  try { const fd = openSync(path, "r"); try { const stat = fstatSync(fd); return { ino: stat.ino, offset: stat.size }; } finally { closeSync(fd); } }
+  catch { return { ino: null, offset: 0 }; }   // no ledger yet: it is read from 0 once it appears
+}
+
+/**
+ * WHAT: Starts following from `from` (default: the ledger's end now): each appended `stop` event calls `wake(session, pane)`.
  * WHY: The poll and the journal's fs.watch still cover a missed event; this path only makes the common case fast.
  */
-export function followStopEvents({ wake, path = eventsPath(), log = () => {}, watchDir = watch } = {}) {
-  let ino = null, offset = 0;
-  try { const fd = openSync(path, "r"); try { const stat = fstatSync(fd); ino = stat.ino; offset = stat.size; } finally { closeSync(fd); } }
-  catch { /* no ledger yet: it is read from 0 once it appears */ }
+export function followStopEvents({ wake, path = eventsPath(), from = stopLedgerMark(path), log = () => {}, watchDir = watch } = {}) {
+  let { ino, offset } = from;
 
   function read() {
     let fd;
@@ -43,6 +50,7 @@ export function followStopEvents({ wake, path = eventsPath(), log = () => {}, wa
     }
   }
 
+  read();   // the stops written since the mark
   let watcher = null;
   try {
     watcher = watchDir(dirname(path), { persistent: false }, (_type, name) => { if (!name || String(name) === basename(path)) read(); });

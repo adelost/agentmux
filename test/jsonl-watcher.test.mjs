@@ -4,7 +4,7 @@ import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, renameSync, write
 import { join } from "path";
 import { tmpdir } from "os";
 import { createJsonlWatcher } from "../channels/jsonl-watcher.mjs";
-import { followStopEvents } from "../core/pulse/stop-wake.mjs";
+import { followStopEvents, stopLedgerMark } from "../core/pulse/stop-wake.mjs";
 import { openWatcherJournal } from "../core/watcher-journal.mjs";
 import { buildClaudeLaunchCommand } from "../core/agent-launch-command.mjs";
 import { keepClaudeDefaultModel } from "../core/claude-default-model.mjs";
@@ -1345,6 +1345,29 @@ feature("optional work row remains available", () => {
 
 // Row 116d: turn ends reached the mirror 1.51 s after the Stop hook (median of 105, 10 Nov 23:15Z-00:10Z).
 feature("watcher: a Stop hook wakes its pane's mirror", () => {
+  // skybar:2, 11 Nov 01:52:38Z: its Stop came 16 s after a bridge start, before the watcher started (index.mjs:457 waits for
+  // Discord); the follower began at the ledger's end then, and the pane waited 26 s for the startup sweep.
+  component("a Stop written between the bridge's start and the watcher's start still wakes its pane", {
+    given: ["a hook ledger marked when the watcher was made, then one Stop before it starts", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-stop-wake-start-")), path = join(dir, "events.jsonl");
+      const stop = (session, pane) => JSON.stringify({ ts: new Date().toISOString(), event: "stop", session, pane }) + "\n";
+      writeFileSync(path, stop("old", 1));
+      const from = stopLedgerMark(path);
+      appendFileSync(path, stop("skybar", 2));
+      return { dir, path, from };
+    }],
+    when: ["the follower starts from that mark", ({ path, from }) => {
+      const woken = [];
+      const follower = followStopEvents({ path, from, wake: (session, pane) => woken.push(`${session}:${pane}`) });
+      follower.close();
+      return woken;
+    }],
+    then: ["skybar:2 is woken at once, the Stop before the mark is not", (woken, { dir }) => {
+      rmSync(dir, { recursive: true, force: true });
+      expect(woken).toEqual(["skybar:2"]);
+    }],
+  });
+
   component("each Stop appended to the hook ledger wakes its pane within a second, also after the ledger is rotated", {
     given: ["a hook ledger with an older Stop and a follower watching it", () => {
       const dir = mkdtempSync(join(tmpdir(), "amux-stop-wake-")), path = join(dir, "events.jsonl");

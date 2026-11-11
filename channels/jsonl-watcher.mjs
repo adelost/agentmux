@@ -40,7 +40,7 @@ import { bridgeRotationRuntime } from "./account-switch-command.mjs";
 import { isPaneModelSwitchReading, paneModelSelection, recordPaneModelReading, setPaneModelSelection } from "../core/pane-model-state.mjs";
 import { settleLandedClaudeModelSwitch } from "../core/claude-model-command.mjs";
 import { createJournalFollower } from "../core/pulse/journal-follower.mjs";
-import { followStopEvents } from "../core/pulse/stop-wake.mjs";
+import { followStopEvents, stopLedgerMark } from "../core/pulse/stop-wake.mjs";
 import { recordTurnEnd } from "../core/pulse/turn-end-timing.mjs";
 const DEFAULT_POLL_MS = 15_000;
 // Polling backs up fs.watch where events are dropped.
@@ -115,6 +115,7 @@ export function createJsonlWatcher({
   const readSnapshots = new Map();
   const follower = createJournalFollower({ maxJournals: FOLLOWED_JOURNALS, log });
   const wokenAt = new Map();   // pane key -> when its Stop hook woke it, for the turn-end timings in `amux pulse io`
+  const stopsFrom = stopLedgerMark();   // stops written before start() still wake their panes, ahead of the startup sweep
   // Panes audited since THIS bridge started — the startup self-heal runs once
   // per pane, then the normal cursor engine owns the stream again.
   const auditedPanes = new Set();
@@ -897,7 +898,7 @@ export function createJsonlWatcher({
   return {
     start() {
       stopped = false;
-      stopWake ??= followStopEvents({ wake: wakePane, log });
+      stopWake ??= followStopEvents({ wake: wakePane, from: stopsFrom, log });
       tick().catch((err) => log(`initial tick failed: ${err.message}`));
       pollTimer = setInterval(() => tick().catch(() => {}), pollMs);
       typingTimer = setInterval(() => typingTick().catch(() => {}), typingPollMs);
