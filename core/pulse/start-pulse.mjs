@@ -6,6 +6,7 @@ import { join } from "path";
 import { createControlTransport, TRANSPORT_MODES } from "./control-transport.mjs";
 import { createIoCounters, saveIoSnapshot } from "./io-counters.mjs";
 import { createPaneSnapshot } from "./pane-snapshot.mjs";
+import { turnEndTimings } from "./turn-end-timing.mjs";
 
 /** WHAT: Names the counter file `amux pulse io` reads. WHY: Keeps the bridge and the CLI on one path. */
 export const PULSE_IO_PATH = join(homedir(), ".agentmux", "pulse-io.json");
@@ -27,8 +28,8 @@ export function startPulse({ socket, processExec, env = process.env, ioPath = PU
   counters.setTransport(transport.state());
   let written = null;
   const writer = setInterval(() => {
-    const snapshot = counters.snapshot();
-    const key = JSON.stringify([snapshot.totals, snapshot.transport, snapshot.disagreementCount]);
+    const snapshot = { ...counters.snapshot(), turnEnds: turnEndTimings() };
+    const key = JSON.stringify([snapshot.totals, snapshot.transport, snapshot.disagreementCount, snapshot.turnEnds.at(-1)]);
     if (key === written) return;
     try { saveIoSnapshot(ioPath, snapshot); written = key; }
     catch (error) { log(`counter file not written: ${error.message}`); }

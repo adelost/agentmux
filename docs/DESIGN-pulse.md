@@ -387,13 +387,23 @@ Each branch is proved by the tests in §12. Shadow and degraded counts are prove
 | `channels/auto-compact.mjs` | `channels/auto-compact.integration.test.mjs::running state comes from the shared pane listing and not two questions per pane (pulse-11)`, `channels/auto-compact.integration.test.mjs` |
 | `channels/permission-watchdog.mjs` | `channels/permission-watchdog.test.mjs::captures an idle pane again only after its journal moves or two minutes pass (pulse-10)`, `channels/permission-watchdog.test.mjs::reads a prompt with the bridge's own agent that has no paneDirectory (defect since 2026-09-15)`, `channels/permission-watchdog.test.mjs` |
 | `core/pulse/pane-snapshot.mjs` | n/a: new in B2; tests added with B2 |
-| `core/pulse/journal-follower.mjs` | n/a: new in B3; tests added with B3 (pulse-7) |
-| `channels/jsonl-watcher.mjs` | n/a: changes in B3; tests added with B3 |
-| `core/progress.mjs` | n/a: changes in B3; tests added with B3 |
+| `core/pulse/journal-follower.mjs` | `test/jsonl-reader.test.mjs::the follower returns what a fresh window read returns, through growth, cut lines, truncation and replacement`, `test/jsonl-reader.test.mjs::a turn appended to a 6 MB journal is read as its own bytes, not as a new 4 MiB tail` |
+| `core/pulse/journal-hold.mjs` | `core/context.test.mjs::a journal whose path, size and mtime stand still is answered from the last reading`, `core/pane-activity.test.mjs::an idle journal is answered from its last reading until it changes (row 116d)`, `core/reminder-activity.test.mjs::an idle journal is read once, then again only after it grows or the cutoff moves (row 116d)`, `core/context-maintenance.test.mjs::an unchanged journal keeps its answer about work after the compact until it grows` |
+| `core/pulse/stop-wake.mjs` | `test/jsonl-watcher.test.mjs::each Stop appended to the hook ledger wakes its pane within a second, also after the ledger is rotated`, `core/pane-queue.test.mjs::a pane woken by its Stop hook starts before a poll sweep's queued panes` |
+| `channels/jsonl-watcher.mjs` | `test/jsonl-watcher.test.mjs`, `test/jsonl-reader.test.mjs` |
+| `core/progress.mjs` | n/a: unchanged in B3; the follower feeds it the same turns |
 
 | Test | Guards | Level | Write min | Run s |
 |---|---|---|---|---|
 | `core/delivery-broker.test.mjs::a bridge restart waits for a paste in progress (row 116d)` | pulse-12 | component | 20 | 1 |
+| `test/jsonl-reader.test.mjs::the follower returns what a fresh window read returns, through growth, cut lines, truncation and replacement` | pulse-7 | component | 25 | 1 |
+| `test/jsonl-reader.test.mjs::a turn appended to a 6 MB journal is read as its own bytes, not as a new 4 MiB tail` | pulse-7, UC-2 | component | 15 | 1 |
+| `core/reminder-activity.test.mjs::an idle journal is read once, then again only after it grows or the cutoff moves (row 116d)` | pulse-7, UC-1 | unit | 10 | 1 |
+| `core/context.test.mjs::a journal whose path, size and mtime stand still is answered from the last reading` | pulse-7, UC-1 | component | 10 | 1 |
+| `core/pane-activity.test.mjs::an idle journal is answered from its last reading until it changes (row 116d)` | pulse-7, UC-1 | unit | 10 | 1 |
+| `core/context-maintenance.test.mjs::an unchanged journal keeps its answer about work after the compact until it grows` | pulse-7, UC-1 | component | 15 | 1 |
+| `test/jsonl-watcher.test.mjs::each Stop appended to the hook ledger wakes its pane within a second, also after the ledger is rotated` | UC-2 | component | 15 | 1 |
+| `core/pane-queue.test.mjs::a pane woken by its Stop hook starts before a poll sweep's queued panes` | UC-2 | unit | 5 | 1 |
 | `cli/config.test.mjs::parses agentmux.yaml again only when it changes` | pulse-8 | unit | 10 | 1 |
 | `core/pulse/control-transport.test.mjs::answers the same as exec` | pulse-2, R-2, R-3 | integration | 30 | 5 |
 | `core/pulse/control-transport.test.mjs::starts no process for read-only questions` | pulse-1, pulse-5 | integration | 15 | 3 |

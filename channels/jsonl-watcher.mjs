@@ -41,6 +41,7 @@ import { isPaneModelSwitchReading, paneModelSelection, recordPaneModelReading, s
 import { settleLandedClaudeModelSwitch } from "../core/claude-model-command.mjs";
 import { createJournalFollower } from "../core/pulse/journal-follower.mjs";
 import { followStopEvents } from "../core/pulse/stop-wake.mjs";
+import { recordTurnEnd } from "../core/pulse/turn-end-timing.mjs";
 const DEFAULT_POLL_MS = 15_000;
 // Polling backs up fs.watch where events are dropped.
 
@@ -111,6 +112,7 @@ export function createJsonlWatcher({
   // Cache journal identity, recovery evidence and the next mirror deadline.
   const readSnapshots = new Map();
   const follower = createJournalFollower({ maxJournals: FOLLOWED_JOURNALS, log });
+  const wokenAt = new Map();   // pane key -> when its Stop hook woke it, for the turn-end timings in `amux pulse io`
   // Panes audited since THIS bridge started — the startup self-heal runs once
   // per pane, then the normal cursor engine owns the stream again.
   const auditedPanes = new Set();
@@ -626,6 +628,7 @@ export function createJsonlWatcher({
 
       const dir = paneDir(agentDir, idx);
       const key = paneKey(name, idx);
+      const began = Date.now();
       await timedWatcherStep(`${key} progress`, () => progress.reconcile(channelId), log);
       const { readTurns, latestMtime, latestInfo } = readerFor(config, name, idx);
       const now = Date.now();
@@ -654,6 +657,7 @@ export function createJsonlWatcher({
       const tailBytes = startupAudit ? STARTUP_AUDIT_TAIL_BYTES : WATCHER_TAIL_BYTES;
       // The startup audit's 16 MiB window is read once and never held.
       const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes, headless: true, ...(!startupAudit && { follower }) });
+      const readAt = Date.now();
       await timedWatcherStep(`${key} recovery`, () => codexRecovery.tick({ name, pane: idx, dir, result }), log);
       await timedWatcherStep(`${key} progress-read`, () => progress.reconcile(channelId, result?.turns || []), log);
       const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
@@ -718,6 +722,7 @@ export function createJsonlWatcher({
         maxPostActions: MAX_POST_ACTIONS,
       });
       commitEngineState(channelId, planned.nextState);
+      const plannedAt = Date.now();
       metric(`${key} read bytes=${readBytes} ms=${readMs} turns=${result.turns.length} actions=${planned.actions.length}`);
 
       for (const note of planned.notes || []) {
@@ -727,7 +732,13 @@ export function createJsonlWatcher({
       }
 
       for (const action of planned.actions) {
+        const postAt = Date.now();
         const result = await timedWatcherStep(`${key} post`, () => postTurn({ name, idx, channelId, turn: action.turn, config }), log);
+        if (action.reason === "stop_reason" && Number.isFinite(action.endMs)) {
+          const after = (at) => (Number.isFinite(at) ? at - action.endMs : null);
+          recordTurnEnd({ pane: key, endAt: new Date(action.endMs).toISOString(), woken: after(wokenAt.get(key)), began: after(began),
+            progressed: after(now), read: after(readAt), planned: after(plannedAt), post: after(postAt), posted: after(Date.now()), ok: !!result?.ok });
+        }
         if (!result?.ok) {
           const nextState = applyPostFailure({
             lastPostedMs: lastPostedMs(channelId),
@@ -768,6 +779,7 @@ export function createJsonlWatcher({
     try { config = loadConfig(agentsYamlPath); } catch { return; }
     const entry = config?.[name];
     if (!entry?.dir || entry.backend === "native" || !entry.panes?.[idx]) return;
+    wokenAt.set(paneKey(name, idx), Date.now());
     queue.enqueue(paneKey(name, idx), { name, idx, agentDir: entry.dir, sharedConfig: config }, { first: true });
   }
 
