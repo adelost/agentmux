@@ -736,7 +736,8 @@ export function createJsonlWatcher({
         const result = await timedWatcherStep(`${key} post`, () => postTurn({ name, idx, channelId, turn: action.turn, config }), log);
         if (action.reason === "stop_reason" && Number.isFinite(action.endMs)) {
           const after = (at) => (Number.isFinite(at) ? at - action.endMs : null);
-          recordTurnEnd({ pane: key, endAt: new Date(action.endMs).toISOString(), woken: after(wokenAt.get(key)), began: after(began),
+          const wake = wokenAt.get(key);
+          recordTurnEnd({ pane: key, endAt: new Date(action.endMs).toISOString(), woken: after(wake?.at), wake: wake ? `${wake.status}, ${wake.active} active` : null, began: after(began),
             progressed: after(now), read: after(readAt), planned: after(plannedAt), post: after(postAt), posted: after(Date.now()), ok: !!result?.ok });
         }
         if (!result?.ok) {
@@ -779,8 +780,9 @@ export function createJsonlWatcher({
     try { config = loadConfig(agentsYamlPath); } catch { return; }
     const entry = config?.[name];
     if (!entry?.dir || entry.backend === "native" || !entry.panes?.[idx]) return;
-    wokenAt.set(paneKey(name, idx), Date.now());
-    queue.enqueue(paneKey(name, idx), { name, idx, agentDir: entry.dir, sharedConfig: config }, { first: true });
+    const at = Date.now();
+    const { status } = queue.enqueue(paneKey(name, idx), { name, idx, agentDir: entry.dir, sharedConfig: config }, { first: true });
+    wokenAt.set(paneKey(name, idx), { at, status, active: queue.stats().active });
   }
 
   function enqueuePane(name, idx, agentDir, sharedConfig = null) {
