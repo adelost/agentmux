@@ -22,6 +22,9 @@ process.env.AMUX_ASK_LEDGER_PATH = join(
 // Binding tests must never close real asks through the user's append-only evidence file.
 process.env.AMUX_ASK_BINDINGS_PATH = join(mkdtempSync(join(tmpdir(), "amux-test-bindings-")), "bindings.jsonl");
 
+// And for the compact log: the rotation tests wrote 539 false lsrc:0 compacts into ~/.agentmux/compacts.jsonl (11 Nov).
+process.env.AMUX_COMPACT_LOG_PATH = join(mkdtempSync(join(tmpdir(), "amux-test-compacts-")), "compacts.jsonl");
+
 // And for the day files of his messages that amux search writes next to the log: a test that searches must not write
 // his words into ~/.agentmux/search-human.
 process.env.AMUX_SEARCH_HUMAN_DIR = join(

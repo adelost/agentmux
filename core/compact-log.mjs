@@ -5,11 +5,13 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-/** WHAT: Names the compact log. WHY: Keeps the bridge, the rotation and a replay on one file. */
-export const COMPACT_LOG = join(homedir(), ".agentmux", "compacts.jsonl");
+/** WHAT: Names the compact log. WHY: Keeps the bridge, rotation and replay on one file, and test runs off it. */
+export function compactLogPath() {
+  return process.env.AMUX_COMPACT_LOG_PATH || join(homedir(), ".agentmux", "compacts.jsonl");
+}
 
 /** WHAT: Stores one compact call in the log. WHY: Lets a night's compacts be counted; a failed write never changes the compact. */
-export function recordCompactCall(entry, path = COMPACT_LOG) {
+export function recordCompactCall(entry, path = compactLogPath()) {
   try {
     mkdirSync(dirname(path), { recursive: true });
     appendFileSync(path, `${JSON.stringify(entry)}\n`);
