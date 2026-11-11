@@ -1,4 +1,5 @@
 import { component, feature, unit, expect } from "bdd-vitest";
+import { vi } from "vitest";
 import { appendFileSync, mkdtempSync, mkdirSync, copyFileSync, readFileSync, rmSync, writeFileSync, utimesSync } from "fs";
 import { startReadMeter } from "../core/pulse/read-meter.mjs";
 import { createJournalFollower } from "../core/pulse/journal-follower.mjs";
@@ -599,6 +600,55 @@ feature("isBusyFromJsonl: compacted session with null stop_reason", () => {
       expect(result).not.toBeNull();
       expect(result.items[0].content).toBe("Two typos found.");
       cleanup();
+    }],
+  });
+});
+
+// Row 116d: a delivery asks isBusy every few seconds; a prompt in neither searched file cost 2 x 16 MiB a call, also of idle journals.
+feature("isBusyFromJsonl: an unchanged journal is not read again for the same question", () => {
+  component("a not-busy answer for a 6 MB idle journal is given again without reading it", {
+    given: ["a finished turn after 6 MB of earlier events", () => {
+      const ctx = setupFakeProject("idle-end-turn.jsonl");
+      const journal = join(ctx.projectDir, "session-abc123.jsonl"), tail = readFileSync(journal);
+      const filler = `${JSON.stringify({ type: "system", subtype: "note", content: "x".repeat(10_000), timestamp: "2026-11-10T20:00:00.000Z" })}\n`;
+      writeFileSync(journal, filler.repeat(600)); appendFileSync(journal, tail);
+      const meterDir = mkdtempSync(join(tmpdir(), "agentmux-read-meter-"));
+      writeFileSync(join(meterDir, "on"), "");
+      const meter = startReadMeter({ flag: join(meterDir, "on"), out: join(meterDir, "reads.json"), everyMs: 3_600_000, asker: () => "test" });
+      return { ...ctx, meter, meterDir };
+    }],
+    when: ["a delivery asks twice about a prompt the journal does not hold", ({ paneDir, meter }) => {
+      const first = isBusyFromJsonl(paneDir, "a prompt that is still queued");
+      const before = meter.totals().total;
+      const again = isBusyFromJsonl(paneDir, "a prompt that is still queued");
+      return { first, again, read: meter.totals().total - before };
+    }],
+    then: ["the same answer, from under 10 kB read", ({ first, again, read }, { cleanup, meter, meterDir }) => {
+      meter.stop(); rmSync(meterDir, { recursive: true, force: true }); cleanup();
+      expect({ same: first === again, notBusy: first !== true, readUnder10kB: read < 10_000 })
+        .toEqual({ same: true, notBusy: true, readUnder10kB: true });
+    }],
+  });
+
+  unit("a reply with no stop reason still turns not busy after 15 s of quiet", {
+    given: ["a fresh reply whose stop reason was never written", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const ctx = setupFakeProject("stale-null-stop.jsonl");
+      const journal = join(ctx.projectDir, "session-abc123.jsonl"), at = Date.parse("2026-11-11T00:40:00Z");
+      utimesSync(journal, at / 1000, at / 1000);
+      vi.setSystemTime(at + 1_000);
+      return { ...ctx, at };
+    }],
+    when: ["busy is asked at once and again 16 s later, the journal unchanged", ({ paneDir, at }) => {
+      try {
+        const fresh = isBusyFromJsonl(paneDir, "review this CV");
+        vi.setSystemTime(at + 16_000);
+        return [fresh, isBusyFromJsonl(paneDir, "review this CV")];
+      } finally { vi.useRealTimers(); }
+    }],
+    then: ["busy, then not busy: a busy answer is never held", (answers, { cleanup }) => {
+      cleanup();
+      expect(answers).toEqual([true, false]);
     }],
   });
 });

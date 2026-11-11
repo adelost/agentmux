@@ -14,18 +14,20 @@ export function fileStamp(path) {
 }
 
 /**
- * WHAT: Builds a hold: `hold(key, stamp, compute)` returns the answer computed for the same key and stamp, else computes it.
- * WHY: A null stamp (no journal found) is never held, so a missing journal is looked for again every call.
+ * WHAT: Builds a hold: `hold(key, stamp, compute, keep)` returns the answer computed for the same key and stamp, else computes it.
+ * WHY: A null stamp (no journal found) is never held, so a missing journal is looked for again every call; `keep` leaves out
+ * answers that also depend on the clock.
  */
 export function createJournalHold() {
   const held = new Map();
-  return function hold(key, stamp, compute) {
+  return function hold(key, stamp, compute, keep = () => true) {
     if (stamp == null) return compute();
     const tag = JSON.stringify(stamp);
     const last = held.get(key);
     if (last?.tag === tag) return last.value;
     const value = compute();
-    held.set(key, { tag, value });
+    if (keep(value)) held.set(key, { tag, value });
+    else held.delete(key);
     return value;
   };
 }

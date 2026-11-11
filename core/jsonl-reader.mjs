@@ -10,6 +10,7 @@ import { isSystemNoiseDirective, isWorkDirective } from "./system-noise.mjs";
 import { CLAUDE_TERMINAL_STOP_REASONS as TERMINAL_STOP_REASONS, userPromptText, isClaudeTaskNotification } from "./claude-turn-lifecycle.mjs";
 import { isClaudeTurnBusy } from "./claude-turn-busy.mjs";
 import { normalizePrompt, promptAppearsInEvents, promptEventMatches } from "./claude-prompt-text.mjs";
+import { createJournalHold, fileStamp } from "./pulse/journal-hold.mjs";
 // Long sessions require bounded tail reads to stay below Node string limits.
 const DEFAULT_JSONL_WINDOW_BYTES = 8 * 1024 * 1024; // 8 MiB tail: thousands of turns
 const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024; // hard cap, well under the string limit
@@ -342,8 +343,20 @@ function describeJsonlToolCall(toolUse) {
  * WHAT: Reads Claude turn activity from its persisted journal.
  * WHY: Prevents interrupted tool turns from blocking exact delivery recovery.
  */
+// A delivery asks this every few seconds; when the prompt is in neither file, each ask read 2 x 16 MiB, also of idle journals
+// (read meter 11 Nov 00:19-00:30Z: 25.2 MB a call, row 116d). The two searched files' stamps hold a not-busy answer; a busy one
+// is read again, as a reply with no stop reason turns not busy only after 15 s of quiet (claude-turn-busy.mjs).
+const heldBusy = createJournalHold();
+
 export function isBusyFromJsonl(paneDir, promptText = null) {
   const projectDir = claudeProjectDir(paneDir);
+  const files = existsSync(projectDir) ? listJsonlFiles(projectDir).slice(0, PROMPT_SEARCH_FILES) : [];
+  const stamps = files.map((file) => fileStamp(file.path));
+  return heldBusy(projectDir, files.length && !stamps.includes(null) ? [stamps, promptText] : null,
+    () => scanBusy(projectDir, promptText), (busy) => busy !== true);
+}
+
+function scanBusy(projectDir, promptText) {
   const found = findJsonlAndEvents(projectDir, promptText);
   if (!found) {
     // No file contains the needle. Two subcases:
