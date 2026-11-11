@@ -5,6 +5,9 @@ vi.mock("../cli/config.mjs", () => ({
   findChannelForPane: () => "chan-1",
 }));
 
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createPermissionWatchdog } from "./permission-watchdog.mjs";
 
 const PROMPT = `
@@ -24,7 +27,7 @@ const PROMPT = `
 const UNSAFE = PROMPT.replace('Q=/mnt/q/Chathelper-traningsdata-2026-09-10/GEMMA-4-TEST/TRANINGSDATA; ', "");
 const IDLE = "● Bash\n  done\n\n❯ ";
 
-function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null, defaults = false, activityOf = () => "unchanged" }) {
+function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null, defaults = false, realActivity = false, activityOf = () => "unchanged" }) {
   const decisions = [];
   const snapshots = [];
   const beats = [];
@@ -42,7 +45,7 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
     agent, discord, notifyUser, deliveryBroker, agentsYamlPath: "x.yaml",
     config: { enabled: true, autoAnswer, pollMs: 1, answerAgeMs: 10_000, promptAgeMs: 120_000, humanAgeMs: 600_000 },
     holdsKeptFiles: () => false,
-    ...(defaults ? {} : { sessionIdentity: (_agentConfig, pane) => sessionIds[pane] ?? null, activityOf }),
+    ...(defaults ? {} : { sessionIdentity: (_agentConfig, pane) => sessionIds[pane] ?? null, ...(realActivity ? {} : { activityOf }) }),
     recordDecision: (line) => decisions.push(JSON.parse(line)),
     publishOpenPrompts: (text) => snapshots.push(JSON.parse(text)),
     beat: (metrics) => beats.push(metrics),
@@ -62,7 +65,7 @@ describe("permission watchdog", () => {
     } finally { vi.unstubAllEnvs(); }
   });
 
-  it("captures an idle pane again only after its journal moves or two minutes pass (pulse-10)", async () => {
+  it("captures a quiet pane once, then only when its dialog hook moves, never on a timer (pulse-10, row 116e)", async () => {
     const world = { stamp: "j1" };
     const h = harness({ screens: {}, activityOf: () => world.stamp });
     const capturesOfPane0 = () => h.agent.capturePane.mock.calls.filter(([, pane]) => pane === 0).length;
@@ -74,8 +77,34 @@ describe("permission watchdog", () => {
       if (capturesOfPane0() > before) captured.push(at / 1000);
       h.advance(10_000);
     }
-    // First sight is one capture, not a minute of them: [0, 10, 20, 30, 40, 50, 170] read a quiet pane as active for its first minute (row 116c)
-    expect(captured).toEqual([0, 120, 200, 210, 220, 230, 240, 250]);
+    // First sight is one capture, not a minute of them: [0, 10, 20, 30, 40, 50, 170] read a quiet pane as active for its first minute (row 116c).
+    // Row 116e removed the two-minute recheck at 120 s: 6 captures per quiet pane in 12.3 min, for a prompt that always fires its hook.
+    expect(captured).toEqual([0, 200, 210, 220, 230, 240, 250]);
+  });
+
+  it("captures on a permission notification or a turn end, never on a turn start, and still answers the prompt (row 116e)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "amux-116e-"));
+    const events = join(dir, "events.jsonl");
+    const hook = (event, extra = {}) => appendFileSync(events, `${JSON.stringify({ ts: new Date().toISOString(), event, session: "lsrc", pane: 0, ...extra })}\n`);
+    vi.stubEnv("AMUX_EVENTS_PATH", events);
+    try {
+      const screens = { 0: IDLE };
+      const h = harness({ screens, realActivity: true });
+      const capturesOfPane0 = () => h.agent.capturePane.mock.calls.filter(([, pane]) => pane === 0).length;
+      await h.wd.tick();                                            // first sight
+      h.advance(70_000); hook("prompt"); await h.wd.tick();
+      expect(capturesOfPane0()).toBe(1);
+      h.advance(70_000); hook("stop"); await h.wd.tick();           // the autocompact offer follows a turn end (row 157)
+      expect(capturesOfPane0()).toBe(2);
+      h.advance(70_000); hook("prompt"); await h.wd.tick();
+      screens[0] = PROMPT; hook("notification", { detail: "Claude needs your permission", needsYou: true });
+      h.advance(1_000); await h.wd.tick();
+      h.advance(11_000);
+      expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:0", action: "answered" }]);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("answers the safe rm prompt once after the short answer delay, not after two minutes", async () => {

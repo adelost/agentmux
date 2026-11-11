@@ -9,7 +9,7 @@ import {
 import { isAutocompactOffer } from "../core/dismiss.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
-import { createCaptureDue, paneActivityStamp } from "../core/pulse/capture-due.mjs";
+import { createCaptureDue, createDialogHookStamp } from "../core/pulse/capture-due.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
 import { execFileSync } from "node:child_process";
@@ -80,10 +80,9 @@ export function createPermissionWatchdog({
   captureTimeoutMs = 5_000,
   // The bridge's agent has no paneDirectory: every prompt threw here from 2026-09-15 to 1.25.402.
   sessionIdentity = (agentConfig, paneIdx) => latestClaudeSessionIdentity(panePathFor(agentConfig, paneIdx))?.sessionId || null,
-  // A prompt follows its tool call into the journal (and a Claude hook), so these stamps say when a capture can matter.
-  activityOf = paneActivityStamp,
+  // A permission prompt fires a needsYou hook and the autocompact offer follows a turn end, so only those hooks make a capture matter.
+  activityOf = createDialogHookStamp(),
   activeMs = 60_000,
-  quietRecheckMs = 120_000,
 }) {
   // Safe rm prompts are answered after config.answerAgeMs, every other prompt
   // alerts the human after config.promptAgeMs.
@@ -92,8 +91,8 @@ export function createPermissionWatchdog({
   let publishedPrompts = null;
   let ticking = false;
   let lastBeatAt = -Infinity;
-  // An open prompt, recent journal or hook activity, or a quiet pane's two-minute recheck (pulse-10; the recheck is row 116e's to remove)
-  const due = createCaptureDue({ activityOf, activeMs, quietRecheckMs });
+  // An open prompt, first sight, or a dialog hook within activeMs; never a timer (pulse-10, row 116e)
+  const due = createCaptureDue({ activityOf, activeMs });
   const captureDue = (agentConfig, paneIdx, at) => due(agentConfig, paneIdx, at, { tracking: seen.has(`${agentConfig.name}:${paneIdx}`) });
 
   // A pane whose capture never returns must not hold every other pane's prompt:

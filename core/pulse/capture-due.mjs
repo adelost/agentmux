@@ -13,6 +13,21 @@ export function paneActivityStamp(agentConfig, paneIdx) {
 }
 
 /**
+ * WHAT: Builds a stamp of a pane's newest dialog hook: needsYou or a turn end.
+ * WHY: Keeps journal writes and turn starts from costing a capture; prompts fire needsYou, offers follow turn ends.
+ */
+export function createDialogHookStamp({ states = latestPaneStatesCached } = {}) {
+  const last = new Map();
+  return function dialogHookStamp(agentConfig, paneIdx) {
+    const paneKey = `${agentConfig.name}:${paneIdx}`;
+    const pushed = states().get(paneKey);
+    // A turn start replaces the pane's newest state, so the last dialog hook is remembered across it
+    if (pushed && pushed.state !== "working") last.set(paneKey, pushed.ts);
+    return last.get(paneKey) ?? null;
+  };
+}
+
+/**
  * WHAT: Builds a per-watchdog check: due when the watchdog tracks the pane, when its activity changed within `activeMs`, on first sight,
  * or after `quietRecheckMs` without a capture (Infinity: never). WHY: One rule for every watchdog that captures panes.
  */
