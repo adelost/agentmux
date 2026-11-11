@@ -470,13 +470,8 @@ nativeRuntimeWatcher.start();
 // wakes exactly its recorded session through the broker lifecycle above.
 if (process.env.AMUX_PANE_SLEEP_ENABLED !== "false") {
   setTimeout(() => {
-    void cmdSleepWatch({
-      agent,
-      deliveryQueue,
-      socket: TMUX_SOCKET,
-      configPath: AGENTS_YAML,
-      bridgeDir: __dir,
-    }, { once: false, apply: true }, {
+    void cmdSleepWatch({ agent, deliveryQueue, fleetPanes, socket: TMUX_SOCKET, configPath: AGENTS_YAML, bridgeDir: __dir },
+      { once: false, apply: true }, {
       queue: deliveryQueue,
       // A refused automatic candidate is expected and must not set the
       // foreground bridge's eventual process exit code.

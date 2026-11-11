@@ -329,6 +329,36 @@ feature("candidate watch", () => {
     }],
   });
 
+  unit("an old Claude pane whose engine has exited refuses from the shared listing before tmux probes (row 116c)", {
+    given: ["a Claude pane idle 30 hours that the bridge's listing shows at a shell", () => {
+      const ctx = baseContext();
+      ctx.agent.paneProcessState = vi.fn();
+      ctx.agent.promptTransportState = vi.fn();
+      ctx.agent.isBusy = vi.fn();
+      ctx.agent.capturePane = vi.fn();
+      ctx.fleetPanes = { panes: async () => new Map([["lsrc:0", { command: "bash", dead: false }]]) };
+      return {
+        ctx,
+        agent: { name: "lsrc", dir: "/tmp/lsrc", panes: [{ cmd: "claude" }] },
+        exec: vi.fn(() => { throw new Error("must not probe"); }),
+      };
+    }],
+    when: ["observing the pane", ({ ctx, agent, exec }) => observePane(ctx, agent, 0, {
+      exec,
+      queue: leaseQueue(),
+      readFile: vi.fn(),
+      nowMs: NOW,
+      activity: () => NOW - 30 * 60 * 60_000,
+    })],
+    then: ["the pane is refused as not running, with no tmux question", (result, fixture) => {
+      expect(result).toMatchObject({ ok: false, reason: "process-not-provably-running" });
+      expect(fixture.exec).not.toHaveBeenCalled();
+      for (const probe of ["paneProcessState", "promptTransportState", "isBusy", "capturePane"]) {
+        expect(fixture.ctx.agent[probe]).not.toHaveBeenCalled();
+      }
+    }],
+  });
+
   unit("dry mode reports only the conservative candidates and never sleeps", {
     given: ["one Claude candidate and one unsupported pane", () => {
       const logs = [];

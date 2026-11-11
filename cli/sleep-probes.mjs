@@ -10,6 +10,7 @@ import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import { latestConversationActivityMs } from "../core/pane-activity.mjs";
 import { PANE_SLEEP_IDLE_MS, planSleep } from "../core/pane-sleep.mjs";
+import { processStateOf } from "../core/pulse/pane-snapshot.mjs";
 
 const CLAUDE_COMMAND = /(?:^|\s)claude(?:\s|$)/u;
 const EXCLUDED_PANE = /manager|broker|service|native/u;
@@ -161,6 +162,19 @@ export async function observePane(ctx, agent, pane, {
       ok: false,
       reason: "idle-threshold-not-met",
       facts: { engine, idleMs },
+      identity: null,
+      processGeneration: null,
+      lastActivityMs,
+    };
+  }
+  // The bridge's shared pane listing (pulse-11) already says whether the engine runs. A pane whose Claude has exited is
+  // refused as planSleep would refuse it, before four tmux questions every sweep (row 116c: ai:2, api:2, claw:1).
+  const listing = ctx.fleetPanes ? await ctx.fleetPanes.panes().catch(() => null) : null;
+  if (listing && !processStateOf(listing.get(`${agent.name}:${pane}`)).running) {
+    return {
+      ok: false,
+      reason: "process-not-provably-running",
+      facts: { engine, idleMs, processRunning: false },
       identity: null,
       processGeneration: null,
       lastActivityMs,
