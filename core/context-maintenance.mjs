@@ -51,15 +51,19 @@ const claudeWorkEvent = e => e?.type === "user" && !e.isMeta && !e.isCompactSumm
 // A Codex prompt is work once a model ran on it or while its turn is open.
 // One the provider refused (an unsupported model) added nothing to compact.
 // auto-compact asks every round; journals unchanged since the last scan give the same answer without a read (row 116d).
-const heldWork = createJournalHold();
-function hasWorkAfter(files, cursor) {
+const heldScans = createJournalHold();
+function scanAfter(kind, files, cursor, scan) {
   const stamps = files.map(fileStamp);
-  return heldWork(JSON.stringify(files), stamps.includes(null) ? null : [stamps, cursor.positions], () => {
+  return heldScans(`${kind}\0${JSON.stringify(files)}`, stamps.includes(null) ? null : [stamps, cursor.positions], scan);
+}
+function hasWorkAfter(files, cursor) {
+  return scanAfter("work", files, cursor, () => {
     const prompts = codexPromptProgress();
     return hasJsonlEventAfterCursor(files, cursor, e => claudeWorkEvent(e) || prompts.see(e) === "processed")
       || prompts.isOpen();
   });
 }
+const hasCompactAfter = (files, cursor) => scanAfter("compact", files, cursor, () => hasJsonlEventAfterCursor(files, cursor, compactEvent));
 
 function write(state, key, record) {
   assertDeliveryPreparation();
@@ -99,7 +103,7 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null, no
   if (!cursor) return { ...record, status: "UNKNOWN", reason: "journal-copy-unverified" };
   if (!copied && !readOnly) write(state, paneKey(name, pane), { ...record, cursor });
   const files = Object.keys(cursor.positions);
-  if (record.status !== "VERIFIED" && hasJsonlEventAfterCursor(files, cursor, compactEvent)) {
+  if (record.status !== "VERIFIED" && hasCompactAfter(files, cursor)) {
     const verified = { ...record, cursor, status: "VERIFIED", compactBoundary: true,
       ...(["attempting", "unverified", "measured"].includes(record.nightlyStatus)
         && { nightlyStatus: "compacted-unmeasured", afterTokens: null, reason: "native-compact-boundary" }) };
@@ -110,7 +114,7 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null, no
   // A compact the provider's usage limit refused spent nothing, so its fence ends when that limit resets.
   if (record.status === "FAILED" && now >= record.retryAt) return null;
   if (record.status === "VERIFIED" && record.compactBoundary == null) {
-    return { ...record, compactBoundary: hasJsonlEventAfterCursor(files, cursor, compactEvent) };
+    return { ...record, compactBoundary: hasCompactAfter(files, cursor) };
   }
   return record;
 }

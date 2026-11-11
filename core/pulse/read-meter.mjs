@@ -51,7 +51,7 @@ export function startReadMeter({ flag = READ_METER_FLAG, out = READ_METER_PATH, 
     if (JOURNAL_KINDS.has(kind) && (journals[file] || Object.keys(journals).length < MAX_JOURNALS)) {
       const journal = (journals[file] ??= { bytes: 0, calls: 0, readers: {} });
       journal.bytes += bytes; journal.calls++;
-      if (journal.readers[who] || Object.keys(journal.readers).length < 4) journal.readers[who] = (journal.readers[who] ?? 0) + bytes;
+      if (journal.readers[who] || Object.keys(journal.readers).length < 8) journal.readers[who] = (journal.readers[who] ?? 0) + bytes;
     }
     if (!byReader[who] && Object.keys(byReader).length >= MAX_READERS) return;
     const reader = (byReader[who] ??= { bytes: 0, calls: 0, kinds: {} });
@@ -111,7 +111,7 @@ export function startReadMeter({ flag = READ_METER_FLAG, out = READ_METER_PATH, 
     on = existsSync(flag);
     if (on && !was) { since = now(); total = 0; calls = 0; byReader = {}; byKind = {}; journals = {}; }
     if (!on && !was) return;
-    const readers = Object.entries(byReader).sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 40)
+    const readers = Object.entries(byReader).sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 80)
       .map(([who, r]) => ({ who, bytes: r.bytes, calls: r.calls, kinds: r.kinds }));
     const snapshot = { v: 1, on, since, at: now(), total, calls, byKind, readers, journals };
     try { mkdirSync(dirname(out), { recursive: true }); writeFileSync(`${out}.tmp`, JSON.stringify(snapshot)); renameSync(`${out}.tmp`, out); }
