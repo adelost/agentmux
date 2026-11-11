@@ -261,9 +261,17 @@ function codexRecordedModel(entry) {
       ?? settings.reasoning_effort ?? settings.effort ?? null } : null;
 }
 
+const heldCodexContexts = createJournalHold();
+
+// auto-compact read each idle Codex rollout's tail about once a minute, 11.5 MB per rollout in 11 min (11 Nov 00:56Z, row 116d).
 function getContextFromCodexJsonl(paneDir) {
   const file = latestCodexSessionFor(paneDir);
   if (!file) return null;
+  const context = heldCodexContexts(paneDir, fileStamp(file), () => scanCodexContext(file));
+  return context && { ...context };
+}
+
+function scanCodexContext(file) {
 
   // The newest token_count lives in the tail, even in multi-MB rollouts.
   const lines = readTailLines(file);
