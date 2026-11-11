@@ -15,6 +15,8 @@ export const READ_METER_FLAG = join(homedir(), ".agentmux", "read-meter.on");
 export const READ_METER_PATH = join(homedir(), ".agentmux", "read-meter.json");
 const WRITE_EVERY_MS = 15_000;
 const MAX_READERS = 200;
+const MAX_JOURNALS = 400;   // one entry per session journal read, so an idle journal that is still read shows by name (row 116d)
+const JOURNAL_KINDS = new Set(["claude journal", "codex rollout"]);
 const CARRIERS = new Set(["core/pulse/read-meter.mjs", "index.mjs", "lib.mjs"]);
 // A journal read passes three reader functions before the watcher that pays for it (readTailWindow < parseJsonlTail < readLastTurns).
 const READER_FRAMES = 6;
@@ -37,7 +39,7 @@ export function kindOf(file) {
 export function startReadMeter({ flag = READ_METER_FLAG, out = READ_METER_PATH, everyMs = WRITE_EVERY_MS, asker = () => askerOf(CARRIERS, { frames: READER_FRAMES }),
   now = () => Date.now() } = {}) {
   let on = existsSync(flag), since = now(), total = 0, calls = 0;
-  let byReader = {}, byKind = {};
+  let byReader = {}, byKind = {}, journals = {};
   const fdPaths = new Map(), handlePaths = new WeakMap();
   let inside = 0;   // readFileSync reads through fs.readSync for a buffer: the outer call counts, the inner one does not
   const count = (bytes, file) => {
@@ -45,6 +47,11 @@ export function startReadMeter({ flag = READ_METER_FLAG, out = READ_METER_PATH, 
     const kind = kindOf(file), who = asker();
     total += bytes; calls++;
     byKind[kind] = (byKind[kind] ?? 0) + bytes;
+    if (JOURNAL_KINDS.has(kind) && (journals[file] || Object.keys(journals).length < MAX_JOURNALS)) {
+      const journal = (journals[file] ??= { bytes: 0, calls: 0, readers: {} });
+      journal.bytes += bytes; journal.calls++;
+      if (journal.readers[who] || Object.keys(journal.readers).length < 4) journal.readers[who] = (journal.readers[who] ?? 0) + bytes;
+    }
     if (!byReader[who] && Object.keys(byReader).length >= MAX_READERS) return;
     const reader = (byReader[who] ??= { bytes: 0, calls: 0, kinds: {} });
     reader.bytes += bytes; reader.calls++; reader.kinds[kind] = (reader.kinds[kind] ?? 0) + bytes;
@@ -101,11 +108,11 @@ export function startReadMeter({ flag = READ_METER_FLAG, out = READ_METER_PATH, 
   const writer = setInterval(() => {
     const was = on;
     on = existsSync(flag);
-    if (on && !was) { since = now(); total = 0; calls = 0; byReader = {}; byKind = {}; }
+    if (on && !was) { since = now(); total = 0; calls = 0; byReader = {}; byKind = {}; journals = {}; }
     if (!on && !was) return;
     const readers = Object.entries(byReader).sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 40)
       .map(([who, r]) => ({ who, bytes: r.bytes, calls: r.calls, kinds: r.kinds }));
-    const snapshot = { v: 1, on, since, at: now(), total, calls, byKind, readers };
+    const snapshot = { v: 1, on, since, at: now(), total, calls, byKind, readers, journals };
     try { mkdirSync(dirname(out), { recursive: true }); writeFileSync(`${out}.tmp`, JSON.stringify(snapshot)); renameSync(`${out}.tmp`, out); }
     catch (error) { console.error(`[read-meter] counts not written: ${error.message}`); }
   }, everyMs);
