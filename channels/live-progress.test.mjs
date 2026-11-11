@@ -37,6 +37,30 @@ describe("a single live progress row", () => {
   });
 });
 
+// 11 Nov 01:36-01:47Z: a turn end waited 0.2-2.2 s before its reply was planned and posted, on the work row's delete
+// (jsonl-watcher.mjs:664 and :460 await finish, live-progress.mjs:74, which fetches and then deletes the message).
+describe("a finished turn and its work row", () => {
+  it("returns the reply at once and deletes the row behind it, without clearing a row a new turn made meanwhile", async () => {
+    const f = setup(), args = { channelId: "ch", paneKey: "test:0" };
+    let release;
+    f.discord.deleteMessage.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    f.discord.send.mockResolvedValueOnce({ id: "row-1" }).mockResolvedValueOnce({ id: "row-2" });
+    await f.progress.update({ ...args, turn: turn([tool("1")]) });
+    const answered = await Promise.race([
+      f.progress.update({ ...args, turn: turn([tool("1"), { id: "t", type: "text", content: "Done." }], true) }).then(() => "reply"),
+      new Promise(resolve => setTimeout(() => resolve("waited for the delete"), 50)),
+    ]);
+    await Promise.race([f.progress.reconcile("ch", []), new Promise(resolve => setTimeout(resolve, 50))]);
+    const next = { ...turn([tool("2")]), timestamp: "2026-10-17T07:05:00Z" };
+    await f.progress.update({ ...args, turn: next });
+    release(); await new Promise(resolve => setTimeout(resolve, 0));
+    await f.progress.update({ ...args, turn: { ...next, items: [tool("2"), tool("3")] } });
+    expect(answered).toBe("reply");
+    expect(f.discord.send).toHaveBeenCalledTimes(2);
+    expect(f.discord.editMessage).toHaveBeenLastCalledWith("ch", "row-2", "Working · 2 steps · last: reading cut.ts");
+  });
+});
+
 describe("the work row and the agent state file", () => {
   // defect: every tool step saved the row into agentmux-state.json, which was rewritten about once a second (2026-10-27).
   it("edits the row on each step without writing the agent state", async () => {

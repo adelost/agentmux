@@ -71,17 +71,22 @@ export function createLiveProgress({ discord, state, journal = openWatcherJourna
   async function finish(channelId) {
     const row = rowOf(channelId);
     if (!row) return;
+    // Only this row's own record is changed: a new turn may have made the channel's next row while the delete ran.
+    const same = () => rowOf(channelId)?.messageId === row.messageId;
     try { await discord.deleteMessage(channelId, row.messageId); }
     catch (error) {
       if (Number(error.code) !== 10008) {
-        save(channelId, { ...row, finishing: true });
+        if (same()) save(channelId, { ...row, finishing: true });
         log(`work row cleanup failed for ${channelId}: ${error.message}`);
         return false;
       }
     }
-    save(channelId, null);
+    if (same()) save(channelId, null);
     return true;
   }
+  // A finished turn's reply does not wait on Discord's fetch and delete of its work row, 0.2-2.2 s (11 Nov); a failure
+  // leaves the row `finishing`, and the next reconcile tries again.
+  const finishBehind = (channelId) => { finish(channelId).catch((error) => log(`work row cleanup failed for ${channelId}: ${error.message}`)); };
   async function update({ channelId, paneKey, turn }) {
     if (toolLinesEnabled(channelId, paneKey, env)) { await finish(channelId); return turn; }
     noteChanges(channelId, turn, toolItems(turn));
@@ -91,7 +96,7 @@ export function createLiveProgress({ discord, state, journal = openWatcherJourna
       if (await finish(channelId) === false) return { ...turn, items: (turn.items || []).filter(item => item.type !== "tool") };
       row = null;
     }
-    if (turn.isComplete || turn.complete) { await finish(channelId); return { ...turn, items: (turn.items || []).filter(item => item.type !== "tool") }; }
+    if (turn.isComplete || turn.complete) { finishBehind(channelId); return { ...turn, items: (turn.items || []).filter(item => item.type !== "tool") }; }
     const tools = toolItems(turn);
     if (tools.length) {
       const seen = new Set(row?.seen || []), fresh = tools.filter(item => !seen.has(stepKey(item)));
@@ -118,6 +123,6 @@ export function createLiveProgress({ discord, state, journal = openWatcherJourna
   }
   return { update, finish, takeChanged, async reconcile(channelId, turns) {
     const row = rowOf(channelId);
-    if (row && (row.finishing || (turns && !turns.some(turn => (keyOf(turn) === row.turnKey || turn.headless) && !turn.isComplete && !turn.complete)))) await finish(channelId);
+    if (row && (row.finishing || (turns && !turns.some(turn => (keyOf(turn) === row.turnKey || turn.headless) && !turn.isComplete && !turn.complete)))) finishBehind(channelId);
   } };
 }
