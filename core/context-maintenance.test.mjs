@@ -1,5 +1,5 @@
 import { component, expect, feature } from "bdd-vitest";
-import { appendFileSync, copyFileSync, mkdtempSync, truncateSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdtempSync, truncateSync, utimesSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { contextMaintenanceAttempt, createContextMaintenance, liveCompactAttempts } from "./context-maintenance.mjs";
@@ -656,6 +656,33 @@ function sharedSession(ctx) {
   };
   return { ...ctx, queue: bridge, other, seen, cleanup: () => { ctx.cleanup(); rmSync(rootDir, { recursive: true, force: true }); } };
 }
+
+feature("an idle journal costs no reads (row 116d)", () => {
+  component("an unchanged journal keeps its answer about work after the compact until it grows", {
+    given: ["a VERIFIED compact followed by one bookkeeping record with a fixed mtime", () => {
+      const ctx = fixture(), { path } = ctx.identityFor();
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [path]);
+      ctx.state.set("context_maintenance_by_pane_v1", { "claw:4": { sessionId: "one", cursor, status: "VERIFIED", compactBoundary: true, at: 1 } });
+      const work = JSON.stringify({ type: "user", message: { content: "Continue the existing task" } });
+      const bookkeeping = JSON.stringify({ type: "attachment", pad: "" });
+      ctx.append({ type: "attachment", pad: "x".repeat(work.length - bookkeeping.length) });
+      return { ...ctx, path, work, still: new Date("2026-11-10T23:00:00Z") };
+    }],
+    when: ["it is checked, rewritten in place to work with the same size and mtime, checked, then grown and checked", ctx => {
+      const check = () => contextMaintenanceAttempt(ctx.state, "claw", 4, ctx.identityFor(), ctx.now())?.status ?? null;
+      utimesSync(ctx.path, ctx.still, ctx.still);
+      const first = check();
+      writeFileSync(ctx.path, ctx.work + "\n");
+      utimesSync(ctx.path, ctx.still, ctx.still);
+      const unchanged = check();
+      ctx.append({ type: "user", message: { content: "Next task" } });
+      return [first, unchanged, check()];
+    }],
+    then: ["the unchanged journal was not scanned again; the grown one was", (answers) => {
+      expect(answers).toEqual(["VERIFIED", "VERIFIED", null]);
+    }], cleanup: ctx => ctx.cleanup(),
+  });
+});
 
 feature("a compact waiting on its engine fences only its own pane", () => {
   component("a sibling pane is served while an idle compact runs", {

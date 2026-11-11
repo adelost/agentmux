@@ -23,6 +23,7 @@ import { withdrawDraft } from "./draft-withdrawal.mjs";
 import { assertDeliveryPreparation, onUnsentPreparationTimeout } from "./delivery-preparation.mjs";
 import { COMPACT_RECEIPTS_STATE, recoverLoginRefusedCompact, compactWriterGone, resolveExpiredCompact, updateCompactReceipt } from "./compact-receipts.mjs";
 import { randomUUID } from "node:crypto";
+import { createJournalHold, fileStamp } from "./pulse/journal-hold.mjs";
 
 const STATE_KEY = COMPACT_RECEIPTS_STATE;
 const paneKey = (name, pane) => `${name}:${pane}`;
@@ -49,10 +50,15 @@ const claudeWorkEvent = e => e?.type === "user" && !e.isMeta && !e.isCompactSumm
     : e.message?.content?.some(part => part.type === "text"));
 // A Codex prompt is work once a model ran on it or while its turn is open.
 // One the provider refused (an unsupported model) added nothing to compact.
+// auto-compact asks every round; journals unchanged since the last scan give the same answer without a read (row 116d).
+const heldWork = createJournalHold();
 function hasWorkAfter(files, cursor) {
-  const prompts = codexPromptProgress();
-  return hasJsonlEventAfterCursor(files, cursor, e => claudeWorkEvent(e) || prompts.see(e) === "processed")
-    || prompts.isOpen();
+  const stamps = files.map(fileStamp);
+  return heldWork(JSON.stringify(files), stamps.includes(null) ? null : [stamps, cursor.positions], () => {
+    const prompts = codexPromptProgress();
+    return hasJsonlEventAfterCursor(files, cursor, e => claudeWorkEvent(e) || prompts.see(e) === "processed")
+      || prompts.isOpen();
+  });
 }
 
 function write(state, key, record) {
