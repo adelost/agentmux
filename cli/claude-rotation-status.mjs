@@ -82,11 +82,16 @@ export function saveRotationCompact(state, entry, request, compact) {
   const current = state.get(claudeRotationKey(entry.agentName, entry.pane), null);
   if (current?.id !== request.id) return false;
   return saveClaudeRotation(state, { ...current, compact: { ...compact, sourceProfileId: entry.currentProfile?.id } }, request.id,
-    prior => compact.status === "attempting" ? !prior.compact
+    prior => compact.status === "attempting" ? !prior.compact || compactNeverSent(prior.compact)
       : !prior.compact || prior.compact.sourceProfileId === entry.currentProfile?.id
         && (prior.compact.status === "attempting" || prior.compact.status === "verified" && prior.compact.afterTokens === null
           && compact.status === "verified" && Number.isFinite(compact.afterTokens)));
 }
+
+// Releases before 2026-11-11 stored such a stop as unknown with the reason compact-skipped (skyvw:1 and lsrc:0 held on a spent account).
+/** WHAT: Checks whether a switch compact stopped before it was sent. WHY: Lets the next rotation retry; a sent outcome keeps holding. */
+export const compactNeverSent = proof => proof?.status === "skipped"
+  || proof?.status === "unknown" && /^compact-skipped(?::|$)/u.test(proof.reason || "");
 
 /** WHAT: Stores the original rotation request. WHY: Keeps busy retries on one identity and preserves successful outcomes. */
 export function finishClaudeRotations(state, rows, requests) {

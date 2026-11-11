@@ -111,6 +111,31 @@ feature("Claude fleet account rotation", () => {
       }],
     });
   }
+  // sandman:0 2026-11-11 (skyvw:1 and lsrc:0 held on a spent account): the earlier store wrote this stop as unknown.
+  for (const stored of ["skipped", "unknown"]) {
+    component(`a compact stopped before it was sent, stored as ${stored}, lets the next rotation compact and move`, {
+      given: ["a warm large pane whose first compact never got the pane's delivery lease", () => {
+        const fx = fixture();
+        fx.deps.observeContext = async () => ({ facts: { tokens: 116_000, idleMs: 60_000 }, compacted: false,
+          target: { agent: { name: "lsrc" }, pane: { index: 0 } } });
+        fx.deps.compactPane = vi.fn()
+          .mockResolvedValueOnce({ ok: false, sent: false, reason: "compact-skipped:delivery-lease-busy" })
+          .mockResolvedValueOnce({ ok: true, status: "within-budget", afterTokens: 30_000 });
+        return fx;
+      }],
+      when: ["the same request rotates twice", async fx => {
+        const first = await rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps);
+        const key = "claude_account_request_v1:lsrc:0", request = fx.state.get(key);
+        fx.state.set(key, { ...request, compact: { ...request.compact, status: stored } });
+        return { first, second: await rotateClaudeFleet(fx.ctx, "2", { only: ["lsrc:0"] }, fx.deps) };
+      }],
+      then: ["the first holds the pane, the second compacts once more and moves it", ({ first, second }, fx) => {
+        expect(first.rows[0]).toMatchObject({ status: "blocked", reason: "compact-skipped:delivery-lease-busy" });
+        expect(second.rows[0].status).toBe("switched");
+        expect(fx.deps.compactPane).toHaveBeenCalledTimes(2);
+      }],
+    });
+  }
   component("a new request after a completed switch may compact new work", {
     given: ["a finished move to account 2", async () => {
       const fx = fixture();

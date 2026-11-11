@@ -104,5 +104,7 @@ export async function compactBeforeSwitch(ctx, target, {
   const row = pass.rows.find((candidate) => candidate.pane === key) || pass.rows[0] || null;
   if (row && VERIFIED_COMPACT.has(row.status)) return { ok: true, status: row.status, afterTokens: row.afterTokens ?? null,
     sessionId: row.sessionId ?? null, attemptId: row.attemptId ?? null, compactBoundary: row.compactBoundary === true };
-  return { ok: false, reason: `compact-${row?.status || "missing"}${row?.reason ? `:${row.reason}` : ""}` };
+  // The run skips a pane only before its durable intent, so a skipped compact never reached the pane and may be tried again.
+  return { ok: false, ...(row?.status === "skipped" && { sent: false }),
+    reason: `compact-${row?.status || "missing"}${row?.reason ? `:${row.reason}` : ""}` };
 }

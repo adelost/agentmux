@@ -138,4 +138,11 @@ feature("the compact step of an account switch", () => {
       compactBeforeSwitch({ deliveryQueue: {} }, target, { run: runReturning({ status: "failed", reason: "compact-boundary-missing" }) })],
     then: ["the reason is kept", (result) => expect(result).toEqual({ ok: false, reason: "compact-failed:compact-boundary-missing" })],
   });
+
+  unit("a compact skipped before its send says nothing was sent, so the switch may try again", {
+    when: ["another delivery holds the pane's lease", () =>
+      compactBeforeSwitch({ deliveryQueue: {} }, target, { run: runReturning({ status: "skipped", reason: "delivery-lease-busy" }) })],
+    then: ["the result carries the proof", (result) =>
+      expect(result).toEqual({ ok: false, sent: false, reason: "compact-skipped:delivery-lease-busy" })],
+  });
 });

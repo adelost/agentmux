@@ -34,7 +34,8 @@ import { accountSwitchPlan } from "../policies/account-switch-cost.mjs";
 import { readContextCostPolicy } from "../policies/context-cost.mjs";
 import { waitForSessionLease } from "../core/session-lease.mjs";
 import { compactBeforeSwitch, observeSwitchContext } from "./account-switch-compact.mjs";
-import { beginClaudeRotation, finishClaudeRotations, rotationCompact, saveRotationCompact, claudeRotationKey, saveClaudeRotation } from "./claude-rotation-status.mjs";
+import { beginClaudeRotation, finishClaudeRotations, rotationCompact, saveRotationCompact, claudeRotationKey, saveClaudeRotation,
+  compactNeverSent } from "./claude-rotation-status.mjs";
 
 const paneKey = (agentName, pane) => `${agentName}:${pane}`;
 const requestKey = claudeRotationKey;
@@ -239,7 +240,8 @@ async function planPanes(ctx, observed, target, deps, compactedKeys = new Set())
       || request.sessionPath !== pane.identity?.path || deps.requestCurrent(request)?.id !== request.id);
     const plan = changed ? { action: "HOLD", reason: "rotation-session-or-request-changed" }
       : accountSwitchPlan({ mode: pane.mode, alreadySelected, facts: context?.facts,
-      compactRefusal: proof && proof.status !== "verified" ? `previous-switch-compact-${proof.status}` : context?.compactRefusal,
+      compactRefusal: proof && proof.status !== "verified" && !compactNeverSent(proof) ? `previous-switch-compact-${proof.status}`
+        : context?.compactRefusal,
       compacted: proof?.status === "verified" || context?.compacted || compactedKeys.has(pane.key) }, deps.policy);
     planned.push({ ...pane, plan, compactTarget: context?.target || null, contextTokens: context?.facts?.tokens ?? null });
   }
@@ -255,7 +257,7 @@ async function compactMovers(ctx, movers, deps, rows) {
       rows.push({ ...pane, status: "blocked", reason: "rotation-request-changed" }); continue;
     }
     const result = await deps.compactPane(ctx, pane.compactTarget).catch((error) => ({ ok: false, reason: error.message }));
-    saveRotationCompact(ctx.state, pane, request, { status: result.ok ? "verified" : "unknown",
+    saveRotationCompact(ctx.state, pane, request, { status: result.ok ? "verified" : result.sent === false ? "skipped" : "unknown",
       verifiedAt: result.ok ? Date.now() : null, attemptId: result.attemptId ?? null, compactBoundary: result.compactBoundary === true,
       afterTokens: Number.isFinite(result.afterTokens) ? result.afterTokens : null, reason: result.reason || null });
     deps.recordCompact({ at: new Date().toISOString(), pane: pane.key, engine: "claude", source: "account-switch",
