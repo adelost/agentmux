@@ -15,7 +15,8 @@ export const READ_METER_FLAG = join(homedir(), ".agentmux", "read-meter.on");
 export const READ_METER_PATH = join(homedir(), ".agentmux", "read-meter.json");
 const WRITE_EVERY_MS = 15_000;
 const MAX_READERS = 200;
-const MAX_JOURNALS = 400;   // one entry per session journal read, so an idle journal that is still read shows by name (row 116d)
+const MAX_JOURNALS = 2_000;   // one entry per session journal read, so an idle journal that is still read shows by name (row 116d);
+// the Codex session catalog reads all 637 rollouts once at start, which filled a 400 cap (11 Nov 00:05Z)
 const JOURNAL_KINDS = new Set(["claude journal", "codex rollout"]);
 const CARRIERS = new Set(["core/pulse/read-meter.mjs", "index.mjs", "lib.mjs"]);
 // A journal read passes three reader functions before the watcher that pays for it (readTailWindow < parseJsonlTail < readLastTurns).
