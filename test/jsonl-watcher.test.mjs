@@ -1,9 +1,10 @@
-import { feature, unit, expect } from "bdd-vitest";
+import { component, feature, unit, expect } from "bdd-vitest";
 import { afterAll, vi } from "vitest";
-import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, utimesSync } from "fs";
+import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, renameSync, writeFileSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createJsonlWatcher } from "../channels/jsonl-watcher.mjs";
+import { followStopEvents } from "../core/pulse/stop-wake.mjs";
 import { openWatcherJournal } from "../core/watcher-journal.mjs";
 import { buildClaudeLaunchCommand } from "../core/agent-launch-command.mjs";
 import { keepClaudeDefaultModel } from "../core/claude-default-model.mjs";
@@ -1339,5 +1340,36 @@ feature("optional work row remains available", () => {
       expect(ctx.discord.sends[1].payload).toBe("SUMMARY: Done.");
       expect(ctx.discord.sends[2].payload).toMatch(/context: 42% \(120k\) · changed: cut\.ts_$/u);
     } finally { ctx.cleanup(); } }],
+  });
+});
+
+// Row 116d: turn ends reached the mirror 1.51 s after the Stop hook (median of 105, 10 Nov 23:15Z-00:10Z).
+feature("watcher: a Stop hook wakes its pane's mirror", () => {
+  component("each Stop appended to the hook ledger wakes its pane within a second, also after the ledger is rotated", {
+    given: ["a hook ledger with an older Stop and a follower watching it", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-stop-wake-")), path = join(dir, "events.jsonl");
+      const stop = (session, pane) => JSON.stringify({ ts: new Date().toISOString(), event: "stop", session, pane }) + "\n";
+      writeFileSync(path, stop("old", 1));
+      const woken = [];
+      const follower = followStopEvents({ path, wake: (session, pane) => woken.push({ session, pane, at: Date.now() }) });
+      return { dir, path, stop, woken, follower };
+    }],
+    when: ["lsrc:3 stops, other events arrive, and skyvw:0 stops after a rotation", async ({ dir, path, stop, woken }) => {
+      const waitFor = async (count) => { for (let i = 0; i < 100 && woken.length < count; i++) await new Promise((r) => setTimeout(r, 10)); };
+      const first = Date.now();
+      appendFileSync(path, JSON.stringify({ event: "delivery_queue", session: "lsrc", pane: 3 }) + "\n" + stop("lsrc", 3));
+      await waitFor(1);
+      const rotated = join(dir, "events.jsonl.tmp");
+      writeFileSync(rotated, stop("skyvw", 0));
+      const second = Date.now();
+      renameSync(rotated, path);
+      await waitFor(2);
+      return { panes: woken.map(({ session, pane }) => `${session}:${pane}`), ms: [woken[0]?.at - first, woken[1]?.at - second] };
+    }],
+    then: ["both stops woke their panes in under a second, the older one never", ({ panes, ms }, { dir, follower }) => {
+      follower.close(); rmSync(dir, { recursive: true, force: true });
+      expect(panes).toEqual(["lsrc:3", "skyvw:0"]);
+      expect(ms.every((value) => value < 1_000)).toBe(true);
+    }],
   });
 });

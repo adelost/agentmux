@@ -75,6 +75,30 @@ feature("pane queue: coalescing and concurrency", () => {
   });
 });
 
+feature("pane queue: a turn that just ended goes first (row 116d)", () => {
+  unit("a pane woken by its Stop hook starts before a poll sweep's queued panes", {
+    given: ["one busy worker slot and a sweep of five panes queued behind it", () => {
+      const started = [], releases = [];
+      const q = createPaneQueue({
+        maxConcurrency: 1,
+        worker: async ({ key }) => { started.push(key); await new Promise((resolve) => releases.push(resolve)); },
+      });
+      for (const key of ["s:0", "s:1", "s:2", "s:3", "s:4", "s:5"]) q.enqueue(key);
+      return { q, started, releases };
+    }],
+    when: ["lsrc:3's Stop hook wakes it, then the slot frees", async ({ q, started, releases }) => {
+      await flush();
+      q.enqueue("lsrc:3", {}, { first: true });
+      releases.shift()();
+      await flush(); await flush();
+      return started.slice(0, 2);
+    }],
+    then: ["lsrc:3 runs next, not after the sweep", (order) => {
+      expect(order).toEqual(["s:0", "lsrc:3"]);
+    }],
+  });
+});
+
 feature("pane queue: backoff", () => {
   unit("worker-requested retryAfter delays the next job for that pane", {
     given: ["a queue whose worker asks for retryAfterMs", () => {

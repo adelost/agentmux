@@ -24,7 +24,8 @@ export function createPaneQueue({
   let activeCount = 0;
   let idleResolvers = [];
 
-  function enqueue(key, job = {}) {
+  // `first`: a turn that just ended goes ahead of a poll sweep's panes, so its reply is not held behind them (row 116d).
+  function enqueue(key, job = {}, { first = false } = {}) {
     if (!key) throw new Error("pane queue: key required");
 
     if (active.has(key)) {
@@ -38,7 +39,14 @@ export function createPaneQueue({
       return { status: "delayed", untilMs: until };
     }
 
-    queued.set(key, mergeJob(queued.get(key), job));
+    const merged = mergeJob(queued.get(key), job);
+    if (first) {
+      queued.delete(key);
+      const rest = [...queued];
+      queued.clear();
+      queued.set(key, merged);
+      for (const [other, otherJob] of rest) queued.set(other, otherJob);
+    } else queued.set(key, merged);
     drain();
     return { status: "queued" };
   }

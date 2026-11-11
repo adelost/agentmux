@@ -40,6 +40,7 @@ import { bridgeRotationRuntime } from "./account-switch-command.mjs";
 import { isPaneModelSwitchReading, paneModelSelection, recordPaneModelReading, setPaneModelSelection } from "../core/pane-model-state.mjs";
 import { settleLandedClaudeModelSwitch } from "../core/claude-model-command.mjs";
 import { createJournalFollower } from "../core/pulse/journal-follower.mjs";
+import { followStopEvents } from "../core/pulse/stop-wake.mjs";
 const DEFAULT_POLL_MS = 15_000;
 // Polling backs up fs.watch where events are dropped.
 
@@ -116,6 +117,7 @@ export function createJsonlWatcher({
   const metricsEnabled = process.env.AMUX_WATCHER_METRICS === "1";
   let pollTimer = null;
   let typingTimer = null;
+  let stopWake = null;
   let stopped = false;
   const codexRecovery = createCodexRecovery({ state, broker: deliveryBroker, agent, log, configPath: agentsYamlPath,
     notify: (text, target) => discord.send(findChannelForPane(agentsYamlPath, target.name, target.pane), text) });
@@ -759,6 +761,16 @@ export function createJsonlWatcher({
     return processPane(name, idx, agentDir, sharedConfig);
   }
 
+  // A Stop hook means the journal already holds the turn's end: read it now, ahead of a poll sweep (row 116d).
+  function wakePane(name, idx) {
+    if (stopped) return;
+    let config;
+    try { config = loadConfig(agentsYamlPath); } catch { return; }
+    const entry = config?.[name];
+    if (!entry?.dir || entry.backend === "native" || !entry.panes?.[idx]) return;
+    queue.enqueue(paneKey(name, idx), { name, idx, agentDir: entry.dir, sharedConfig: config }, { first: true });
+  }
+
   function enqueuePane(name, idx, agentDir, sharedConfig = null) {
     return queue.enqueue(paneKey(name, idx), { name, idx, agentDir, sharedConfig });
   }
@@ -863,6 +875,7 @@ export function createJsonlWatcher({
   return {
     start() {
       stopped = false;
+      stopWake ??= followStopEvents({ wake: wakePane, log });
       tick().catch((err) => log(`initial tick failed: ${err.message}`));
       pollTimer = setInterval(() => tick().catch(() => {}), pollMs);
       typingTimer = setInterval(() => typingTick().catch(() => {}), typingPollMs);
@@ -873,6 +886,7 @@ export function createJsonlWatcher({
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
       detachAllFsWatch();
+      stopWake?.close(); stopWake = null;
       queue.stop();
     },
     // Exposed for tests so we can drive tick/checkPane directly without
