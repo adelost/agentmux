@@ -107,3 +107,23 @@ feature("runDeliveryPreflight: one ordered pass", () => {
     }],
   });
 });
+
+feature("runDeliveryPreflight: a submitted job behind a held head", () => {
+  // skybar:0 12 Nov: `amux compact` submitted /compact behind a pending head that the quota floor would not wake; Claude recorded
+  // the command, but only the head was checked, so the job stayed submitted and account rotation refused the pane for a live delivery.
+  component("its exact receipt acknowledges it, while the held head stays as it is", {
+    given: ["a pending head and a submitted /compact with its receipt", () => {
+      const acknowledged = [];
+      const head = job({ id: "head", status: "pending", lastReason: "wake-refused:quota-floor" });
+      const compact = job({ id: "compact", kind: "slash", status: "submitted", verifyText: "/compact", echoCursor: { kind: "claude-slash-events-v1" } });
+      const queue = { list: () => [head, compact], update: (target, patch) => ({ ...target, ...patch }) };
+      return { acknowledged, run: () => runDeliveryPreflight({ agentName: "skybar", pane: 0, queue, now: () => NOW, queueEvent: () => {}, log: () => {},
+        terminalizeNotSent: async () => {}, notifyTerminal: async () => {},
+        exactEcho: async (one) => one.id === "compact", acknowledge: async (one, via) => { acknowledged.push(`${one.id}:${via}`); } }) };
+    }],
+    when: ["running preflight", (fx) => fx.run().then(() => fx.acknowledged)],
+    then: ["the /compact is acknowledged and the head is not", (acknowledged) => {
+      expect(acknowledged).toEqual(["compact:echo-behind-head"]);
+    }],
+  });
+});

@@ -5,7 +5,7 @@
 // during tests — fake "claw:1 NOT delivered" rows would then surface in
 // the user's live `amux done`/`timeline`. Tests that need a specific
 // ledger still pass their own path explicitly.
-import { mkdtempSync } from "fs";
+import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -39,3 +39,11 @@ process.env.AMUX_SEARCH_HUMAN_DIR = join(
 const runtime = mkdtempSync(join(tmpdir(), "amux-test-runtime-"));
 process.env.AGENTS_YAML = join(runtime, "agents.yaml");
 process.env.STATE_FILE = join(runtime, "state.json");
+
+// And for the config: queue-stall-watch.mjs reads agentmux.yaml's queue_stall_watch, so a broker test with an old held head enqueued a real notice to
+// the user's watcher (sandman:0, 12 Nov). A test that needs a config passes its own path.
+{
+  const dir = mkdtempSync(join(tmpdir(), "amux-test-config-"));
+  writeFileSync(join(dir, "agentmux.yaml"), "agents: {}\n");
+  process.env.AGENTMUX_YAML = join(dir, "agentmux.yaml");
+}

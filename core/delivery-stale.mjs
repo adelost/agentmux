@@ -1,7 +1,7 @@
 // Stale delivery guard: a job parked in a physical stage beyond its bound
 // must become LOUD, never auto-terminal. Ambiguity is preserved by contract.
 
-import { DELIVERED_UNVERIFIED_STATE } from "./delivery-queue-policy.mjs";
+import { DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 import { reportBlockedHandoffs } from "./delivery-handoff.mjs";
 import { fenceCodexCapacityJobs } from "./codex-capacity-delivery.mjs";
 import { fenceSelfCompactJobs } from "./self-compact-resume.mjs";
@@ -64,6 +64,17 @@ async function reconcileLateEchoWatch({ agentName, pane, queue, now, exactEcho, 
   }
 }
 
+/** A submitted job behind the head (a control command such as `amux compact` goes past a held head) is checked by its exact receipt here, as the
+ *  head is only checked when it is processed: skybar:0 12 Nov, /compact recorded at 10:59Z but still submitted behind a quota-held head, so account
+ *  rotation refused the pane for a live delivery. A receipt is the truth; without one the job stays as it is. */
+async function acknowledgeBehindHead({ agentName, pane, queue, exactEcho, acknowledge }) {
+  if (typeof exactEcho !== "function" || typeof acknowledge !== "function") return;
+  const open = queue.list(agentName, pane).filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status));
+  for (const job of open.slice(1)) {
+    if (job.status === "submitted" && await exactEcho(job)) await acknowledge(job, "echo-behind-head");
+  }
+}
+
 /** WHAT: Dispatches cancellation requests, terminal notices, and stale reporting before delivery. WHY: Keeps every pre-delivery terminal path in one ordered pass. */
 export async function runDeliveryPreflight({ agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, flushTerminalNotices = null, exactEcho = null, acknowledge = null, notifyBlocked = null, agent = null }) {
   await fenceCodexCapacityJobs({ agentName, pane, queue, agent, now, terminalizeNotSent, log });
@@ -71,6 +82,7 @@ export async function runDeliveryPreflight({ agentName, pane, queue, now, queueE
   const cancellationRequests = queue.pendingCancellationRequests?.(agentName, pane) || [];
   for (const request of cancellationRequests) await terminalizeNotSent(request);
   await reconcileLateEchoWatch({ agentName, pane, queue, now, exactEcho, acknowledge });
+  await acknowledgeBehindHead({ agentName, pane, queue, exactEcho, acknowledge });
   if (typeof flushTerminalNotices === "function") {
     await flushTerminalNotices(agentName, pane);
   } else {
