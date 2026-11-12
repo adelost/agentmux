@@ -236,6 +236,22 @@ feature("isBusyFromJsonl: a long journal is read from its end, not whole", () =>
       expect({ busy, readUnder1MB: read < 1_000_000 }).toEqual({ busy: true, readUnder1MB: true });
     }],
   });
+
+  // 12 Nov 14:5xZ: claw:2 sat idle after a 2 h turn whose prompt lay 16 MiB back, past the 8 MiB tail; rotate called it an unknown turn.
+  component("an idle pane whose last turn outgrew the tail window reads as idle without a prompt to look for", {
+    given: ["a prompt, 9 MB of that turn's events, then its end_turn", () => {
+      const ctx = setupFakeProject("idle-end-turn.jsonl");
+      const journal = join(ctx.projectDir, "session-abc123.jsonl"), [prompt, reply] = readFileSync(journal, "utf8").trim().split("\n");
+      const filler = `${JSON.stringify({ type: "system", subtype: "note", content: "x".repeat(10_000), timestamp: "2026-04-08T20:00:00.500Z" })}\n`;
+      writeFileSync(journal, `${prompt}\n${filler.repeat(900)}${reply}\n`);
+      return ctx;
+    }],
+    when: ["checking busy as rotation does", ({ paneDir }) => isBusyFromJsonl(paneDir)],
+    then: ["idle", (busy, { cleanup }) => {
+      cleanup();
+      expect(busy).toBe(false);
+    }],
+  });
 });
 
 // Row 116d, pulse-7: the watcher reread a 4 MiB tail on every change of a working journal, 38.7 MB per 10 s (10 Nov 23:55Z).

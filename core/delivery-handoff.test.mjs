@@ -36,6 +36,12 @@ feature("the reason the sender of a held handoff reads", () => {
       "den adresserade agentprocessen kunde inte startas",
     ])],
   });
+  // 12 Nov (Mattias via deep:0): the sender heard "när kontot har plats" with the 14 Nov reset while the pane could move at once.
+  unit("a quota hold whose pane moves names the account it moves to, not the old account's reset", {
+    when: ["the floor held a note while the stop mover has Claude W for the pane", () => deliveryBlockerDetail({
+      lastReason: "wake-refused:quota-floor: Claude E has 2 % of its week left (floor 3 %) until 2026-11-14T23:00:00Z; moving to Claude W" })],
+    then: ["the move and the account", detail => expect(detail).toBe("panelen flyttas till Claude W; meddelandet följer med och levereras där")],
+  });
 });
 
 // sandman:0 for Mattias 12 Nov 2026: sandman:0's inbox stood still 07:58-09:36Z behind ce875ebc, a drafted head no sender alarm covered.

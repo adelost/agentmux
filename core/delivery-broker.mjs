@@ -29,6 +29,7 @@ import { submittedTransportHint, submittedTuiInspectionDue, withOwnPaste } from 
 import { needsZoomFallback, terminalizeSlashRejection } from "./slash-ingest-guard.mjs";
 import { createDeliveryMemoryContext, deliveryMemoryReceiptText } from "./delivery-memory-context.mjs";
 import { drainDeliveryJobs } from "./delivery-drain.mjs";
+import { createFloorHold } from "./delivery-floor-hold.mjs";
 import { preparationAgent } from "./delivery-preparation.mjs";
 import { createSessionLanes } from "./delivery-session-lane.mjs";
 const ACTIVE_RETRY_MS = 1_000;
@@ -560,6 +561,7 @@ export function createDeliveryBroker({
     return recoverHiddenDeliveryTui({ job, reason, agent, queue, now, queueEvent, log });
   }
 
+  const floorHold = createFloorHold({ queue, quotaFloor, now, preparationTimeoutMs, queueEvent, maybeNotifyBlocked, exactEcho, acknowledge, log, agent });
   async function drainTarget(agentName, pane) {
     if (typeof validateTarget === "function") {
       try {
@@ -581,17 +583,13 @@ export function createDeliveryBroker({
       }
     }
     return drainDeliveryJobs({ queue, agentName, pane, log, preparationTimeoutMs, now,
-      stopped: () => stopped, processJob, peerWaiting: sessionPeerWaiting,
+      stopped: () => stopped, processJob, peerWaiting: sessionPeerWaiting, floorHold,
       yieldMaintenance: yieldSupersededMaintenance, answerBacklog: answerBacklogBehindProbe,
       preflight: async () => {
-        // Cancellation is a request, never a producer-side state rewrite.
-        // All pre-delivery terminal paths run in one ordered pass under the
+        // Cancellation is a request, never a producer-side state rewrite. All pre-delivery terminal paths run in one ordered pass under the
         // same writer lease as pane delivery.
-        await runDeliveryPreflight({
-          agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, flushTerminalNotices, agent,
-          exactEcho, acknowledge, notifyBlocked: maybeNotifyBlocked,
-        });
-
+        await runDeliveryPreflight({ agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, flushTerminalNotices,
+          agent, exactEcho, acknowledge, notifyBlocked: maybeNotifyBlocked });
       },
     });
   }

@@ -14,6 +14,40 @@ const RESERVE_ORIGINS = new Set([QUOTA_WIND_DOWN_ORIGIN, "idle-capacity"]);
 const pendingState = (drafted, ownsPaneDraft) =>
   drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending");
 
+const MOVING_TO = "moving to ";
+
+// lsrc:0 2026-10-19: at the floor an account's last few percent are for clean stops, compacts and handovers, so
+// automatic work waits; a person's own message still goes through (context-maintenance.mjs, 2026-09-26).
+// A failed reading cannot prove room or lift an existing hold: it holds unless the account's last good reading, as
+// used as it can be by now, still leaves room. A spent Codex window holds paid-credit turns too.
+// 12 Nov (Mattias via deep:0): when the stop mover has an account with room for the pane, the reason names it.
+/** WHAT: Returns why the quota floor holds a prompt, or null. WHY: Lets the broker refuse a held prompt before it takes any writer lease. */
+export async function quotaFloorRefusal({ job, quotaFloor, now }) {
+  if (!quotaFloor || job.kind !== "prompt" || isOwnerChannelJob(job)) return null;
+  const holdOf = (facts) => quotaFloorHold({ windows: facts?.stale ? staleWindows(facts.windows, facts.observedAt, now())
+    : facts?.windows, floorPercent: quotaFloor.percent, now: now(),
+    provider: facts?.account?.provider, creditsAllowed: quotaFloor.creditsAllowed === true });
+  const paneKey = `${job.agentName}:${job.pane}`;
+  const cached = await deliveryPreparationStage("quota-floor:cached", () => quotaFloor.windowsFor(paneKey)).catch(() => ({ unavailable: true }));
+  if (!cached?.unavailable && !holdOf(cached)) return null;
+  // A pane quota recovery just moved may still be listed on its old account; re-read where it runs now.
+  const fresh = await deliveryPreparationStage("quota-floor:fresh", () => quotaFloor.windowsFor(paneKey, { fresh: true })).catch(() => null);
+  if (!fresh || fresh.unavailable) return "quota-floor: fresh account reading unavailable; existing hold remains";
+  const hold = holdOf(fresh);
+  // A clean-stop nudge, and a notice that lets the dispatcher move stopped panes, may use the weekly reserve, never
+  // paid Codex credits.
+  if (!hold || (RESERVE_ORIGINS.has(job.source) && !hold.credits)) return null;
+  const name = `${fresh.account?.name || "its account"}${fresh.stale ? ` (reading failed; last good ${new Date(fresh.observedAt).toISOString()})` : ""}`;
+  const target = quotaFloor.moveTargetFor?.(paneKey);
+  const moving = target ? `; ${MOVING_TO}${target}` : "";
+  return (hold.credits
+    ? `quota-floor: ${name} has spent its ${hold.window === "session" ? "5h" : hold.window} window until ${hold.resetsAt};`
+      + " a turn now draws paid credits"
+    : `quota-floor: ${name} has ${hold.leftPercent} % of its week left (floor ${quotaFloor.percent} %) until ${hold.resetsAt}`) + moving;
+}
+
+/** WHAT: Returns the account the pane moves to from a floor reason, or null. WHY: Lets the sender's notice say where the message goes. */
+export const floorMoveTarget = reason => String(reason || "").split(`; ${MOVING_TO}`)[1]?.trim() || null;
 /** WHAT: Routes one stopped target through wake gates. WHY: Keeps a wake attempt from becoming a false delivery ACK. */
 export async function wakeDeliveryTarget({
   agent,
@@ -46,35 +80,9 @@ export async function wakeDeliveryTarget({
     return { proceed: false, job: await notifyBlocked(pending) };
   };
 
-  // lsrc:0 2026-10-19: at the floor an account's last few percent are for clean stops, compacts and handovers, so
-  // automatic work waits; a person's own message still goes through (context-maintenance.mjs, 2026-09-26).
-  // A failed reading cannot prove room or lift an existing hold: it holds unless the account's last good reading, as
-  // used as it can be by now, still leaves room. A spent Codex window holds paid-credit turns too.
-  const holdOf = (facts) => quotaFloorHold({ windows: facts?.stale ? staleWindows(facts.windows, facts.observedAt, now())
-    : facts?.windows, floorPercent: quotaFloor.percent, now: now(),
-    provider: facts?.account?.provider, creditsAllowed: quotaFloor.creditsAllowed === true });
-  const floorReason = async () => {
-    if (!quotaFloor || isOwnerChannelJob(job)) return null;
-    const paneKey = `${job.agentName}:${job.pane}`;
-    const cached = await deliveryPreparationStage("quota-floor:cached", () => quotaFloor.windowsFor(paneKey)).catch(() => ({ unavailable: true }));
-    if (!cached?.unavailable && !holdOf(cached)) return null;
-    // A pane quota recovery just moved may still be listed on its old account; re-read where it runs now.
-    const fresh = await deliveryPreparationStage("quota-floor:fresh", () => quotaFloor.windowsFor(paneKey, { fresh: true })).catch(() => null);
-    if (!fresh || fresh.unavailable) return "quota-floor: fresh account reading unavailable; existing hold remains";
-    const hold = holdOf(fresh);
-    // A clean-stop nudge, and a notice that lets the dispatcher move stopped panes, may use the weekly reserve, never
-    // paid Codex credits.
-    if (!hold || (RESERVE_ORIGINS.has(job.source) && !hold.credits)) return null;
-    const name = `${fresh.account?.name || "its account"}${fresh.stale ? ` (reading failed; last good ${new Date(fresh.observedAt).toISOString()})` : ""}`;
-    return hold.credits
-      ? `quota-floor: ${name} has spent its ${hold.window === "session" ? "5h" : hold.window} window until ${hold.resetsAt};`
-        + " a turn now draws paid credits"
-      : `quota-floor: ${name} has ${hold.leftPercent} % of its week left (floor ${quotaFloor.percent} %) until ${hold.resetsAt}`;
-  };
-
   const costGate = async () => {
     if (job.kind !== "prompt") return { proceed: true, job };
-    const floor = await floorReason();
+    const floor = await quotaFloorRefusal({ job, quotaFloor, now });
     if (floor) return refuse(floor, true);
     if (!costAdmission) return { proceed: true, job: job.costHold ? queue.update(job, { costHold: null }) : job };
     const verdict = await deliveryPreparationStage("cost-admission", () => costAdmission(job, { lease })).catch(error => ({ ok: false, reason: error.message }));

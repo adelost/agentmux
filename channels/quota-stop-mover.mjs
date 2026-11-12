@@ -48,10 +48,13 @@ export function readQuotaStopMoveMode(env = process.env) {
 export function createQuotaStopMover({ runtime, readSnapshot, rotate, floorPercent, reservePercent = 90, mode = "on",
   now = Date.now, record = () => {}, log = () => {} }) {
   let running = null;
+  // The account each held pane moves to, for the sender's notice (delivery-wake.mjs quotaFloorRefusal).
+  let targets = new Map();
   async function run() {
     const ctx = mode === "off" ? null : runtime();
     if (!ctx) return [];
     const moves = quotaStopMoves({ accounts: (await readSnapshot())?.accounts, floorPercent, reservePercent, now: now() });
+    targets = new Map(mode === "on" ? moves.flatMap((move) => move.panes.map((pane) => [pane, move.target.name])) : []);
     const results = [];
     for (const move of moves) {
       const line = { at: new Date(now()).toISOString(), pane: move.panes.join(","), cell: "quota-stop-move", from: move.from, to: move.target.name,
@@ -68,6 +71,7 @@ export function createQuotaStopMover({ runtime, readSnapshot, rotate, floorPerce
   const tick = () => (running ||= run().finally(() => { running = null; }));
   return {
     tick,
+    targetFor: (paneKey) => targets.get(paneKey) || null,
     start(intervalMs = 60_000) {
       const timer = setInterval(() => tick().catch((error) => log(`tick failed: ${error.message}`)), intervalMs);
       timer.unref?.();

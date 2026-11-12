@@ -4,10 +4,12 @@ import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
 
 /** WHAT: Dispatches eligible heads with one leased preparation scope each. WHY: Prevents a completed physical operation from disabling the next head's unsent bound. */
 export async function drainDeliveryJobs({ queue, agentName, pane, log, preparationTimeoutMs,
-  stopped, preflight, yieldMaintenance, answerBacklog, processJob, peerWaiting, now }) {
+  stopped, preflight, yieldMaintenance, answerBacklog, processJob, peerWaiting, now, floorHold = async () => false }) {
   let again = true;
   while (again && !stopped()) {
     again = false;
+    // A pane the quota floor holds is refused without the writer lease (delivery-floor-hold.mjs).
+    if (await floorHold(agentName, pane)) return;
     await withDeliveryWriter({ queue, agentName, pane, log, preparationTimeoutMs, now }, async context => {
       context.job = deliveryHead(queue.list(agentName, pane));
       await preflight();

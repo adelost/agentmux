@@ -3033,6 +3033,29 @@ feature("the quota floor holds new automatic work on an account near its weekly 
     }],
   });
 
+  // 12 Nov 14:24-14:58Z (deep:0): a floor-held job took the skyvw session lease 13 times in 9 min and rotation refused idle skyvw:0.
+  component("a floor-held prompt takes no writer lease, and its reason names the account the pane moves to", {
+    given: ["claw:1 held at 97 % used while the stop mover has Claude W for it", () => {
+      const w = floorWorld();
+      const quotaFloor = { percent: 3, moveTargetFor: (key) => (key === "claw:1" ? "Claude W" : null),
+        windowsFor: async () => ({ account: { name: "Claude S" }, windows: [{ kind: "week", usedPercent: 97, resetsAt: RESETS }] }) };
+      const broker = createDeliveryBroker({ agent: w.agent, queue: w.queue, now: () => Date.parse("2026-10-19T19:55:00Z"),
+        notify: async () => {}, quotaFloor });
+      const acquire = w.queue.acquireSessionLease;
+      const count = { leases: 0 };
+      w.queue.acquireSessionLease = (...args) => { count.leases += 1; return acquire(...args); };
+      return { ...w, broker, count };
+    }],
+    when: ["the broker serves claw:1 twice", async (w) => { await w.broker.kickTarget("claw", 1); await w.broker.kickTarget("claw", 1); }],
+    then: ["nothing is typed, no lease was taken, and the hold names Claude W", (_, w) => {
+      try {
+        expect({ sends: w.agent.sends, leases: w.count.leases, held: w.current().costHold, status: w.current().status })
+          .toEqual({ sends: [], leases: 0, held: true, status: "pending" });
+        expect(w.current().lastReason).toMatch(/until 2026-10-20T04:00:00.000Z; moving to Claude W$/u);
+      } finally { w.cleanup(); }
+    }],
+  });
+
   component("the person's own message still reaches the pane at the floor", {
     given: ["a Discord message from the owner to claw:1 at 97 % used", () => floorWorld({
       job: { text: "Hur går det med Kit?", source: "discord" } })],

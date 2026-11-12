@@ -9,7 +9,7 @@ fileSize:
     core/contract-lint.mjs: 640
     core/delivery-broker.mjs: 659
     core/delivery-queue.mjs: 525
-    core/jsonl-reader.mjs: 918
+    core/jsonl-reader.mjs: 874
     core/native-runtime-client.mjs: 544
     core/suggestions-comment-bridge.mjs: 1131
     core/worktree-deps.mjs: 657

@@ -1,6 +1,6 @@
 // Read Claude Code session JSONL as the structured source of truth.
 
-import { readdirSync, readFileSync, statSync, existsSync, openSync, fstatSync, readSync, closeSync } from "fs";
+import { readdirSync, readFileSync, statSync, existsSync } from "fs";
 import { join } from "path";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { readAlternateTurns } from "./alternate-session-reader.mjs";
@@ -11,9 +11,9 @@ import { CLAUDE_TERMINAL_STOP_REASONS as TERMINAL_STOP_REASONS, userPromptText, 
 import { isClaudeTurnBusy } from "./claude-turn-busy.mjs";
 import { normalizePrompt, promptAppearsInEvents, promptEventMatches } from "./claude-prompt-text.mjs";
 import { createJournalHold, fileStamp } from "./pulse/journal-hold.mjs";
-// Long sessions require bounded tail reads to stay below Node string limits.
-const DEFAULT_JSONL_WINDOW_BYTES = 8 * 1024 * 1024; // 8 MiB tail: thousands of turns
-const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024; // hard cap, well under the string limit
+import { DEFAULT_JSONL_WINDOW_BYTES, MAX_JSONL_WINDOW_BYTES, parseJsonlText, readTailWindow, parseJsonlWindow } from "./jsonl-window.mjs";
+
+export { parseJsonlText, readTailWindow, parseJsonlWindow };
 const PROMPT_FIRST_BYTES = 256 * 1024;        // a prompt's search starts at the last 256 KiB and doubles
 const PROMPT_MAX_BYTES = 16 * 1024 * 1024;     // up to 16 MiB of a file
 const PROMPT_SEARCH_FILES = 2;                 // in the two newest files
@@ -58,7 +58,12 @@ function findJsonlAndEvents(projectDir, needle, { notBeforeMs = 0 } = {}) {
   // Row 124: a busy or reply check reads the latest turns, never the whole journal (a 130 MB journal was read whole at every poll of a delivery,
   // 141 MB per 10 s of the bridge's 270 on 10 Nov). A prompt is looked for from the end in a window that doubles until it is found, in the two
   // newest files (a /clear or /compact starts a new one): a prompt the bridge is waiting on was written moments ago.
-  if (!needle) return { jsonl: files[0].path, events: parseJsonlWindow(files[0].path) };
+  // Without a needle the window still grows until it holds the last prompt: a turn longer than the tail read as an unknown turn
+  // (12 Nov: claw:2 idle after a 2 h turn, its prompt 16 MiB back), and rotation refused the idle pane.
+  if (!needle) {
+    const events = parseJsonlWindow(files[0].path, { enough: (window) => window.some((event) => userPromptText(event) !== null) });
+    return { jsonl: files[0].path, events };
+  }
   const found = (events) => promptAppearsInEvents(notBeforeMs
     ? events.filter((event) => {
       const eventMs = Date.parse(event?.timestamp || "");
@@ -70,71 +75,6 @@ function findJsonlAndEvents(projectDir, needle, { notBeforeMs = 0 } = {}) {
     if (found(events)) return { jsonl: path, events };
   }
   return null;
-}
-
-/** Parse JSON lines from a string blob, skipping malformed lines. */
-export function parseJsonlText(content) {
-  const events = [];
-  for (const line of content.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      events.push(JSON.parse(line));
-    } catch {
-      // skip malformed line
-    }
-  }
-  return events;
-}
-
-/**
- * Read the last `maxBytes` of a file as UTF-8 text, aligned to a line boundary.
- * Returns { text, reachedStart }. When the window does NOT span the whole file
- * the first (partial) line is dropped and reachedStart is false; when it does,
- * the full text is returned and reachedStart is true. UTF-8-safe: a multibyte
- * char split at the window start lands inside the dropped partial line, so a
- * kept line never begins mid-codepoint. Never materialises more than the window.
- */
-export function readTailWindow(filePath, maxBytes) {
-  let fd;
-  try {
-    fd = openSync(filePath, "r");
-    const size = fstatSync(fd).size;
-    const reachedStart = size <= maxBytes;
-    const readBytes = reachedStart ? size : maxBytes;
-    const buf = Buffer.alloc(readBytes);
-    if (readBytes > 0) readSync(fd, buf, 0, readBytes, size - readBytes);
-    let text = buf.toString("utf-8");
-    if (!reachedStart) {
-      const nl = text.indexOf("\n");
-      text = nl === -1 ? "" : text.slice(nl + 1); // discard partial leading line
-    }
-    return { text, reachedStart };
-  } catch {
-    return { text: "", reachedStart: false };
-  } finally {
-    if (fd !== undefined) { try { closeSync(fd); } catch {} }
-  }
-}
-
-/**
- * Parse a GROWING tail window until `enough(events)` is satisfied, the window
- * reaches the file start, or it hits `maxBytes`. Doubles the window each pass.
- * Never materialises more than `maxBytes` as a string, so it is safe on files
- * past Node's max string length. `enough` defaults to "the first window is
- * enough" (single bounded tail read).
- */
-export function parseJsonlWindow(filePath, {
-  initialBytes = DEFAULT_JSONL_WINDOW_BYTES,
-  maxBytes = MAX_JSONL_WINDOW_BYTES,
-  enough = () => true,
-} = {}) {
-  let bytes = Math.max(1, Math.min(initialBytes, maxBytes));
-  for (;;) {
-    const { text, reachedStart } = readTailWindow(filePath, bytes);
-    const events = parseJsonlText(text);
-    if (reachedStart || bytes >= maxBytes || enough(events)) return events;
-    bytes = Math.min(bytes * 2, maxBytes);
-  }
 }
 
 /**

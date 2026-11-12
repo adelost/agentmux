@@ -1,5 +1,6 @@
 // A blocked handoff returns to its recorded sender, never to a fleet-wide manager.
 import { parseSenderAddress } from "./sender-detect.mjs";
+import { floorMoveTarget } from "./delivery-wake.mjs";
 
 const HANDOFF_STALL_MS = 10 * 60_000;
 const ALERT_RETRY_MS = 60_000;
@@ -20,8 +21,10 @@ export function deliveryBlockerDetail(job) {
   if (reason.startsWith("wake-refused:guard-state-stale")) return "minnesvaktens mätning är för gammal";
   // A quota hold lifts by itself on the first reading with room; the pane is fine (2026-10-20 18:12Z, api:6).
   if (reason.startsWith("wake-refused:quota-floor:")) {
-    return `mottagarens kvot håller jobbet (${reason.slice("wake-refused:quota-floor:".length).trim()}); `
-      + "det levereras av sig självt när kontot har plats";
+    const held = reason.slice("wake-refused:quota-floor:".length).trim(), target = floorMoveTarget(held);
+    // 12 Nov (Mattias via deep:0): the sender learns the move and the account, not a wait until the old account's reset.
+    if (target) return `panelen flyttas till ${target}; meddelandet följer med och levereras där`;
+    return `mottagarens kvot håller jobbet (${held}); det levereras av sig självt när kontot har plats`;
   }
   if (reason.startsWith("wake-refused:")) return "den adresserade agentprocessen kunde inte startas";
   return "panelen är inte redo för säker leverans; composern får inte skrivas över";
