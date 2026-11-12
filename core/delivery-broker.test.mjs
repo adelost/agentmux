@@ -3065,6 +3065,24 @@ feature("the quota floor holds new automatic work on an account near its weekly 
     }],
   });
 
+  // 12 Nov 18:12Z (sandman:0): skybar:0's head had 155 floor holds; moved to Claude W, it was parked 5 min as a spent pre-submit budget.
+  component("a prompt the floor held for over an hour is typed once the floor lifts, not parked as a spent attempt budget", {
+    given: ["the brief held at 97 % used for 70 retries over 71 min", async () => {
+      const w = floorWorld();
+      for (let i = 0; i < 70; i++) { await w.broker.kickTarget("claw", 1); w.advance(61_000); }
+      return w;
+    }],
+    when: ["the pane's account reads room and the retry comes", async (w) => {
+      w.reading.used = 0;
+      w.reading.freshUsed = 0;
+      w.advance(61_000);
+      await w.broker.kickTarget("claw", 1);
+    }],
+    then: ["the brief is typed at once", (_, w) => {
+      try { expect(w.agent.sends.map((send) => send.text)).toEqual(["[from claw:0] Build the Kit view."]); } finally { w.cleanup(); }
+    }],
+  });
+
   component("the floor lifts by itself once the reading shows room", {
     given: ["the brief held at 97 % used", async () => {
       const w = floorWorld();

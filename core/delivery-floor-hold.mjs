@@ -27,7 +27,12 @@ export function createFloorHold({ queue, quotaFloor, now, preparationTimeoutMs, 
       onStage: (stage, ms) => log(`delivery floor hold ${agentName}:${pane} ${head.id}: ${stage} ${ms}ms`),
       onTimeout: error => `quota-floor: ${error.message}; fresh account reading unavailable; existing hold remains` },
     () => quotaFloorRefusal({ job: head, quotaFloor, now }));
-    if (!reason) return false;
+    // The floor's refusals held a prompt that was never sent, so they spend no pre-submit budget: once it lifts the prompt starts
+    // that budget afresh (12 Nov 18:12Z: skybar:0's head, 155 holds, was parked 5 min as spent after its move to Claude W).
+    if (!reason) {
+      if (isQuotaFloorHeldJob(head)) queue.update(head, { attempts: 0, firstAttemptAt: null, costHold: null, nextAttemptAt: now() });
+      return false;
+    }
     const attempts = Number(head.attempts || 0) + 1;
     const retryMs = reason.includes("preparation-timeout") ? 60_000 : blockedRetryMs({ attempts });
     const held = queue.update(head, { status: "pending", attempts, firstAttemptAt: head.firstAttemptAt || now(),
