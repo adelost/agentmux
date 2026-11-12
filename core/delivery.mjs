@@ -97,6 +97,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
   precheckEcho = false,
   notBeforeMs: suppliedNotBeforeMs = null,
   knownDrafted = false,
+  ownedPaste = null,
   onPasteStarted = null,
   onDrafted = null,
   onSubmitting = null,
@@ -137,6 +138,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
     let sendReceipt = null;
     await agent.sendOnly(agentName, text, pane, {
       knownDrafted,
+      ownedPaste,
       onPasteStarted,
       onDrafted,
       onSubmitting,

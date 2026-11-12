@@ -443,6 +443,8 @@ export function createDeliveryBroker({
           notBeforeMs: job.echoCursor ? null : job.echoNotBeforeMs,
           precheckEcho: true,
           knownDrafted: ownsPaneDraft,
+          // the collapsed paste the first attempt recorded: a retry submits it rather than call it a draft it cannot see
+          ownedPaste: job.metadata?.claudeOwnedPaste ?? null,
           onPasteStarted: async () => {
             ownsPaneDraft = true;
             const current = queue.read(job.agentName, job.pane, job.id) || job;

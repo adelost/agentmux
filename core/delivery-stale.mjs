@@ -5,6 +5,7 @@ import { DELIVERED_UNVERIFIED_STATE } from "./delivery-queue-policy.mjs";
 import { reportBlockedHandoffs } from "./delivery-handoff.mjs";
 import { fenceCodexCapacityJobs } from "./codex-capacity-delivery.mjs";
 import { fenceSelfCompactJobs } from "./self-compact-resume.mjs";
+import { reportStalledHead } from "./queue-stall-watch.mjs";
 
 const STALE_WARN_MS = 20 * 60_000;
 const PHYSICAL_STATES = new Set(["pasting", "submitting"]);
@@ -85,5 +86,6 @@ export async function runDeliveryPreflight({ agentName, pane, queue, now, queueE
           && (job.attempts > 0 || job.metadata?.preSubmitPark)) await notifyBlocked(job);
     }
   }
+  reportStalledHead({ agentName, pane, queue, now, log });
   return reportStaleDeliveryJobs({ agentName, pane, queue, now, queueEvent, log });
 }

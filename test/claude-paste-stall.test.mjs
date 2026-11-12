@@ -422,6 +422,48 @@ feature("amux's own collapsed paste whose Enter Claude dropped is submitted unde
     }],
   });
 
+  // sandman:0 12 Nov 07:58-09:36Z: job ce875ebc's paste folded to "[Pasted text #319 +4 lines]", its Enter never went, and every retry
+  // (knownDrafted) refused the composer as "durable draft is not visible", 54 times, while its claudeOwnedPaste matched the screen and the pid.
+  component("a retry of the job whose own collapsed paste stands in the composer submits it once", {
+    given: ["the job's paste left in an idle composer after every Enter was dropped", async () => {
+      const fixture = claudePane();
+      const home = idleHome(fixture);
+      return { fixture, delivered: await deliverDropped(fixture, 3), home };
+    }],
+    when: ["the broker retries the job with what it recorded of its paste", ({ fixture, delivered }) =>
+      deliver(fixture, FOUR_LINES, { knownDrafted: true, ownedPaste: delivered.owned })],
+    then: ["the paste is submitted once, never pasted again or erased", async (error, { fixture, home }) => {
+      try {
+        expect(error).toBeNull();
+        expect(fixture.pane.submitted).toEqual([FOUR_LINES]);
+        expect(fixture.pane.calls.filter((call) => call.includes("paste-buffer"))).toHaveLength(1);
+        expect(fixture.pane.calls.filter((call) => /BSpace|C-u|Escape/u.test(call))).toEqual([]);
+      } finally { home.restore(); await fixture.clean(); }
+    }],
+  });
+
+  component("a retry under a new Claude process does not take the marker for its own", {
+    given: ["the job's paste left in the composer, then a new Claude process in the pane", async () => {
+      const fixture = claudePane();
+      const home = idleHome(fixture);
+      const delivered = await deliverDropped(fixture, 3);
+      fixture.newClaudeProcess();
+      return { fixture, delivered, home };
+    }],
+    when: ["the broker retries the job with what it recorded of its paste", async ({ fixture, delivered }) => ({
+      entersBefore: enters(fixture.pane),
+      error: await deliver(fixture, FOUR_LINES, { knownDrafted: true, ownedPaste: delivered.owned }),
+    })],
+    then: ["it is refused, with no Enter and the draft intact", async (result, { fixture, home }) => {
+      try {
+        expect(result.error).toMatch(/durable draft is not visible/u);
+        expect(enters(fixture.pane)).toBe(result.entersBefore);
+        expect(fixture.pane.submitted).toEqual([]);
+        expect(fixture.pane.composer).toBe("[Pasted text #1 +3 lines]");
+      } finally { home.restore(); await fixture.clean(); }
+    }],
+  });
+
   component("the same marker under a new Claude process is not amux's and gets no Enter", {
     given: ["the job's paste left in the composer, then a new Claude process in the pane", async () => {
       const fixture = claudePane();

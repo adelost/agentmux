@@ -1022,7 +1022,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   async function sendPrompt(agentName, prompt, pane, {
-    knownDrafted = false, maintenanceGuard = null,
+    knownDrafted = false, maintenanceGuard = null, ownedPaste: knownOwnedPaste = null,
     onPasteStarted = null,
     onDrafted = null,
     onSubmitting = null,
@@ -1055,6 +1055,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }));
     let busyAtSend = false, ownedPaste = null;
     let exactDraft = dialect === "codex" && alreadyComposed;
+    // Claude folds a long paste to "[Pasted text #N +M lines]", so a retry never sees the prompt's head. The paste the first attempt recorded,
+    // still in the composer of the same Claude process, is the draft: sandman:0 sat 07:58-09:36Z on 12 Nov with ce875ebc refused 54 times
+    // as "durable draft is not visible" below, while its claudeOwnedPaste matched the screen and the pid.
+    if (dialect === "claude" && knownDrafted && !alreadyComposed && knownOwnedPaste
+        && await claudeGuards.holdsOwnPaste(agentName, pane, knownOwnedPaste).catch(() => false)) {
+      alreadyComposed = true;
+      ownedPaste = knownOwnedPaste;
+    }
 
     if (dialect === "codex" && knownDrafted && !alreadyComposed) {
       const recovered = await recoverKnownCodexDraft(agentName, pane, prompt);
