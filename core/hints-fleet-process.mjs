@@ -92,6 +92,6 @@ Mattias protokoll 1 nov 2026, fallen i [momentum.md](${fleetPolicyFile("momentum
 - Before a compact or a long-running check loop: read [context.md](${fleetPolicyFile("context.md")}).
 - Before changing a hot function: read [hotspots.md](${fleetPolicyFile("hotspots.md")}).
 - Memory or day digests: read [memory.md](${fleetPolicyFile("memory.md")}); AMUX logs, Dream digests, workers keep no manual diary.
-- Before health, quota or lifecycle maintenance: read [maintenance.md](${fleetPolicyFile("maintenance.md")}).
+- Before health, quota or lifecycle maintenance, or a heavy job (over 10 minutes at a core, or over 2 GB): read [maintenance.md](${fleetPolicyFile("maintenance.md")}).
 - Delivering images or speech, choosing a browser, or sending a notification: read [evidence.md](${fleetPolicyFile("evidence.md")}).
 `;
