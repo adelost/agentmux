@@ -35,10 +35,14 @@ export const CONTEXT_COST_POLICY = Object.freeze({ maxTokens: 80_000, coldMaxTok
 // 2x), so the budgets compare as: 200k is the cost minimum on each of three days (-6.7 % of the builders' weighted cost with 100k
 // extra per compact for re-orienting), 150k is worse (-5.6 %), 250k and 300k are -5.8 % and -4.9 %.
 // The panes of the ongoing film work (the Cutkit launch, testers from Wed 4 Nov 10:00Z) keep 400k until sandman:0 lifts the list.
+// Row 168 (Mattias to deep:1 14 Nov 08:55Z, delivery:fcef3482170b2e0dd6ce540e4949d077; 400k is deep:1's figure): deep:1, deep:2 and deep:3
+// keep 400k too. A session starts at about 99k after a compact, so 200k leaves about 100k to work in; deep:1 went 99k to 203k in 31 min on
+// 14 Nov, three compacts in 1 h 38 min, 13 since 12 Nov 20:00Z, each losing detail of its talk with him. The 3 Nov replay puts the cost at
+// most 6.7 % of these panes' own. Not through leaders in agentmux.yaml: leaderPanes also drives leader-review.
 // The mid-turn ask stays at 1.5 times the earlier budgets (600k for builders, 1.05M for leaders), so the lower budget adds no notice in a turn.
 /** WHAT: Defines compaction at a natural pause. WHY: Keeps busy panes from growing past 700k between 50-minute rests that never come. */
 export const PAUSE_COMPACT_POLICY = Object.freeze({ builderTokens: 400_000, claudeBuilderTokens: 200_000, leaderTokens: 700_000, oversizeFactor: 1.5,
-  keepBuilderPanes: Object.freeze(["skyvw:1", "skyvw:2", "lsrc:1", "lsrc:2"]),
+  keepBuilderPanes: Object.freeze(["skyvw:1", "skyvw:2", "lsrc:1", "lsrc:2", "deep:1", "deep:2", "deep:3"]),
   settleMs: 60_000, spacingMs: 30 * 60_000, backgroundQuietMs: 5 * 60_000, hungJobMs: 60 * 60_000,
   codexIdleMs: 25 * 60_000, codexMinTokens: 150_000 });
 

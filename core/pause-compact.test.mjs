@@ -84,15 +84,20 @@ feature("compaction at a natural pause: one guard per condition", () => {
       lsrc0: 700_000, lsrc2: 400_000, lsrcLeaders: [3, 0] })],
   });
   // sandman:0 2026-11-03: a Claude builder compacts from 200k, where a compact pays back (replay in docs/AMUX-COST-POLICY.md); leaders, Codex builders and the panes of the ongoing film work keep what they had.
+  // Row 168: deep:1 to deep:3, the panes that talk with Mattias, keep 400k too; deep:4 is an ordinary builder.
   unit("a Claude builder has 200k, and the leader, the Codex builder and a kept film pane keep their earlier budgets", {
     given: ["ai led by Codex pane 3, lsrc led by Codex pane 3 and Claude pane 0, skyvw orchestrated by pane 0", () => ({
-      ai: { name: "ai", orchestrator: 3, leaders: [] }, lsrc: { name: "lsrc", orchestrator: 3, leaders: [0] }, skyvw: { name: "skyvw", orchestrator: 0, leaders: [] } })],
-    when: ["reading the budgets by engine", ({ ai, lsrc, skyvw }) => ({ aiClaude: pauseCompactLimit(ai, 1, PAUSE_COMPACT_POLICY, "claude"), aiCodex: pauseCompactLimit(ai, 4, PAUSE_COMPACT_POLICY, "codex"),
+      ai: { name: "ai", orchestrator: 3, leaders: [] }, lsrc: { name: "lsrc", orchestrator: 3, leaders: [0] }, skyvw: { name: "skyvw", orchestrator: 0, leaders: [] },
+      deep: { name: "deep", orchestrator: 0, leaders: [] } })],
+    when: ["reading the budgets by engine", ({ ai, lsrc, skyvw, deep }) => ({ aiClaude: pauseCompactLimit(ai, 1, PAUSE_COMPACT_POLICY, "claude"), aiCodex: pauseCompactLimit(ai, 4, PAUSE_COMPACT_POLICY, "codex"),
       aiLeaderCodex: pauseCompactLimit(ai, 3, PAUSE_COMPACT_POLICY, "codex"), lsrcLeaderClaude: pauseCompactLimit(lsrc, 0, PAUSE_COMPACT_POLICY, "claude"),
       lsrc1: pauseCompactLimit(lsrc, 1, PAUSE_COMPACT_POLICY, "claude"), skyvw2: pauseCompactLimit(skyvw, 2, PAUSE_COMPACT_POLICY, "claude"),
-      skyvw0: pauseCompactLimit(skyvw, 0, PAUSE_COMPACT_POLICY, "claude"), noEngine: pauseCompactLimit(ai, 1) })],
+      skyvw0: pauseCompactLimit(skyvw, 0, PAUSE_COMPACT_POLICY, "claude"), noEngine: pauseCompactLimit(ai, 1),
+      deep1: pauseCompactLimit(deep, 1, PAUSE_COMPACT_POLICY, "claude"), deep2: pauseCompactLimit(deep, 2, PAUSE_COMPACT_POLICY, "claude"),
+      deep3: pauseCompactLimit(deep, 3, PAUSE_COMPACT_POLICY, "claude"), deep4: pauseCompactLimit(deep, 4, PAUSE_COMPACT_POLICY, "claude") })],
     then: ["only the Claude builders outside the kept panes drop to 200k", budgets => expect(budgets).toEqual({ aiClaude: 200_000, aiCodex: 400_000, aiLeaderCodex: 700_000,
-      lsrcLeaderClaude: 700_000, lsrc1: 400_000, skyvw2: 400_000, skyvw0: 700_000, noEngine: 400_000 })],
+      lsrcLeaderClaude: 700_000, lsrc1: 400_000, skyvw2: 400_000, skyvw0: 700_000, noEngine: 400_000,
+      deep1: 400_000, deep2: 400_000, deep3: 400_000, deep4: 200_000 })],
   });
   unit("the mid-turn ask stays where it was, so the lower budget adds no notice in a turn", {
     given: ["a Claude builder in ai and a leader in skyvw", () => ({ ai: { name: "ai", orchestrator: 3, leaders: [] }, skyvw: { name: "skyvw", orchestrator: 0, leaders: [] } })],
