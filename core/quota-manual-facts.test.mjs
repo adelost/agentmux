@@ -20,6 +20,12 @@ feature("manual quota facts cannot masquerade as current provider readings", () 
       expect(text).toMatch(/STALE/u); expect(text).toMatch(/age 24h/u); expect(text).toContain("2026-10-23");
     })],
   });
+  unit("each kind of free reset is named beside the count", {
+    when: ["a Weekly and a Fable reset were read a minute ago", () => render({ freeResetsLeft: 2, freeResetsReadOn: "2026-10-24",
+      freeResetsReadAt: "2026-10-24T06:05:00Z", limitResets: [{ kind: "weekly", expires: "2026-12-10T23:00+01:00" },
+        { kind: "fable", expires: "2027-03-09T08:59+01:00" }] })],
+    then: ["both surfaces say which is which", texts => texts.forEach(text => expect(text).toContain("free resets 2 (1 weekly, 1 fable)"))],
+  });
   unit("a renewal day in the past is invalid even if read just now", {
     when: ["an old renewal survived in the profile", () => render({ renewsOn: "2026-10-20", renewsReadAt: "2026-10-24T06:06:00Z" })],
     then: ["neither surface presents it as an upcoming renewal", texts => texts.forEach(text => expect(text).toContain("INVALID: renewal date has passed"))],

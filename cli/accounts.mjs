@@ -33,6 +33,8 @@ Login dirs: ~/.config/agent/account-profiles/claude/<login>, one account per dir
   "accounts": {"claude:<login>": {"name": "Claude W", "subscription": {"renewsOn": "YYYY-MM-DD",
   "freeResetsLeft": 1, "freeResetsReadOn": "YYYY-MM-DD", "freeResetsExpire": ["YYYY-MM-DDTHH:MM+01:00"]}}},
   and "slots" only for a slot's non-default home. A free reset stops counting when its time has passed.
+  "limitResets": [{"kind": "weekly", "expires": "..."}, {"kind": "fable", "expires": "..."}] names each reset's kind:
+  weekly gives the whole week back, a model's name only that model's allowance.
 rotate --dry prints the plan per pane and changes nothing; Discord: /byt <login>.
 Codex switch compacts running panes first and preserves model/effort and the exact session when portable.
 Busy panes keep a durable request for the existing watcher; dormant panes are selected for their next start, never woken.

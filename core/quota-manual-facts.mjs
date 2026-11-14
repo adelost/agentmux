@@ -10,6 +10,14 @@ export function manualFactAge(readAt, now) {
   return { stale: elapsed > DAY, text: `${elapsed > DAY ? "STALE · " : ""}manual read ${readAt} · age ${age}` };
 }
 
+/** WHAT: Names each kind of free reset with its count, " (1 weekly, 1 fable)". WHY: Keeps a model's reset from reading as a week back. */
+const resetKinds = (resets) => {
+  if (!Array.isArray(resets) || !resets.length) return "";
+  const counts = new Map();
+  for (const { kind } of resets) counts.set(kind, (counts.get(kind) || 0) + 1);
+  return ` (${[...counts].map(([kind, count]) => `${count} ${kind}`).join(", ")})`;
+};
+
 /** WHAT: Formats only manually observed subscription facts. WHY: Keeps age and invalid renewal dates visible on both quota surfaces. */
 export function manualSubscriptionFacts(subscription = {}, now = Date.now()) {
   const s = subscription || {}, facts = [];
@@ -23,7 +31,7 @@ export function manualSubscriptionFacts(subscription = {}, now = Date.now()) {
   }
   if (Number.isInteger(s.freeResetsLeft)) {
     const expiry = s.freeResetsExpire?.[0];
-    add("freeResetsLeft", `free resets ${s.freeResetsLeft}${expiry ? ` · first expires ${expiry}` : ""}`,
+    add("freeResetsLeft", `free resets ${s.freeResetsLeft}${resetKinds(s.limitResets)}${expiry ? ` · first expires ${expiry}` : ""}`,
       s.freeResetsReadAt || s.freeResetsReadOn);
   }
   if (s.planTier) add("planTier", `plan ${s.planTier}`, s.planReadAt);

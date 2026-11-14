@@ -148,6 +148,10 @@ const isMoment = (value) => typeof value === "string"
 // Mattias 2026-10-17: the renewal date and the free resets left, read by hand from the billing and usage pages.
 // The names are the ones stats.v1d.io reads (api:0, 2026-10-17), so the push forwards them unchanged.
 // freeResetsExpire: lsrc:0 the same day, when each reset ends, so the box can show the first.
+// limitResets: Mattias 2026-11-14 (deep:3), each free reset's kind as the usage page names it. A Weekly reset gives the
+// whole week back, a Fable reset only that model's allowance; the count alone made two resets read as two weeks.
+const isLimitReset = (value) => !!value && typeof value === "object" && !Array.isArray(value)
+  && typeof value.kind === "string" && /^[a-z][a-z0-9-]{0,19}$/u.test(value.kind) && isMoment(value.expires);
 const SUBSCRIPTION_FIELDS = Object.freeze({
   renewsReadAt: { valid: isMoment, need: "an ISO time with offset" },
   freeResetsReadAt: { valid: isMoment, need: "an ISO time with offset" },
@@ -163,6 +167,8 @@ const SUBSCRIPTION_FIELDS = Object.freeze({
   freeResetsReadOn: { valid: isDay, need: "YYYY-MM-DD" },
   freeResetsExpire: { valid: (value) => Array.isArray(value) && value.length > 0 && value.every(isMoment),
     need: "a list of times like 2026-10-29T20:24+01:00" },
+  limitResets: { valid: (value) => Array.isArray(value) && value.length > 0 && value.length <= 10 && value.every(isLimitReset),
+    need: 'a list like [{"kind":"weekly","expires":"2026-12-10T23:00+01:00"}]' },
 });
 
 /** WHAT: Checks one login's subscription fields. WHY: Keeps a free-reset count from standing without the day it was read. */
@@ -194,11 +200,13 @@ function subscriptionOf(key, value, problems) {
  * WHY: Keeps an expired reset from being counted or shown after the day its page was read.
  */
 export function subscriptionAt(subscription, now) {
-  if (!subscription?.freeResetsExpire) return subscription;
-  const { freeResetsExpire: expire, ...rest } = subscription;
-  const ahead = expire.filter((at) => Date.parse(at) > now).sort((a, b) => Date.parse(a) - Date.parse(b));
-  return { ...rest, freeResetsLeft: Math.max(0, rest.freeResetsLeft - (expire.length - ahead.length)),
-    ...(ahead.length ? { freeResetsExpire: ahead } : {}) };
+  if (!subscription?.freeResetsExpire && !subscription?.limitResets) return subscription;
+  const { freeResetsExpire: expire, limitResets: kinds, ...rest } = subscription;
+  const ahead = (expire || []).filter((at) => Date.parse(at) > now).sort((a, b) => Date.parse(a) - Date.parse(b));
+  const live = (kinds || []).filter((reset) => Date.parse(reset.expires) > now);
+  return { ...rest,
+    ...(expire ? { freeResetsLeft: Math.max(0, rest.freeResetsLeft - (expire.length - ahead.length)) } : {}),
+    ...(ahead.length ? { freeResetsExpire: ahead } : {}), ...(live.length ? { limitResets: live } : {}) };
 }
 
 /**

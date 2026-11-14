@@ -576,7 +576,11 @@ are in English, without emoji.
 `slots` only for a slot's non-default home. `freeResetsExpire` optionally lists
 when each free reset ends, as the usage page gives it
 (`["2026-10-29T20:24+01:00"]`); a reset stops counting when its time has
-passed. `amux quota --json` puts `name` and `subscription` on every account,
+passed. `limitResets` optionally names each reset's kind as the usage page
+does (`[{"kind": "weekly", "expires": "2026-12-10T23:00+01:00"}, {"kind":
+"fable", "expires": "2027-03-09T08:59+01:00"}]`): a weekly reset gives the
+whole week back, a model's reset only that model's allowance. The quota line
+then reads `free resets 2 (1 weekly, 1 fable)`. `amux quota --json` puts `name` and `subscription` on every account,
 also when its reading failed. Version 1 files still give their slot homes.
 
 Set `AMUX_TOOL_LINES_CHANNELS` in the bridge environment to a comma-separated
