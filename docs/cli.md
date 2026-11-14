@@ -479,9 +479,10 @@ admits a registered checkout, branch or detached, only when a fetched origin
 ref contains its HEAD (pushed or merged), it is clean, it has no process cwd,
 open descriptor or mapping, and no non-dependency metadata changed in 24 hours.
 A checkout holding over 100 MB of ignored files outside `node_modules`, `dist`,
-`.vite`, `coverage`, `__pycache__` and `.venv` stays, since removal would
+`.vite`, `coverage`, `__pycache__`, `.venv` and a `build` folder beside a
+Gradle build or settings script stays, since removal would
 delete them, and so does one holding any ignored wrangler state, database,
-credential file or browser profile.
+credential file or browser profile outside those folders.
 Recent source-root receipts and guard units protect their checkouts;
 `skyvw0-verify` and Cutkit's `v2-live` stay protected.
 Read-only scanners use noninteractive sudo to inspect other UIDs. Any unknown

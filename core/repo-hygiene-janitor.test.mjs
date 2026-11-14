@@ -137,6 +137,39 @@ feature("the repo-hygiene janitor decides every candidate by the table and touch
     }],
     cleanup: (ctx) => rmSync(ctx.root, { recursive: true, force: true }),
   });
+  // Row 173: Gradle names its output build. On 2026-11-14 that folder alone held 104 finished checkouts, 66 GB.
+  integration("a build folder counts as build output only beside a Gradle script", {
+    given: ["an otherwise retirable worktree with 150 MB ignored under a Gradle module's build folder and under another build folder", () => {
+      const ctx = repoWithEveryKind();
+      commitDaysAgo(ctx.work, "tools/render.sh", 3);
+      const gradleModule = commitDaysAgo(ctx.work, "app/build.gradle.kts", 3);
+      git(ctx.work, ["push", "-q", "origin", "main"]);
+      ctx.target = join(ctx.root, "gradle-built");
+      git(ctx.work, ["worktree", "add", "-q", "--detach", ctx.target, gradleModule]);
+      mkdirSync(join(ctx.common, "info"), { recursive: true });
+      writeFileSync(join(ctx.common, "info", "exclude"), "build/\n");
+      // The build copies a certificate from source into its output; the copy is no secret of the checkout.
+      for (const file of ["app/build/outputs/app.apk", "app/build/intermediates/raw/root.pem", "tools/build/take.mov"]) {
+        mkdirSync(dirname(join(ctx.target, file)), { recursive: true });
+        writeFileSync(join(ctx.target, file), "");
+        truncateSync(join(ctx.target, file), 150e6);
+      }
+      return ctx;
+    }],
+    when: ["checking eligibility with the folder no Gradle script owns, then without it", (ctx) => {
+      const check = () => retirementEligibility({ common: ctx.common, now: Date.now() + 2 * DAY_S * 1000,
+        candidate: registeredWorktrees(ctx.common).find(({ path }) => path === ctx.target),
+        safety: { holders: { [ctx.target]: [] }, protectedPaths: [], errors: [] } });
+      const withUnowned = check();
+      rmSync(join(ctx.target, "tools", "build"), { recursive: true });
+      return { withUnowned, gradleOnly: check() };
+    }],
+    then: ["the folder no Gradle script owns keeps the checkout with its size; Gradle's own output does not", ({ withUnowned, gradleOnly }) => {
+      expect(withUnowned).toEqual({ ok: false, reasons: ["ignored files outside build folders: 150 MB"] });
+      expect(gradleOnly).toEqual({ ok: true, reasons: [] });
+    }],
+    cleanup: (ctx) => rmSync(ctx.root, { recursive: true, force: true }),
+  });
   integration("each kind lands in its cell, with a restore command, and origin keeps every branch", {
     given: ["a repo touched today with merged, unmerged, planned, closed and worktree leftovers", repoWithEveryKind],
     when: ["the janitor reviews it, having first seen row 5 closed ten days ago", (fixture) => {

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, closeSync, fsyncSync, lstatSync, mkdirSync,
+import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync,
   openSync, readdirSync, realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { processPathReferences, receiptPathReferences } from "./process-path-references.mjs";
 
 const DAY = 86400000;
@@ -28,6 +28,10 @@ export function worktreeLastChange(root) {
 // else ignored over 100 MB (renders, recordings, local data) keeps the checkout (lsrc:0, 2026-10-22), and so
 // does any wrangler persist state, database or credential file, which the disk-pressure skill never touches.
 const BUILD_FOLDERS=new Set(["node_modules","dist",".vite","coverage","__pycache__",".venv"]);
+// Gradle names its output build, a name other tools give kept data, so it is build output only beside a Gradle
+// script. In the 2026-11-14T16:00Z cleanup it was 122.6 of the 149.6 GB that held 269 finished checkouts, and the
+// one protected name inside was a public root certificate the build copies from source (row 173).
+const GRADLE_SCRIPTS=["build.gradle","build.gradle.kts","settings.gradle","settings.gradle.kts"];
 const IGNORED_LIMIT_BYTES=100e6;
 const PROTECTED_DATA=[
   ["wrangler state",(parts)=>parts.some((part,index)=>part===".wrangler"&&parts[index+1]==="state")],
@@ -40,6 +44,18 @@ export const IGNORED_FILES_REASON="ignored files outside build folders";
 /** WHAT: Names the hold reason for ignored never-touch data. WHY: Keeps the cleanup report's list on the same words the guard writes. */
 export const PROTECTED_DATA_REASON="ignored protected data";
 
+/** WHAT: Checks whether a checkout path is a regenerable build folder. WHY: Keeps a folder named build that no Gradle project owns under the size limit. */
+function isBuildFolder(root,relative) {
+  const name=basename(relative);
+  return BUILD_FOLDERS.has(name) || (name==="build" && GRADLE_SCRIPTS.some((script)=>existsSync(join(root,dirname(relative),script))));
+}
+
+/** WHAT: Checks whether a checkout path is a build folder or lies in one. WHY: Keeps Git's listing of a path deep in build output from counting it. */
+function inBuildFolder(root,relative) {
+  const parts=relative.split("/").filter(Boolean);
+  return parts.some((_,index)=>isBuildFolder(root,parts.slice(0,index+1).join("/")));
+}
+
 /** WHAT: Reads the size and protected kinds of ignored files outside regenerable build folders. WHY: Keeps a checkout whose removal would delete data Git never tracked. */
 export function ignoredData(root) {
   const listed=execFileSync("git",["-C",root,"ls-files","-z","--others","--ignored","--exclude-standard","--directory"],
@@ -50,11 +66,11 @@ export function ignoredData(root) {
     for(const [kind,matches] of PROTECTED_DATA) if(matches(parts)) kinds.add(kind);
     if(stat.isFile()) bytes+=stat.size;
     else if(stat.isDirectory()) for(const name of readdirSync(join(root,relative))) {
-      if(!BUILD_FOLDERS.has(name)) visit(join(relative,name));
+      if(!isBuildFolder(root,join(relative,name))) visit(join(relative,name));
     }
   }
   for(const entry of listed) {
-    if(!entry.split("/").some((part)=>BUILD_FOLDERS.has(part))) visit(entry);
+    if(!inBuildFolder(root,entry)) visit(entry);
   }
   return {bytes,protectedKinds:[...kinds].sort()};
 }
