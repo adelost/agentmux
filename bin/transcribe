@@ -568,9 +568,11 @@ for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
         # A refused admission or explicit unavailable response proves that no
         # supplier job ran. Poll/transport/unknown outcomes never qualify.
         # The gateway's own rate limit also refuses before a run exists (14 Nov 19:14Z: the day's speech calls
-        # were spent and five voice messages reached no pane), so the caller may take its fallback then too.
+        # were spent and five voice messages reached no pane), so the caller may take its fallback then too. The
+        # day's audio time (429 audio_allowance) is the same kind of limit. The spending cap (402 over_cap) is not:
+        # a paid path around his cap needs his words, so it stays a refusal.
         before_run = not run.get('id') and not error.get('run_id')
-        if before_run and (status, error.get('type')) in ((503, 'provider_unavailable'), (429, 'rate_limited')):
+        if before_run and (status, error.get('type')) in ((503, 'provider_unavailable'), (429, 'rate_limited'), (429, 'audio_allowance')):
             return 21
         if error.get('type') == 'unknown_outcome' or run.get('status') == 'unknown' or run.get('id') or error.get('run_id'):
             return 22
