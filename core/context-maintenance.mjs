@@ -21,7 +21,7 @@ import { QUOTA_PARK_ORIGIN } from "./quota-park.mjs";
 import { QUOTA_WIND_DOWN_ORIGIN } from "./quota-wind-down.mjs";
 import { withdrawDraft } from "./draft-withdrawal.mjs";
 import { assertDeliveryPreparation, onUnsentPreparationTimeout } from "./delivery-preparation.mjs";
-import { COMPACT_RECEIPTS_STATE, recoverLoginRefusedCompact, compactWriterGone, resolveExpiredCompact, updateCompactReceipt } from "./compact-receipts.mjs";
+import { COMPACT_RECEIPTS_STATE, compactReceipt, recoverLoginRefusedCompact, compactWriterGone, resolveExpiredCompact, updateCompactReceipt } from "./compact-receipts.mjs";
 import { randomUUID } from "node:crypto";
 import { createJournalHold, fileStamp } from "./pulse/journal-hold.mjs";
 
@@ -75,8 +75,9 @@ function write(state, key, record) {
 export function rememberContextCompact(state, name, pane, receipt) {
   // "Nothing to compact" leaves the context as small as a compact would: no attempt is due before new work.
   if (!state || !(receipt?.ok || receipt?.nothingToCompact)) return;
-  write(state, paneKey(name, pane), { sessionId: receipt.sessionId, cursor: receipt.cursor, status: "VERIFIED",
-    compactBoundary: receipt.compactBoundary === true, at: Date.now() });
+  const prior = compactReceipt(state, paneKey(name, pane));
+  write(state, paneKey(name, pane), { ...prior, sessionId: receipt.sessionId, cursor: receipt.cursor, status: "VERIFIED",
+    compactBoundary: receipt.compactBoundary === true, at: prior?.at ?? Date.now() });
 }
 
 /** WHAT: Reads when amux last tried to compact a pane, whatever the outcome. WHY: Keeps pause compaction at most once per spacing window. */
@@ -120,11 +121,12 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null, no
 }
 
 /** WHAT: Stores a maintenance intent before the model call. WHY: Prevents a crash or an ambiguous compact from becoming permission to spend again. */
-export function beginContextCompact(state, name, pane, identity, { command = null, source = null } = {}) {
+export function beginContextCompact(state, name, pane, identity, { command = null, source = null, compactCause = null, beforeTokens = null } = {}) {
   if (!state) return;
   const cursor = captureJsonlAppendCursor("context-maintenance-v1", [identity.path]);
   const record = { sessionId: identity.sessionId, sessionPath: identity.path, cursor, status: "ATTEMPTING", at: Date.now(),
-    pid: process.pid, attemptId: randomUUID(), ...(command && { command }), ...(source && { source }) };
+    pid: process.pid, attemptId: randomUUID(), ...(command && { command }), ...(source && { source }),
+    ...(compactCause && { compactCause, beforeTokens }) };
   write(state, paneKey(name, pane), record);
   return record;
 }
@@ -196,7 +198,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   // focus: what a self-requested Claude compact should keep (Codex's /compact takes no focus).
   // beforeDelivery: the broker holds the pane for a waiting job, so queued jobs do not count as in flight.
   async function run(name, pane, { cold = false, pauseTokens = null, pauseSettleMs, dry = false, leaseHeld = false, heldLease = null,
-    jobId = null, focus = "", beforeDelivery = cold, required = false } = {}) {
+    jobId = null, focus = "", beforeDelivery = cold, required = false, trigger = null } = {}) {
     const target = resolveTarget(name, pane);
     if (!target || !["claude", "codex"].includes(target.engine)) return { ok: true, skipped: "unsupported-engine" };
     if (typeof agent.paneProcessState !== "function" || (await agent.paneProcessState(name, pane).catch(() => null))?.running !== true) {
@@ -257,10 +259,21 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     const warmMs = target.engine === "codex" ? 30 * 60_000 : policy.coldMs;
     const quota = !cold && Number.isFinite(activity) && now() < activity + warmMs
       ? warmQuotaHold(state, name, pane, queue.list(name, pane), now()) : null;
-    const result = await compactOnce({ name, pane, target, identity, context, decision, dry, leaseHeld, heldLease, jobId, focus, beforeDelivery,
+    const kind = trigger || (cold ? "before-delivery" : pauseTokens != null ? "turn-end" : required ? "required" : "idle");
+    const minutes = Math.round((cold ? coldPolicy.coldMs : policy.idleMs) / 60_000);
+    const threshold = cold ? coldPolicy.coldMaxTokens : pauseTokens ?? policy.maxTokens;
+    const measured = `${context?.tokens ?? "unknown"} tokens > ${threshold}`;
+    const cause = kind === "turn-end" ? `turn end: ${measured}`
+      : kind === "codex-idle" ? `Codex idle 25 min: ${measured}`
+      : kind === "self-request" ? `pane request: ${context?.tokens ?? "unknown"} tokens (minimum ${threshold})`
+      : kind === "account-switch" ? `account switch: ${context?.tokens ?? "unknown"} tokens`
+      : kind === "before-delivery" ? `before delivery after ${minutes} min idle: ${measured}`
+      : kind === "idle" ? `${minutes} min idle: ${measured}` : `${kind}: ${context?.tokens ?? "unknown"} tokens`;
+    const result = await compactOnce({ name, pane, target, identity, context, decision, cause, dry, leaseHeld, heldLease, jobId, focus, beforeDelivery,
       quota: quota && { ...quota, expiresAt: activity + warmMs } });
-    if (cold && coldPolicy !== policy) {
-      try { coldBeforeDelivery.record({ at: new Date(now()).toISOString(), pane: `${name}:${pane}`, cell: "before-delivery",
+    if ((kind === "idle" || cold && coldPolicy !== policy) && coldBeforeDelivery?.record) {
+      try { coldBeforeDelivery.record({ at: new Date(now()).toISOString(), pane: `${name}:${pane}`, cell: kind,
+        tokens: context?.tokens ?? null, limit: threshold, reason: cause,
         outcome: result.compacted ? "compacted" : result.dry ? "would-compact" : "failed", detail: result.reason || result.cell || null }); }
       catch { /* diagnostics never change delivery truth */ }
     }
@@ -268,7 +281,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
   }
 
   // Sends one compact under the session lease, with its intent stored before the paid call.
-  async function compactOnce({ name, pane, target, identity, context, decision, dry, leaseHeld, heldLease, jobId, focus, beforeDelivery, quota }) {
+  async function compactOnce({ name, pane, target, identity, context, decision, cause, dry, leaseHeld, heldLease, jobId, focus, beforeDelivery, quota }) {
     const lease = leaseHeld ? null : queue.acquireSessionLease(name, pane);
     if (!leaseHeld && !lease) return { ok: false, reason: "delivery-lease-busy" };
     // Once the command is sent only this pane stays fenced, so its siblings
@@ -313,7 +326,7 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       const cursor = captureJsonlAppendCursor("context-maintenance-v1", [identity.path]);
       const command = focus && target.engine === "claude" ? `/compact ${focus}` : "/compact";
       // pid and command let the next pass erase what this attempt typed if this process stops before its Enter.
-      const record = { sessionId: identity.sessionId, cursor, status: "ATTEMPTING", at: now(), cell: decision.cell, beforeTokens: context.tokens,
+      const record = { sessionId: identity.sessionId, sessionPath: identity.path, compactCause: cause, source: "bridge", cursor, status: "ATTEMPTING", at: now(), cell: decision.cell, beforeTokens: context.tokens,
         pid: process.pid, command, ...(quotaClaim && { quotaClaim }) };
       intent = record;
       write(state, paneKey(name, pane), record);
@@ -355,9 +368,9 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       log(`${name}:${pane} ${decision.cell}: ${result.ok ? "compact verified" : result.reason}`);
       const after = result.ok ? await Promise.resolve(agent.getContext?.(name, pane)).catch(() => null) : null;
       recordCompact({ at: new Date(now()).toISOString(), pane: paneKey(name, pane), engine: target.engine, source: "bridge", cell: decision.cell,
-        outcome: result.ok ? "compacted" : "failed", reason: result.reason || null, beforeTokens: context?.tokens ?? null,
+        outcome: result.ok ? "compacted" : "failed", reason: cause, failure: result.reason || null, beforeTokens: context?.tokens ?? null,
         afterTokens: Number.isFinite(after?.tokens) ? after.tokens : null, account: await accountOf(name, pane).catch(() => null) });
-      return result.ok ? { ok: true, compacted: true, receipt: result }
+      return result.ok ? { ok: true, compacted: true, compactCause: cause, receipt: result }
         : { ok: false, attempted: true, reason: `context-cost:${result.reason}`, detail: result.detail || null, ...(retryAt ? { retryAt } : {}) };
     } catch (error) {
       if (intent) write(state, paneKey(name, pane), { ...intent, status: submitted ? "FAILED" : "NOT_SENT", reason: error.message, finishedAt: now() });
@@ -406,12 +419,12 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       return null;
     }
     const result = await run(agentName, pane, { pauseTokens: SELF_COMPACT_POLICY.minTokens, pauseSettleMs: 0, beforeDelivery: true,
-      focus: request.focus, leaseHeld: true, heldLease: lease, jobId: id });
+      focus: request.focus, trigger: "self-request", leaseHeld: true, heldLease: lease, jobId: id });
     if (!result.compacted && !result.attempted) return null;
     // The waiting delivery already continues or replaces the task. Do not
     // enqueue the older handoff behind it.
     selfRequests.clear(agentName, pane);
-    noticeSelf(request, result.compacted ? { outcome: "compacted", tokens: context?.tokens } : { outcome: "failed", detail: result.reason });
+    noticeSelf(request, result.compacted ? { outcome: "compacted", tokens: context?.tokens, compactCause: result.compactCause } : { outcome: "failed", detail: result.reason });
     return result;
   }
   return { canAttempt, run, beforeWork, selfRequestSuperseded, finishSelfRequest };

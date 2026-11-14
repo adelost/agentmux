@@ -50,7 +50,7 @@ export async function compactBeforeStop(ctx, name, {
     const maxTokens = stopCompactLimit(facts.idleMs);
     if (facts.tokens <= maxTokens) continue;
     const pass = await run(ctx, {}, {
-      targets: [target], queue, now, mirror: mirrorStopCompact,
+      targets: [target], queue, now, mirror: mirrorStopCompact, trigger: "before stop",
       label: `Compact before stop (${agent.name}:${target.pane.index})`,
       policy: { enabled: true, maxTokens, idleMinutes: 0 },
       path: join(homedir(), ".agentmux", "stop-compact", compactDayKey(now())),

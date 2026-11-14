@@ -35,12 +35,12 @@ export function selfCompactAdmission({ tokens, lastCompactAt = null, now }, poli
 }
 
 /** WHAT: Formats a self-request outcome for the pane's channel. WHY: Keeps a discarded continuation distinct from a resumed turn. */
-export function formatSelfCompactNotice(paneKey, { outcome, tokens = null, detail = "", focus = "", continuationSuperseded = false }) {
+export function formatSelfCompactNotice(paneKey, { outcome, tokens = null, detail = "", focus = "", continuationSuperseded = false, compactCause = null }) {
   if (continuationSuperseded) {
     return `Self-compact **${paneKey}**: the saved continuation was not queued because newer input or a new session superseded it.`;
   }
   if (outcome === "compacted") {
-    return `Self-compact **${paneKey}** at the end of its turn${Number.isFinite(tokens) ? ` (${tokens} tokens)` : ""}${focus ? `, focus: ${focus}` : ""}.`;
+    return `Self-compact **${paneKey}** at the end of its turn${Number.isFinite(tokens) ? ` (${tokens} tokens)` : ""}${focus ? `, focus: ${focus}` : ""}.${compactCause ? ` Cause: ${compactCause}.` : ""}`;
   }
   return `Self-compact **${paneKey}** ${outcome}: ${detail}`;
 }

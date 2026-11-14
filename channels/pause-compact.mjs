@@ -249,7 +249,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       }
       return false;
     }
-    // A pane that asked at a stage boundary is compacted from about 80k, the size rule waits for its budget: 200k for a Claude builder, 400k for the others, 700k for a leader.
+    // A pane that asked at a stage boundary is compacted from about 80k, the size rule waits for its budget: 400k for builders, 700k for a leader or thinker.
     const limit = request ? SELF_COMPACT_POLICY.minTokens : pauseCompactLimit(agentConfig, pane, policy, engine);
     const askAt = pauseAskTokens(agentConfig, pane, policy);
     // Codex's cache lives about 30 minutes, so its idle rule is 25 minutes instead of the shared 50.
@@ -289,7 +289,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
     // The same admission as a live compact: lease, fence, delivery in flight, session, busy screen, composer.
     const result = await contextMaintenance.run(name, pane, { pauseTokens: decision.budget, dry: mode === "dry",
       ...(windDownRequested ? { pauseSettleMs: 0 } : {}),
-      ...(request ? { focus: request.focus } : {}) });
+      ...(request ? { focus: request.focus, trigger: "self-request" } : decision.cell === "codex-idle" ? { trigger: "codex-idle" } : {}) });
     if (result.dry) {
       dryCompacts.set(paneKey, facts.now);
       report(paneKey, lastActivityMs, { ...line, outcome: "would-compact", tokens: result.tokens ?? contextTokens });
@@ -301,7 +301,7 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       const park = parkStore?.read(name, pane);
       if (park?.state === "parked") parkStore.update(park, { compactedAt: new Date(facts.now).toISOString() });
     }
-    const ended = { ...line, outcome, cell: request ? "self-request" : result.cell || line.cell, detail: result.reason || line.detail };
+    const ended = { ...line, outcome, compactCause: result.compactCause, cell: request ? "self-request" : result.cell || line.cell, detail: result.reason || line.detail };
     // A refused request (a delivery waiting, the lease busy) stays for the delivery path or the next pause.
     if (request && (result.compacted || result.attempted)) endRequest(paneKey, request, ended);
     else report(paneKey, lastActivityMs, ended);

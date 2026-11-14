@@ -125,7 +125,7 @@ export async function cmdSleep(ctx, agentName, pane, _opts = {}, deps = {}) {
       if (previousCompact?.status === "VERIFIED" && previousCompact.compactBoundary) compact = { ...previousCompact, ok: true };
       else if (previousCompact?.status === "VERIFIED") return fail("sleep-compact-boundary-unverified");
       else if (previousCompact) return fail(`sleep-compact-previous-${previousCompact.status.toLowerCase()}`);
-      else intent = beginContextCompact(ctx.state, agentName, pane, identity, { source: "sleep", command: "/compact" });
+      else intent = beginContextCompact(ctx.state, agentName, pane, identity, { source: "sleep", command: "/compact", compactCause: "sleep request: context size unavailable" });
     } else if (!deps.sendSlash) return fail("sleep-compact-store-unavailable");
     const recordFailure = reason => {
       if (intent) updateCompactReceipt(ctx.state, `${agentName}:${pane}`, current => current.attemptId === intent.attemptId

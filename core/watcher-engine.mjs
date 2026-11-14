@@ -347,3 +347,35 @@ function trimIds(ids, keep) {
   }
   return out.reverse();
 }
+
+function turnMs(iso) {
+  if (!iso) return NaN;
+  const ms = new Date(iso).getTime();
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+/** WHAT: Returns the next pending reply grace deadline. WHY: Keeps restart and retry timing aligned with posted items. */
+export function pendingGraceDueAt(turns, cursorMs, postedIds, latestMtimeMs, graceMs) {
+  if (!Number.isFinite(cursorMs)) return null;
+  const postedSet = new Set(postedIds);
+  let dueAt = null;
+
+  for (const turn of turns || []) {
+    if (turn?.isComplete) continue;
+    const endMs = turnMs(turn?.endTimestamp || turn?.timestamp);
+    if (!Number.isFinite(endMs) || endMs <= cursorMs) continue;
+    const items = Array.isArray(turn.items) ? turn.items : [];
+    if (items.length === 0) continue;
+
+    // Any item whose stable id is not yet in the posted set is still pending.
+    const startMs = turnMs(turn.timestamp) || endMs;
+    const hasUnposted = items.some((it, idx) => !postedSet.has(itemKey(it, startMs, idx)));
+    if (!hasUnposted) continue;
+
+    const baseMs = Math.max(endMs, Number.isFinite(latestMtimeMs) ? latestMtimeMs : 0);
+    const candidate = baseMs + graceMs;
+    dueAt = dueAt === null ? candidate : Math.min(dueAt, candidate);
+  }
+
+  return dueAt;
+}

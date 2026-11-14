@@ -115,7 +115,7 @@ export function createCodexCompact({ control, dirFor, wait, state, identityFor =
     if (previous?.status === "VERIFIED" && previous.compactBoundary) return { ...previous, ok: true };
     if (previous?.status === "VERIFIED") return { ok: false, reason: "compact-boundary-unverified" };
     if (previous) return { ok: false, reason: `compact-previous-${previous.status.toLowerCase()}` };
-    beginContextCompact(state, name, pane, identity, { source: "codex-model", command: "/compact" });
+    beginContextCompact(state, name, pane, identity, { source: "codex-model", command: "/compact", compactCause: "model switch: context size unavailable" });
     const receipt = await verifiedCodexCompact({
       agentName: name, pane, paneDir: dirFor(name, pane), agent: control, sleep: wait,
       ...(sendCompact ? { sendSlash: () => sendCompact() } : {}),

@@ -1091,7 +1091,7 @@ feature("a self-request before the next delivery", () => {
         expect(ctx.commands).toEqual(["/compact behåll G4-siffrorna"]);
         expect(ctx.requests.list()).toEqual([]);
         await Promise.resolve();
-        expect(ctx.notices).toEqual(["Self-compact **claw:2** at the end of its turn (120000 tokens), focus: behåll G4-siffrorna."]);
+        expect(ctx.notices).toEqual(["Self-compact **claw:2** at the end of its turn (120000 tokens), focus: behåll G4-siffrorna. Cause: pane request: 120000 tokens (minimum 80000)."]);
       } finally { ctx.cleanup(); rmSync(ctx.dir, { recursive: true, force: true }); }
     }],
   });
@@ -1172,6 +1172,37 @@ feature("a compact its writer never finished", () => {
 
 // lsrc:0 for Mattias 2026-10-21: sandman:0 could not count the night's compacts; each one now leaves a line.
 feature("every compact the bridge runs is logged", () => {
+  component("an idle compact logs its actual rule and numbers", {
+    given: ["a 137030-token Claude pane idle for 50 minutes", () => {
+      const ctx = fixture(); ctx.lines = [];
+      ctx.agent.getContext = async () => ({ tokens: 137_030 });
+      ctx.activityFor = () => ctx.now() - 50 * 60_000;
+      ctx.recordCompact = line => ctx.lines.push(line);
+      return ctx;
+    }],
+    when: ["running the idle compact", ctx => createContextMaintenance(ctx).run("claw", 2)],
+    then: ["the receipt names the idle rule and numbers", (_result, ctx) => {
+      expect(ctx.lines[0].reason).toContain("50 min");
+      expect(ctx.lines[0].reason).toContain("137030");
+      expect(ctx.lines[0].reason).toContain("80000");
+    }], cleanup: ctx => ctx.cleanup(),
+  });
+  for (const [label, options, expected] of [
+    ["turn end", { pauseTokens: 400_000 }, "turn end: 473000 tokens > 400000"],
+    ["cold delivery", { cold: true }, "before delivery after 60 min idle: 473000 tokens > 210000"],
+    ["Codex idle", { pauseTokens: 150_000, trigger: "codex-idle" }, "Codex idle 25 min: 473000 tokens > 150000"],
+    ["pane request", { pauseTokens: 80_000, trigger: "self-request" }, "pane request: 473000 tokens (minimum 80000)"],
+    ["account switch", { required: true, trigger: "account-switch" }, "account switch: 473000 tokens"],
+  ]) component(`the ${label} cause is the same in the durable intent and log`, {
+    given: ["an exact-session pane and a captured compact log", () => {
+      const ctx = fixture(); ctx.lines = []; ctx.recordCompact = line => ctx.lines.push(line); return ctx;
+    }],
+    when: ["running its compact", async ctx => { await createContextMaintenance(ctx).run("claw", 2, options); return ctx.lines[0]; }],
+    then: ["the cause names the trigger and numbers", (line, ctx) => {
+      expect(line.reason).toBe(expected);
+      expect(ctx.state.get("context_maintenance_by_pane_v1")["claw:2"].compactCause).toBe(expected);
+    }], cleanup: ctx => ctx.cleanup(),
+  });
   component("a compact logs its time, pane, tokens before and after, and account", {
     given: ["claw:2 at 473k on Claude S, 31k after its compact", () => {
       const ctx = fixture(), lines = [];

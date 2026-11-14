@@ -3,6 +3,7 @@ import { panePathFor } from "../core/jsonl-reader.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { beginContextCompact, contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
 import { recoverLoginRefusedCompact, overrideFailedCompact, updateCompactReceipt } from "../core/compact-receipts.mjs";
+import { getContextPercent } from "../core/context.mjs";
 import { waitForSessionLease } from "../core/session-lease.mjs";
 
 /** WHAT: Routes a manual compact under the shared receipt fence. WHY: Prevents an automated trigger from duplicating the same queued model call. */
@@ -18,7 +19,9 @@ export async function sendRecordedCompact(ctx, agent, pane, engine, command, { o
     if (engine === "claude") await recoverLoginRefusedCompact(ctx.state, agent.name, pane, identity);
     const previous = contextMaintenanceAttempt(ctx.state, agent.name, pane, identity);
     if (previous && previous.status !== "VERIFIED") return { delivered: false, blocked: true, reason: `compact-${previous.status.toLowerCase()}` };
-    attempt = beginContextCompact(ctx.state, agent.name, pane, identity, { command, source: "manual" });
+    const tokens = getContextPercent(panePathFor(agent, pane), engine)?.tokens ?? null;
+    attempt = beginContextCompact(ctx.state, agent.name, pane, identity, { command, source: "manual", beforeTokens: tokens,
+      compactCause: `manual request: ${tokens ?? "unknown"} tokens` });
     queued = sendToPane(ctx, agent.name, pane, command, { source: "amux:compact" });
   } finally { acquired.lease.release(); }
   try {

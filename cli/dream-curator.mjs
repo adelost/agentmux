@@ -120,7 +120,7 @@ async function compactDreamOwner(ctx, owner, dependencies, before) {
     if (previous?.status === "VERIFIED" && previous.compactBoundary) return { ...previous, ok: true };
     if (previous?.status === "VERIFIED") throw new Error("dream-owner-compact-boundary-unverified");
     if (previous) throw new Error(`dream-owner-compact-previous-${previous.status.toLowerCase()}`);
-    intent = beginContextCompact(ctx.state, owner.agent, owner.pane, identity, { source: "dream", command: "/compact" });
+    intent = beginContextCompact(ctx.state, owner.agent, owner.pane, identity, { source: "dream", command: "/compact", compactCause: "nightly Dream: context size unavailable" });
     const result = await compact({ ...options, onCommandAccepted: () => lease.releaseSession?.() });
     if (!result.ok || !result.compactBoundary || result.sessionId !== identity.sessionId) {
       throw new Error(`dream-owner-compact-failed:${result.reason || "boundary-or-session-mismatch"}`);

@@ -22,5 +22,5 @@ export async function compactCodexBeforeSwitch(ctx, target, { dry = false } = {}
     identityFor: (_engine, dir) => latestCodexSessionIdentity(dir, { sessionDirs: [join(target.sourceHome, "sessions")], sessionId: target.sessionId }),
     log: message => console.error(`account compact | ${message}`),
   });
-  return maintenance.run(name, pane, { required: true, dry, beforeDelivery: true });
+  return maintenance.run(name, pane, { required: true, dry, beforeDelivery: true, trigger: "account-switch" });
 }

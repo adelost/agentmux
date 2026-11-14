@@ -83,9 +83,9 @@ feature("compaction at a natural pause: one guard per condition", () => {
     then: ["leaders get 700k, builders 400k", budgets => expect(budgets).toEqual({ skyvw0: 700_000, skyvw1: 400_000,
       lsrc0: 700_000, lsrc2: 400_000, lsrcLeaders: [3, 0] })],
   });
-  // sandman:0 2026-11-03: a Claude builder compacts from 200k, where a compact pays back (replay in docs/AMUX-COST-POLICY.md); leaders, Codex builders and the panes of the ongoing film work keep what they had.
+  // Row 170: all builders return to 400k; leaders and thinkers keep 700k.
   // Row 169: every deep pane is a thinker at 700k, including panes created after row 168.
-  unit("a Claude builder has 200k, and the leader, the Codex builder and a kept film pane keep their earlier budgets", {
+  unit("builders have 400k, and leaders and thinkers have 700k", {
     given: ["ai led by Codex pane 3, lsrc led by Codex pane 3 and Claude pane 0, skyvw orchestrated by pane 0", () => ({
       ai: { name: "ai", orchestrator: 3, leaders: [] }, lsrc: { name: "lsrc", orchestrator: 3, leaders: [0] }, skyvw: { name: "skyvw", orchestrator: 0, leaders: [] },
       deep: { name: "deep", orchestrator: 0, leaders: [] } })],
@@ -97,11 +97,16 @@ feature("compaction at a natural pause: one guard per condition", () => {
       deep3: pauseCompactLimit(deep, 3, PAUSE_COMPACT_POLICY, "claude"), deep4: pauseCompactLimit(deep, 4, PAUSE_COMPACT_POLICY, "claude"),
       deep5: pauseCompactLimit(deep, 5, PAUSE_COMPACT_POLICY, "claude"), deep0: pauseCompactLimit(deep, 0, PAUSE_COMPACT_POLICY, "claude"),
       deepAsk: pauseAskTokens(deep, 5), deepLeaders: [...leaderPanes({ name: "deep", orchestrator: null, leaders: [] })] })],
-    then: ["only the Claude builders outside the kept panes drop to 200k", budgets => expect(budgets).toEqual({ aiClaude: 200_000, aiCodex: 400_000, aiLeaderCodex: 700_000,
+    then: ["all builders have 400k, leaders and thinkers 700k", budgets => expect(budgets).toEqual({ aiClaude: 400_000, aiCodex: 400_000, aiLeaderCodex: 700_000,
       lsrcLeaderClaude: 700_000, lsrc1: 400_000, skyvw2: 400_000, skyvw0: 700_000, noEngine: 400_000,
       deep1: 700_000, deep2: 700_000, deep3: 700_000, deep4: 700_000, deep5: 700_000, deep0: 700_000, deepAsk: 1_050_000, deepLeaders: [] })],
   });
-  unit("the mid-turn ask stays where it was, so the lower budget adds no notice in a turn", {
+  unit("a Claude builder at 250k stays at its turn end", {
+    when: ["deciding with its actual budget", () => pauseCompactDecision(atPause({ tokens: 250_000,
+      limit: pauseCompactLimit({ name: "ai", orchestrator: 0 }, 1, PAUSE_COMPACT_POLICY, "claude") }))],
+    then: ["it remains within budget", result => expect(result).toMatchObject({ action: "none", cell: "within-budget" })],
+  });
+  unit("the mid-turn ask stays at 1.5 times the budget", {
     given: ["a Claude builder in ai and a leader in skyvw", () => ({ ai: { name: "ai", orchestrator: 3, leaders: [] }, skyvw: { name: "skyvw", orchestrator: 0, leaders: [] } })],
     when: ["reading where a working pane is asked and what it is told", ({ ai, skyvw }) => {
       const limit = pauseCompactLimit(ai, 1, PAUSE_COMPACT_POLICY, "claude"), askAt = pauseAskTokens(ai, 1);
@@ -110,8 +115,8 @@ feature("compaction at a natural pause: one guard per condition", () => {
         oldStyle: oversizeNotice({ tokens: 615_000, limit: 400_000 }) };
     }],
     then: ["600k for a builder, 1.05M for a leader, and the notice names the factor against the budget it states", seen => {
-      expect(seen).toMatchObject({ limit: 200_000, askAt: 600_000, leaderAskAt: 1_050_000, at450: false, at600: true });
-      expect(seen.notice).toContain("615k tokens, 3 times your 200k budget");
+      expect(seen).toMatchObject({ limit: 400_000, askAt: 600_000, leaderAskAt: 1_050_000, at450: false, at600: true });
+      expect(seen.notice).toContain("615k tokens, 1.5 times your 400k budget");
       expect(seen.oldStyle).toContain("615k tokens, 1.5 times your 400k budget");
     }],
   });

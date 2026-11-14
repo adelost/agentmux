@@ -1,3 +1,4 @@
+import { recordCompactCall } from "../core/compact-log.mjs";
 // One sequential maintenance pass. Never starts engines or sends prose to them.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -178,6 +179,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
   const dateKey = compactDayKey(now());
   const policy = dependencies.policy || nightlyCompactPolicy((dependencies.runtimeConfig || loadConfig(ctx.configPath))?.dream?.compact);
   const label = dependencies.label || "Nightly compact";
+  const trigger = dependencies.trigger || "nightly";
   if (!policy.enabled) return { disabled: true, rows: [] };
   const agents = dependencies.agents || listAgents(ctx.configPath);
   let targets = dependencies.targets || await discoverCompactTargets(ctx, agents);
@@ -283,6 +285,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       // Durable intent precedes typing. A crash/ambiguous outcome is not a
       // licence to repeat a model call on a later invocation tonight.
       intent = { sessionId: first.sessionId, sessionPath: first.sessionPath, beforeTokens: first.tokens,
+        compactCause: `${trigger}: ${first.tokens} tokens (threshold ${policy.maxTokens}, idle ${policy.idleMinutes} min)`, source: trigger,
         status: "attempting", attemptId: randomUUID(), attemptedAt: new Date(now()).toISOString(), command,
         ...(retryStale ? { staleRetryUsed: true } : {}) };
       save(intent);
@@ -317,6 +320,9 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       const outcome = nightlyCompactOutcome(receipt, first, after, policy.maxTokens);
       const row = { ...intent, ...outcome, compactBoundary: receipt?.compactBoundary === true, finishedAt: new Date(now()).toISOString() };
       save(row);
+      if (trigger !== "account switch") (dependencies.recordCompact || recordCompactCall)({ at: new Date(now()).toISOString(), pane: key,
+        engine: target.engine, source: trigger, outcome: receipt?.ok ? "compacted" : "failed", reason: intent.compactCause,
+        failure: receipt?.reason || null, beforeTokens: first.tokens, afterTokens: row.afterTokens ?? null });
       rows.push({ pane: key, ...row });
     } catch (error) {
       const row = { ...intent, status: intent ? "failed" : "skipped", reason: error.message };

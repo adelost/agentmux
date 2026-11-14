@@ -1,9 +1,9 @@
 // One persistent JSONL mirror owns completed replies, native typing and recovery.
 // fs.watch plus bounded polling covers WSL missed events; stable item IDs retain
 // restart dedupe. Terminal chrome never becomes reply text.
-import { watch, statSync, existsSync } from "fs";
+import { watch, existsSync } from "fs";
 import { join } from "path";
-import { splitMessage, extractImageMarkers, validateImagePath, chunkAttachments } from "../lib.mjs";
+import { splitMessage, chunkAttachments } from "../lib.mjs";
 import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
 import { claudeProjectDir } from "../core/claude-paths.mjs";
@@ -12,8 +12,8 @@ import { alternateEngineForCommand, sessionReaderForCommand, alternateWatchDir, 
 import { createGeminiTmuxMirror } from "../core/gemini-tmux-mirror.mjs";
 import { getContextFromPane } from "../core/context.mjs";
 import { jsonlContextFooter } from "../core/context-footer.mjs";
-import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
-import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
+import { isHarnessPlaceholder, renderTurn } from "../core/reply-forwarder.mjs";
+import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey, pendingGraceDueAt } from "../core/watcher-engine.mjs";
 import {
   classifyModelChange, changeMessage, stopBrief, shouldStopPane, label as modelLabel,
   decideRecovery, resumeBrief, recoveryMessage, interruptUntilIdle,
@@ -29,8 +29,7 @@ import { createPaneQueue } from "../core/pane-queue.mjs";
 import { createLiveProgress } from "./live-progress.mjs";
 import { openWatcherJournal } from "../core/watcher-journal.mjs";
 import { timedWatcherStep } from "../core/watcher-timing.mjs";
-import { compactionNoticeText } from "../core/compaction-notice.mjs";
-import { announceNewPaneEvents } from "../core/pane-notices.mjs";
+import { announceCompactions, announceNewPaneEvents } from "../core/pane-notices.mjs";
 import { planQuotaStopMirror } from "../core/watcher-quota-stop.mjs";
 import { refusalNoticeText } from "../core/codex-refusal-notice.mjs";
 import { isCodexCapacityError } from "../core/codex-capacity-recovery.mjs";
@@ -427,34 +426,6 @@ export function createJsonlWatcher({
 
   // --- rendering -----------------------------------------------------------
 
-  function renderTurn(turn) {
-    // Tool calls render as compact semantic labels (`Run ...`, `Edit ...`).
-    // Provider wrapper names stay internal so Claude and Codex look alike.
-    const items = turn.items || [];
-    const hasNarrative = items.some((it) => it.type === "text" && (it.content || "").trim());
-    const rawText = items
-      // Codex emits write_stdin/wait calls for every background-process poll.
-      // The readers classify both legacy and current envelopes semantically.
-      .filter((it) => it.kind !== "wait")
-      // Cross-agent sends have a stronger, delivery-verified owner in
-      // cli/tmux.mjs: target gets the full brief and sender gets an immediate
-      // `amux ... → delivered` receipt. Do not repeat the invocation later.
-      .filter((it) => it.kind !== "inter-agent-send")
-      .map((it) => (it.type === "tool" ? `\`${it.content}\`` : it.content))
-      .join("\n\n")
-      .trim();
-    const { text: cleanedText, paths: imagePaths } = extractImageMarkers(rawText);
-    const validFiles = [];
-    const failedMarkers = [];
-    for (const p of imagePaths) {
-      const result = validateImagePath(p, statSync);
-      if (result.ok) validFiles.push(result.path);
-      else failedMarkers.push(`image skipped: \`${p}\` (${result.error})`);
-    }
-    const fullText = [cleanedText, ...failedMarkers].filter(Boolean).join("\n\n");
-    return { fullText, validFiles, hasNarrative };
-  }
-
   async function postTurn({ name, idx, channelId, turn, config = null }) {
     const quotaKey = `watcher_quota_episode:${name}:${idx}`;
     const quota = planQuotaStopMirror(turn, state.get(quotaKey, null));
@@ -578,38 +549,6 @@ export function createJsonlWatcher({
     if (metricsEnabled || Number(msg.match(/\bms=(\d+)/u)?.[1]) >= 1000) log(`metrics | ${msg}`);
   }
 
-  function turnMs(iso) {
-    if (!iso) return NaN;
-    const ms = new Date(iso).getTime();
-    return Number.isFinite(ms) ? ms : NaN;
-  }
-
-  function pendingGraceDueAt(turns, channelId, latestMtimeMs) {
-    const cursorMs = lastPostedMs(channelId);
-    if (!Number.isFinite(cursorMs)) return null;
-    const postedSet = new Set(postedItemIds(channelId));
-    let dueAt = null;
-
-    for (const turn of turns || []) {
-      if (turn?.isComplete) continue;
-      const endMs = turnMs(turn?.endTimestamp || turn?.timestamp);
-      if (!Number.isFinite(endMs) || endMs <= cursorMs) continue;
-      const items = Array.isArray(turn.items) ? turn.items : [];
-      if (items.length === 0) continue;
-
-      // Any item whose stable id is not yet in the posted set is still pending.
-      const startMs = turnMs(turn.timestamp) || endMs;
-      const hasUnposted = items.some((it, idx) => !postedSet.has(itemKey(it, startMs, idx)));
-      if (!hasUnposted) continue;
-
-      const baseMs = Math.max(endMs, Number.isFinite(latestMtimeMs) ? latestMtimeMs : 0);
-      const candidate = baseMs + COMPLETION_GRACE_MS;
-      dueAt = dueAt === null ? candidate : Math.min(dueAt, candidate);
-    }
-
-    return dueAt;
-  }
-
   function rememberReadSnapshot(key, info, turns, channelId, latestMtimeMs, result) {
     if (!info) {
       readSnapshots.delete(key);
@@ -617,7 +556,7 @@ export function createJsonlWatcher({
     }
     readSnapshots.set(key, {
       ...info,
-      graceDueAtMs: pendingGraceDueAt(turns, channelId, latestMtimeMs),
+      graceDueAtMs: pendingGraceDueAt(turns, lastPostedMs(channelId), postedItemIds(channelId), latestMtimeMs, COMPLETION_GRACE_MS),
       recovery: result && { refusals: result.refusals, refusalCandidates: result.refusalCandidates, lastPrompt: result.lastPrompt, jsonlFile: result.jsonlFile },
     });
   }
@@ -667,8 +606,7 @@ export function createJsonlWatcher({
       const readMs = Date.now() - readStarted;
       const readBytes = estimatedReadBytes(fileInfo, tailBytes);
       const notice = { state, channelId, send: (to, text) => discord.send(to, text), log, paneName: `${name}:${idx}` };
-      await announceNewPaneEvents({ ...notice, stateKey: STATE_KEY_COMPACTION_IDS, kind: "compaction",
-        events: result?.compactions || [], text: unseen => compactionNoticeText(`${name}:${idx}`, unseen) });
+      await announceCompactions({ ...notice, stateKey: STATE_KEY_COMPACTION_IDS, events: result?.compactions, sessionPath: result?.jsonlFile });
       await announceNewPaneEvents({ ...notice, stateKey: STATE_KEY_REFUSAL_IDS, kind: "unanswered-turn",
         events: result?.refusals || [], text: unseen => refusalNoticeText(`${name}:${idx}`, unseen, unseen.at(-1).reason,
           { autoCapacity: !!deliveryBroker && isCodexCapacityError(unseen.at(-1).reason) }) });

@@ -261,7 +261,8 @@ async function compactMovers(ctx, movers, deps, rows) {
       verifiedAt: result.ok ? Date.now() : null, attemptId: result.attemptId ?? null, compactBoundary: result.compactBoundary === true,
       afterTokens: Number.isFinite(result.afterTokens) ? result.afterTokens : null, reason: result.reason || null });
     deps.recordCompact({ at: new Date().toISOString(), pane: pane.key, engine: "claude", source: "account-switch",
-      outcome: result.ok ? result.status || "compacted" : "failed", reason: result.reason || null,
+      outcome: result.ok ? result.status || "compacted" : "failed", reason: result.compactCause || `account switch: ${pane.contextTokens ?? "unknown"} tokens`,
+      failure: result.reason || null,
       beforeTokens: pane.contextTokens, afterTokens: result.afterTokens ?? null,
       account: pane.currentProfile?.label || pane.currentProfile?.key || null });
     if (result.ok) compacted.add(pane.key);

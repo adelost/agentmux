@@ -111,7 +111,7 @@ export async function runLockedClaudeModelChange({
     }
     let reusedCompact = Boolean(prior);
     if (!prior) {
-      beginContextCompact(state, name, pane, identity);
+      beginContextCompact(state, name, pane, identity, { source: "model switch", compactCause: "model switch: context size unavailable" });
       const receipt = await compact({ agent, agentName: name, pane, paneDir,
         latestIdentity: identityFor, sendSlash });
       // A session with nothing to compact has no context or cache to lose by changing model.

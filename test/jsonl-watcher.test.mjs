@@ -463,7 +463,7 @@ feature("watcher: claude compaction visibility", () => {
     then: ["one notice names both times", (ctx) => {
       expect(ctx.discord.sends).toHaveLength(1);
       expect(ctx.discord.sends[0].payload).toBe(
-        `Context compacted 2 times for **testagent:0** (${clock("2026-09-27T15:08:31.242Z")}, ${clock("2026-09-27T17:50:05.444Z")}). Work continues from the latest summary.`,
+        `Context compacted 2 times for **testagent:0** (${clock("2026-09-27T15:08:31.242Z")}, ${clock("2026-09-27T17:50:05.444Z")}). Causes: cause unavailable; cause unavailable. The latest summary is available for the next turn.`,
       );
       ctx.cleanup();
     }],
@@ -490,7 +490,7 @@ feature("watcher: claude compaction visibility", () => {
     then: ["one completion notice with its time is posted", (ctx) => {
       expect(ctx.discord.sends).toHaveLength(1);
       expect(ctx.discord.sends[0].payload).toBe(
-        `Context compacted for **testagent:0** (${clock("2026-04-30T20:20:00.000Z")}). Work continues from the summary.`,
+        `Context compacted for **testagent:0** (${clock("2026-04-30T20:20:00.000Z")}). Cause: cause unavailable. The summary is available for the next turn.`,
       );
       ctx.cleanup();
     }],
@@ -907,7 +907,7 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
     then: ["Discord receives one concise completion notice with its time and no duplicate", (ctx) => {
       expect(ctx.discord.sends).toHaveLength(1);
       expect(ctx.discord.sends[0].payload).toBe(
-        `Context compacted for **testagent:0** (${clock("2026-05-10T00:00:05.000Z")}). Work continues from the summary.`,
+        `Context compacted for **testagent:0** (${clock("2026-05-10T00:00:05.000Z")}). Cause: cause unavailable. The summary is available for the next turn.`,
       );
       ctx.cleanup();
     }],

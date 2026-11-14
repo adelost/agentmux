@@ -240,7 +240,7 @@ feature("pause compaction in the bridge poll", () => {
     }],
     then: ["120k is left alone, 200k gets a dry admission against 150k", (sent, ctx) => {
       expect(sent).toEqual([false, false]);
-      expect(ctx.runs).toEqual([{ pane: "lsrc:4", pauseTokens: 150_000, dry: true }]);
+      expect(ctx.runs).toEqual([{ pane: "lsrc:4", pauseTokens: 150_000, dry: true, trigger: "codex-idle" }]);
       expect(ctx.lines[0]).toMatchObject({ outcome: "would-compact", cell: "codex-idle", limit: 150_000, mode: "dry" });
     }],
   });
@@ -252,7 +252,7 @@ feature("pause compaction in the bridge poll", () => {
 });
 
 // sandman:0 2026-11-03: a Claude builder compacts at a pause from 200k, the film panes (lsrc:1 and 2, skyvw:1 and 2) keep 400k, Codex builders and leaders keep what they had.
-feature("a Claude builder's budget of 200k", () => {
+feature("a Claude builder's budget of 400k", () => {
   const ai = { name: "ai", orchestrator: 3, leaders: [] };
   function pane(mode = "on") {
     const runs = [], lines = [], enqueued = [];
@@ -266,13 +266,12 @@ feature("a Claude builder's budget of 200k", () => {
     return { runs, lines, enqueued, poll };
   }
 
-  component("a Claude builder at 250k is compacted at its pause with the 200k budget", {
+  component("a Claude builder at 250k stays at its pause under the 400k budget", {
     given: ["ai:1, a Claude builder", () => pane()],
     when: ["polling it 82 s after its turn at 250k", ctx => ctx.poll()],
-    then: ["it compacts, the admission carries 200k and the line says so", (sent, ctx) => {
-      expect(sent).toBe(true);
-      expect(ctx.runs).toEqual([{ pane: "ai:1", pauseTokens: 200_000, dry: false }]);
-      expect(ctx.lines[0]).toMatchObject({ pane: "ai:1", outcome: "compacted", limit: 200_000, leader: false, tokens: 250_000 });
+    then: ["it stays within budget and no compact runs", (sent, ctx) => {
+      expect(sent).toBe(false);
+      expect(ctx.runs).toEqual([]);
     }],
   });
   component("under 200k nothing happens", {
@@ -290,7 +289,7 @@ feature("a Claude builder's budget of 200k", () => {
     when: ["polling it at 250k, 82 s after its turn", ctx => ctx.poll({ pane: 4, engine: "codex", contextTokens: 250_000 })],
     then: ["no admission: it is under its budget and its 25-minute rule has not run", (sent, ctx) => { expect(sent).toBe(false); expect(ctx.runs).toEqual([]); }],
   });
-  component("a working Claude builder is asked only from 600k, as before, and told the factor against its 200k", {
+  component("a working Claude builder is asked only from 600k and told the factor against 400k", {
     given: ["ai:1 working", () => pane()],
     when: ["polling it working at 300k, 450k, 599k and 610k", async ctx => {
       const sent = [];
@@ -304,8 +303,8 @@ feature("a Claude builder's budget of 200k", () => {
       expect(before).toBe(0);
       expect(ctx.enqueued).toHaveLength(1);
       expect(ctx.enqueued[0]).toMatchObject({ agentName: "ai", pane: 1, source: "pause-compact" });
-      expect(ctx.enqueued[0].text).toContain("610k tokens, 3 times your 200k budget");
-      expect(ctx.lines.at(-1)).toMatchObject({ cell: "oversize", outcome: "asked", limit: 200_000, detail: "working at 610000 tokens, 600000 or more" });
+      expect(ctx.enqueued[0].text).toContain("610k tokens, 1.5 times your 400k budget");
+      expect(ctx.lines.at(-1)).toMatchObject({ cell: "oversize", outcome: "asked", limit: 400_000, detail: "working at 610000 tokens, 600000 or more" });
     }],
   });
 });
@@ -364,7 +363,7 @@ feature("a pane's own request to be compacted", () => {
       try {
         expect(during).toBe(false);
         expect(after).toBe(true);
-        expect(ctx.runs).toEqual([{ pane: "lsrc:0", pauseTokens: 80_000, dry: false, focus: "behåll G4-siffrorna" }]);
+        expect(ctx.runs).toEqual([{ pane: "lsrc:0", pauseTokens: 80_000, dry: false, focus: "behåll G4-siffrorna", trigger: "self-request" }]);
         expect(ctx.requests.list()).toEqual([]);
         expect(ctx.lines.at(-1)).toMatchObject({ outcome: "compacted", cell: "self-request" });
         expect(ctx.notices).toEqual(["lsrc:0 Self-compact **lsrc:0** at the end of its turn (150000 tokens), focus: behåll G4-siffrorna."]);

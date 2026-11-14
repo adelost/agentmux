@@ -19,6 +19,15 @@ export function compactionsToAnnounce(events, seenIds) {
   return events.filter((event) => event.id && !seenIds.has(event.id) && !(timeOf(event) <= newestSeen));
 }
 
+/** WHAT: Reads the compact cause for an exact-session journal boundary. WHY: Prevents a stale pane reason from reaching another session. */
+export function compactCauseForEvent(event, receipt, sessionPath) {
+  const time = timeOf(event);
+  if (!receipt?.compactCause || !Number.isFinite(time) || !Number.isFinite(receipt.at)
+      || receipt.sessionPath !== sessionPath || time < receipt.at || time - receipt.at > 40 * 60_000
+      || Number.isFinite(receipt.finishedAt) && time > receipt.finishedAt + 120_000) return null;
+  return receipt.compactCause;
+}
+
 /**
  * WHAT: Formats the one notice for new compactions with their clock times.
  * WHY: Keeps a late notice after a restart from implying the compaction happened just now.
@@ -26,7 +35,8 @@ export function compactionsToAnnounce(events, seenIds) {
 export function compactionNoticeText(paneName, compactions) {
   const times = compactions.map((event) => event.timestamp).filter((ts) => Number.isFinite(Date.parse(ts))).map(clock);
   const when = times.length ? ` (${times.join(", ")})` : "";
+  const causes = compactions.map(event => event.cause || "cause unavailable").join("; ");
   return compactions.length === 1
-    ? `Context compacted for **${paneName}**${when}. The summary is available for the next turn.`
-    : `Context compacted ${compactions.length} times for **${paneName}**${when}. The latest summary is available for the next turn.`;
+    ? `Context compacted for **${paneName}**${when}. Cause: ${causes}. The summary is available for the next turn.`
+    : `Context compacted ${compactions.length} times for **${paneName}**${when}. Causes: ${causes}. The latest summary is available for the next turn.`;
 }

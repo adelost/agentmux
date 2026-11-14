@@ -36,14 +36,14 @@ export const leaderPanes = (agentConfig) =>
 
 /**
  * WHAT: Maps a pane and its engine to its pause budget.
- * WHY: Keeps leaders and thinkers on 700k, Claude builders on 200k where a compact pays, the rest on 400k.
+ * WHY: Keeps leaders and thinkers on 700k, builders on 400k.
  */
 export const pauseCompactLimit = (agentConfig, pane, policy = PAUSE_COMPACT_POLICY, engine = null) => {
   if (leaderPanes(agentConfig).has(pane) || policy.thinkerProjects.includes(agentConfig?.name)) return policy.leaderTokens;
-  return engine === "claude" && !policy.keepBuilderPanes.includes(`${agentConfig?.name}:${pane}`) ? policy.claudeBuilderTokens : policy.builderTokens;
+  return engine === "claude" ? policy.claudeBuilderTokens : policy.builderTokens;
 };
 
-/** WHAT: Maps a pane to the size where a working pane is asked to compact. WHY: Keeps the mid-turn ask at 1.5 times the earlier budgets, so 200k adds no notice. */
+/** WHAT: Maps a pane to the size where a working pane is asked to compact. WHY: Keeps the mid-turn ask at 1.5 times the budget. */
 export const pauseAskTokens = (agentConfig, pane, policy = PAUSE_COMPACT_POLICY) =>
   (leaderPanes(agentConfig).has(pane) || policy.thinkerProjects.includes(agentConfig?.name) ? policy.leaderTokens : policy.builderTokens) * policy.oversizeFactor;
 
