@@ -2,11 +2,14 @@
 // The search daemon keeps a small overlay: files edited or created since the
 // index was built are re-embedded in the background, reusing the vectors of
 // units whose text did not change, and ranking reads the overlay in their
-// place once a file is done.
+// place once a file is done. What it embeds is also kept on disk
+// (core/search-overlay-vectors.mjs), so a daemon that starts again embeds
+// only what no start has embedded since the build.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileUnits, indexDir, listMarkdownFiles, openIndex, rankUnits } from "./search-semantic.mjs";
+import { openOverlayVectors } from "./search-overlay-vectors.mjs";
 
 const SCAN_EVERY_MS = 30_000;
 const MAX_UNITS_PER_SCAN = 4_000;
@@ -16,14 +19,16 @@ const BATCH = 4;
  * WHAT: Builds a semantic index view that follows edits made after the nightly build.
  * WHY: Keeps today's and yesterday's notes from being invisible to paraphrase search until night.
  */
-export function createLiveIndex({ dir = indexDir(), embed, listFiles = listMarkdownFiles, now = Date.now,
+export function createLiveIndex({ dir = indexDir(), embed, model = null, listFiles = listMarkdownFiles, now = Date.now,
   scanEveryMs = SCAN_EVERY_MS, maxUnitsPerScan = MAX_UNITS_PER_SCAN } = {}) {
+  // `model` names the model `embed` runs, so vectors saved under another model are not read; without it the index's own.
   const metaPath = join(dir, "meta.json");
   const overlay = new Map();
   let base = null;
   let baseMtime = -1;
   let baseFiles = new Map();
   let byHash = null;
+  let saved = null;
   let lastScan = -Infinity;
   let queue = [];
   let running = null;
@@ -35,6 +40,7 @@ export function createLiveIndex({ dir = indexDir(), embed, listFiles = listMarkd
       baseMtime = mtime;
       baseFiles = new Map((base?.meta || []).map((file) => [file.file, file]));
       byHash = null;
+      saved = base && openOverlayVectors({ dir, builtAt: base.builtAt, model: model || base.model, dimension: base.dimension });
       for (const [file, entry] of overlay) {
         const indexed = baseFiles.get(file);
         if (indexed && indexed.mtimeMs === entry.mtimeMs && indexed.size === entry.size) overlay.delete(file);
@@ -79,7 +85,7 @@ export function createLiveIndex({ dir = indexDir(), embed, listFiles = listMarkd
     const missing = [];
     units.forEach((unit, i) => {
       const row = vectorByHash().get(unit.hash);
-      const reuse = known.get(unit.hash) || (row === undefined ? null : base.vectors.subarray(row * dim, (row + 1) * dim));
+      const reuse = known.get(unit.hash) || (row === undefined ? saved.get(unit.hash) : base.vectors.subarray(row * dim, (row + 1) * dim));
       if (reuse) vectors.set(reuse, i * dim);
       else missing.push(i);
     });
@@ -87,7 +93,7 @@ export function createLiveIndex({ dir = indexDir(), embed, listFiles = listMarkd
     for (let i = 0; i < missing.length; i += BATCH) {
       const batch = missing.slice(i, i + BATCH);
       const embedded = await embed(batch.map((index) => units[index].embedText), "passage");
-      batch.forEach((index, k) => vectors.set(embedded[k], index * dim));
+      batch.forEach((index, k) => { vectors.set(embedded[k], index * dim); saved.add(units[index].hash, embedded[k]); });
       // Yield so queries keep being answered while a large file embeds.
       await new Promise((resolve) => setImmediate(resolve));
     }

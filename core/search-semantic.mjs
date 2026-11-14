@@ -18,6 +18,7 @@
 //                mtimeMs, size, root, weight, units: [{line, start, length,
 //                section}]}]}
 //   vectors.bin  Float32 rows in meta order, normalized (dot = cosine).
+//   overlay-vectors.bin  what the daemon embedded since this build (core/search-overlay-vectors.mjs).
 
 import { readFileSync, writeFileSync, statSync, mkdirSync, renameSync } from "fs";
 import { createHash } from "crypto";

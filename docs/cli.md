@@ -137,7 +137,9 @@ lexically and the output says so; a reranker that is still loading or failed
 is reported the same way. While running, it re-embeds notes edited since the
 nightly index in the background (at most 4 000 new units per 30 s scan),
 reusing vectors of unchanged units, so today's note is searchable before the
-next reindex. Models are cached in `~/.cache/agentmux/models`, outside the
+next reindex. What it embeds is kept in `overlay-vectors.bin` beside the index
+until the next reindex, so a daemon that starts again embeds only what is
+new. Models are cached in `~/.cache/agentmux/models`, outside the
 install. `--reindex` (also run nightly) re-embeds only units whose text
 changed, at most `AMUX_REINDEX_MAX_UNITS` (25 000 on the CPU, 200 000 on the
 GPU) per run; a larger backlog continues on the next run and the output notes

@@ -81,6 +81,51 @@ feature("semantic unit index", () => {
     }],
   });
 
+  component("a daemon that starts again embeds only what no start has embedded since the build", {
+    given: ["an index built before today's note grew", async () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-live-root-"));
+      const dir = mkdtempSync(join(tmpdir(), "amux-live-index-"));
+      const path = join(root, "2026-10-10.md");
+      const roots = [{ name: "memory", path: root, semantic: true, exclude: [], weight: 3 }];
+      const build = () => reindex(roots, { dir, embed: fakeEmbed, model: semanticModel("Xenova/multilingual-e5-small") });
+      writeFileSync(path, "# 2026-10-10\n- Axel fyller år.\n");
+      await build();
+      writeFileSync(path, "# 2026-10-10\n- Axel fyller år.\n- Ny kassör vald i klubben.\n");
+      return { root, dir, roots, path, build };
+    }],
+    when: ["a daemon starts twice, the note grows before a third start, and a new build comes before a fourth", async ({ dir, roots, path, build }) => {
+      const start = async () => {
+        const embedded = [];
+        const live = createLiveIndex({ dir, scanEveryMs: 0, embed: async (texts, kind) => { embedded.push(...texts); return fakeEmbed(texts, kind); } });
+        await live.refresh(roots);
+        const [query] = await fakeEmbed(["vem är kassör"]);
+        return { embedded, top: live.rank(query, 1)[0] };
+      };
+      const first = await start();
+      const second = await start();
+      writeFileSync(path, "# 2026-10-10\n- Axel fyller år.\n- Ny kassör vald i klubben.\n- Bumbi-filmen klar.\n");
+      const third = await start();
+      // A new build that never saw the bullet: the vectors saved for the old build are not carried into it.
+      writeFileSync(path, "# 2026-10-10\n- Axel fyller år.\n");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await build();
+      writeFileSync(path, "# 2026-10-10\n- Axel fyller år.\n- Ny kassör vald i klubben.\n");
+      return { first, second, third, afterBuild: await start() };
+    }],
+    then: ["the second start embeds nothing and ranks the bullet, the third embeds the new bullet, the new build starts over", (result, { root, dir, path }) => {
+      try {
+        expect(result.first.embedded).toEqual([expect.stringContaining("Ny kassör vald i klubben.")]);
+        expect(result.second.embedded).toEqual([]);
+        expect(result.second.top).toMatchObject({ path, line: 3 });
+        expect(result.third.embedded).toEqual([expect.stringContaining("Bumbi-filmen klar.")]);
+        expect(result.afterBuild.embedded).toEqual([expect.stringContaining("Ny kassör vald i klubben.")]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }],
+  });
+
   unit("golden sets may carry their provenance in # lines", {
     given: ["a set with a header", () => "# held-out labels are frozen before search\n{\"id\":\"n1\",\"query\":\"q\",\"expect\":[\"a\"],\"split\":\"heldout\",\"asOf\":\"2026-10-10\"}\n"],
     when: ["parsing", (text) => parseGoldenCases(text)],

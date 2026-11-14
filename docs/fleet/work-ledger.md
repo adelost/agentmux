@@ -3,6 +3,8 @@
 ## One ledger writer, shared checkouts are mirrors
 
 Every TASKS change in every repository uses the installed `push_ledger.sh`.
+It is on PATH beside `amux` (`command -v push_ledger.sh` names it; the file is
+`bin/push_ledger.sh` of the installed agentmux). Never search the disk for it.
 It generates the new ledger from fetched origin, commits through a temporary
 index, and pushes in one operation. A rejected concurrent push regenerates
 above the new origin. It never edits the shared ledger or uses its index.

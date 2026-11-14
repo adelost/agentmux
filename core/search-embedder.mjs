@@ -276,7 +276,7 @@ async function serveOwnedEmbedder({ dir, model, idleMs, lease, load, loadRanking
   const rerankInfo = () => reranker ? { kind: reranker.kind, candidates: reranker.candidates, perFile: reranker.perFile, semanticK: reranker.semanticK,
     weight: reranker.weight, note: rerankNote } : { note: rerankNote };
   const segments = new Map();
-  const live = createLiveIndex({ dir, embed });
+  const live = createLiveIndex({ dir, embed, model: model.name });
   // His day files are brought up to date when the daemon has not synced yet or a message of his has arrived since, so
   // the passage step of the same question reads them current. A failed sync is tried again by the next question.
   let syncDue = true;
