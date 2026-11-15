@@ -7,7 +7,7 @@ import { readAlternateTurns } from "./alternate-session-reader.mjs";
 import { describeToolCall } from "./tool-display.mjs";
 import { captureJsonlAppendCursor, createJsonlReceiptProbe, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { isSystemNoiseDirective, isWorkDirective } from "./system-noise.mjs";
-import { CLAUDE_TERMINAL_STOP_REASONS as TERMINAL_STOP_REASONS, userPromptText, isClaudeTaskNotification } from "./claude-turn-lifecycle.mjs";
+import { CLAUDE_TERMINAL_STOP_REASONS as TERMINAL_STOP_REASONS, userPromptText, isClaudeTaskNotification, startsClaudeTurn } from "./claude-turn-lifecycle.mjs";
 import { isClaudeTurnBusy } from "./claude-turn-busy.mjs";
 import { normalizePrompt, promptAppearsInEvents, promptEventMatches } from "./claude-prompt-text.mjs";
 import { createJournalHold, fileStamp } from "./pulse/journal-hold.mjs";
@@ -61,7 +61,7 @@ function findJsonlAndEvents(projectDir, needle, { notBeforeMs = 0 } = {}) {
   // Without a needle the window still grows until it holds the last prompt: a turn longer than the tail read as an unknown turn
   // (12 Nov: claw:2 idle after a 2 h turn, its prompt 16 MiB back), and rotation refused the idle pane.
   if (!needle) {
-    const events = parseJsonlWindow(files[0].path, { enough: (window) => window.some((event) => userPromptText(event) !== null) });
+    const events = parseJsonlWindow(files[0].path, { enough: (window) => window.some(startsClaudeTurn) });
     return { jsonl: files[0].path, events };
   }
   const found = (events) => promptAppearsInEvents(notBeforeMs
@@ -236,7 +236,7 @@ function findUserPromptIndex(events, promptText) {
     return -1;
   }
   for (let i = events.length - 1; i >= 0; i--) {
-    if (userPromptText(events[i]) !== null) return i;
+    if (startsClaudeTurn(events[i])) return i;
   }
   return -1;
 }

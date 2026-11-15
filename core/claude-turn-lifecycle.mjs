@@ -30,6 +30,18 @@ export function isClaudeTaskNotification(event) {
     && text !== null && /^\s*<task-notification>[\s\S]*<\/task-notification>\s*$/.test(text);
 }
 
+// skybar:0 2026-11-15: its process was restarted in its session after a compact, Claude reported the shell the old
+// process left, and the pane read as working for three hours, so no automatic delivery reached it; claw:2 read as
+// working from 2026-11-13T10:40Z and no account move took it. In ten days of journals 87 such rows had no reply.
+/** WHAT: Checks a notification Claude wrote to the journal without a model call. WHY: Keeps a row that no reply will follow from starting or ending a turn. */
+export function isTranscriptOnlyNotification(event) {
+  return event?.type === "user" && event.origin?.kind === "task-notification"
+    && event.promptSource === "system" && event.queueTranscriptOnly === true;
+}
+
+/** WHAT: Checks whether a journal row starts a model turn. WHY: Keeps the last-turn readers on a prompt whose reply can still arrive. */
+export const startsClaudeTurn = event => userPromptText(event) !== null && !isTranscriptOnlyNotification(event);
+
 /** WHAT: Checks Claude's exact interruption record. WHY: Prevents ordinary errors and quoted output from authorizing idle recovery. */
 function isInterruption(event) {
   const content = event?.message?.content;
@@ -46,6 +58,7 @@ export function readClaudeTurnLifecycle(events, userIdx) {
   let interrupted = false;
   for (let i = userIdx + 1; i < events.length; i++) {
     const event = events[i];
+    if (isTranscriptOnlyNotification(event)) continue;
     if (isInterruption(event)) {
       interrupted = true;
       pendingToolResult = false;

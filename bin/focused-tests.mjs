@@ -56,6 +56,8 @@ const TEST_ALIASES = {
   "core/heartbeat.mjs": ["core/doctor.test.mjs", "core/windows-wsl-probe.test.mjs"],
   "core/codex-jsonl-reader.mjs": ["test/codex-jsonl-reader.test.mjs"],
   "core/jsonl-reader.mjs": ["core/dream-summarizer.test.mjs", "core/jsonl-reader-prompt-receipt.test.mjs", "test/jsonl-reader.test.mjs"],
+  "core/claude-turn-lifecycle.mjs": ["test/claude-quota-busy.test.mjs", "test/claude-interrupted-turn.test.mjs", "test/jsonl-reader.test.mjs"],
+  "core/claude-empty-epoch.mjs": ["cli/account-switch-compact.test.mjs", "core/context-maintenance.test.mjs"],
   "core/search-semantic.mjs": ["core/search.test.mjs"],
   "core/ask-origin.mjs": ["core/search-human-words.test.mjs", "core/dream-conversation.test.mjs"],
   "core/search-human-days.mjs": ["core/search-human-words.test.mjs"],

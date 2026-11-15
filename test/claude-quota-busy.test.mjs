@@ -91,3 +91,29 @@ describe("quota-terminated Claude turn with trailing background notifications", 
     expect(observe([stop, notification]).busy).toBe(true);
   });
 });
+
+// Sanitized skybar:0 journal shape, 2026-11-15 03:14:27Z to 03:20:18Z: a compact, then the pane's process was
+// restarted in its session and Claude reported the shell its old process left. No model call follows that row.
+const leftShell = {
+  type: "user", uuid: "left-shell-event", sessionId,
+  timestamp: "2026-11-15T03:20:18.896Z",
+  origin: { kind: "task-notification" }, promptSource: "system", queueSkipAttachments: true, queueTranscriptOnly: true,
+  message: { content: "<task-notification>\n<task-id>background-shell</task-id>\n<status>stopped</status>\n<summary>Background shell command didn't finish before the previous session ended</summary>\n</task-notification>" },
+};
+const question = { type: "user", sessionId, timestamp: "2026-11-15T03:10:00Z", message: { content: "Measure it before the change" } };
+const answer = (stop_reason, content) => ({ type: "assistant", sessionId, timestamp: "2026-11-15T03:12:00Z", message: { stop_reason, content } });
+
+describe("a notification Claude wrote to the transcript only", () => {
+  it("leaves a pane idle when the turn before it has ended", () => {
+    // Given an ended turn, a compact and the shell report of a restarted process.
+    const compacted = { type: "user", sessionId, timestamp: "2026-11-15T03:15:04.098Z", message: { content: "<local-command-stdout>Compacted</local-command-stdout>" } };
+    // When the pane is read, then neither the ended turn nor the compact waits on a reply.
+    expect(observe([question, answer("end_turn", [{ type: "text", text: "Measured." }]), leftShell]).busy).toBe(false);
+    expect(observe([question, answer("end_turn", [{ type: "text", text: "Measured." }]), compacted, { type: "queue-operation", sessionId }, leftShell]).busy).toBe(false);
+  });
+
+  it("does not end a turn that still owes a tool result", () => {
+    // Given a tool call with no result yet, then the report of a left shell cannot close it.
+    expect(observe([question, answer("tool_use", [{ type: "tool_use", id: "measure", name: "Bash" }]), leftShell]).busy).toBe(true);
+  });
+});
