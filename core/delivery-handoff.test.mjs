@@ -1,6 +1,9 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { blockedHandoffSender, deliveryBlockerDetail } from "./delivery-handoff.mjs";
 import { reportStalledHead, stallWatcherOf } from "./queue-stall-watch.mjs";
+import { vi } from "vitest";
+import { notifyUser } from "../cli/send-notify.mjs";
+vi.mock("../cli/send-notify.mjs", () => ({ notifyUser: vi.fn(async () => ({ sent: true })) }));
 import { pushWaitVerdict, pollPushWaitOnce } from "./push-wait-watch.mjs";
 
 feature("push wait watch", () => {
@@ -165,5 +168,16 @@ feature("a stalled queue head is told to the pane that watches it", () => {
       expect(notices).toHaveLength(1);
       expect(notices[0]).toMatch(/sandman:0.*amux enter/u);
     }],
+  });
+  unit("a stall without an injected notifier never contacts the human", {
+    when: ["a stalled head has no watcher and no notifier", async () => {
+      vi.mocked(notifyUser).mockClear();
+      const head = drafted(1_000);
+      const queue = { list: () => [head], update: () => {}, enqueue: () => { throw Error("no watcher"); } };
+      await reportStalledHead({ agentName: "sandman", pane: 0, queue, now: () => 1_000 + 11 * 60_000,
+        log: () => {}, watcherOf: () => [] });
+      return vi.mocked(notifyUser).mock.calls.length;
+    }],
+    then: ["the real notification path is not invoked", (count) => expect(count).toBe(0)],
   });
 });

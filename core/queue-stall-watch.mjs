@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 import { resolveConfigSources } from "./config-sources.mjs";
 import { TERMINAL_DELIVERY_STATES } from "./delivery-queue-policy.mjs";
-import { notifyUser } from "../cli/send-notify.mjs";
 
 const HEAD_STALL_MS = 10 * 60_000;
 const AGAIN_MS = 60 * 60_000;
@@ -35,7 +34,7 @@ function isStalled(head, now) {
 }
 
 /** WHAT: Reports a stalled queue head to an available watcher. WHY: Keeps a blocked watcher from hiding the stall. */
-export async function reportStalledHead({ agentName, pane, queue, now, log, watcherOf = stallWatchersOf, notify = notifyUser }) {
+export async function reportStalledHead({ agentName, pane, queue, now, log, watcherOf = stallWatchersOf, notify = null }) {
   const open = queue.list(agentName, pane).filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status));
   const head = open[0];
   // a head that stands still before its submit: a paste in the composer, a parked or a refused attempt; a submitted turn the pane is busy with is work
@@ -53,7 +52,7 @@ export async function reportStalledHead({ agentName, pane, queue, now, log, watc
   const text = `[AMUX köstopp] ${target}: ${open.length} meddelanden väntar, huvudet ${head.id.slice(0, 8)} har stått ${minutes} min som `
     + `${head.status} (${String(head.lastReason || "ingen orsak").slice(0, 160)}). Läs panelen (amux log ${agentName} -p ${pane} --tmux) och kön `
     + `(amux queue); ett eget utkast i rutan skickas med amux enter, annars väck panelen eller säg till dess ägare. Skicka inget om.`;
-  if ((!watcher || (told && now() - told >= 20 * 60_000)) && !head.metadata?.headStallHumanNoticeAt) {
+  if (notify && (!watcher || (told && now() - told >= 20 * 60_000)) && !head.metadata?.headStallHumanNoticeAt) {
     const result = await notify(text, { idempotencyKey: `queue-stall-human:${target}:${head.id}`, strictSingleAttempt: true });
     if (result.sent || result.deduped || result.outcome === "unknown") queue.update(head, { metadata: { headStallHumanNoticeAt: now() } });
   }

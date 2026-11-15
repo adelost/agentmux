@@ -75,7 +75,7 @@ function queueEvent(job, state, extra = {}) {
 export function createDeliveryBroker({
   agent,
   queue,
-  notify = async () => {},
+  notify = async () => {}, notifyHuman = null,
   resolveNotificationChannel = null,
   validateTarget = null,
   intervalMs = 500,
@@ -589,7 +589,7 @@ export function createDeliveryBroker({
         // Cancellation is a request, never a producer-side state rewrite. All pre-delivery terminal paths run in one ordered pass under the
         // same writer lease as pane delivery.
         await runDeliveryPreflight({ agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, flushTerminalNotices,
-          agent, exactEcho, acknowledge, notifyBlocked: maybeNotifyBlocked });
+          agent, exactEcho, acknowledge, notifyBlocked: maybeNotifyBlocked, notifyHuman: validateTarget ? notifyHuman : null });
       },
     });
   }

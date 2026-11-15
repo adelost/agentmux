@@ -247,6 +247,7 @@ const contextMaintenance = createBridgeWorkAdmission({
 const deliveryBroker = createDeliveryBroker({
   agent,
   queue: deliveryQueue,
+  notifyHuman: notifyUserDm,
   validateTarget: validateDeliveryTarget,
   bridgeDir: __dir,
   wakeLifecycle: paneSleepWakeLifecycle,

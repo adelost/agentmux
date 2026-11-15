@@ -56,6 +56,7 @@ function mkIdempotencyKey() {
 }
 
 async function gatewaySend(method, params) {
+  if (process.env.AMUX_TEST_NO_NOTIFICATIONS === "1") return { sent: false, target: "test" };
   const { WebSocket } = await import("ws");
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(GATEWAY_URL, {
@@ -237,6 +238,7 @@ async function postFile(channelId, filePath, text, options = {}) {
 
 /** PATCH a Discord channel (used for topic updates). */
 async function discordPatch(channelId, patch) {
+  if (process.env.AMUX_TEST_NO_NOTIFICATIONS === "1") throw new Error("test notification blocked");
   const token = getDiscordBotToken();
   if (!token) throw new Error("DISCORD_TOKEN not found — cannot patch channel");
   const res = await fetch(`https://discord.com/api/v10/channels/${channelId}`, {
@@ -308,6 +310,7 @@ export async function sendToChannel(channelName, message) {
 
 /** WHAT: Dispatches one idempotent message to a channel. WHY: Keeps retries from duplicating the same report. */
 export async function sendToChannelId(channelId, message, { kind = "notice", idempotencyKey = null } = {}) {
+  if (process.env.AMUX_TEST_NO_NOTIFICATIONS === "1") return { sent: false, target: "test" };
   const chunks = splitMessage(String(message || ""));
   const results = [];
   for (const [index, chunk] of chunks.entries()) results.push(await discordPost(channelId, chunk,
@@ -432,6 +435,7 @@ async function rememberNotification(key) {
  * push; falls back to the configured notify channel with a mention.
  */
 export async function notifyUser(message, opts = {}) {
+  if (process.env.AMUX_TEST_NO_NOTIFICATIONS === "1") return { sent: false, target: "test" };
   const userId = resolveNotifyUserId(opts.userId || opts.user);
   const channelName = opts.channel || process.env.AMUX_NOTIFY_CHANNEL || "notify";
   const content = formatUserNotification(message, opts);
@@ -486,6 +490,7 @@ export async function notifyUser(message, opts = {}) {
 
 /** WHAT: Dispatches a file with its original optional caption. WHY: Keeps caller-provided output unchanged. */
 export async function sendFileToChannelId(channelId, filePath, text = "", { kind = "file", ...options } = {}) {
+  if (process.env.AMUX_TEST_NO_NOTIFICATIONS === "1") return { sent: false, target: "test" };
   return discordPostFile(channelId, filePath, text, kind, options);
 }
 

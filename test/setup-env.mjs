@@ -9,6 +9,8 @@ import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
+process.env.AMUX_TEST_NO_NOTIFICATIONS = "1";
+
 process.env.AMUX_EVENTS_PATH = join(
   mkdtempSync(join(tmpdir(), "amux-test-ledger-")),
   "events.jsonl",

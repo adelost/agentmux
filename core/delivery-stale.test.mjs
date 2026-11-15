@@ -79,6 +79,21 @@ feature("reportStaleDeliveryJobs: visible warning, no rewrite, exactly once per 
 });
 
 feature("runDeliveryPreflight: one ordered pass", () => {
+  component("an injected human notifier is forwarded to the stalled-head watch", {
+    given: ["a stalled head and an injected notifier", () => {
+      const head = job({ id: "head", status: "drafted", createdAt: NOW - 11 * 60_000, metadata: {} });
+      const notices = [];
+      const queue = { list: () => [head], update: (target, patch) => Object.assign(target, patch) };
+      return { notices, run: () => runDeliveryPreflight({ agentName: "lsrc", pane: 3, queue, now: () => NOW,
+        queueEvent: () => {}, log: () => {}, terminalizeNotSent: async () => {}, notifyTerminal: async () => {},
+        notifyHuman: async (message) => { notices.push(message); return { sent: true }; } }) };
+    }],
+    when: ["preflight runs", async (fixture) => { await fixture.run(); return fixture.notices; }],
+    then: ["the notifier receives the stalled target", (notices) => {
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain("lsrc:3");
+    }],
+  });
   component("cancellation, notices, and stale reporting all run before delivery", {
     given: ["one of each pre-delivery item", () => {
       const order = [];

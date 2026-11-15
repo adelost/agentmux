@@ -76,7 +76,7 @@ async function acknowledgeBehindHead({ agentName, pane, queue, exactEcho, acknow
 }
 
 /** WHAT: Dispatches cancellation requests, terminal notices, and stale reporting before delivery. WHY: Keeps every pre-delivery terminal path in one ordered pass. */
-export async function runDeliveryPreflight({ agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, flushTerminalNotices = null, exactEcho = null, acknowledge = null, notifyBlocked = null, agent = null }) {
+export async function runDeliveryPreflight({ agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, flushTerminalNotices = null, exactEcho = null, acknowledge = null, notifyBlocked = null, notifyHuman = null, agent = null }) {
   await fenceCodexCapacityJobs({ agentName, pane, queue, agent, now, terminalizeNotSent, log });
   await fenceSelfCompactJobs({ agentName, pane, queue, agent, now, terminalizeNotSent, log });
   const cancellationRequests = queue.pendingCancellationRequests?.(agentName, pane) || [];
@@ -98,6 +98,6 @@ export async function runDeliveryPreflight({ agentName, pane, queue, now, queueE
           && (job.attempts > 0 || job.metadata?.preSubmitPark)) await notifyBlocked(job);
     }
   }
-  await reportStalledHead({ agentName, pane, queue, now, log });
+  await reportStalledHead({ agentName, pane, queue, now, log, notify: notifyHuman });
   return reportStaleDeliveryJobs({ agentName, pane, queue, now, queueEvent, log });
 }
