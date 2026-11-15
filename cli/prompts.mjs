@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { classifyPermissionPrompt, detectPermissionPrompt } from "../core/permission-watchdog.mjs";
-import { gitKeepsFilesUnder, openPromptsPath, permissionDecisionLogPath } from "../channels/permission-watchdog.mjs";
+import { openPromptsPath, permissionDecisionLogPath } from "../channels/permission-watchdog.mjs";
 import { listAgents } from "./config.mjs";
 
 const ANSWER_SETTLE_MS = 1_500;
@@ -25,7 +25,7 @@ export function readOpenPromptAges(path = openPromptsPath()) {
 }
 
 /** WHAT: Collects every pane that currently sits on a permission prompt. WHY: Keeps the owner from scraping tmux by hand. */
-export async function collectOpenPrompts({ agent, agentsYamlPath, home = homedir(), holdsKeptFiles = gitKeepsFilesUnder }) {
+export async function collectOpenPrompts({ agent, agentsYamlPath, home = homedir() }) {
   const rows = [];
   for (const a of listAgents(agentsYamlPath)) {
     if (a.backend === "native") continue;
@@ -35,7 +35,7 @@ export async function collectOpenPrompts({ agent, agentsYamlPath, home = homedir
       try { screen = await agent.capturePane(a.name, pane, 120); } catch { continue; }
       const prompt = detectPermissionPrompt(screen);
       if (!prompt) continue;
-      const decision = classifyPermissionPrompt(prompt, { home, holdsKeptFiles });
+      const decision = classifyPermissionPrompt(prompt, { home });
       rows.push({ paneKey: `${a.name}:${pane}`, agentName: a.name, pane, prompt, decision, orchestrator: a.orchestrator ?? null });
     }
   }
@@ -49,7 +49,8 @@ export function formatPromptRows(rows, { ages = new Map(), at = Date.now() } = {
     const tracked = ages.get(paneKey);
     const waited = tracked ? `${Math.round((at - Date.parse(tracked.firstSeenAt)) / 60_000)} min` : "unknown (watchdog has not seen it yet)";
     const verdict = decision.action === "answer"
-      ? `amux answers this one itself: ${decision.why}`
+      ? tracked?.decision === "auto-answer" ? `amux answers this one itself: ${decision.why}`
+        : `may be answered if bypass mode is verified: ${decision.why}`
       : `needs a decision: ${decision.why}`;
     const owner = orchestrator === null ? "no orchestrator configured for this project" : `${agentName}:${orchestrator}`;
     return [

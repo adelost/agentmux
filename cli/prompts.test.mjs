@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { spawnSync } from "node:child_process";
 
 vi.mock("./config.mjs", () => ({
   listAgents: () => [{ name: "skyvw", panes: [{}, {}], orchestrator: 0 }],
@@ -24,6 +25,10 @@ const fakeAgent = (screens) => ({
 });
 
 describe("amux prompts", () => {
+  it("loads its real ESM dependency graph in Node", () => {
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", "await import('./cli/prompts.mjs')"], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
   it("lists the blocked pane with its age, its verdict and the command that ends it", async () => {
     const rows = await collectOpenPrompts({ agent: fakeAgent({ 1: PROMPT }), agentsYamlPath: "x.yaml", holdsKeptFiles: () => false });
     expect(rows.map((r) => r.paneKey)).toEqual(["skyvw:1"]);
