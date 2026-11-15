@@ -12,6 +12,7 @@ import { isAutocompactOffer } from "../core/dismiss.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import { createCaptureDue, createDialogHookStamp } from "../core/pulse/capture-due.mjs";
+import { latestPaneStatesCached } from "../core/events.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -69,6 +70,7 @@ export function createPermissionWatchdog({
   // A permission prompt fires a needsYou hook and the autocompact offer follows a turn end, so only those hooks make a capture matter.
   activityOf = createDialogHookStamp(),
   activeMs = 60_000,
+  needsYouAtStart = null,
 }) {
   // Safe rm prompts are answered after config.answerAgeMs, every other prompt
   // alerts the human after config.promptAgeMs.
@@ -78,6 +80,9 @@ export function createPermissionWatchdog({
   catch (err) { if (err.code !== "ENOENT") log(`open-prompt snapshot read failed: ${err.message}`); }
   if (!Array.isArray(savedPrompts)) savedPrompts = [];
   const startedAt = now();
+  const startupStates = new Map(latestPaneStatesCached());
+  const startupNeedsYou = needsYouAtStart || ((a, i) => startupStates.get(`${a.name}:${i}`)?.state === "needs_you");
+  const startup = new Map();
   for (const saved of savedPrompts) {
     if (!saved || typeof saved !== "object") continue;
     const firstSeenAt = Date.parse(saved?.firstSeenAt);
@@ -93,7 +98,19 @@ export function createPermissionWatchdog({
   let lastBeatAt = -Infinity;
   // An open prompt, first sight, or a dialog hook within activeMs; never a timer (pulse-10, row 116e)
   const due = createCaptureDue({ activityOf, activeMs });
-  const captureDue = (agentConfig, paneIdx, at) => due(agentConfig, paneIdx, at, { tracking: seen.has(`${agentConfig.name}:${paneIdx}`) });
+  const captureDue = (agentConfig, paneIdx, at) => {
+    const key = `${agentConfig.name}:${paneIdx}`;
+    if (!startup.has(key)) startup.set(key, startupNeedsYou(agentConfig, paneIdx) ? { count: 0, last: -Infinity } : null);
+    const entry = startup.get(key);
+    if (entry && (at - startedAt >= 600_000 || entry.count >= 40)) {
+      log(`${key}: startup needsYou capture window ended`); startup.set(key, null);
+    } else if (entry && (at - startedAt < 60_000 || at - entry.last >= 60_000)) {
+      entry.count++; entry.last = at;
+      due(agentConfig, paneIdx, at, { tracking: true });
+      return true;
+    }
+    return due(agentConfig, paneIdx, at, { tracking: seen.has(key) });
+  };
 
   function markMissing(paneKey, at) {
     const prior = seen.get(paneKey);
@@ -184,6 +201,7 @@ export function createPermissionWatchdog({
     let content = "";
     try {
       content = await capture(agentConfig, paneIdx);
+      if (typeof content === "string" && content.trim()) startup.set(paneKey, null);
     } catch (err) {
       if (/timed out/u.test(err.message)) log(`${paneKey}: ${err.message}`);
       markMissing(paneKey, at);

@@ -28,7 +28,7 @@ const PROMPT = `
 const UNSAFE = PROMPT.replace('Q=/mnt/q/Chathelper-traningsdata-2026-09-10/GEMMA-4-TEST/TRANINGSDATA; ', "");
 const IDLE = "● Bash\n  done\n\n❯ ";
 
-function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null, defaults = false, realActivity = false, activityOf = () => "unchanged", mode = "bypassPermissions", saved = null, start = 0 }) {
+function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null, defaults = false, realActivity = false, activityOf = () => "unchanged", mode = "bypassPermissions", saved = null, start = 0, needsYouAtStart = () => false }) {
   const decisions = [];
   const snapshots = [];
   const beats = [];
@@ -52,12 +52,32 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
     publishOpenPrompts: (text) => snapshots.push(JSON.parse(text)),
     beat: (metrics) => beats.push(metrics),
     captureTimeoutMs: 50,
+    needsYouAtStart,
     log: () => {}, now: () => t,
   });
   return { wd, agent, discord, notifyUser, decisions, snapshots, beats, advance: (ms) => { t += ms; } };
 }
 
 describe("permission watchdog", () => {
+  it("recaptures an initially blank needsYou pane and alerts on its dialog", async () => {
+    const screens = { 0: "", 1: "" }, h = harness({ screens, needsYouAtStart: (_a, p) => p === 0 });
+    await h.wd.tick(); screens[0] = UNSAFE; h.advance(10_000); await h.wd.tick();
+    h.advance(120_000); await h.wd.tick();
+    expect(h.discord.send).toHaveBeenCalledTimes(1);
+    expect(h.agent.capturePane.mock.calls.filter(call => call[1] === 1)).toHaveLength(1);
+  });
+  it("stops startup retries when a nonempty screen arrives", async () => {
+    const screens = { 0: "", 1: "" }, h = harness({ screens, needsYouAtStart: (_a, p) => p === 0 });
+    await h.wd.tick(); screens[0] = IDLE; h.advance(10_000); await h.wd.tick();
+    h.advance(10_000); await h.wd.tick();
+    expect(h.agent.capturePane.mock.calls.filter(call => call[1] === 0)).toHaveLength(2);
+  });
+  it("bounds startup retry cost and never retries a quiet pane", async () => {
+    const h = harness({ screens: { 0: "", 1: "" }, needsYouAtStart: (_a, p) => p === 0 });
+    for (let second = 0; second <= 610; second++) { await h.wd.tick(); h.advance(1_000); }
+    expect(h.agent.capturePane.mock.calls.filter(call => call[1] === 0).length).toBeLessThanOrEqual(40);
+    expect(h.agent.capturePane.mock.calls.filter(call => call[1] === 1)).toHaveLength(1);
+  });
   it("keeps alert and repeat clocks after restart for the same session and prompt", async () => {
     const screens = { 0: UNSAFE };
     const before = harness({ screens });
