@@ -415,31 +415,41 @@ feature("amux dream configured-pane orchestration", () => {
     }],
   });
 
-  component("a candidate that can run but never settles ends the walk rather than passing the night on", {
-    given: ["a permanently busy primary and an idle fallback", () => fixture()],
+  component("a curator that stays busy through its whole wait hands the night to the next candidate, with no notice", {
+    given: ["a primary that works through the whole wait and an idle fallback", () => fixture()],
     when: ["running Dream", async (fx) => {
-      const events = [];
+      const events = [], notified = [];
       const fallback = { agent: "claw", pane: 7, engine: "codex", paneDir: "/workspace/.agents/7" };
-      let error = null;
-      try {
-        await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
-          workspace: fx.workspace, quiet: true,
-        }, {
-          ...ownerDependencies(fx, events),
-          owner: undefined,
-          candidates: [owner, fallback],
-          idleAttempts: 3,
-          idlePollMs: 0,
-          sleep: async () => {},
-          getStatus: async (_ctx, _agent, pane) => (pane === 3 ? "working" : "idle"),
-          notifyUser: async () => {},
-        });
-      } catch (caught) { error = caught; }
-      return { fx, error, events };
+      const result = await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
+        workspace: fx.workspace, quiet: true, deferSentinel: true,
+      }, {
+        ...ownerDependencies(fx, events),
+        owner: undefined,
+        candidates: [owner, fallback],
+        idleAttempts: 3,
+        idlePollMs: 0,
+        sleep: async () => {},
+        getStatus: async (_ctx, _agent, pane) => (pane === 3 ? "working" : "idle"),
+        notifyUser: async (message) => { notified.push(message); },
+        send: async (_ctx, agent, pane) => {
+          events.push(`send:${agent}:${pane}`);
+          return { delivered: true, pending: false, unverified: false };
+        },
+        waitForResult: async ({ outputPath, dateKey, runId, sourceSha256 }) => {
+          const content = [
+            `> Kuraterad av claw:7 efter verifierad kompaktering · run \`${runId}\` · source \`${sourceSha256}\`.`,
+            "- Reservpanelen kurerade natten.", "",
+          ].join("\n");
+          writeFileSync(outputPath, content);
+          return { ok: true, content, dateKey };
+        },
+      });
+      return { fx, result, events, notified };
     }],
-    then: ["only the primary is named and nothing was sent", ({ fx, error, events }) => {
-      expect(error?.message).toBe("dream-owner-not-idle:claw:3");
-      expect(events).toEqual([]);
+    then: ["the fallback curated the night and nobody was notified", ({ fx, result, events, notified }) => {
+      expect(result.owner).toMatchObject({ agent: "claw", pane: 7 });
+      expect(events.filter((line) => line.startsWith("send:"))).toEqual(["send:claw:7"]);
+      expect(notified).toEqual([]);
       cleanup(fx);
     }],
   });

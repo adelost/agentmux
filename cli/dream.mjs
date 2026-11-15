@@ -337,10 +337,13 @@ async function runDream(ctx, flags, dependencies) {
         const message = `Dream: curator ${selection.reasons.join("; ")};`
           + ` curating with configured fallback ${selection.owner.agent}:${selection.owner.pane}.`;
         console.warn(message);
-        try {
-          await (dependencies.notifyUser || notifyUser)(message, { level: "warn", title: "amux dream" });
-        } catch (error) {
-          console.error(`Dream: fallback notification failed: ${error.message}`);
+        // A curator that was only busy needs nothing from him, so its hand-over stays in the log.
+        if (selection.unable.length) {
+          try {
+            await (dependencies.notifyUser || notifyUser)(message, { level: "warn", title: "amux dream" });
+          } catch (error) {
+            console.error(`Dream: fallback notification failed: ${error.message}`);
+          }
         }
       }
       owner = selection.owner;

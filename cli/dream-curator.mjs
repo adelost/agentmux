@@ -11,7 +11,8 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // A pane in one of these states cannot curate tonight no matter how long Dream
 // waits: the quota is spent, or a human has to clear something first. Every
-// other non-idle state is a pane that is merely busy and will come back.
+// other non-idle state is a pane that is merely busy: it will come back, but
+// not necessarily within the night's wait, so it hands the night on as well.
 const CANNOT_CURATE = Object.freeze({
   limited: "quota or rate limited",
   permission: "waiting on a human permission prompt",
@@ -24,36 +25,41 @@ export function dreamCandidateBlocker(status) {
 }
 
 /**
- * WHAT: Returns the first capable idle configured curator.
- * WHY: Prevents a transient busy state from silently changing editorial ownership.
+ * WHAT: Returns the first configured curator that settles within its own wait.
+ * WHY: Keeps a curator that works through the whole wait from costing the night its digest.
  */
 export async function selectIdleOwner(ctx, candidates, { ensureReady, prepare, attempts, ...idleOptions } = {}) {
   const skipped = [];
   const reasons = [];
+  // The skipped panes that could not curate at all, as distinct from the ones that were only busy.
+  const unable = [];
   let lastError = null;
   for (const candidate of candidates) {
+    const key = `${candidate.agent}:${candidate.pane}`;
     try { await ensureReady(candidate.agent, candidate.pane); }
     catch (error) {
       lastError = error;
-      skipped.push(`${candidate.agent}:${candidate.pane}`);
-      reasons.push(`${candidate.agent}:${candidate.pane} startup failed: ${error.message}`);
+      skipped.push(key);
+      unable.push(key);
+      reasons.push(`${key} startup failed: ${error.message}`);
       continue;
     }
     const outcome = await waitForOwnerIdle(ctx, candidate, { ...idleOptions, attempts });
     if (outcome.idle) {
-      try { return { owner: candidate, ...(await prepare(candidate)), skipped, reasons }; }
+      try { return { owner: candidate, ...(await prepare(candidate)), skipped, reasons, unable }; }
       catch (error) {
         lastError = error;
-        skipped.push(`${candidate.agent}:${candidate.pane}`);
-        reasons.push(`${candidate.agent}:${candidate.pane} preparation failed: ${error.message}`);
+        skipped.push(key);
+        unable.push(key);
+        reasons.push(`${key} preparation failed: ${error.message}`);
         continue;
       }
     }
-    skipped.push(`${candidate.agent}:${candidate.pane}`);
-    reasons.push(`${candidate.agent}:${candidate.pane} ${outcome.blocked || "stayed busy for the whole grace period"}`);
-    if (!outcome.blocked) break;
+    skipped.push(key);
+    if (outcome.blocked) unable.push(key);
+    reasons.push(`${key} ${outcome.blocked || "stayed busy for the whole grace period"}`);
   }
-  return { owner: null, skipped, reasons, lastError };
+  return { owner: null, skipped, reasons, unable, lastError };
 }
 
 /** WHAT: Waits only inside the configured grace period. WHY: Busy work and terminal incapacity need different fallback decisions. */

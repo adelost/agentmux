@@ -22,7 +22,14 @@ compact receipt.
 
 `candidates` is optional; without it the single configured pane is the only
 curator, exactly as before. With it, Dream tries each entry in order and
-curates from the first one that is live and idle. Every candidate is still
+curates from the first one that is live and idle. Each entry gets its own
+wait of ten minutes. A pane that works through the whole of it hands the night
+to the next entry, and so does a pane that cannot curate at all (quota spent,
+a permission prompt, a modal menu); only when every entry is passed does the
+night end without a digest. Every hand-over is written in the Dream log, and
+the digest's receipt line names the pane that curated. The operator is
+notified only when a skipped pane could not curate, never for one that was
+merely busy. Every candidate is still
 written in `agentmux.yaml`, so the curator remains visible and operator-chosen
 and no hidden model process can be selected. Entries accept `agent:pane` or
 `{agent, pane}`; a candidate that does not resolve is an error rather than a
@@ -33,7 +40,8 @@ Reserve these panes for Dream rather than product work. `dream` is a reserved
 runtime configuration key, so use an agent name such as `sandman` and label
 its panes Dream. New panes use their existing default account profile 1;
 creating them does not rotate any existing pane or log in another account.
-Startup, quality and compact failures can try the next configured candidate.
+Startup, quality and compact failures, and a wait that ran out, try the next
+configured candidate.
 Fallback is preparation-only. After one dispatched curation, a limit, missing
 answer or invalid product ends that attempt honestly; it never purchases a
 second curator turn that night. Recovery reuses the original output and proof.
