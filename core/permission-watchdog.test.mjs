@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { classifyPermissionPrompt, detectPermissionPrompt, nextPromptStep, parsePermissionWatchdogConfig } from "./permission-watchdog.mjs";
+import { classifyPermissionPrompt, detectPermissionPrompt, nextPromptStep, parsePermissionWatchdogConfig, permissionModeAllowsAnswer } from "./permission-watchdog.mjs";
+
+it("requires an observed bypass mode before answering", () => {
+  expect(permissionModeAllowsAnswer("bypassPermissions")).toBe(true);
+  expect(permissionModeAllowsAnswer("default")).toBe(false);
+  expect(permissionModeAllowsAnswer(null)).toBe(false);
+});
 
 // The screen lsrc:0 sat on for 21 minutes on 2026-09-12 (captured with amux log --tmux).
 const LSRC0_SCREEN = `
@@ -168,9 +174,16 @@ describe("classifyPermissionPrompt", () => {
     expect(classifyPermissionPrompt(rm("build/*", "rm -rf build/*"), untracked).action).toBe("notify");
   });
 
-  it("notifies when the target holds files git keeps (tracked, or untracked and not ignored)", () => {
+  it("allows deep targets even if git keeps files, as ordered for bypass dialogs in row 191", () => {
     const tracked = { home: HOME, holdsKeptFiles: (path) => path.startsWith("/home/adelost/.openclaw/workspace/memory") };
-    expect(classifyPermissionPrompt(rm("/home/adelost/.openclaw/workspace/memory/2026-09-1*.md"), tracked).action).toBe("notify");
+    expect(classifyPermissionPrompt(rm("/home/adelost/.openclaw/workspace/memory/2026-09-1*.md"), tracked).action).toBe("answer");
+  });
+
+  it("answers the newer rm wording only when the visible command is safe and unwrapped", () => {
+    const prompt = { reason: "Dangerous rm operation not ruled out", command: "cat <<'EOF'\nhello\nEOF" };
+    expect(classifyPermissionPrompt(prompt, untracked)).toMatchObject({ action: "answer", keys: "1" });
+    expect(classifyPermissionPrompt({ ...prompt, screenWrapped: true }, untracked).action).toBe("notify");
+    expect(classifyPermissionPrompt({ ...prompt, command: "rm -rf /" }, untracked).action).toBe("notify");
   });
 
   it("notifies when the target comes from command substitution", () => {

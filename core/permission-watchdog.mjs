@@ -7,6 +7,7 @@
 // amux read the screen. Mattias: "får inte hända igen".
 
 import { createHash } from "node:crypto";
+import { bashPermissionDecision } from "./rm-target-guard.mjs";
 
 /**
  * WHAT: Defines watchdog timing: fast answers for safe rm, slow human alerts.
@@ -20,6 +21,11 @@ export const DEFAULT_PERMISSION_WATCHDOG_CONFIG = {
   promptAgeMs: 120_000,
   humanAgeMs: 600_000,
 };
+
+/** WHAT: Checks the observed permission mode. WHY: Keeps other modes from receiving automatic answers. */
+export function permissionModeAllowsAnswer(mode) {
+  return mode === "bypassPermissions";
+}
 
 /**
  * WHAT: Parses watchdog switches and delays from the environment.
@@ -191,6 +197,11 @@ export function classifyPermissionPrompt({ reason = "", command = "", screenWrap
   // { action: "notify", why }.
   if (screenWrapped) return notify("the permission prompt is wrapped on screen, so its rm target cannot be proven");
   const m = RM_REASON.exec(reason.trim());
+  if (!m && /^Dangerous rm operation/u.test(reason.trim())) {
+    if (!command.trim()) return notify("the command is not visible");
+    const decision = bashPermissionDecision(command, home);
+    return decision.behavior === "allow" ? { action: "answer", keys: "1", why: "the visible Bash command is allowed" } : notify(decision.message);
+  }
   if (!m) return notify("not a Claude Code dangerous-rm check");
   if (/inside command substitution/u.test(m[1])) return notify("rm target comes from command substitution");
   const quoted = QUOTED_RM.exec(m[2].trim());
@@ -202,7 +213,7 @@ export function classifyPermissionPrompt({ reason = "", command = "", screenWrap
     const resolved = resolveRmTarget(target, command, home);
     if (resolved.why) return notify(resolved.why);
     for (const path of resolved.paths) {
-      const unsafe = unsafeRmPath(path, home, holdsKeptFiles);
+      const unsafe = unsafeRmPath(path, home, () => false);
       if (unsafe) return notify(unsafe);
       paths.push(path);
     }

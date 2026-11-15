@@ -35,6 +35,13 @@ const humanJob = (overrides = {}) => ({
 const MODEL_GUARD = "Codex work blocked: selected gpt-5.6-sol, running gpt-6-sol; verify /status before retrying";
 
 feature("delivery notices a human understands", () => {
+  unit("a waiting permission dialog gives the pane answer command", {
+    when: ["the target has an open dialog", () => deliveryStateNotice(humanJob(), "blocked", { permissionPrompt: { pane: "lsrc:3" } })],
+    then: ["the notice names the dialog and how to answer", text => {
+      expect(text).toContain("permission dialog");
+      expect(text).toContain("amux lsrc -p 3 -- 1");
+    }],
+  });
   unit("a missing context reading does not claim a pane failed to start", {
     when: ["a delivery is held for missing context evidence", () => blockedDeliveryNotice({
       agentName: "a", pane: 1, lastReason: "wake-refused:held-for-evidence:context-cost:unknown-evidence",

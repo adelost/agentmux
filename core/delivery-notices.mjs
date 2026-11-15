@@ -8,6 +8,9 @@
 
 import { DELIVERED_UNVERIFIED_STATE, isNotSentDeliveryJob } from "./delivery-queue.mjs";
 import { parseSenderAddress } from "./sender-detect.mjs";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   busyNotice, deliveredNotice, messagePreview, notSentGroupNotice, notSentNotice,
   uncertainNotice, waitingNotice, withMessageQuote,
@@ -58,7 +61,14 @@ export function deliveryStateNotice(job, state, extra = {}) {
 export function createDiscordDeliveryNotify({ discord, resolveChannel, timeZone }) {
   return async (job, state, extra = {}) => {
     if (!discord || !isHumanMessage(job)) return null;
-    const text = deliveryStateNotice(job, state, { timeZone, ...extra });
+    let permissionPrompt = null;
+    if (state === "blocked") {
+      try {
+        const path = process.env.AMUX_PERMISSION_PROMPTS_PATH || join(homedir(), ".agentmux", "permission-prompts.json");
+        permissionPrompt = JSON.parse(readFileSync(path, "utf8")).prompts?.find((p) => p.pane === `${job.agentName}:${job.pane}`) || null;
+      } catch { /* no current prompt snapshot */ }
+    }
+    const text = deliveryStateNotice(job, state, { timeZone, ...extra, permissionPrompt });
     if (!text) return null;
     const group = state === "not-sent-group";
     const ref = group ? null : job.metadata?.noticeRef;

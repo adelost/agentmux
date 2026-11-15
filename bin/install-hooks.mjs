@@ -34,6 +34,7 @@ const SUGGESTIONS_GUARD_CMD = `exec node "${INSTALLED_GUARD}"`;
 export const HOTSPOT_GUARD_CMD = `p=$(cat); case "$p" in *commit*) printf '%s' "$p" | exec node "${join(__dir, "hotspot-commit-guard.mjs")}";; esac`;
 // rm targets Claude Code stops for a person are refused before the call; only payloads naming rm start node.
 const RM_GUARD_CMD = `p=$(cat); case "$p" in *rm*) printf '%s' "$p" | exec node "${join(__dir, "rm-target-guard.mjs")}";; esac`;
+const PERMISSION_GUARD_CMD = `[ -n "$TMUX_PANE" ] || exit 0; exec node "${join(__dir, "permission-request-guard.mjs")}"`;
 // Forks are banned (Mattias 2026-10-10: "vi borde väl förbjuda det helt"). Claude Code's own switch removes the
 // fork type; the same existing Agent/Task guard also serializes fresh subagents (Mattias 2026-10-17).
 const FORK_GUARD_CMD = `exec node "${join(__dir, "fork-guard.mjs")}"`;
@@ -54,6 +55,8 @@ const isHotspotGuard = (h) => h?.type === "command"
   && /hotspot-commit-guard\.mjs/.test(h?.command || "");
 const isRmGuard = (h) => h?.type === "command"
   && /rm-target-guard\.mjs/.test(h?.command || "");
+const isPermissionGuard = (h) => h?.type === "command"
+  && /permission-request-guard\.mjs/.test(h?.command || "");
 const isForkGuard = (h) => h?.type === "command"
   && /fork-guard\.mjs/.test(h?.command || "");
 const isMemorySectionReminder = (h) => h?.type === "command"
@@ -173,6 +176,10 @@ function main() {
   }
   if (preToolUse.length) hooks.PreToolUse = preToolUse;
   else delete hooks.PreToolUse;
+  const permissionRequests = without(hooks.PermissionRequest, isPermissionGuard);
+  if (!remove) permissionRequests.push({ matcher: "Bash", hooks: [{ type: "command", command: PERMISSION_GUARD_CMD, timeout: 10 }] });
+  if (permissionRequests.length) hooks.PermissionRequest = permissionRequests;
+  else delete hooks.PermissionRequest;
   for (const event of ["SubagentStart", "SubagentStop", "PostToolUseFailure", "PostToolUse", "SessionStart"]) {
     const kept = without(hooks[event], isForkGuard);
     if (!remove) kept.push({ ...(event.startsWith("PostTool") ? { matcher: FORK_GUARD_RECEIPT_MATCHER } : {}),

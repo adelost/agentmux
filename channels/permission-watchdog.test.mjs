@@ -27,7 +27,7 @@ const PROMPT = `
 const UNSAFE = PROMPT.replace('Q=/mnt/q/Chathelper-traningsdata-2026-09-10/GEMMA-4-TEST/TRANINGSDATA; ', "");
 const IDLE = "● Bash\n  done\n\n❯ ";
 
-function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null, defaults = false, realActivity = false, activityOf = () => "unchanged" }) {
+function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null, defaults = false, realActivity = false, activityOf = () => "unchanged", mode = "bypassPermissions" }) {
   const decisions = [];
   const snapshots = [];
   const beats = [];
@@ -44,6 +44,7 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
   const wd = createPermissionWatchdog({
     agent, discord, notifyUser, deliveryBroker, agentsYamlPath: "x.yaml",
     config: { enabled: true, autoAnswer, pollMs: 1, answerAgeMs: 10_000, promptAgeMs: 120_000, humanAgeMs: 600_000 },
+    sessionMode: () => mode,
     holdsKeptFiles: () => false,
     ...(defaults ? {} : { sessionIdentity: (_agentConfig, pane) => sessionIds[pane] ?? null, ...(realActivity ? {} : { activityOf }) }),
     recordDecision: (line) => decisions.push(JSON.parse(line)),
@@ -56,6 +57,25 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
 }
 
 describe("permission watchdog", () => {
+  it("never answers when the current session mode is default or missing", async () => {
+    for (const mode of ["default", null]) {
+      const h = harness({ screens: { 0: PROMPT }, mode });
+      await h.wd.tick(); h.advance(121_000); await h.wd.tick();
+      expect(h.agent.typeLiteral).not.toHaveBeenCalled();
+      expect(h.agent.sendOnly).toHaveBeenCalled();
+    }
+  });
+  it("routes an ownerless prompt to sandman and repeats only the agent notice after ten minutes", async () => {
+    const h = harness({ screens: { 0: UNSAFE } });
+    await h.wd.tick(); h.advance(121_000); await h.wd.tick();
+    expect(h.agent.sendOnly).toHaveBeenCalledWith("sandman", expect.stringContaining("lsrc:0"), 0);
+    expect(h.discord.send).toHaveBeenCalledTimes(1);
+    expect(h.notifyUser).toHaveBeenCalledTimes(1);
+    h.advance(600_000); await h.wd.tick();
+    expect(h.agent.sendOnly).toHaveBeenCalledTimes(2);
+    expect(h.discord.send).toHaveBeenCalledTimes(1);
+    expect(h.notifyUser).toHaveBeenCalledTimes(1);
+  });
   it("reads a prompt with the bridge's own agent that has no paneDirectory (defect since 2026-09-15)", async () => {
     vi.stubEnv("AMUX_EVENTS_PATH", "/tmp/permission-watchdog-test-no-events.jsonl");
     try {

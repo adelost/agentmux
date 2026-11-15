@@ -9,6 +9,35 @@ import { chmodSync, statSync } from "node:fs";
 import { publishLedger, updateLedgerMirror } from "../core/work-ledger-write.mjs";
 import { it } from "vitest";
 
+it("installs exactly one tmux-only Bash PermissionRequest hook and removes it", () => {
+  const home = mkdtempSync(join(tmpdir(), "amux-permission-install-"));
+  const settings = join(home, ".claude", "settings.json");
+  const run = (...args) => spawnSync(process.execPath, [resolve("bin/install-hooks.mjs"), ...args], { encoding: "utf8", env: { ...process.env, HOME: home } });
+  try {
+    expect(run().status).toBe(0); expect(run().status).toBe(0);
+    const entries = JSON.parse(readFileSync(settings, "utf8")).hooks.PermissionRequest;
+    expect(entries).toHaveLength(1); expect(entries[0].matcher).toBe("Bash");
+    expect(entries[0].hooks[0].command).toContain("TMUX_PANE");
+    expect(run("--remove").status).toBe(0);
+    expect(JSON.parse(readFileSync(settings, "utf8")).hooks?.PermissionRequest).toBeUndefined();
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+it("decides only bypass Bash permission requests and records the decision", () => {
+  const home = mkdtempSync(join(tmpdir(), "amux-permission-hook-"));
+  const run = (data) => spawnSync(process.execPath, [resolve("bin/permission-request-guard.mjs")], {
+    input: JSON.stringify(data), encoding: "utf8", env: { ...process.env, HOME: home, TMUX_PANE: "%4" },
+  });
+  try {
+    const request = { session_id: "s", permission_mode: "bypassPermissions", tool_name: "Bash", tool_input: { command: "rm -rf /" } };
+    const denied = run(request); expect(denied.status).toBe(0);
+    expect(JSON.parse(denied.stdout).hookSpecificOutput.decision.behavior).toBe("deny");
+    expect(run({ ...request, permission_mode: "default" }).stdout).toBe("");
+    expect(run({ ...request, tool_name: "Write" }).stdout).toBe("");
+    expect(readFileSync(join(home, ".agentmux", "permission-watchdog.jsonl"), "utf8")).toContain('"action":"hook-refused"');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 const git = (repo, ...args) => {
   const result = spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
   if (result.status) throw new Error(result.stderr);

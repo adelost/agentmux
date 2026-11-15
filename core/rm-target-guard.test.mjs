@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { formatRmRefusal, stoppingRmTargets } from "./rm-target-guard.mjs";
+import { bashPermissionDecision, formatRmRefusal, stoppingRmTargets } from "./rm-target-guard.mjs";
 
 const targets = (command) => stoppingRmTargets(command).map((f) => f.target);
 
 describe("stoppingRmTargets", () => {
+  it("decides bypass dialogs without running a dangerous removal or shell-expanded heredoc", () => {
+    const decision = (command) => bashPermissionDecision(command, "/home/adelost");
+    for (const cmd of ["rm -rf $S/$2", "rm -rf ~/lsrc", "rm -rf /", "rm -rf /mnt/c/Users", "cat <<EOF\n$(touch file)\nEOF", "cat <<EOF\n`touch file`\nEOF", "bash <<'EOF'\nrm -rf /\nEOF", "bash -c 'rm -rf /'"]) {
+      expect(decision(cmd).behavior, cmd).toBe("deny");
+    }
+    for (const cmd of ["cat <<'EOF'\n$(touch file)\nEOF", "cat <<\\EOF\n$(touch file)\nEOF", "cat <<EOF\n\\$(touch file)\nEOF", "cat <<EOF\n${NAME}\nEOF", "cd $S && rm -rf fresh42d"]) {
+      expect(decision(cmd).behavior, cmd).toBe("allow");
+    }
+  });
   // The commands that stopped panes: lsrc:1 2026-09-29, lsrc:0 2026-09-12, skyvw:2 2026-09-13, claw:0 2026-09-14.
   it("finds the targets that stopped panes, with the form the check accepts", () => {
     const [lsrc1] = stoppingRmTargets('S=/tmp/x/scratchpad/a23; for pair in "8865 p-ws1-cut v2"; do set -- $pair; rm -rf $S/$2; $S/make_copy.sh $S/$2; done');
@@ -35,6 +44,7 @@ describe("stoppingRmTargets", () => {
     expect(targets("cat > s.sh <<'EOF'\nrm -rf $X/*\nEOF\nbash s.sh")).toEqual([]);
     expect(targets("python3 - <<EOF\nimport os; os.system('rm -rf $X/')\nEOF")).toEqual([]);
     expect(targets("# rm -rf $X/*\nls")).toEqual([]);
+    expect(targets("bash <<'EOF'\nrm -rf $X/*\nEOF")).toEqual(["$X/*"]);
   });
 
   it("tells the agent nothing ran and what to write instead", () => {

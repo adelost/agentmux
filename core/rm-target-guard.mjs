@@ -14,12 +14,64 @@ const POSITIONAL_ROOT = /^["']*\$(?:\{(?:[0-9]+|[@*!])(?::?-(?:["']{2}|"?\$\{?[A
 const LEADING_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "time", "sudo", "command", "exec", "nohup", "env"]);
 const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
 
+/** WHAT: Checks a bypass Bash dialog. WHY: Keeps unsafe expansions and broad removals from running unseen. */
+export function bashPermissionDecision(command, home = "") {
+  const script = String(command || "");
+  const deny = (message) => ({ behavior: "deny", message });
+  const stopping = stoppingRmTargets(script);
+  if (stopping.length) return deny(formatRmRefusal(stopping));
+  for (const block of heredocBlocks(script)) {
+    if (!block.quoted && /(^|[^\\])(?:\\\\)*(?:\$\(|`)/mu.test(block.body)) return deny("Nothing ran. The shell runs text in backticks or substitutions; quote the heredoc tag or write the file with the file tool.");
+    if (block.shell) {
+      const nested = bashPermissionDecision(block.body, home);
+      if (nested.behavior === "deny") return nested;
+    }
+  }
+  for (const words of simpleCommands(script)) {
+    let i = 0;
+    while (i < words.length && (LEADING_WORDS.has(words[i]) || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[i]))) i++;
+    if (SHELLS.has((words[i] || "").replace(/^\\/u, "")) && words.includes("-c")) {
+      const nested = bashPermissionDecision(unquote(words[words.indexOf("-c") + 1] || ""), home);
+      if (nested.behavior === "deny") return nested;
+    }
+    if (!["rm", "rmdir"].includes((words[i] || "").replace(/^\\/u, ""))) continue;
+    for (const word of words.slice(i + 1)) {
+      if (word.startsWith("-")) continue;
+      let path = unquote(word);
+      if (path === "~" || path.startsWith("~/")) path = home + path.slice(1);
+      if (!path.startsWith("/")) continue;
+      const parts = path.split("/").filter(Boolean), hp = home.split("/").filter(Boolean);
+      if (parts.includes("..") || parts.length < 3 || (hp.length && hp.every((p, n) => parts[n] === p) && parts.length <= hp.length + 1)
+          || (parts[0] === "mnt" && parts.length <= 3)) return deny(`Nothing ran. ${word} is too broad; use a narrower literal path.`);
+    }
+  }
+  return { behavior: "allow" };
+}
+
+function heredocBlocks(script) {
+  const blocks = [];
+  const start = /([^\n]*?)<<(-?)[ \t]*(?:(['"])([A-Za-z_][A-Za-z0-9_]*)\3|\\([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))[^\n]*\n/gu;
+  let match;
+  while ((match = start.exec(script))) {
+    const tag = match[4] || match[5] || match[6];
+    const end = new RegExp(`^${match[2] ? "\\t*" : ""}${tag}[\\t ]*$`, "mu").exec(script.slice(start.lastIndex));
+    if (!end) continue;
+    const body = script.slice(start.lastIndex, start.lastIndex + end.index);
+    blocks.push({ body, quoted: Boolean(match[3] || match[5]), shell: /(?:^|[;&|\s])(?:bash|sh|zsh|dash)(?:\s|$)/u.test(match[1]) });
+    start.lastIndex += end.index + end[0].length;
+  }
+  return blocks;
+}
+
 /**
  * WHAT: Collects the rm and rmdir targets in a command that Claude Code stops for a person.
  * WHY: Keeps a pane from waiting on a removal the agent can write in an accepted form.
  */
 export function stoppingRmTargets(command) {
   const found = [];
+  for (const block of heredocBlocks(String(command || ""))) {
+    if (block.shell) found.push(...stoppingRmTargets(block.body));
+  }
   let changedDirectory = false;
   for (const words of simpleCommands(String(command || ""))) {
     let i = 0;
@@ -101,8 +153,8 @@ function simpleCommands(script) {
     }
     if (c === "#" && !word) { const j = script.indexOf("\n", i); i = j < 0 ? script.length : j; continue; }
     if (c === "<" && script[i + 1] === "<" && script[i + 2] !== "<") {
-      const tag = /^<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/u.exec(script.slice(i));
-      if (tag) { endWord(); heredocs.push(tag[2]); i += tag[0].length; continue; }
+      const tag = /^<<-?\s*(?:(['"])([A-Za-z_][A-Za-z0-9_]*)\1|\\([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))/u.exec(script.slice(i));
+      if (tag) { endWord(); heredocs.push(tag[2] || tag[3] || tag[4]); i += tag[0].length; continue; }
     }
     if (c === "\n") {
       endCommand();

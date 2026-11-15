@@ -5,7 +5,9 @@ import {
   nextPromptStep,
   openPromptsSnapshot,
   permissionDecisionLine,
+  permissionModeAllowsAnswer,
 } from "../core/permission-watchdog.mjs";
+import { parseJsonlWindow } from "../core/jsonl-window.mjs";
 import { isAutocompactOffer } from "../core/dismiss.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
@@ -80,6 +82,13 @@ export function createPermissionWatchdog({
   captureTimeoutMs = 5_000,
   // The bridge's agent has no paneDirectory: every prompt threw here from 2026-09-15 to 1.25.402.
   sessionIdentity = (agentConfig, paneIdx) => latestClaudeSessionIdentity(panePathFor(agentConfig, paneIdx))?.sessionId || null,
+  sessionMode = (agentConfig, paneIdx, sessionId) => {
+    const session = latestClaudeSessionIdentity(panePathFor(agentConfig, paneIdx));
+    if (!session || session.sessionId !== sessionId) return null;
+    const rows = parseJsonlWindow(session.path, { initialBytes: 256 * 1024, maxBytes: 8 * 1024 * 1024,
+      enough: (events) => events.some((e) => e.type === "permission-mode" && e.sessionId === sessionId) });
+    return rows.filter((e) => e.type === "permission-mode" && e.sessionId === sessionId).at(-1)?.permissionMode || null;
+  },
   // A permission prompt fires a needsYou hook and the autocompact offer follows a turn end, so only those hooks make a capture matter.
   activityOf = createDialogHookStamp(),
   activeMs = 60_000,
@@ -122,6 +131,7 @@ export function createPermissionWatchdog({
       const currentSessionId = sessionIdentity(agentConfig, paneIdx);
       if (!current || current.signature !== expected.signature
           || !currentSessionId || currentSessionId !== expected.sessionId) return false;
+      if (!permissionModeAllowsAnswer(sessionMode(agentConfig, paneIdx, currentSessionId))) return false;
       state.answered = true;
       await agent.typeLiteral(agentConfig.name, keys, paneIdx);
       await agent.sendEnter(agentConfig.name, paneIdx);
@@ -156,7 +166,10 @@ export function createPermissionWatchdog({
   }
 
   async function routeToOrchestrator(agentConfig, paneIdx, prompt, ageMs) {
-    const ownerPane = agentConfig.orchestrator;
+    const validOwner = Number.isSafeInteger(agentConfig.orchestrator) && agentConfig.orchestrator >= 0
+      && agentConfig.orchestrator < agentConfig.panes.length && agentConfig.orchestrator !== paneIdx;
+    const owner = validOwner ? agentConfig.name : "sandman";
+    const ownerPane = validOwner ? agentConfig.orchestrator : (agentConfig.name === "sandman" && paneIdx === 0 ? 1 : 0);
     const text = formatPermissionAlert({
       paneKey: `${agentConfig.name}:${paneIdx}`,
       ageMs,
@@ -164,7 +177,7 @@ export function createPermissionWatchdog({
       command: prompt.command,
       why: "needs the owner's decision",
     });
-    await agent.sendOnly(agentConfig.name, text, ownerPane);
+    await agent.sendOnly(owner, text, ownerPane);
   }
 
   async function inspectPane(agentConfig, paneIdx, at) {
@@ -196,6 +209,7 @@ export function createPermissionWatchdog({
         answered: false,
         orchestratorNotified: false,
         humanNotified: false,
+        lastAgentNoticeAt: null,
       });
       return null;
     }
@@ -212,13 +226,23 @@ export function createPermissionWatchdog({
       }
       return { paneKey, action };
     };
-    const answerable = decision.action === "answer" && config.autoAnswer && Boolean(prev.sessionId);
+    let mode = null;
+    try { if (prev.sessionId) mode = sessionMode(agentConfig, paneIdx, prev.sessionId); }
+    catch (err) { log(`permission mode unreadable for ${paneKey}: ${err.message}`); }
+    const answerable = decision.action === "answer" && config.autoAnswer && Boolean(prev.sessionId) && permissionModeAllowsAnswer(mode);
     const ownerPane = agentConfig.orchestrator;
     const hasOrchestrator = Number.isSafeInteger(ownerPane)
       && ownerPane >= 0
       && ownerPane < agentConfig.panes.length
       && ownerPane !== paneIdx
       && typeof agent.sendOnly === "function";
+    if (prev.lastAgentNoticeAt !== null && typeof agent.sendOnly === "function"
+        && at - prev.lastAgentNoticeAt >= config.humanAgeMs) {
+      try {
+        await routeToOrchestrator(agentConfig, paneIdx, prompt, ageMs);
+        prev.lastAgentNoticeAt = at;
+      } catch (err) { log(`permission route failed for ${paneKey}: ${err.message}`); }
+    }
     const step = nextPromptStep({ ageMs, answerable, hasOrchestrator, state: prev, config });
     if (!step) return null;
 
@@ -243,6 +267,7 @@ export function createPermissionWatchdog({
       prev.orchestratorNotified = true;
       try {
         await routeToOrchestrator(agentConfig, paneIdx, prompt, ageMs);
+        prev.lastAgentNoticeAt = at;
         log(`routed prompt ${prompt.signature.slice(0, 12)} from ${paneKey} to ${agentConfig.name}:${ownerPane}`);
         return decided("escalated-orchestrator", `${agentConfig.name}:${ownerPane} owns the decision`);
       } catch (err) {
@@ -251,14 +276,19 @@ export function createPermissionWatchdog({
     }
 
     prev.humanNotified = true;
-    const text = formatPermissionAlert({ paneKey, ageMs, reason: prompt.reason, command: prompt.command, why: decision.action === "answer" ? "auto-answer is off" : decision.why });
+    if (!hasOrchestrator && prev.lastAgentNoticeAt === null && typeof agent.sendOnly === "function") {
+      try { await routeToOrchestrator(agentConfig, paneIdx, prompt, ageMs); prev.lastAgentNoticeAt = at; }
+      catch (err) { log(`permission route failed for ${paneKey}: ${err.message}`); }
+    }
+    const why = decision.action !== "answer" ? decision.why : !config.autoAnswer ? "auto-answer is off" : "bypass permission mode is not verified";
+    const text = formatPermissionAlert({ paneKey, ageMs, reason: prompt.reason, command: prompt.command, why });
     log(`alert for ${paneKey}: ${decision.why}`);
     await post(agentConfig.name, paneIdx, text);
     if (notifyUser) {
       try { await notifyUser(text, { idempotencyKey: `permission-watchdog:${paneKey}:${prompt.signature.slice(0, 80)}` }); }
       catch (err) { log(`notifyUser failed for ${paneKey}: ${err.message}`); }
     }
-    return decided("escalated-human", decision.action === "answer" ? "auto-answer is off" : decision.why);
+    return decided("escalated-human", why);
   }
 
   async function tick() {
