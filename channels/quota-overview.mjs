@@ -10,6 +10,11 @@ import { clockOf, creditsText, nearestMinute } from "../core/quota-format.mjs";
 import { manualSubscriptionFacts, manualFactText } from "../core/quota-manual-facts.mjs";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const HOUR = 3_600_000, DAY = 24 * HOUR, PHONE_WIDTH = 32;
+// Mattias to sandman:0 2026-11-15 06:25Z, after pressing Codex W's free reset on advice that did not show its week was back in
+// three days: three days was worth a reset, two would have been doubtful.
+const WAIT_WITHIN_MS = 2 * DAY;
 const LOGGED_OUT = new Set(["login_expired", "credentials_expired", "credentials_unavailable", "login_required"]);
 const codexWindows = account => (account.limits?.find(limit => limit.limitId === "codex") || account.limits?.[0])?.windows || [];
 
@@ -87,21 +92,51 @@ function spareFor(fact, facts, config) {
     && other.week.usedPercent < config.warnPercent).sort((a, b) => a.week.usedPercent - b.week.usedPercent)[0] || null;
 }
 
+/** WHAT: Lists when the login's free weekly resets end, soonest first. WHY: A model's reset gives that model's allowance back, never the week. */
+function weeklyResetEnds(subscription, now) {
+  const listed = Array.isArray(subscription.limitResets)
+    ? subscription.limitResets.filter(reset => reset.kind === "weekly").map(reset => reset.expires)
+    : subscription.freeResetsExpire || [];
+  return listed.map(end => Date.parse(end)).filter(end => end > now).sort((a, b) => a - b);
+}
+
+/** WHAT: Tells whether a free weekly reset is worth pressing now. WHY: Keeps a reset from being spent on a week that is back within two days, unless the reset itself ends first. */
+const worthPressing = (weekBackAt, resetEnds, now) => weekBackAt - now > WAIT_WITHIN_MS || resetEnds[0] < weekBackAt;
+
+/** WHAT: Phrases the facts a press is judged by: the week's own return and each reset's end. WHY: He decides on a limited reset, so what it buys stands above the verdict. */
+function resetFactLines(weekBackAt, resetEnds, now) {
+  const away = weekBackAt - now;
+  const lines = [`  week back ${dayAndClock(weekBackAt)}, in ${away < 3 * DAY ? `${Math.round(away / HOUR)} h` : `${Math.round(away / DAY)} d`}`];
+  const dates = resetEnds.map(end => new Date(end)).map(end =>
+    `${end.getDate()} ${MONTHS[end.getMonth()]}${end.getFullYear() === new Date(now).getFullYear() ? "" : ` ${end.getFullYear()}`}`);
+  let line = "  free resets end";
+  dates.forEach((date, index) => {
+    const piece = ` ${date}${index < dates.length - 1 ? "," : ""}`;
+    if ([...line, ...piece].length > PHONE_WIDTH) { lines.push(line); line = `   ${piece}`; } else line += piece;
+  });
+  return dates.length ? [...lines, line] : lines;
+}
+
 /** WHAT: Chooses the one action for the account in use that is stopped now, else the one working nearest a limit it reaches. WHY: Mattias wants a clean recommendation last, or none. */
-function actionLine(facts, { config, now }) {
+function actionLines(facts, { config, now }) {
   const stopped = facts.filter(fact => fact.account.inUse?.length && (fact.blockedBy5h || fact.week?.usedPercent >= 100));
   const nearing = facts.filter(fact => working(fact.account).length && fact.week?.usedPercent >= config.warnPercent
     && fact.week.usedPercent < 100 && fact.runsOut).sort((a, b) => b.week.usedPercent - a.week.usedPercent);
   const fact = [...stopped, ...nearing][0];
-  if (!fact) return null;
+  if (!fact) return [];
   const spare = spareFor(fact, facts, config);
-  if (spare) return `→ Use ${spare.name}: ${fact.engine.switchCommand(spare.account)}`;
+  if (spare) return [`→ Use ${spare.name}: ${fact.engine.switchCommand(spare.account)}`];
+  const spent = fact.week?.usedPercent >= 100;
+  if (!spent && fact.blockedBy5h) return [`→ ${fact.name} back at ${untilClock(fact.blockedBy5h.resetsAt, now)}`];
   // A manually read reset is only actionable while its evidence is fresh.
-  const reset = manualSubscriptionFacts(fact.account.subscription, now).find(item => item.field === "freeResetsLeft");
-  const canReset = reset && !reset.stale && fact.account.subscription.freeResetsLeft > 0;
-  if (fact.week?.usedPercent >= 100) return canReset ? `→ Free reset ${fact.name} now` : `→ ${fact.name} back ${dayAndClock(fact.week.resetsAt)}`;
-  if (fact.blockedBy5h) return `→ ${fact.name} back at ${untilClock(fact.blockedBy5h.resetsAt, now)}`;
-  return canReset ? `→ Free reset ${fact.name} at 0% left` : `→ ${fact.name} back ${dayAndClock(fact.week.resetsAt)}`;
+  const subscription = fact.account.subscription || {};
+  const reset = manualSubscriptionFacts(subscription, now).find(item => item.field === "freeResetsLeft");
+  const resetEnds = weeklyResetEnds(subscription, now);
+  const weeklyLeft = Array.isArray(subscription.limitResets) ? resetEnds.length : subscription.freeResetsLeft;
+  if (!reset || reset.stale || !(weeklyLeft > 0)) return [`→ ${fact.name} back ${dayAndClock(fact.week.resetsAt)}`];
+  const weekBackAt = Date.parse(fact.week.resetsAt), when = spent ? "now" : "at 0% left";
+  return [...resetFactLines(weekBackAt, resetEnds, now),
+    worthPressing(weekBackAt, resetEnds, now) ? `→ Free reset ${fact.name} ${when}` : `→ Wait for ${fact.name}${spent ? "" : ` ${when}`}`];
 }
 
 /**
@@ -116,6 +151,5 @@ export function buildQuotaOverview(snapshot, { config, now = Date.now(), reading
   const width = Math.max(0, ...facts.map(fact => fact.name.length));
   // The percent is what is left, as Mattias asked; the detail lines of amux quota give what is used.
   const table = [`${" ".repeat(width)} panes  left  reset`, ...facts.flatMap(fact => linesOf(fact, width, now))];
-  const action = actionLine(facts, { config, now });
-  return { text: ["```", ...table, "```", ...(action ? [action] : [])].join("\n") };
+  return { text: ["```", ...table, "```", ...actionLines(facts, { config, now })].join("\n") };
 }

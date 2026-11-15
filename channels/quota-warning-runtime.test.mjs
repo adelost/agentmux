@@ -96,7 +96,7 @@ feature("warning activity and background reached-limit routing", () => {
     }],
     then: ["the full alert reaches an affected pane's channel once", send => {
       expect(send).toHaveBeenCalledTimes(1);
-      expect(send.mock.calls[0]).toEqual(["own-channel", expect.stringContaining("→ Free reset Claude A now"), { kind: "notice" }]);
+      expect(send.mock.calls[0]).toEqual(["own-channel", expect.stringContaining("→ Claude A back "), { kind: "notice" }]);
     }],
   });
   unit("a missing channel cannot mark the reached-limit alert as delivered", {
@@ -126,7 +126,7 @@ feature("quota rows are edited, Sky 2026-10-17", () => {
     }],
     then: ["one ordinary edit and one new full-limit signal", ({ send, editNotice }) => {
       expect(send).toHaveBeenCalledTimes(2); expect(editNotice).toHaveBeenCalledTimes(1);
-      expect(send.mock.calls[1][1]).toContain("→ Free reset Claude A now");
+      expect(send.mock.calls[1][1]).toContain("→ Claude A back ");
     }],
   });
 });
@@ -145,7 +145,7 @@ feature("an explicitly deleted quota row", () => {
     }],
     then: ["one missing edit, two creates including the full-limit alert", ({ send, editNotice }) => {
       expect(editNotice).toHaveBeenCalledTimes(1); expect(send).toHaveBeenCalledTimes(2);
-      expect(send.mock.calls[1][0]).toContain("→ Free reset Claude A now");
+      expect(send.mock.calls[1][0]).toContain("→ Claude A back ");
     }],
   });
 });

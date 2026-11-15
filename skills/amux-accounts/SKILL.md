@@ -28,8 +28,20 @@ activates an account and says it should be used, that word covers every pane.
 
 1. Pace lasts until the weekly reset: do nothing.
 2. A free full reset exists: Mattias presses it on claude.ai or chatgpt.com
-   under Settings, Usage. No cache is lost. amux cannot see free resets.
+   under Settings, Usage. No cache is lost. Before proposing it, state when
+   the account's week comes back by itself, when each free weekly reset ends,
+   and one verdict, press now or wait. Wait when the week is back within two
+   days, unless a reset ends before that (Mattias 2026-11-15: three days was
+   worth a reset, two would have been doubtful). `amux quota` prints the same
+   lines under its table while the login's entry was read within a day. A
+   model's reset (Fable) gives back that model's allowance, never the week.
+   amux knows free resets only from the login's entry in
+   `~/.agentmux/account-profiles.json`, filled in by hand: after a press,
+   update its count, ends and kinds together.
 3. Only then a switch, to the account with the most room before its reset.
+
+Codex room is used, not saved (Mattias 2026-11-15 via sandman:0): a Codex
+account with plenty of room takes work before a reset is proposed.
 
 When Mattias writes in a pane channel, amux answers there for each account
 panes run on at `AMUX_QUOTA_WARN_PERCENT` (default 80 % weekly used) or more:

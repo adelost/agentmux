@@ -138,6 +138,53 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
   });
 });
 
+// Mattias to sandman:0 2026-11-15 06:25Z, after pressing Codex W's free reset on advice that did not show its week was back in
+// three days: three days was worth a reset, two would have been doubtful. The advice shows the week's own return and when each
+// free reset ends, then one verdict.
+feature("advice about a free reset says what the press is worth", () => {
+  const READ = "2026-10-17T10:00:00Z";
+  const weekly = (...expires) => ({ freeResetsLeft: expires.length, freeResetsReadAt: READ, limitResets: expires.map(at => ({ kind: "weekly", expires: at })) });
+  const spent = (resetsAt, subscription) => render([{ ...codex("2", "mattias.wetterlind", 100, resetsAt, panes("lsrc", 4)), subscription }]).slice(-3);
+  unit("a week more than two days away is worth the reset", {
+    when: ["Codex W is spent, its week back in 79 hours, two weekly resets left", () =>
+      spent("2026-10-20T19:19:00Z", weekly("2026-11-30T20:25+01:00", "2026-12-01T23:08+01:00"))],
+    then: ["the week's return, the resets' ends, then press", lines => expect(lines).toEqual([
+      "  week back Tue 21:19, in 3 d",
+      "  free resets end 30 Nov, 1 Dec",
+      "→ Free reset Codex W now",
+    ])],
+  });
+  unit("a week back within two days is waited for", {
+    when: ["the same account with its week back in 46 hours", () =>
+      spent("2026-10-19T09:50:00Z", weekly("2026-11-30T20:25+01:00", "2026-12-01T23:08+01:00"))],
+    then: ["the same facts, then wait", lines => expect(lines).toEqual([
+      "  week back Mon 11:50, in 46 h",
+      "  free resets end 30 Nov, 1 Dec",
+      "→ Wait for Codex W",
+    ])],
+  });
+  unit("a reset that ends before the week is back is pressed, not lost", {
+    when: ["the week is back in 46 hours and the first reset ends the day before", () =>
+      spent("2026-10-19T09:50:00Z", weekly("2026-10-18T20:00+02:00", "2026-12-01T23:08+01:00"))],
+    then: ["press", lines => expect(lines.at(-1)).toBe("→ Free reset Codex W now")],
+  });
+  unit("a model's reset is never offered for a spent week", {
+    when: ["Claude V is spent with one Fable reset left", () => render([{ ...claude("v12345nd", 100, "2026-10-22T20:00:00Z", panes("claw", 2), { name: "Claude V" }),
+      subscription: { freeResetsLeft: 1, freeResetsReadAt: READ, limitResets: [{ kind: "fable", expires: "2027-03-09T08:59+01:00" }] } }]).at(-1)],
+    then: ["only the week's return is named", line => expect(line).toBe("→ Claude V back Thu 22:00")],
+  });
+  unit("every advice line fits a phone, also with three resets and another year", {
+    when: ["three weekly resets, the last next year", () => render([{ ...codex("2", "mattias.wetterlind", 100, "2026-10-20T19:19:00Z", panes("lsrc", 4)),
+      subscription: weekly("2026-11-30T20:25+01:00", "2026-12-12T23:42+01:00", "2027-03-09T08:59+01:00") }])],
+    then: ["no advice line passes 32 characters and every end is named", lines => {
+      const advice = lines.slice(lines.lastIndexOf("```") + 1);
+      expect(advice.filter(line => [...line].length > 32)).toEqual([]);
+      expect(advice.join(" ")).toMatch(/30 Nov,.*12 Dec,.*9 Mar 2027/u);
+      expect(advice.at(-1)).toBe("→ Free reset Codex W now");
+    }],
+  });
+});
+
 // lsrc:0 2026-10-20: Codex A drew paid credits unseen once its 5 h window was spent at about 17:35Z.
 feature("a Codex account's paid credits in the quota box", () => {
   unit("the balance stands under the 5 h line, within a phone's width", {

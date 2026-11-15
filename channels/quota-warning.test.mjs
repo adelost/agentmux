@@ -41,6 +41,8 @@ const posted = async (snapshot, now = NOW) => {
 };
 
 // Which accounts may trigger a notice: Mattias via skyvw:0 07:18Z. What it says: lsrc:0's quota box for Mattias, later that day.
+// These accounts have no entry with a freshly read free reset, so since 293f9284 (24 Oct, a manually read reset is only
+// actionable while its evidence is fresh) their advice is when the week is back. The reset advice itself: quota-overview.test.mjs.
 feature("active-account warning with the quota box, 2026-10-17", () => {
   unit("09:15 posts once for Codex A and gives inactive ai:2 no advice", {
     when: ["rendering the original readings with measured inactivity", () => posted(morning())],
@@ -52,7 +54,7 @@ feature("active-account warning with the quota box, 2026-10-17", () => {
       "Claude W     2   93%  Wed 02:00",
       "Claude A     1    5%  Wed 02:00",
       "```",
-      "→ Free reset Codex A at 0% left",
+      "→ Codex A back Thu 08:13",
     ].join("\n")])],
   });
   unit("09:15 moves ai:2 to wetterlind when ai:2 is active", {
@@ -81,16 +83,16 @@ feature("active-account warning with the quota box, 2026-10-17", () => {
     when: ["only the alternate account is at 80 percent", () => posted({ accounts: [
       account("claude", "adelost", 95), account("claude", "spare", 80, []),
     ] })],
-    then: ["the advice is the free reset, not /byt", ([text]) => expect(text.split("\n").at(-1)).toBe("→ Free reset Claude A at 0% left")],
+    then: ["the advice is the week's return, not /byt", ([text]) => expect(text.split("\n").at(-1)).toBe("→ Claude A back Wed 02:00")],
   });
-  unit("a full account in use says it is used up and to reset now", {
+  unit("a full account in use says it is used up and when it is back", {
     when: ["16 panes have just reached the weekly limit", () => posted({ accounts: [
       account("claude", "mattias.wetterlind", 100, Array.from({ length: 16 }, (_, i) => `test:${i}`)),
     ] })],
     then: ["the stop is explicit", ([text]) => expect(text.split("\n").slice(2)).toEqual([
       "Claude W    16    0%  Wed 02:00",
       "```",
-      "→ Free reset Claude W now",
+      "→ Claude W back Wed 02:00",
     ])],
   });
 });
@@ -109,7 +111,7 @@ feature("account warning cooldown and reached-limit delivery", () => {
     }],
     then: ["a distinct reached-limit warning is delivered immediately", fx => {
       expect(fx.notify).toHaveBeenCalledTimes(2);
-      expect(fx.notify.mock.calls[1][0]).toContain("→ Free reset Claude A now");
+      expect(fx.notify.mock.calls[1][0]).toContain("→ Claude A back Wed 02:00");
     }],
   });
   unit("the background check emits only newly full accounts", {
@@ -117,7 +119,7 @@ feature("account warning cooldown and reached-limit delivery", () => {
       const fx = fixture(); await fx.check(95, NOW, { fullOnly: true }); await fx.check(100, NOW + 1_000, { fullOnly: true }); return fx;
     }],
     then: ["the full account gets one warning without a human message", fx => {
-      expect(fx.notify).toHaveBeenCalledTimes(1); expect(fx.notify.mock.calls[0][0]).toContain("→ Free reset Claude A now");
+      expect(fx.notify).toHaveBeenCalledTimes(1); expect(fx.notify.mock.calls[0][0]).toContain("→ Claude A back Wed 02:00");
     }],
   });
   unit("another account's first warning posts the whole overview again", {

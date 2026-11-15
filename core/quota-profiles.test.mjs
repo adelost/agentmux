@@ -193,6 +193,10 @@ feature("account-profiles.json version 2", () => {
       "claude:wetterlind": { subscription: { freeResetsExpire: ["2026-11-07T00:48+01:00"] } },
       "claude:attrois": { subscription: { limitResets: [{ kind: "weekly", expires: "2026-12-10T23:00+01:00" }, { kind: "fable", expires: "2027-03-09T08:59+01:00" }] } },
       "claude:io": { subscription: { limitResets: [{ kind: "Weekly reset", expires: "2026-12-10T23:00+01:00" }] } },
+      // Codex W's entry of 2026-11-15 06:23Z: the ends were read after he pressed a reset, the kinds still named the pressed one.
+      "codex:pressed": { subscription: { freeResetsLeft: 2, freeResetsReadOn: "2026-11-15",
+        freeResetsExpire: ["2026-12-01T23:48+01:00", "2026-12-12T23:42+01:00"],
+        limitResets: [{ kind: "weekly", expires: "2026-11-30T21:19+01:00" }, { kind: "weekly", expires: "2026-12-01T23:48+01:00" }] } },
       "slot:1": { name: "not a login" },
     },
     slots: { "claude:2": { home: "/profiles/claude/adelost" } },
@@ -216,12 +220,15 @@ feature("account-profiles.json version 2", () => {
       expect(entries.get("claude:attrois")).toEqual({ subscription: { limitResets: [
         { kind: "weekly", expires: "2026-12-10T23:00+01:00" }, { kind: "fable", expires: "2027-03-09T08:59+01:00" }] } });
       expect(entries.get("claude:io")).toEqual({});
+      expect(entries.get("codex:pressed")).toEqual({ subscription: { freeResetsLeft: 2, freeResetsReadOn: "2026-11-15",
+        freeResetsExpire: ["2026-12-01T23:48+01:00", "2026-12-12T23:42+01:00"] } });
       expect(problems).toEqual([
         "codex:wetterlind: subscription.renewsOn needs YYYY-MM-DD",
         "codex:wetterlind: subscription.freeResetsExpire needs a list of times like 2026-10-29T20:24+01:00",
         "codex:wetterlind: subscription.freeResetsLeft and freeResetsReadOn go together",
         "claude:wetterlind: subscription.freeResetsExpire goes with freeResetsLeft",
         'claude:io: subscription.limitResets needs a list like [{"kind":"weekly","expires":"2026-12-10T23:00+01:00"}]',
+        "codex:pressed: subscription.limitResets and freeResetsExpire name different ends",
         "slot:1: not an engine:login entry",
       ]);
     }],

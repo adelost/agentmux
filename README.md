@@ -565,7 +565,10 @@ appears under its account only while it blocks it, and a second short line
 gives the subscription's renewal date, the free resets left and the day the
 first of them ends when the login's entry has them; what does not fit 32
 characters gets a line of its own. At most one action follows: the switch command, when a used-up
-window comes back, or a free reset. A week that lasts until its reset at the
+window comes back, or a free reset. Advice about a free reset stands under two facts, when the week
+comes back by itself and when each free weekly reset ends, and reads press now or wait: wait when the
+week is back within two days, unless a reset ends before that. A model's reset is never offered for a
+spent week. A week that lasts until its reset at the
 last day's pace gets no advice. The box is the warning (80/90/100 percent), the
 `/quota` reply and the top of `amux quota`. Bridge notices and command replies
 are in English, without emoji.

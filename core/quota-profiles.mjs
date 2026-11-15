@@ -171,6 +171,9 @@ const SUBSCRIPTION_FIELDS = Object.freeze({
     need: 'a list like [{"kind":"weekly","expires":"2026-12-10T23:00+01:00"}]' },
 });
 
+const sortedTimes = (moments) => moments.map((moment) => Date.parse(moment)).sort((a, b) => a - b);
+const sameMoments = (left, right) => left.length === right.length && sortedTimes(left).every((at, index) => at === sortedTimes(right)[index]);
+
 /** WHAT: Checks one login's subscription fields. WHY: Keeps a free-reset count from standing without the day it was read. */
 function subscriptionOf(key, value, problems) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -191,6 +194,12 @@ function subscriptionOf(key, value, problems) {
   if (kept.freeResetsExpire && kept.freeResetsLeft === undefined) {
     problems.push(`${key}: subscription.freeResetsExpire goes with freeResetsLeft`);
     delete kept.freeResetsExpire;
+  }
+  // 2026-11-15: Codex W's ends were read after he pressed a reset while its kinds still named the pressed one, and the
+  // quota box's advice reads the ends by kind. Kinds that name other ends are dropped, and the ends stand.
+  if (kept.freeResetsExpire && kept.limitResets && !sameMoments(kept.freeResetsExpire, kept.limitResets.map((reset) => reset.expires))) {
+    problems.push(`${key}: subscription.limitResets and freeResetsExpire name different ends`);
+    delete kept.limitResets;
   }
   return Object.keys(kept).length ? kept : null;
 }
