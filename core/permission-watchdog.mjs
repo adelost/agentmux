@@ -187,12 +187,14 @@ export function openPromptsSnapshot(at, open) {
     ts: new Date(at).toISOString(),
     prompts: open.map((p) => ({
       pane: p.paneKey,
-      signature: String(p.signature || "").slice(0, 16),
+      signature: String(p.signature || ""),
+      sessionId: p.sessionId,
       firstSeenAt: new Date(p.firstSeenAt).toISOString(),
       reason: p.reason,
       decision: p.decision,
       orchestratorNotified: p.orchestratorNotified,
       humanNotified: p.humanNotified,
+      lastAgentNoticeAt: p.lastAgentNoticeAt,
       answered: p.answered,
     })),
   }, null, 2)}\n`;

@@ -28,7 +28,7 @@ const PROMPT = `
 const UNSAFE = PROMPT.replace('Q=/mnt/q/Chathelper-traningsdata-2026-09-10/GEMMA-4-TEST/TRANINGSDATA; ', "");
 const IDLE = "● Bash\n  done\n\n❯ ";
 
-function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null, defaults = false, realActivity = false, activityOf = () => "unchanged", mode = "bypassPermissions" }) {
+function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1: "session-1" }, capture = null, defaults = false, realActivity = false, activityOf = () => "unchanged", mode = "bypassPermissions", saved = null, start = 0 }) {
   const decisions = [];
   const snapshots = [];
   const beats = [];
@@ -41,13 +41,14 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
   const discord = { send: vi.fn(async () => {}) };
   const notifyUser = vi.fn(async () => ({ sent: true }));
   const deliveryBroker = { runExclusive: vi.fn(async (_a, _p, fn) => fn()) };
-  let t = 0;
+  let t = start;
   const wd = createPermissionWatchdog({
     agent, discord, notifyUser, deliveryBroker, agentsYamlPath: "x.yaml",
     config: { enabled: true, autoAnswer, pollMs: 1, answerAgeMs: 10_000, promptAgeMs: 120_000, humanAgeMs: 600_000 },
     sessionMode: () => mode,
     ...(defaults ? {} : { sessionIdentity: (_agentConfig, pane) => sessionIds[pane] ?? null, ...(realActivity ? {} : { activityOf }) }),
     recordDecision: (line) => decisions.push(JSON.parse(line)),
+    loadOpenPrompts: () => saved,
     publishOpenPrompts: (text) => snapshots.push(JSON.parse(text)),
     beat: (metrics) => beats.push(metrics),
     captureTimeoutMs: 50,
@@ -57,6 +58,18 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
 }
 
 describe("permission watchdog", () => {
+  it("keeps alert and repeat clocks after restart for the same session and prompt", async () => {
+    const screens = { 0: UNSAFE };
+    const before = harness({ screens });
+    await before.wd.tick(); before.advance(121_000); await before.wd.tick();
+    const after = harness({ screens, saved: before.snapshots.at(-1), start: 122_000 });
+    await after.wd.tick(); after.advance(599_000); await after.wd.tick();
+    expect(after.discord.send).not.toHaveBeenCalled();
+    expect(after.agent.sendOnly).toHaveBeenCalledTimes(1);
+    const different = harness({ screens, saved: before.snapshots.at(-1), start: 122_000, sessionIds: { 0: "other" } });
+    await different.wd.tick(); different.advance(1_000); await different.wd.tick();
+    expect(different.agent.sendOnly).not.toHaveBeenCalled();
+  });
   it("keeps the alert clock across a transient blank without duplicate notices", async () => {
     const screens = { 0: UNSAFE };
     const h = harness({ screens });
