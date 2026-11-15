@@ -31,7 +31,7 @@ export async function quotaFloorRefusal({ job, quotaFloor, now }) {
   const cached = await deliveryPreparationStage("quota-floor:cached", () => quotaFloor.windowsFor(paneKey)).catch(() => ({ unavailable: true }));
   if (!cached?.unavailable && !holdOf(cached)) return null;
   // A pane quota recovery just moved may still be listed on its old account; re-read where it runs now.
-  const fresh = await deliveryPreparationStage("quota-floor:fresh", () => quotaFloor.windowsFor(paneKey, { fresh: true })).catch(() => null);
+  const fresh = await deliveryPreparationStage("quota-floor:fresh", () => quotaFloor.windowsFor(paneKey, { fresh: true, heldRefresh: isQuotaFloorHeldJob(job) })).catch(() => null);
   if (!fresh || fresh.unavailable) return "quota-floor: fresh account reading unavailable; existing hold remains";
   const hold = holdOf(fresh);
   // A clean-stop nudge, and a notice that lets the dispatcher move stopped panes, may use the weekly reserve, never

@@ -18,13 +18,13 @@ const accountIdentity = profile => {
 
 /** WHAT: Reads Codex quota through a shared fifteen-minute dashboard budget. WHY: Prevents reminder and dashboard consumers from duplicating app-server reads. */
 export async function readCodexQuotaBudgeted(profile, { now = Date.now, read = readCodexAccountQuota,
-  cacheOnly = false, budgetDir = join(homedir(), ".agentmux", "quota-budget", "codex"),
+  cacheOnly = false, heldRefresh = false, budgetDir = join(homedir(), ".agentmux", "quota-budget", "codex"),
   sleep = ms => new Promise(done => setTimeout(done, ms)), ...options } = {}) {
   const key = createHash("sha256").update(`${resolve(profile.home)}:${accountIdentity(profile)}`).digest("hex").slice(0, 32);
   const path = join(budgetDir, `${key}.json`);
   const cached = () => {
     const entry = readEntry(path);
-    return entry && now() >= entry.attemptedAt && now() - entry.attemptedAt < QUOTA_REFRESH_INTERVAL_MS
+    return entry && now() >= entry.attemptedAt && now() - entry.attemptedAt < (heldRefresh ? 60_000 : QUOTA_REFRESH_INTERVAL_MS)
       ? entry.result : null;
   };
   const existing = cached();
