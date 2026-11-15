@@ -120,6 +120,11 @@ describe("the 13 Sep artifact rm", () => {
 });
 
 describe("nextPromptStep", () => {
+  it("alerts on the original clock when a fresh capture delays an answer", () => {
+    expect(nextPromptStep({ ageMs: 121_000, answerAgeMs: 1_000, answerable: true, hasOrchestrator: false,
+      state: { answered: false, orchestratorNotified: false, humanNotified: false },
+      config: { answerAgeMs: 10_000, promptAgeMs: 120_000, humanAgeMs: 600_000 } })).toBe("human");
+  });
   const config = { autoAnswer: true, answerAgeMs: 10_000, promptAgeMs: 120_000, humanAgeMs: 600_000 };
   const open = { answered: false, orchestratorNotified: false, humanNotified: false };
 

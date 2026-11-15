@@ -232,7 +232,7 @@ export function createPermissionWatchdog({
       } catch (err) { log(`permission route failed for ${paneKey}: ${err.message}`); }
     }
     const stepAgeMs = answerable && prev.answerObservedAt != null ? at - prev.answerObservedAt : ageMs;
-    const step = nextPromptStep({ ageMs: stepAgeMs, answerable, hasOrchestrator, state: prev, config });
+    const step = nextPromptStep({ ageMs, answerAgeMs: stepAgeMs, answerable, hasOrchestrator, state: prev, config });
     if (!step) return null;
 
     if (step === "answer") {

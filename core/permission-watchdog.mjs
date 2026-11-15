@@ -153,8 +153,8 @@ export function detectPermissionPrompt(paneText) {
  * WHAT: Resolves the one step a blocking prompt has earned at its current age.
  * WHY: Keeps a prompt from reaching Mattias before its owner has had the chance.
  */
-export function nextPromptStep({ ageMs, answerable, hasOrchestrator, state, config }) {
-  if (answerable && !state.answered && ageMs >= config.answerAgeMs) return "answer";
+export function nextPromptStep({ ageMs, answerAgeMs = ageMs, answerable, hasOrchestrator, state, config }) {
+  if (answerable && !state.answered && answerAgeMs >= config.answerAgeMs) return "answer";
   if (!state.orchestratorNotified && !state.humanNotified && ageMs >= config.promptAgeMs) {
     return hasOrchestrator ? "orchestrator" : "human";
   }
