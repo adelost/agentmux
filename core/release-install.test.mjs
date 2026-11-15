@@ -133,7 +133,8 @@ feature("explicit-SHA release artifact", () => {
       return { base, home, repo, installed, cleanup: () => rmSync(base, { recursive: true, force: true }) };
     }],
     when: ["snapshotting then restoring into a fresh package", (ctx) => {
-      const configs = snapshotRuntimeConfig(ctx.repo, ctx.installed, ctx.home);
+      // No explicit path: the suite pins AGENTMUX_YAML for every test (test/setup-env.mjs), and this case is the home's precedence.
+      const configs = snapshotRuntimeConfig(ctx.repo, ctx.installed, ctx.home, {});
       const fresh = join(ctx.base, "fresh-package");
       mkdirSync(fresh, { recursive: true });
       restoreRuntimeConfig(configs, fresh, ctx.home);
