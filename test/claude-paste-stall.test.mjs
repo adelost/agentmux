@@ -456,6 +456,28 @@ feature("amux's own collapsed paste whose Enter Claude dropped is submitted unde
       } finally { await fixture.clean(); }
     }],
   });
+  component("a visually wrapped long owned draft submits but a changed word does not", {
+    given: ["two composers render a long word across a screen line", () => {
+      const exact = claudePane(), changed = claudePane();
+      const text = `[from x:1]\n\n${"a".repeat(160)} original`;
+      const display = `[from x:1]\n\n${"a".repeat(97)}\n${"a".repeat(63)} original`;
+      exact.pane.composer = display;
+      changed.pane.composer = display.replace("original", "changed");
+      return { exact, changed, text };
+    }],
+    when: ["both drafted jobs retry", async ({ exact, changed, text }) => ({
+      exact: await deliver(exact, text, { knownDrafted: true }),
+      changed: await deliver(changed, text, { knownDrafted: true }),
+    })],
+    then: ["the original is submitted once and the changed text is held", async (result, { exact, changed }) => {
+      try {
+        expect(result.exact).toBeNull();
+        expect(result.changed).toMatch(/durable draft is not visible/u);
+        expect(exact.pane.submitted).toHaveLength(1);
+        expect(enters(changed.pane)).toBe(0);
+      } finally { await exact.clean(); await changed.clean(); }
+    }],
+  });
   component("one dropped Enter: the bounded rescue submits the job's own collapsed paste once", {
     given: ["an idle Claude pane that drops the first Enter", () => {
       const fixture = claudePane();

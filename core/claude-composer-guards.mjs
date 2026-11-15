@@ -14,7 +14,7 @@ export { claudeSafePasteParts } from "./claude-paste-stall.mjs";
 export function claudeUnfoldedDraftMatches(screen, prompt) {
   const lines = composerLines(screen);
   const visible = lines.map((line, index) => index === 0 ? line.replace(COMPOSER_LINE_RE, "") : line).join("\n").trim();
-  return Boolean(visible) && visible === prompt.trim();
+  return Boolean(visible) && visible.replace(/\s/gu, "") === prompt.replace(/\s/gu, "");
 }
 
 /**
