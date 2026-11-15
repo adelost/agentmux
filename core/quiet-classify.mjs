@@ -35,6 +35,10 @@ const GOAL_LINE = /^[\s>*_`#-]*GOAL:/u;
 // rule needing his yes was forwarded in the replay of 06:00 to 10:00Z).
 const REPORT_LINE = /^[\s>*_`#-]*(?:SUMMARY|GOAL|DONE|VERIFIED):/u;
 
+// A named pane owns the decision unless it is the configured delegate. Do not infer ownership from surrounding words.
+const PANE = /\b[A-Za-z][\w-]*:\d+\b/gu;
+const namesAnotherPane = (line, delegate) => [...line.matchAll(PANE)].some(([pane]) => pane.toLowerCase() !== delegate.toLowerCase());
+
 const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
 // What the delegate can answer without him: a yes or no, or a decision named for him. The configured operator's name
@@ -116,13 +120,13 @@ const verdict = (cls, line = null, what = null) => ({ class: cls, line, what });
  * WHAT: Maps a pane's turn-final reply to the reason it went quiet.
  * WHY: Keeps the rules for his hands, decisions and left work in one pure place.
  */
-export function classifyQuiet(reply, { parked = false, operator = operatorName() } = {}) {
+export function classifyQuiet(reply, { parked = false, operator = operatorName(), delegate = process.env.AMUX_QUIET_DELEGATE || "lsrc:0" } = {}) {
   if (parked) return verdict("quota");
   const text = String(reply ?? "");
   const lines = waitingLines(text);
   const hands = handsIn(lines);
   if (hands) return verdict("hands", plainLine(hands.line), hands.what);
-  const decision = lastLineMatching(lines.filter((line) => !REPORT_LINE.test(line)), decisionWords(operator));
+  const decision = lastLineMatching(lines.filter((line) => !REPORT_LINE.test(line) && !namesAnotherPane(line, delegate)), decisionWords(operator));
   if (decision) return verdict("decision", plainLine(decision));
   const left = leftWork(text);
   if (left) return verdict("left", left);

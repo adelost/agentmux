@@ -100,7 +100,7 @@ export function replayQuiet(d, { sinceMs, untilMs }) {
     if (!parked.has(pane)) parked.set(pane, d.parkStore.read(pane.slice(0, pane.lastIndexOf(":")), Number(pane.slice(pane.lastIndexOf(":") + 1))));
     return parked.get(pane);
   };
-  const episodes = quietEpisodes(log, { untilMs, operator: d.operator, isParked: (pane, unit) => parkedThen(recordOf(pane), unit.endMs) })
+  const episodes = quietEpisodes(log, { untilMs, operator: d.operator, delegate: d.delegate, isParked: (pane, unit) => parkedThen(recordOf(pane), unit.endMs) })
     .filter((episode) => episode.startMs > sinceMs);
   const leadFor = (pane) => leadOf(pane, d.rosterText, { delegate: d.delegate });
   const lines = simulate(episodes, { seen: {}, delegate: d.delegate, leadFor, index, untilMs });

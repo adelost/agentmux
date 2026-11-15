@@ -83,12 +83,12 @@ export function episodeKey(pane, verdict, replyId) {
  * WHAT: Collects every reply left quiet long enough for its class, with its class and key.
  * WHY: Keeps the cron and the replay on one definition of a quiet pane.
  */
-export function quietEpisodes(log, { untilMs, quietMs = QUIET_AFTER_MS, operator = operatorName(), isParked = () => false } = {}) {
+export function quietEpisodes(log, { untilMs, quietMs = QUIET_AFTER_MS, operator = operatorName(), delegate, isParked = () => false } = {}) {
   const episodes = [];
   for (const [pane, rows] of rowsByPane(log)) {
     const [agent, paneIndex] = [pane.slice(0, pane.lastIndexOf(":")), Number(pane.slice(pane.lastIndexOf(":") + 1))];
     const units = replyUnits(rows).map((unit) => {
-      const verdict = classifyQuiet(unit.reply, { parked: isParked(pane, unit), operator });
+      const verdict = classifyQuiet(unit.reply, { parked: isParked(pane, unit), operator, delegate });
       const needMs = quietNeedMs(verdict, quietMs);
       return { ...unit, pane, agent, paneIndex, verdict, key: episodeKey(pane, verdict, unit.replyId), needMs, quietFromMs: unit.endMs + needMs };
     });

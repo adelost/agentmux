@@ -103,7 +103,7 @@ async function actQuiet(d) {
     if (!parked.has(pane)) parked.set(pane, d.parkStore.read(...splitPane(pane))?.state === "parked");
     return parked.get(pane);
   };
-  const open = openEpisodes(quietEpisodes(log, { untilMs: nowMs, operator: d.operator, isParked }));
+  const open = openEpisodes(quietEpisodes(log, { untilMs: nowMs, operator: d.operator, delegate: d.delegate, isParked }));
   const context = { nowMs, seen: d.store.seen(), delegate: d.delegate, leadFor: (pane) => leadOf(pane, d.rosterText, { delegate: d.delegate }), index };
   const lines = dry ? ["AMUX_QUIET=0: nothing is sent or marked"] : [];
   const listed = [];

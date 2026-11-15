@@ -9,6 +9,21 @@ const OPERATOR = "Mattias";
 const classify = (reply, options = {}) => classifyQuiet(reply, { operator: OPERATOR, ...options });
 
 feature("quiet: why a pane went quiet", () => {
+  unit("a named pane owns its decision", {
+    given: ["decisions naming another pane, the delegate, no pane, and a custom delegate", () => [
+      ["Planen går till deep:0 för ja eller nej, svar till sandman:0.", {}],
+      ["deep:0 ska säga ja eller nej.", {}],
+      ["lsrc:0: ditt beslut behövs.", {}],
+      ["Väntar på ditt ja eller nej.", {}],
+      ["deep:0: ditt beslut behövs.", { delegate: "deep:0" }],
+      ["lsrc:0 och deep:0 ska ge ja eller nej.", {}],
+      ["SUMMARY: deep:0 vill ha ditt ja.\nVäntar på ditt ja eller nej.", {}],
+    ]],
+    when: ["classifying the waiting lines", (cases) => cases.map(([reply, options]) => classify(reply, options).class)],
+    then: ["only the delegate's own or unnamed decisions are forwarded", (classes) =>
+      expect(classes).toEqual(["unclear", "unclear", "decision", "decision", "decision", "unclear", "decision"])],
+  });
+
   unit("the claw:0 line is a decision", {
     given: ["a reply that ends with a bold waiting line, a yes or no and a cost, after a NOW line that waits on gates", () => replyEndingWith(LINES.decision)],
     when: ["classifying it", (reply) => classify(reply)],
