@@ -57,6 +57,15 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
 }
 
 describe("permission watchdog", () => {
+  it("recaptures a still-open dialog after a transient blank screen", async () => {
+    const screens = { 0: PROMPT };
+    const h = harness({ screens });
+    await h.wd.tick();
+    screens[0] = IDLE; h.advance(10_000); await h.wd.tick();
+    screens[0] = PROMPT; h.advance(10_000); await h.wd.tick();
+    h.advance(11_000);
+    expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:0", action: "answered" }]);
+  });
   it("notices a permission dialog after a stop at the same timestamp", () => {
     const states = new Map([["lsrc:0", { state: "idle", ts: "2026-11-15T12:00:00.000Z" }]]);
     const stamp = createDialogHookStamp({ states: () => states });

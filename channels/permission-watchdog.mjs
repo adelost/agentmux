@@ -80,6 +80,13 @@ export function createPermissionWatchdog({
   const due = createCaptureDue({ activityOf, activeMs });
   const captureDue = (agentConfig, paneIdx, at) => due(agentConfig, paneIdx, at, { tracking: seen.has(`${agentConfig.name}:${paneIdx}`) });
 
+  function markMissing(paneKey, at) {
+    const prior = seen.get(paneKey);
+    if (!prior) return;
+    if (prior.missingSince == null) prior.missingSince = at;
+    if (at - prior.missingSince >= 60_000) seen.delete(paneKey);
+  }
+
   // A pane whose capture never returns must not hold every other pane's prompt:
   // on 2026-09-29 no round had finished since the bridge restarted the day before.
   async function capture(agentConfig, paneIdx) {
@@ -164,7 +171,7 @@ export function createPermissionWatchdog({
       content = await capture(agentConfig, paneIdx);
     } catch (err) {
       if (/timed out/u.test(err.message)) log(`${paneKey}: ${err.message}`);
-      seen.delete(paneKey);
+      markMissing(paneKey, at);
       return null;
     }
     if (isAutocompactOffer(content)) return keepAutocompact(agentConfig, paneIdx, at);
@@ -172,11 +179,11 @@ export function createPermissionWatchdog({
     // its numbered options and "Esc to cancel" in the last lines with no
     // composer below, so a footer-less capture is still recognised.
     const prompt = detectPermissionPrompt(content);
-    if (!prompt) { seen.delete(paneKey); return null; }
+    if (!prompt) { markMissing(paneKey, at); return null; }
     const sessionId = sessionIdentity(agentConfig, paneIdx);
 
     const prev = seen.get(paneKey);
-    if (!prev || prev.signature !== prompt.signature || prev.sessionId !== sessionId) {
+    if (!prev || prev.missingSince != null || prev.signature !== prompt.signature || prev.sessionId !== sessionId) {
       seen.set(paneKey, {
         signature: prompt.signature,
         sessionId,
@@ -299,7 +306,7 @@ export function createPermissionWatchdog({
   }
 
   function publishOpen(at) {
-    const open = [...seen.entries()].map(([paneKey, state]) => ({ paneKey, ...state }));
+    const open = [...seen.entries()].filter(([, state]) => state.missingSince == null).map(([paneKey, state]) => ({ paneKey, ...state }));
     const text = openPromptsSnapshot(at, open);
     const shape = text.replace(/"ts": "[^"]*"/u, "");
     if (shape === publishedPrompts) return;
