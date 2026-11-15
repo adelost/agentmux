@@ -57,6 +57,21 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
 }
 
 describe("permission watchdog", () => {
+  it("keeps the alert clock across a transient blank without duplicate notices", async () => {
+    const screens = { 0: UNSAFE };
+    const h = harness({ screens });
+    await h.wd.tick();
+    screens[0] = IDLE; h.advance(90_000); await h.wd.tick();
+    screens[0] = UNSAFE; h.advance(10_000); await h.wd.tick();
+    h.advance(20_000); await h.wd.tick();
+    expect(h.agent.sendOnly).toHaveBeenCalledTimes(1);
+    expect(h.discord.send).toHaveBeenCalledTimes(1);
+    h.advance(120_000); await h.wd.tick();
+    expect(h.agent.sendOnly).toHaveBeenCalledTimes(1);
+    h.advance(480_000); await h.wd.tick();
+    expect(h.agent.sendOnly).toHaveBeenCalledTimes(2);
+    expect(h.discord.send).toHaveBeenCalledTimes(1);
+  });
   it("recaptures a still-open dialog after a transient blank screen", async () => {
     const screens = { 0: PROMPT };
     const h = harness({ screens });

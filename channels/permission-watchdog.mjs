@@ -183,7 +183,7 @@ export function createPermissionWatchdog({
     const sessionId = sessionIdentity(agentConfig, paneIdx);
 
     const prev = seen.get(paneKey);
-    if (!prev || prev.missingSince != null || prev.signature !== prompt.signature || prev.sessionId !== sessionId) {
+    if (!prev || (prev.missingSince != null && prev.answered) || prev.signature !== prompt.signature || prev.sessionId !== sessionId) {
       seen.set(paneKey, {
         signature: prompt.signature,
         sessionId,
@@ -196,6 +196,10 @@ export function createPermissionWatchdog({
         lastAgentNoticeAt: null,
       });
       return null;
+    }
+    if (prev.missingSince != null) {
+      delete prev.missingSince;
+      prev.answerObservedAt = at;
     }
     const ageMs = at - prev.firstSeenAt;
     const decision = classifyPermissionPrompt(prompt, { home });
@@ -227,7 +231,8 @@ export function createPermissionWatchdog({
         prev.lastAgentNoticeAt = at;
       } catch (err) { log(`permission route failed for ${paneKey}: ${err.message}`); }
     }
-    const step = nextPromptStep({ ageMs, answerable, hasOrchestrator, state: prev, config });
+    const stepAgeMs = answerable && prev.answerObservedAt != null ? at - prev.answerObservedAt : ageMs;
+    const step = nextPromptStep({ ageMs: stepAgeMs, answerable, hasOrchestrator, state: prev, config });
     if (!step) return null;
 
     if (step === "answer") {
