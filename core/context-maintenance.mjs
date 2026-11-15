@@ -89,7 +89,7 @@ export function lastContextCompactAt(state, name, pane) {
 /** WHAT: Reads the current context-generation fence. WHY: Keeps warm, cold and nightly maintenance from repeating a paid attempt without new work. */
 export function contextMaintenanceAttempt(state, name, pane, identity = null, now = Date.now(), { readOnly = false } = {}) {
   let record = state?.get?.(STATE_KEY, {})?.[paneKey(name, pane)];
-  if (!record || record.status === "NOT_SENT") return null;
+  if (!record || record.status === "NOT_SENT" || untypedNightlyStop(record)) return null;
   if (!readOnly && (record.status === "ATTEMPTING" || record.status === "UNKNOWN")) {
     record = resolveExpiredCompact(state, paneKey(name, pane), { identity, now }) || record;
   }
@@ -119,6 +119,9 @@ export function contextMaintenanceAttempt(state, name, pane, identity = null, no
   }
   return record;
 }
+
+// The nightly pass once stored the stop before its command was typed as FAILED; such a receipt spent nothing either.
+const untypedNightlyStop = record => record.status === "FAILED" && record.reason === "compact-pre-submit-state-changed";
 
 /** WHAT: Stores a maintenance intent before the model call. WHY: Prevents a crash or an ambiguous compact from becoming permission to spend again. */
 export function beginContextCompact(state, name, pane, identity, { command = null, source = null, compactCause = null, beforeTokens = null } = {}) {

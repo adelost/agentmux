@@ -518,6 +518,43 @@ feature("nightly context budget", () => {
       then: ["no slash is typed", ({ result, calls }) => { expect(calls).toBe(0); expect(result.rows[0].status).toBe("failed"); }],
     });
   }
+  component("a compact stopped before its command is typed fails only its own night", {
+    when: ["a delivery arrives before the command is typed, and the pane is idle and over budget the next night", async () => {
+      const fx = fixture();
+      try {
+        fx.deps.mirror = async () => { fx.change({ queued: 1 }); };
+        const stopped = await runNightlyCompact(fx.ctx, {}, fx.deps);
+        fx.deps.mirror = async () => {};
+        fx.change({ queued: 0 });
+        const sameNight = await runNightlyCompact(fx.ctx, {}, fx.deps);
+        const nextNight = await runNightlyCompact(fx.ctx, {}, { ...fx.deps, now: () => now() + 86_400_000 });
+        return { stopped, sameNight, nextNight, calls: fx.calls() };
+      } finally { fx.clean(); }
+    }],
+    then: ["the night keeps its one failed attempt and the next night compacts the pane", ({ stopped, sameNight, nextNight, calls }) => {
+      expect(stopped.rows[0].status).toBe("failed");
+      expect(sameNight.rows[0].reason).toBe("already-attempted:failed"); expect(sameNight.unresolved).toBe(1);
+      expect(nextNight.rows[0]).toMatchObject({ status: "within-budget", afterTokens: 23_000 });
+      expect(nextNight.unresolved).toBe(0); expect(calls).toBe(1);
+    }],
+  });
+  component("a receipt stored as failed for a command that was never typed does not fail a later night", {
+    when: ["the pane has stopped since the night of the attempt", async () => {
+      const fx = fixture(), journal = join(fx.root, "session.jsonl");
+      fx.ctx.state.set("context_maintenance_by_pane_v1", { "claw:4": {
+        receiptStoreVersion: 1, sessionId: "same-session", sessionPath: journal, cursor: { positions: { [journal]: 0 } },
+        status: "FAILED", nightlyStatus: "failed", nightlyDateKey: "2026-09-04", reason: "compact-pre-submit-state-changed",
+        beforeTokens: 521_218, attemptedAt: "2026-09-04T02:03:57.565Z", at: Date.parse("2026-09-04T02:03:57.565Z"),
+      } });
+      fx.change({ running: false, tokens: 521_218 });
+      try { return { result: await runNightlyCompact(fx.ctx, {}, fx.deps), calls: fx.calls() }; }
+      finally { fx.clean(); }
+    }],
+    then: ["the stopped pane is skipped and nothing is unresolved", ({ result, calls }) => {
+      expect(result.rows[0]).toMatchObject({ status: "skipped", reason: "not-running-tmux" });
+      expect(result.unresolved).toBe(0); expect(calls).toBe(0);
+    }],
+  });
   component("ambiguous failed compact is durable and never blindly repeated", {
     when: ["the engine call fails after intent was stored", async () => {
       const fx = fixture();

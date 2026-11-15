@@ -63,7 +63,10 @@ export function readNightlyCompactAttempt(state, path, dateKey, key) {
 const sharedStatus = row => row.status === "attempting" ? "ATTEMPTING" : row.status === "unverified" ? "UNKNOWN"
   : ["within-budget", "compacted-above-budget", "compacted-unmeasured", "nothing-to-compact"].includes(row.status)
     ? row.reason === "stale-attempt-measured" ? "MEASURED" : "VERIFIED"
-    : row.reason === "stale-attempt-above-budget" ? "MEASURED" : "FAILED";
+    : row.reason === "stale-attempt-above-budget" ? "MEASURED" : row.submitted === false ? "NOT_SENT" : "FAILED";
+
+// A failed attempt whose command was never submitted spent nothing: it holds its own night, never a later one.
+const unsent = (status, submitted) => status === "failed" && !submitted ? { submitted: false } : {};
 
 function importLegacyAttempt(state, key, dateKey, row, facts, now) {
   if (!state || !row || row.sessionId !== facts.sessionId || row.sessionPath !== facts.sessionPath || compactReceipt(state, key)?.status) return;
@@ -245,7 +248,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       lease = queue.acquireSessionLease(target.agent.name, target.pane.index);
     }
     if (!lease) { rows.push({ pane: key, status: "skipped", reason: "delivery-lease-busy" }); continue; }
-    let intent;
+    let intent, submitted = false;
     const save = (row) => updateCompactReceipt(ctx.state, key, prior => {
       const status = sharedStatus(row);
       const cursor = row.status === "attempting" ? captureJsonlAppendCursor("context-maintenance-v1", [row.sessionPath]) : prior.cursor;
@@ -295,6 +298,7 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
         sendOnly: async (name, text, pane, options) => {
           await check();
           return ctx.agent.sendOnly(name, text, pane, { ...options, existingOnly: true,
+            onSubmitting: async () => { submitted = true; await options?.onSubmitting?.(); },
             maintenanceGuard: async (stage) => {
               if (stage === "paste") return check();
               const current = latestPaneSessionIdentity(target.engine, target.paneDir);
@@ -318,14 +322,15 @@ export async function runNightlyCompact(ctx, flags = {}, dependencies = {}) {
       await sleep(500);
       const after = await observe(ctx, target, { queue, now });
       const outcome = nightlyCompactOutcome(receipt, first, after, policy.maxTokens);
-      const row = { ...intent, ...outcome, compactBoundary: receipt?.compactBoundary === true, finishedAt: new Date(now()).toISOString() };
+      const row = { ...intent, ...outcome, ...unsent(outcome.status, submitted),
+        compactBoundary: receipt?.compactBoundary === true, finishedAt: new Date(now()).toISOString() };
       save(row);
       if (trigger !== "account switch") (dependencies.recordCompact || recordCompactCall)({ at: new Date(now()).toISOString(), pane: key,
         engine: target.engine, source: trigger, outcome: receipt?.ok ? "compacted" : "failed", reason: intent.compactCause,
         failure: receipt?.reason || null, beforeTokens: first.tokens, afterTokens: row.afterTokens ?? null });
       rows.push({ pane: key, ...row });
     } catch (error) {
-      const row = { ...intent, status: intent ? "failed" : "skipped", reason: error.message };
+      const row = { ...intent, status: intent ? "failed" : "skipped", reason: error.message, ...(intent && unsent("failed", submitted)) };
       if (intent) save(row);
       rows.push({ pane: key, ...row });
     } finally { lease.release(); }
