@@ -8,6 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { bashPermissionDecision } from "./rm-target-guard.mjs";
+import { parseJsonlWindow } from "./jsonl-window.mjs";
 
 /**
  * WHAT: Defines watchdog timing: fast answers for safe rm, slow human alerts.
@@ -25,6 +26,14 @@ export const DEFAULT_PERMISSION_WATCHDOG_CONFIG = {
 /** WHAT: Checks the observed permission mode. WHY: Keeps other modes from receiving automatic answers. */
 export function permissionModeAllowsAnswer(mode) {
   return mode === "bypassPermissions";
+}
+
+/** WHAT: Reads the session's latest permission mode. WHY: Keeps stale or foreign sessions from authorizing an answer. */
+export function sessionPermissionMode(path, sessionId) {
+  if (!path || !sessionId) return null;
+  const rows = parseJsonlWindow(path, { initialBytes: 256 * 1024, maxBytes: 8 * 1024 * 1024,
+    enough: (events) => events.some((e) => e.type === "permission-mode" && e.sessionId === sessionId) });
+  return rows.filter((e) => e.type === "permission-mode" && e.sessionId === sessionId).at(-1)?.permissionMode || null;
 }
 
 /**

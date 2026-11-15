@@ -1,10 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { classifyPermissionPrompt, detectPermissionPrompt, nextPromptStep, parsePermissionWatchdogConfig, permissionModeAllowsAnswer } from "./permission-watchdog.mjs";
+import { classifyPermissionPrompt, detectPermissionPrompt, nextPromptStep, parsePermissionWatchdogConfig, permissionModeAllowsAnswer, sessionPermissionMode } from "./permission-watchdog.mjs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 it("requires an observed bypass mode before answering", () => {
   expect(permissionModeAllowsAnswer("bypassPermissions")).toBe(true);
   expect(permissionModeAllowsAnswer("default")).toBe(false);
   expect(permissionModeAllowsAnswer(null)).toBe(false);
+});
+
+it("uses the latest mode of the same session and fails closed on missing data", () => {
+  const dir = mkdtempSync(join(tmpdir(), "amux-permission-mode-")), path = join(dir, "session.jsonl");
+  try {
+    const row = (sessionId, permissionMode) => JSON.stringify({ type: "permission-mode", sessionId, permissionMode });
+    writeFileSync(path, [row("a", "bypassPermissions"), row("b", "bypassPermissions"), row("a", "default")].join("\n") + "\n");
+    expect(sessionPermissionMode(path, "a")).toBe("default");
+    expect(sessionPermissionMode(path, "b")).toBe("bypassPermissions");
+    expect(sessionPermissionMode(path, "c")).toBeNull();
+    expect(sessionPermissionMode(join(dir, "missing"), "a")).toBeNull();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // The screen lsrc:0 sat on for 21 minutes on 2026-09-12 (captured with amux log --tmux).

@@ -6,8 +6,8 @@ import {
   openPromptsSnapshot,
   permissionDecisionLine,
   permissionModeAllowsAnswer,
+  sessionPermissionMode,
 } from "../core/permission-watchdog.mjs";
-import { parseJsonlWindow } from "../core/jsonl-window.mjs";
 import { isAutocompactOffer } from "../core/dismiss.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
@@ -85,9 +85,7 @@ export function createPermissionWatchdog({
   sessionMode = (agentConfig, paneIdx, sessionId) => {
     const session = latestClaudeSessionIdentity(panePathFor(agentConfig, paneIdx));
     if (!session || session.sessionId !== sessionId) return null;
-    const rows = parseJsonlWindow(session.path, { initialBytes: 256 * 1024, maxBytes: 8 * 1024 * 1024,
-      enough: (events) => events.some((e) => e.type === "permission-mode" && e.sessionId === sessionId) });
-    return rows.filter((e) => e.type === "permission-mode" && e.sessionId === sessionId).at(-1)?.permissionMode || null;
+    return sessionPermissionMode(session.path, sessionId);
   },
   // A permission prompt fires a needsYou hook and the autocompact offer follows a turn end, so only those hooks make a capture matter.
   activityOf = createDialogHookStamp(),
