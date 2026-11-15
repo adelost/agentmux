@@ -60,7 +60,7 @@ export function createQuotaParkFacts({
   // The last good reading of each account, which a failed one stands on for a while (STALE_READING_POLICY).
   const lastGood = new Map();
   function fresh() {
-    if (now() - readAt < maxAgeMs) return Promise.resolve(snapshot);
+    if (now() - readAt < (snapshot ? maxAgeMs : 60_000)) return Promise.resolve(snapshot);
     reading ||= quotaReadWithin(read, readTimeoutMs).then((next) => {
       snapshot = next;
       for (const account of next?.accounts || []) if (account.ok) lastGood.set(accountKey(account), account);
@@ -69,6 +69,7 @@ export function createQuotaParkFacts({
     })
       .catch((error) => {
         log(`snapshot read failed: ${error.message}`);
+        if (!snapshot) readAt = now();
         // A timed-out shared call releases every waiter, and never makes an old snapshot fresh.
         if (error.code === "QUOTA_READ_TIMEOUT") return null;
         readAt = now();

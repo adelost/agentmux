@@ -60,6 +60,29 @@ feature("which account a pane's quota facts come from", () => {
       expect(reason).toBeNull(); expect(fx.readHeldClaude).toHaveBeenCalledTimes(1);
     }],
   });
+  unit("a failed first snapshot retries once per minute for all waiting panes", {
+    given: ["one rejected read followed by an account with room", () => {
+      let time = 0;
+      const good = { accounts: [{ ok: true, name: "room", provider: "claude", profile: { key: "claude:1" },
+        inUse: ["test:0"], limits: [] }] };
+      const read = vi.fn().mockRejectedValueOnce(new Error("boot failure")).mockResolvedValue(good);
+      return { read, facts: createQuotaParkFacts({ read, now: () => time, log: () => {} }), setTime: n => { time = n; } };
+    }],
+    when: ["many panes retry before and after the minute", async w => {
+      const first = await w.facts("test:0");
+      w.setTime(59_000); const early = await Promise.all(Array.from({ length: 25 }, () => w.facts("test:0")));
+      const countBefore = w.read.mock.calls.length;
+      w.setTime(61_000); const recovered = await Promise.all(Array.from({ length: 25 }, () => w.facts("test:0")));
+      return { first, early, countBefore, recovered };
+    }],
+    then: ["unavailable stays held until one shared retry obtains a valid snapshot", (result, w) => {
+      expect(result.first).toEqual({ unavailable: true });
+      expect(result.early).toEqual(Array(25).fill({ unavailable: true }));
+      expect(result.countBefore).toBe(1);
+      expect(result.recovered).toEqual(Array(25).fill(expect.objectContaining({ account: expect.objectContaining({ name: "room" }) })));
+      expect(w.read).toHaveBeenCalledTimes(2);
+    }],
+  });
   unit("a stalled shared read releases all waiters and then reads again", {
     given: ["a quota reader with one unresolved read and a later good reading, under a named fake clock", () => {
       vi.useFakeTimers();
@@ -79,6 +102,8 @@ feature("which account a pane's quota facts come from", () => {
     then: ["both receive unavailable, the next call reads anew and the old result cannot overwrite it", async (settled, w) => {
       expect(settled).toEqual([{ unavailable: true }, { unavailable: true }]);
       expect(w.read).toHaveBeenCalledTimes(1);
+      expect(await w.facts("lsrc:0")).toEqual({ unavailable: true });
+      await vi.advanceTimersByTimeAsync(60_000);
       expect(await w.facts("lsrc:0")).toMatchObject({ account: { name: "room" } });
       expect(w.read).toHaveBeenCalledTimes(2);
       w.finish({ accounts: [] }); await Promise.resolve();
