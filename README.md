@@ -282,10 +282,11 @@ noise rejected by VAD, typed `no_speech`/`too_short`, and wordless answers end
 with a short channel notice, never a pane prompt. Accompanying text survives.
 
 An unknown submitted outcome is terminal and cached in the existing inbound
-receipt, including failure of any part or Whisper call. It is never resent.
+receipt, including failure of any part or of the reserve. It is never resent.
 Known access, quota and content refusals are terminal known errors, with a
-channel notice. Only the public `provider_unavailable` admission type, without a run identity, can use labelled Whisper
-fallback. Other pre-submit infrastructure failures retain the separate error
+channel notice. A refusal before any run exists (`provider_unavailable`, `rate_limited`, `audio_allowance`, `over_cap`)
+goes to the labelled reserve: faster-whisper large-v3 on the host's own GPU, which spends nothing, so no paid provider
+stands behind the primary. Other pre-submit infrastructure failures retain the separate error
 notice and pending-record recovery. Recipient-resolved records suppress late
 results. PTT returns terminal codes without enqueuing a pane prompt; the Link
 connector journals these outcomes without a reclaim loop.

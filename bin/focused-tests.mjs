@@ -35,6 +35,7 @@ const TEST_ALIASES = {
   "policies/context-cost.mjs": ["core/context-cost.test.mjs", "core/auto-compact.test.mjs", "core/pause-compact.test.mjs", "channels/pause-compact.test.mjs"],
   "test/fixtures/composer-agent.mjs": ["core/delivery-broker.test.mjs", "core/draft-withdrawal.test.mjs"],
   "bin/transcribe-whisper.sh": ["bin/transcribe-whisper.test.mjs"],
+  "bin/transcribe": ["bin/transcribe-whisper.test.mjs"],
   "core/discord-inbound-store.mjs": ["core/inbound-voice-failure.test.mjs", "core/inbound-reconciler.test.mjs",
     "core/inbound-completed.test.mjs", "core/inbound-transcript-compat.test.mjs", "core/inactive-channel.test.mjs",
     "core/unmapped-channel.test.mjs", "core/inbound-asset-integrity.test.mjs"],

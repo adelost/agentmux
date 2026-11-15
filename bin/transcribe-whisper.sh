@@ -10,8 +10,14 @@
 # spells the heard words against it with /v1/proofread, 2 to 4 s and about
 # 0.0006 USD more per part (ai:1 1 Nov). Mattias
 # 2026-10-30 chose the API over Gemini 2.5 Pro after using it. The Pro chain
-# stays behind AMUX_STT_PRIMARY=gemini as the way back. Benchmark 2026-05-27:
-# Whisper-1 mishears tech terms ("Gemini"→"Yemeni"), so it is only the fallback.
+# stays behind AMUX_STT_PRIMARY=gemini as the way back.
+#
+# Reserve: faster-whisper large-v3 on our own machine (transcribe --backend
+# local), which spends nothing. Mattias 2026-11-15 06:39Z chose it over the
+# paid Whisper-1, so no paid provider is left behind the primary, and the
+# spending cap's refusal may take the reserve like any other refusal before a
+# run. Measured that morning at load 25: a 31 s message took 68 s, of which
+# 47 s loaded the model.
 #
 # Usage: transcribe-whisper.sh <audio_file> [language]
 
@@ -30,9 +36,10 @@ range_marker() { # $1=label $2=start $3=end
 DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO_FILE") || exit 1
 TOTAL_SECONDS="${DURATION%.*}"
 [[ "$TOTAL_SECONDS" =~ ^[0-9]+$ ]] || { echo "[stt] invalid audio duration" >&2; exit 1; }
-# One primary attempt. A verified unavailable admission may use Whisper once,
-# after CPU VAD; a timeout, UNKNOWN, refusal or empty answer never resends audio.
-# Keys load inside transcribe. No GPU or local ASR is used by this wrapper. CPU VAD precedes every call.
+# One primary attempt. A verified unavailable admission may use the local
+# reserve once, after CPU VAD; a timeout, UNKNOWN, refusal or empty answer never
+# resends audio. Keys load inside transcribe. CPU VAD precedes every call; only
+# the reserve uses the GPU.
 GEMINI_CAP_S="${AMUX_STT_GEMINI_CAP_S:-100}"
 # A clip of at most 45 s needs about 400 answer tokens, so a thinking or
 # repetition loop stops at these caps instead of running on to the deadline.
@@ -44,6 +51,9 @@ case "$PRIMARY" in
 esac
 # The API answers a 240 s part in seconds; the cap only bounds a stalled call.
 V1D_CAP_S="${AMUX_STT_V1D_CAP_S:-150}"
+# The reserve hears a 240 s part in about two minutes with its model load; the
+# bridge gives the whole wrapper 300 s (attachments.mjs).
+LOCAL_CAP_S="${AMUX_STT_LOCAL_CAP_S:-240}"
 STT_FAILURE_LOG="$HOME/.agentmux/stt-$PRIMARY-failures.jsonl"
 
 try_backend() { # $1=backend $2=wall-clock-cap $3=clip, then extra transcribe options
@@ -60,7 +70,7 @@ try_primary() { # $1=clip $2=temperature (gemini only)
   fi
 }
 
-# One line per failed primary try, so a clip that whisper1 rescued still says
+# One line per failed primary try, so a clip that the reserve rescued still says
 # why the primary failed. The reason is the provider's error line, never the words.
 log_primary_failure() { # $1=attempt $2=exit $3=seconds $4=stderr-file $5=start $6=end
   mkdir -p "${STT_FAILURE_LOG%/*}" && (umask 077; python3 -I - "$@" "$AUDIO_FILE" "$PRIMARY" >> "$STT_FAILURE_LOG") <<'PY' \
@@ -128,12 +138,12 @@ transcribe_clip() { # $1=clip $2=start $3=end
     echo '[stt] primary outcome is not verified unavailable; no fallback' >&2
     return 22
   fi
-  echo '[stt] primary unavailable; using Whisper after speech detection' >&2
-  if TEXT=$(try_backend whisper1 60s "$clip"); then
-    if has_words "$TEXT"; then printf '[stt-fallback:whisper1] %s\n' "$TEXT"; else echo '[stt:no_speech]'; fi
+  echo '[stt] primary unavailable; using local Whisper after speech detection' >&2
+  if TEXT=$(try_backend local "${LOCAL_CAP_S}s" "$clip"); then
+    if has_words "$TEXT"; then printf '[stt-fallback:local] %s\n' "$TEXT"; else echo '[stt:no_speech]'; fi
     return 0
   fi
-  echo '[stt] Whisper outcome unknown; no retry' >&2
+  echo '[stt] local Whisper failed; no other provider is tried' >&2
   return 22
 }
 
@@ -193,9 +203,9 @@ fallback=false
 joined=""
 for result in "$PARTS"/part-*."$EXT".txt; do
   TEXT=$(< "$result")
-  if [[ "$TEXT" == '[stt-fallback:whisper1] '* ]]; then
+  if [[ "$TEXT" == '[stt-fallback:local] '* ]]; then
     fallback=true
-    TEXT="${TEXT#'[stt-fallback:whisper1] '}"
+    TEXT="${TEXT#'[stt-fallback:local] '}"
   fi
   [[ "$TEXT" == "[stt:no_speech]" || "$TEXT" == '[tyst '* ]] && continue
   [ -n "${TEXT//[[:space:]]/}" ] || { echo "[stt] empty segment transcript" >&2; exit 1; }
@@ -204,7 +214,7 @@ done
 if [ -z "$joined" ]; then
   echo '[stt:no_speech]'
 elif $fallback; then
-  printf '[stt-fallback:whisper1] %s\n' "$joined"
+  printf '[stt-fallback:local] %s\n' "$joined"
 else
   printf '%s\n' "$joined"
 fi

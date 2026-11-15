@@ -80,9 +80,9 @@ export function createAttachmentHandler({
 
   /** WHAT: Posts a readable Discord transcript in bounded chunks. WHY: Keeps long voice notes visible without markdown noise or 2000-character failures. */
   async function replyWithTranscript(msg, attachmentId, text, viaFallback) {
-    const heading = viaFallback ? "**Transcript · Whisper fallback**" : "**Transcript**";
+    const heading = viaFallback ? "**Transcript · local Whisper reserve**" : "**Transcript**";
     const note = viaFallback
-      ? "-# The main transcription was unavailable. Technical terms may be less accurate."
+      ? "-# The main transcription was refused or unavailable. Technical terms may be less accurate."
       : "-# Speech-to-text may contain errors.";
     const chunks = splitMessage(`${heading}\n${text}\n${note}`);
     if (typeof msg.sendTranscriptOnce === "function") {
@@ -112,11 +112,12 @@ export function createAttachmentHandler({
       const path = await downloadToTmp(msg, att, tmpFiles);
       return path ? `[voice message not transcribed (outcome unknown); audio attached: ${path}]` : null;
     }
-    // The wrapper marks fallback-engine transcripts (the primary failed →
-    // whisper1 took over). The mark must survive into BOTH destinations:
-    // whisper1 mishears technical terms, and a silent fallback would be
-    // a quality downgrade nobody knows to compensate for.
-    const FALLBACK_MARK = "[stt-fallback:whisper1] ";
+    // The wrapper marks reserve transcripts (the primary refused or was
+    // unavailable → faster-whisper on our own machine took over). The mark
+    // must survive into BOTH destinations: the reserve has no context to spell
+    // technical terms against, and a silent fallback would be a quality
+    // downgrade nobody knows to compensate for.
+    const FALLBACK_MARK = "[stt-fallback:local] ";
     const viaFallback = transcribed.startsWith(FALLBACK_MARK);
     if (viaFallback) transcribed = transcribed.slice(FALLBACK_MARK.length).trim();
     // Same disclaimer in both destinations: the agent (via pane text)
@@ -125,7 +126,7 @@ export function createAttachmentHandler({
     // the prompt — anyone seeing it knows this is AI-transcribed and
     // may have word-level errors.
     const tagged = viaFallback
-      ? `[transcribed voice via whisper1 FALLBACK (primary transcription failed); extra error-prone on technical terms, interpret intent${lateVoiceNote(msg)}] ${transcribed}`
+      ? `[transcribed voice via the local Whisper RESERVE (primary transcription refused or unavailable); extra error-prone on technical terms, interpret intent${lateVoiceNote(msg)}] ${transcribed}`
       : `[transcribed voice, may contain speech-to-text errors; interpret intent${lateVoiceNote(msg)}] ${transcribed}`;
     await replyWithTranscript(msg, att.id, transcribed, viaFallback);
     return tagged;
@@ -170,7 +171,7 @@ export function createAttachmentHandler({
         writeTmp(tmpPath, buffer);
         tmpFiles.push(tmpPath);
       }
-      // 300s covers the wrapper's full chain (gemini 2×100s + whisper1 60s).
+      // 300s covers the wrapper's full chain (a refusal within seconds, then the local reserve's 240 s; or gemini 2×100s).
       // The old 60s cap killed stalled-but-recoverable gemini calls and
       // surfaced them as a bare "Command failed" (2026-07-11, api:3: the
       // user's voice order was silently never delivered).

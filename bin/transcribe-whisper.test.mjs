@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -8,6 +8,9 @@ import { createDiscordInboundStore } from "../core/discord-inbound-store.mjs";
 import { createInboundReconciler } from "../core/inbound-reconciler.mjs";
 
 const wrapperPath = process.env.AMUX_TRANSCRIBE_SCRIPT || resolve("bin/transcribe-whisper.sh");
+// These cases synthesize up to 250 s of audio and run the real VAD. At host load 25 (15 Nov 06:57Z) four of them took
+// 5 to 11 s and fell on the suite's 5 s limit, with no assertion reached.
+vi.setConfig({ testTimeout: 30_000 });
 
 describe("the existing voice wrapper bounds long clips", () => {
   it("joins 110 seconds in order and durably fences a partial UNKNOWN without replay", async () => {
@@ -209,7 +212,8 @@ describe("primary calls are never repeated after uncertain outcomes", () => {
   });
 });
 
-// Mattias 2026-10-30: the API, not Gemini 2.5 Pro, transcribes voice; whisper1 stays the fallback.
+// Mattias 2026-10-30: the API, not Gemini 2.5 Pro, transcribes voice. Mattias 2026-11-15 06:39Z
+// (delivery:a752a26d1f5d71857cc686fb8d190711): the reserve is faster-whisper on our own machine, not the paid Whisper-1.
 describe("api.v1d.io is the primary transcriber", () => {
   const v1d = { AMUX_STT_PRIMARY: "v1d" };
   it("is the default and gets a 110 s message whole, in one call", () => {
@@ -230,7 +234,7 @@ describe("api.v1d.io is the primary transcriber", () => {
       expect(fx.calls()).toEqual(["v1d", "v1d"]);
     } finally { fx.close(); }
   });
-  it("hands a failed call to whisper1 at once, logs why without the words, and never sends it again", () => {
+  it("hands a refused call to the local reserve at once, logs why without the words, and never sends it again", () => {
     const fx = providerFixture(`if [ "$backend" = v1d ]; then
   echo "v1d 503 provider_unavailable: refused before submit" >&2; exit 21
 fi
@@ -238,12 +242,21 @@ echo "whisper words"`);
     try {
       const result = fx.run(v1d);
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout.trim()).toBe("[stt-fallback:whisper1] whisper words");
-      expect(fx.calls()).toEqual(["v1d", "whisper1"]);
+      expect(result.stdout.trim()).toBe("[stt-fallback:local] whisper words");
+      expect(fx.calls()).toEqual(["v1d", "local"]);
       const log = fx.failures("v1d");
       expect(log).toHaveLength(1);
       expect(log[0]).toMatchObject({ backend: "v1d", attempt: 1, exit: 21, reason: expect.stringContaining("503 provider_unavailable") });
       expect(JSON.stringify(log)).not.toContain("whisper words");
+    } finally { fx.close(); }
+  });
+  it("ends unknown when the local reserve fails, with no paid provider after it", () => {
+    const fx = providerFixture(`[ "$backend" = v1d ] && exit 21
+echo "CUDA out of memory" >&2; exit 1`);
+    try {
+      const result = fx.run(v1d);
+      expect(result.status).toBe(22); expect(result.stdout).toBe("");
+      expect(fx.calls()).toEqual(["v1d", "local"]);
     } finally { fx.close(); }
   });
   // sandman:0 1 Nov: the API answered Mattias' clear 13 s message of 20:40Z without words, and it
@@ -311,8 +324,9 @@ describe("151 terminal speech outcomes", () => {
       execFileSync("ffmpeg", ["-v", "error", "-i", fx.audio, "-af", "volume=-33dB", quiet]);
       const result = fx.run({ AMUX_STT_PRIMARY: "v1d" }, quiet);
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout.trim()).toBe("[stt-fallback:whisper1] ja");
-      expect(fx.calls().filter(x => x === "whisper1")).toHaveLength(1);
+      expect(result.stdout.trim()).toBe("[stt-fallback:local] ja");
+      expect(fx.calls().filter(x => x === "local")).toHaveLength(1);
+      expect(fx.calls()).not.toContain("whisper1");
     } finally { fx.close(); }
   }, 15000);
 });
@@ -323,9 +337,10 @@ describe("151 gateway adapter contract, real codec and stubbed HTTP only", () =>
     ["outage", 21, null], ["content", 23, null], ["auth", 23, null], ["quota", 23, null], ["outage_run", 22, null], ["http_unknown", 22, null], ["proofread", 0, "ja"],
     // 14 Nov 19:14Z: the day's speech calls were spent, the gateway answered this body, and five voice messages reached no pane.
     ["rate_limited", 21, null],
-    // The day's audio time refuses before a run too (ai-gateway src/journal/speech/allowance.ts), so the fallback takes it.
-    // The spending cap does not: a paid path around his cap needs his words (sandman:0 14 Nov 20:5xZ).
-    ["audio_allowance", 21, null], ["over_cap", 23, null],
+    // The day's audio time refuses before a run too (ai-gateway src/journal/speech/allowance.ts), so the reserve takes it.
+    // The spending cap as well since 15 Nov: the reserve is faster-whisper on our own machine and spends nothing
+    // (Mattias 06:39Z, delivery:a752a26d1f5d71857cc686fb8d190711). Until then it stayed a refusal, as no paid path may pass his cap.
+    ["audio_allowance", 21, null], ["over_cap", 21, null],
   ]) it(`preserves ${scenario} semantics`, () => {
     const root = mkdtempSync(join(tmpdir(), "voice-adapter-"));
     try {

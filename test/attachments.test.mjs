@@ -109,9 +109,10 @@ feature("buildPrompt: audio attachment transcription", () => {
       }],
   });
 
+  // Mattias 2026-11-15 06:39Z (delivery:a752a26d1f5d71857cc686fb8d190711): the reserve is faster-whisper on our own machine.
   unit("fallback-marked transcript surfaces the engine switch in the tag", {
-    given: ["wrapper output carrying the whisper1 fallback mark", () => ({
-      ctx: setup({ transcribeOutput: "[stt-fallback:whisper1] hej det är jag" }),
+    given: ["wrapper output carrying the local reserve's mark", () => ({
+      ctx: setup({ transcribeOutput: "[stt-fallback:local] hej det är jag" }),
       msg: fakeMsg({
         id: "m9",
         text: "",
@@ -121,12 +122,12 @@ feature("buildPrompt: audio attachment transcription", () => {
     })],
     when: ["buildPrompt is called", async ({ ctx, msg, tmpFiles }) =>
       ctx.handler.buildPrompt(msg, tmpFiles)],
-    then: ["mark stripped from text, FALLBACK visible in tag for pane AND reply",
+    then: ["mark stripped from text, the reserve visible in tag for pane AND reply",
       async (result, { msg }) => {
-        expect(result).toContain("whisper1 FALLBACK");
+        expect(result).toContain("local Whisper RESERVE");
         expect(result).toContain("hej det är jag");
-        expect(result).not.toContain("[stt-fallback:whisper1]");
-        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("Whisper fallback"));
+        expect(result).not.toContain("[stt-fallback:local]");
+        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("local Whisper reserve"));
       }],
   });
 
