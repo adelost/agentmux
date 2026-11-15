@@ -1,6 +1,6 @@
 import { feature, integration, unit, expect } from "bdd-vitest";
 import { freshCodexAccount, prepareCodexAccountHandover } from "./codex-account-handover.mjs";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -27,6 +27,25 @@ feature("fresh-account handover preserves exact task text and operational receip
 });
 
 feature("fresh account recovery accepts the fleet model", () => {
+  integration("a high-effort pane recovers with a verified fresh session", {
+    given: ["a separate target account with an exact fresh journal", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-fresh-account-"));
+      const sessions = join(root, "sessions"), id = "019f5d43-9b4b-7e42-b8bd-9de61683501b";
+      mkdirSync(sessions, { recursive: true });
+      writeFileSync(join(sessions, "rollout-2026-11-15T12-00-00-test.jsonl"), JSON.stringify({ type: "session_meta", payload: { id, cwd: "/pane", source: "cli", originator: "codex-tui" } }) + "\n");
+      const data = {}, calls = [];
+      return { root, id, calls, state: { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } } };
+    }],
+    when: ["recovering the pane on the target account", async fx => freshCodexAccount({ name: "claw", pane: 5, dir: "/pane",
+      state: fx.state, target: { id: "2", home: fx.root }, handover: { ok: true, text: "handover", path: "/handover" },
+      agent: { captureScreen: async () => TERRA_SCREEN.replaceAll("xhigh", "high"), isBusy: async () => false,
+        restartCodex: async (_name, _pane, launch) => { fx.calls.push(launch); } },
+      statusDriver: async () => ({ ok: true, status: { session: fx.id, model: { id: "gpt-6.1-terra", effort: "high" } } }) })],
+    then: ["the target identity and high effort verify", (result, fx) => {
+      expect(result).toMatchObject({ kind: "switched", fresh: true });
+      expect(fx.calls[0]).toMatchObject({ model: "gpt-6.1-terra", effort: "high", newSession: true });
+    }], cleanup: fx => rmSync(fx.root, { recursive: true, force: true }),
+  });
   unit("a pane showing GPT-6.1 Terra high passes the model check", {
     when: ["recovering a Terra pane that has just started a turn", () => freshCodexAccount({ name: "claw", pane: 5, handover: { ok: true },
       agent: { captureScreen: async () => TERRA_SCREEN.replaceAll("xhigh", "high"), isBusy: async () => true } })],
