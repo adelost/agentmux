@@ -153,21 +153,23 @@ feature("advice about a free reset says what the press is worth", () => {
       };
       const e = make("E", 16, 2), risk = make("Risk", 90, 60);
       const readingsOf = account => account === risk ? [{ at: NOW - 3600000, usedPercent: 80, fableUsedPercent: 50,
+        resetsAt: "2026-10-21T07:00:00Z", fableResetsAt: "2026-10-21T07:00:00Z" },
+      { at: NOW - 60000, usedPercent: 89, fableUsedPercent: 60,
         resetsAt: "2026-10-21T07:00:00Z", fableResetsAt: "2026-10-21T07:00:00Z" }] : [];
       e.observation = risk.observation = { observedAt: new Date(NOW).toISOString() };
       return buildQuotaOverview({ accounts: [e, risk] }, { config, now: NOW, readingsOf }).text;
     }],
     then: ["E gives one point without warning, Risk gives 30 and warns", text => {
-      expect(text).toContain("E: Fable-reset ger 1 veckopoäng");
-      expect(text).toContain("Risk: Fable-reset ger 30 veckopoäng");
-      expect(text).toContain("Risk: veckan tar slut före Fable");
-      expect(text).not.toContain("E: veckan tar slut före Fable");
+      expect(text).toContain("E: Fable reset gives 1 week point");
+      expect(text).toContain("Risk: Fable reset gives 30 week points");
+      expect(text).toContain("Risk: week ends before Fable");
+      expect(text).not.toContain("E: week ends before Fable");
     }],
   });
   unit("at the floor press the Fable reset, and do not estimate another plan", {
     when: ["Ultra at 98/60, Max at 98/60, and Ultra without a Fable reset", () => {
       const make = (name, tier, resets) => {
-        const account = claude(name, 98, "2026-10-21T07:00:00Z", ["deep:1"], { name,
+        const account = claude(name, 98, "2026-10-21T07:00:00Z", ["deep:1"], { name, activeInUse: ["deep:1"],
           subscription: { planTier: tier, freeResetsLeft: resets.length, freeResetsReadAt: "2026-10-17T10:00:00Z", limitResets: resets } });
         account.limits.push({ kind: "weekly_scoped", scopeName: "Fable", usedPercent: 60, resetsAt: "2026-10-21T07:00:00Z" });
         return account;
@@ -176,12 +178,44 @@ feature("advice about a free reset says what the press is worth", () => {
       return render([make("Ultra", "Ultra", fable), make("Max", "Max", fable), make("None", "Ultra", [])]).join("\n");
     }],
     then: ["only Ultra with a reset gets 30 points and a press", text => {
-      expect(text).toContain("Ultra: Fable-reset ger 30 veckopoäng");
-      expect(text).toContain("Ultra: tryck Fable-reset nu");
-      expect(text).not.toContain("Max: Fable-reset ger");
-      expect(text).toContain("Max: tryck Fable-reset nu");
-      expect(text).not.toContain("None: Fable-reset ger");
+      expect(text).toContain("Ultra: Fable reset gives 30 week points");
+      expect(text).toContain("Ultra: press Fable reset now");
+      expect(text).not.toContain("Max: Fable reset gives");
+      expect(text).toContain("Max: press Fable reset now");
+      expect(text).not.toContain("None: Fable reset gives");
       expect(text).not.toContain("→ Use");
+    }],
+  });
+  unit("idle or soon resetting accounts keep their Fable reset, and one-minute noise does not warn", {
+    when: ["S idle at 99/38, its week returns in 36 hours, and E's readings are one minute apart", () => {
+      const s = claude("s", 99, new Date(NOW + 36 * 3600000).toISOString(), [], { name: "S", activeInUse: [] });
+      const e = claude("e", 90, "2026-10-21T07:00:00Z", ["x:1"], { name: "E", activeInUse: ["x:1"] });
+      for (const [a, used] of [[s, 38], [e, 60]]) {
+        a.subscription = { planTier: "Ultra", limitResets: [{ kind: "fable", expires: "2026-11-30T20:25:00Z" }] };
+        a.limits.push({ kind: "weekly_scoped", scopeName: "Fable", usedPercent: used, resetsAt: a.limits[0].resetsAt });
+        a.observation = { observedAt: new Date(NOW).toISOString() };
+      }
+      const readingsOf = a => a === e ? [{ at: NOW - 60000, usedPercent: 89, fableUsedPercent: 60,
+        resetsAt: e.limits[0].resetsAt, fableResetsAt: e.limits[0].resetsAt }] : [];
+      return buildQuotaOverview({ accounts: [s, e] }, { config, now: NOW, readingsOf }).text;
+    }],
+    then: ["S's 19 points remain visible without a press and E has no warning", text => {
+      expect(text).toContain("S: Fable reset gives 19 week points");
+      expect(text).not.toContain("S: press Fable reset now");
+      expect(text).not.toContain("E: week ends before Fable");
+    }],
+  });
+  unit("a Fable press does not hide another account's switch advice", {
+    when: ["one account needs a Fable press while another needs a switch", () => {
+      const fable = claude("fable", 98, "2026-10-21T07:00:00Z", ["deep:1"], { name: "Fable", activeInUse: ["deep:1"],
+        subscription: { planTier: "Ultra", limitResets: [{ kind: "fable", expires: "2026-11-30T20:25:00Z" }] } });
+      fable.limits.push({ kind: "weekly_scoped", scopeName: "Fable", usedPercent: 60, resetsAt: "2026-10-21T07:00:00Z" });
+      return render([fable, codex("1", "adelost", 100, "2026-10-24T11:35:12Z", ["a:0"]),
+        codex("2", "wetterlind", 10, "2026-10-24T11:35:12Z")]).join("\n");
+    }],
+    then: ["both independent actions remain", text => {
+      expect(text).toContain("Fable: press Fable reset now");
+      expect(text).toContain("→ Use Codex W: //switch 2");
     }],
   });
   const READ = "2026-10-17T10:00:00Z";

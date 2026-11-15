@@ -132,8 +132,8 @@ export async function postDueQuotaWarnings({ snapshot, notify, sent, config = pa
   return warned.map(state => ({ ...state, edited: true }));
 }
 
-/** WHAT: Formats the quota box for /quota and amux quota using observed pace. WHY: Keeps both windows' readings together for the Fable forecast. */
+/** WHAT: Formats the quota box for /quota and amux quota with the pace the warnings recorded. WHY: Keeps a view on demand from writing the warning's store. */
 export function quotaBoxText(snapshot, { sent = createSentNoticeStore(), config = parseQuotaWarningConfig(), now = Date.now() } = {}) {
-  const readings = weeklyReadings(sent, snapshot?.accounts || [], now, { record: true });
+  const readings = weeklyReadings(sent, snapshot?.accounts || [], now);
   return buildQuotaOverview(snapshot, { config, now, readingsOf: account => readings.get(account) || [] }).text;
 }

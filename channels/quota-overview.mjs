@@ -122,9 +122,9 @@ function resetFactLines(weekBackAt, resetEnds, now) {
 }
 
 /** WHAT: Chooses the one action for the account in use that is stopped now, else the one working nearest a limit it reaches. WHY: Mattias wants a clean recommendation last, or none. */
-function actionLines(facts, { config, now }) {
-  const stopped = facts.filter(fact => fact.account.inUse?.length && (fact.blockedBy5h || fact.week?.usedPercent >= 100));
-  const nearing = facts.filter(fact => working(fact.account).length && fact.week?.usedPercent >= config.warnPercent
+function actionLines(facts, { config, now, skipAccounts = new Set() }) {
+  const stopped = facts.filter(fact => !skipAccounts.has(fact.account) && fact.account.inUse?.length && (fact.blockedBy5h || fact.week?.usedPercent >= 100));
+  const nearing = facts.filter(fact => !skipAccounts.has(fact.account) && working(fact.account).length && fact.week?.usedPercent >= config.warnPercent
     && fact.week.usedPercent < 100 && fact.runsOut).sort((a, b) => b.week.usedPercent - a.week.usedPercent);
   const fact = [...stopped, ...nearing][0];
   if (!fact) return [];
@@ -151,22 +151,23 @@ function fableAdvice(fact, { now, readingsOf, floorPercent }) {
   if (!reset || !week || !Number.isFinite(fable?.usedPercent)) return [];
   const ultra = account.subscription?.planTier?.toLowerCase() === "ultra";
   const value = Number((fable.usedPercent * 0.5).toFixed(1)).toString().replace(".", ",");
-  const lines = ultra ? [`${name}: Fable-reset ger ${value} veckopoäng`] : [];
+  const lines = ultra ? [`${name}: Fable reset gives ${value} week ${value === "1" ? "point" : "points"}`] : [];
   if (fable.usedPercent >= 100 || (floorPercent > 0 && 100 - week.usedPercent <= floorPercent)) {
-    lines.push(`${name}: tryck Fable-reset nu`);
+    if (account.activeInUse?.length && Date.parse(week.resetsAt) - now > WAIT_WITHIN_MS)
+      lines.push(`${name}: press Fable reset now`);
     return lines;
   }
   if (!ultra) return lines;
   const at = Date.parse(account.observation?.observedAt);
   const same = (a, b) => Number.isFinite(Date.parse(a)) && Math.abs(Date.parse(a) - Date.parse(b)) < 30 * 60_000;
-  const previous = readingsOf(account).filter(p => Number.isFinite(p.at) && p.at < at && now - p.at <= 24 * HOUR
+  const previous = readingsOf(account).filter(p => Number.isFinite(p.at) && at - p.at >= HOUR && now - p.at <= 24 * HOUR
     && Number.isFinite(p.fableUsedPercent) && Number.isFinite(p.usedPercent)
     && p.usedPercent <= week.usedPercent && p.fableUsedPercent <= fable.usedPercent
-    && same(p.resetsAt, week.resetsAt) && same(p.fableResetsAt, fable.resetsAt)).sort((a, b) => b.at - a.at)[0];
+    && same(p.resetsAt, week.resetsAt) && same(p.fableResetsAt, fable.resetsAt)).sort((a, b) => a.at - b.at)[0];
   if (previous) {
     const weekRise = week.usedPercent - previous.usedPercent, fableRise = fable.usedPercent - previous.fableUsedPercent;
     if (weekRise > 0 && (fableRise === 0 || (100 - week.usedPercent) * fableRise < weekRise * (100 - fable.usedPercent)))
-      lines.push(`${name}: veckan tar slut före Fable`);
+      lines.push(`${name}: week ends before Fable`);
   }
   return lines;
 }
@@ -183,7 +184,7 @@ export function buildQuotaOverview(snapshot, { config, now = Date.now(), reading
   const width = Math.max(0, ...facts.map(fact => fact.name.length));
   // The percent is what is left, as Mattias asked; the detail lines of amux quota give what is used.
   const table = [`${" ".repeat(width)} panes  left  reset`, ...facts.flatMap(fact => linesOf(fact, width, now))];
-  const fable = facts.flatMap(fact => fableAdvice(fact, { now, readingsOf, floorPercent }));
-  const action = fable.some(line => line.endsWith("tryck Fable-reset nu")) ? [] : actionLines(facts, { config, now });
-  return { text: ["```", ...table, "```", ...fable, ...action].join("\n") };
+  const fable = facts.map(fact => ({ fact, lines: fableAdvice(fact, { now, readingsOf, floorPercent }) }));
+  const skipAccounts = new Set(fable.filter(item => item.lines.some(line => line.endsWith("press Fable reset now"))).map(item => item.fact.account));
+  return { text: ["```", ...table, "```", ...fable.flatMap(item => item.lines), ...actionLines(facts, { config, now, skipAccounts })].join("\n") };
 }

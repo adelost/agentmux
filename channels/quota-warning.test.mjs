@@ -44,8 +44,8 @@ const posted = async (snapshot, now = NOW) => {
 // These accounts have no entry with a freshly read free reset, so since 293f9284 (24 Oct, a manually read reset is only
 // actionable while its evidence is fresh) their advice is when the week is back. The reset advice itself: quota-overview.test.mjs.
 feature("active-account warning with the quota box, 2026-10-17", () => {
-  unit("two quota reads retain Fable and week together for the race", {
-    when: ["the week rises 80 to 90 and Fable 50 to 60 in an hour", () => {
+  unit("bridge readings retain Fable and week together for the race", {
+    when: ["the week rises 80 to 90 and Fable 50 to 60 in an hour", async () => {
       const { sent } = fixture();
       const snapshot = (week, fable, at) => {
         const item = account("claude", "e", week);
@@ -56,12 +56,14 @@ feature("active-account warning with the quota box, 2026-10-17", () => {
         item.limits.push({ kind: "weekly_scoped", scopeName: "Fable", usedPercent: fable, resetsAt: RESET });
         return { accounts: [item] };
       };
-      quotaBoxText(snapshot(80, 50, NOW), { sent, now: NOW });
-      return quotaBoxText(snapshot(90, 60, NOW + HOUR), { sent, now: NOW + HOUR });
+      await postDueQuotaWarnings({ snapshot: snapshot(80, 50, NOW), sent, notify: async () => {}, now: NOW });
+      const observe = vi.spyOn(sent, "observe");
+      return { text: quotaBoxText(snapshot(90, 60, NOW + HOUR), { sent, now: NOW + HOUR }), observe };
     }],
-    then: ["the second call reports 30 points and warns", text => {
-      expect(text).toContain("E: Fable-reset ger 30 veckopoäng");
-      expect(text).toContain("E: veckan tar slut före Fable");
+    then: ["the second call reports 30 points and warns without writing", ({ text, observe }) => {
+      expect(text).toContain("E: Fable reset gives 30 week points");
+      expect(text).toContain("E: week ends before Fable");
+      expect(observe).not.toHaveBeenCalled();
     }],
   });
   unit("09:15 posts once for Codex A and gives inactive ai:2 no advice", {
