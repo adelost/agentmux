@@ -209,7 +209,6 @@ const discord = TOKEN ? createDiscordChannel({ token: TOKEN, onSent: (channelId,
 
 // Memory admission guard: classifies pressure, alarms on transitions, and
 // frees IDLE Gradle daemons while blocked (core/memory-relief.mjs).
-startBridgeMemoryGuard({ discord, alertChannel: process.env.AMUX_MEMORY_ALERT_CHANNEL || null });
 
 const resolveSleepPane = (agentName, pane) => {
   const configured = listAgents(AGENTS_YAML).find((entry) => entry.name === agentName);
@@ -261,6 +260,8 @@ const deliveryBroker = createDeliveryBroker({
   log: (message) => console.warn(`[delivery-broker] ${message}`),
   memoryContextOptions: { leaderReview: createLeaderReview({ isLeader: leaderFromConfig(listAgents, AGENTS_YAML) }) },
 });
+startBridgeMemoryGuard({ discord, alertChannel: process.env.AMUX_MEMORY_ALERT_CHANNEL || null, tmuxSocket: TMUX_SOCKET,
+  sendSwapAgent: text => deliveryBroker.enqueue({ agentName: "sandman", pane: 0, source: "memory-guard", text }), sendSwapHuman: text => notifyUserDm(text, { title: "Swap pressure" }) });
 
 // Discord is an adapter, not the queue owner. Headless mode still drains CLI jobs.
 if (!TOKEN) {

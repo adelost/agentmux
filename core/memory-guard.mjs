@@ -208,6 +208,7 @@ export function startMemoryGuard({
   onTransition = () => {},
   onPressure = () => {},
   onCachePressure = null,
+  onSample = null,
   log = (message) => console.warn(message),
   clock = () => Date.now(),
   schedule = scheduleInterval,
@@ -218,6 +219,7 @@ export function startMemoryGuard({
   const tick = () => {
     try {
       const { state, previousLevel, changed } = pollMemoryGuardOnce(pollOptions);
+      if (onSample) Promise.resolve(onSample(state.sample)).catch(error => log(`memory-guard sample alarm failed: ${error.message}`));
       const { memFreeKb, cachedKb } = state.sample;
       if (onCachePressure && !cacheReliefRunning && memFreeKb !== null && cachedKb !== null
           && memFreeKb < 6 * 1024 * 1024 && cachedKb > 8 * 1024 * 1024

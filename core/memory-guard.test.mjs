@@ -14,6 +14,7 @@ import {
   transitionGuard,
 } from "./memory-guard.mjs";
 import { pollDiskGuardOnce } from "./disk-guard.mjs";
+import { createSwapAlarm } from "./swap-alarm.mjs";
 
 // 48 GiB host, 4 GiB swap — the 2026-07-20 incident shape.
 const HOST = { memTotalKb: 48 * 1024 * 1024, swapTotalKb: 4 * 1024 * 1024 };
@@ -32,6 +33,20 @@ function sample(availableGiB, swapFreeGiB = 4) {
 }
 
 feature("memory admission guard", () => {
+  unit("alarms on sustained swap exhaustion independent of RAM pressure", {
+    then: ["one episode reports at ten minutes, repeats hourly, and clears", async () => {
+      let time = 0, reads = 0; const agents = [], humans = [], logs = [];
+      const alarm = createSwapAlarm({ clock: () => time, census: async () => { reads++; return ["pane 3 GiB"]; },
+        sendAgent: async text => agents.push(text), sendHuman: async text => humans.push(text), log: text => logs.push(text) });
+      const low = sample(20, 0.2), clear = sample(20, 4);
+      await alarm(low); time = 599_999; await alarm(low);
+      expect(agents).toHaveLength(0); expect(reads).toBe(0);
+      time = 600_000; await alarm(low); expect(agents).toHaveLength(1); expect(reads).toBe(1);
+      time = 4_200_000; await alarm(low); expect(agents).toHaveLength(2); expect(humans).toHaveLength(1); expect(reads).toBe(2);
+      await alarm(clear); time += 1; await alarm(low); time += 600_000; await alarm(low);
+      expect(agents).toHaveLength(3); expect(logs.length).toBeGreaterThan(0);
+    }],
+  });
   unit("disk guard relieves below 100 GB and alerts once until the pressure episode clears", {
     then:["pressure relieves and only two distinct critical episodes alert, in English",async()=>{
       let state=null,reliefs=0;const alerts=[];

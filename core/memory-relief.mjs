@@ -8,6 +8,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseMeminfo, startMemoryGuard } from "./memory-guard.mjs";
+import { createSwapAlarm } from "./swap-alarm.mjs";
+import { paneMemoryCensus } from "./swap-census.mjs";
 
 const GRADLE_DAEMON = /\sorg\.gradle\.launcher\.daemon\.bootstrap\.GradleDaemon (\d+(?:\.\d+)+)(?:\s|$)/u;
 const STATUS_ROW = /^\s*(\d+)\s+(IDLE|BUSY|STOPPED|CANCELED|\S+)\s+(\d+(?:\.\d+)+)/u;
@@ -153,7 +155,7 @@ export function isWsl() {
 }
 
 /** WHAT: Schedules the bridge's memory guard with its alarm and relief. WHY: Keeps pressure policy out of the bridge entry point. */
-export function startBridgeMemoryGuard({ discord = null, alertChannel = null, log = console.warn, relieve = relieveIdleGradleDaemons, ...guardOptions } = {}) {
+export function startBridgeMemoryGuard({ discord = null, alertChannel = null, log = console.warn, relieve = relieveIdleGradleDaemons, sendSwapAgent, sendSwapHuman, tmuxSocket, ...guardOptions } = {}) {
   const notify = async (text, reason) => {
     log(`[memory-guard] ${text}`);
     if (alertChannel && discord) {
@@ -163,6 +165,7 @@ export function startBridgeMemoryGuard({ discord = null, alertChannel = null, lo
   // Alarms go to AMUX_MEMORY_ALERT_CHANNEL when configured, otherwise to the bridge log.
   return startMemoryGuard({
     ...guardOptions,
+    ...(sendSwapAgent && sendSwapHuman ? { onSample: createSwapAlarm({ log, census: () => paneMemoryCensus(tmuxSocket), sendAgent: sendSwapAgent, sendHuman: sendSwapHuman }) } : {}),
     onTransition: ({ from, to, state }) => notify(
       `Memory guard: ${from} → ${to} (MemAvailable ${gibText(state.sample?.memAvailableKb)} GiB, SwapFree ${gibText(state.sample?.swapFreeKb)} GiB): new heavy automatic jobs are ${to === "blocked" || to === "critical" ? "stopped" : "allowed"}.`,
       "alarm",
