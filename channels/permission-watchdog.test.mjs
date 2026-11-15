@@ -9,6 +9,7 @@ import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPermissionWatchdog } from "./permission-watchdog.mjs";
+import { createDialogHookStamp } from "../core/pulse/capture-due.mjs";
 
 const PROMPT = `
  Bash command
@@ -45,7 +46,6 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
     agent, discord, notifyUser, deliveryBroker, agentsYamlPath: "x.yaml",
     config: { enabled: true, autoAnswer, pollMs: 1, answerAgeMs: 10_000, promptAgeMs: 120_000, humanAgeMs: 600_000 },
     sessionMode: () => mode,
-    holdsKeptFiles: () => false,
     ...(defaults ? {} : { sessionIdentity: (_agentConfig, pane) => sessionIds[pane] ?? null, ...(realActivity ? {} : { activityOf }) }),
     recordDecision: (line) => decisions.push(JSON.parse(line)),
     publishOpenPrompts: (text) => snapshots.push(JSON.parse(text)),
@@ -57,6 +57,13 @@ function harness({ screens, autoAnswer = true, sessionIds = { 0: "session-0", 1:
 }
 
 describe("permission watchdog", () => {
+  it("notices a permission dialog after a stop at the same timestamp", () => {
+    const states = new Map([["lsrc:0", { state: "idle", ts: "2026-11-15T12:00:00.000Z" }]]);
+    const stamp = createDialogHookStamp({ states: () => states });
+    const before = stamp({ name: "lsrc" }, 0);
+    states.set("lsrc:0", { state: "needs_you", ts: "2026-11-15T12:00:00.000Z" });
+    expect(stamp({ name: "lsrc" }, 0)).not.toBe(before);
+  });
   it("never answers when the current session mode is default or missing", async () => {
     for (const mode of ["default", null]) {
       const h = harness({ screens: { 0: PROMPT }, mode });
@@ -244,7 +251,6 @@ describe("permission watchdog", () => {
     expect(await h.wd.tick()).toEqual([{ paneKey: "lsrc:0", action: "answered" }]);
   });
 });
-
 describe("the watchdog's own record", () => {
   it("writes one decision line per outcome, so the file answers whether it acted", async () => {
     const screens = { 0: PROMPT, 1: UNSAFE };
@@ -311,27 +317,5 @@ describe("the watchdog stays alive and says so", () => {
     release();
     await first;
     expect(h.agent.capturePane).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe("gitKeepsFilesUnder", () => {
-  it("keeps tracked and new files, lets an ignored folder and a path outside git go", async () => {
-    const { execFileSync } = await import("node:child_process");
-    const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const { gitKeepsFilesUnder } = await import("./permission-watchdog.mjs");
-    const outside = mkdtempSync(join(tmpdir(), "wd-outside-"));
-    const repo = mkdtempSync(join(tmpdir(), "wd-repo-"));
-    execFileSync("git", ["init", "-q", repo]);
-    writeFileSync(join(repo, ".gitignore"), "scratch/\n");
-    mkdirSync(join(repo, "scratch")); writeFileSync(join(repo, "scratch", "a.audio"), "x");
-    mkdirSync(join(repo, "notes")); writeFileSync(join(repo, "notes", "2026-09-14.md"), "new, never committed");
-    mkdirSync(join(outside, "tmp")); writeFileSync(join(outside, "tmp", "b"), "x");
-
-    expect(gitKeepsFilesUnder(join(repo, "scratch"))).toBe(false);
-    expect(gitKeepsFilesUnder(join(repo, "notes"))).toBe(true);
-    expect(gitKeepsFilesUnder(join(repo, "notes", "2026-09-1"))).toBe(true);
-    expect(gitKeepsFilesUnder(join(outside, "tmp"))).toBe(false);
   });
 });

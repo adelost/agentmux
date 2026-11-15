@@ -165,7 +165,7 @@ describe("classifyPermissionPrompt", () => {
 
   // Mattias 2026-09-14: "Kan du inte bygga in i amux att den godkänner RM automatiskt ...
   // Kan du fixa till det så det löser sig automatiskt ordentligt." A literal folder that
-  // is deep enough and holds nothing git keeps is now answered like any other target.
+  // is deep enough is answered like any other target.
   it("answers yes when the bare variable is a deep literal folder", () => {
     expect(classifyPermissionPrompt(varRm('"$D"', 'D=/mnt/q/a/b; rm -rf "$D"'), untracked).action).toBe("answer");
   });

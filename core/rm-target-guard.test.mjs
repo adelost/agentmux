@@ -9,9 +9,16 @@ describe("stoppingRmTargets", () => {
     for (const cmd of ["rm -rf $S/$2", "rm -rf ~/lsrc", "rm -rf /", "rm -rf /mnt/c/Users", "cat <<EOF\n$(touch file)\nEOF", "cat <<EOF\n`touch file`\nEOF", "bash <<'EOF'\nrm -rf /\nEOF", "bash -c 'rm -rf /'", "echo $(rm -rf /)", "cat <<A <<B\none\nA\n$(touch file)\nB"]) {
       expect(decision(cmd).behavior, cmd).toBe("deny");
     }
-    for (const cmd of ["cat <<'EOF'\n$(touch file)\nEOF", "cat <<\\EOF\n$(touch file)\nEOF", "cat <<EOF\n\\$(touch file)\nEOF", "cat <<EOF\n${NAME}\nEOF", "cd $S && rm -rf fresh42d"]) {
+    for (const cmd of ["cat <<'EOF'\n$(touch file)\nEOF", "cat <<'EOF'\n<< literal\nEOF", "echo '<<EOF'", "cat <<\\EOF\n$(touch file)\nEOF", "cat <<EOF\n\\$(touch file)\nEOF", "cat <<EOF\n${NAME}\nEOF", "cd $S && rm -rf fresh42d"]) {
       expect(decision(cmd).behavior, cmd).toBe("allow");
     }
+  });
+
+  it("refuses dangerous targets after here-strings, home variables, unknown variables and unknown heredocs", () => {
+    for (const cmd of ["grep x <<< foo\nrm -rf $S/", "grep x <<< foo\nrm -rf ~/lsrc", 'rm -rf "$HOME"', "rm -rf $HOME/lsrc", "rm -rf ${HOME}", "rm -rf $S", 'rm -rf "$DIR/build"', "cat > f <<EOF-1\n`touch file`\nEOF-1"]) {
+      expect(bashPermissionDecision(cmd, "/home/adelost").behavior, cmd).toBe("deny");
+    }
+    expect(bashPermissionDecision("rm -rf $HOME/lsrc/project/tmp", "/home/adelost").behavior).toBe("allow");
   });
   // The commands that stopped panes: lsrc:1 2026-09-29, lsrc:0 2026-09-12, skyvw:2 2026-09-13, claw:0 2026-09-14.
   it("finds the targets that stopped panes, with the form the check accepts", () => {

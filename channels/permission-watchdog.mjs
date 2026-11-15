@@ -14,30 +14,9 @@ import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs
 import { createCaptureDue, createDialogHookStamp } from "../core/pulse/capture-due.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
-import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-
-/**
- * WHAT: Checks whether git keeps a file at or under a literal rm prefix.
- * WHY: Keeps tracked and uncommitted work from auto-approved deletes.
- */
-export function gitKeepsFilesUnder(path) {
-  // Kept means tracked, or untracked and not ignored. Outside a repository git
-  // knows nothing; any other git failure counts as kept, so unknown never deletes.
-  let dir = path;
-  while (dir !== "/" && !existsSync(dir)) dir = dirname(dir);
-  // A folder means its contents; anything else is a name prefix ("2026-09-1*").
-  const spec = dir === path && statSync(path).isDirectory() ? `${path}/` : `${path}*`;
-  try {
-    const out = execFileSync("git", ["-C", dir, "ls-files", "--cached", "--others", "--exclude-standard", "--", spec], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 20 });
-    return out.trim().length > 0;
-  } catch (err) {
-    if (err.code === "ENOBUFS") return true;
-    return !/not a git repository/u.test(String(err.stderr || ""));
-  }
-}
 
 /**
  * WHAT: Resolves the file that records every watchdog decision.
@@ -75,7 +54,6 @@ export function createPermissionWatchdog({
   log = (msg) => console.log(`permission-watchdog | ${msg}`),
   now = Date.now,
   home = homedir(),
-  holdsKeptFiles = gitKeepsFilesUnder,
   recordDecision = (line) => writeFile(permissionDecisionLogPath(), line, { append: true }),
   publishOpenPrompts = (text) => writeFile(openPromptsPath(), text, { append: false }),
   beat = (metrics) => writeGuardHeartbeat({ key: "permission-watchdog", metrics }),
@@ -212,7 +190,7 @@ export function createPermissionWatchdog({
       return null;
     }
     const ageMs = at - prev.firstSeenAt;
-    const decision = classifyPermissionPrompt(prompt, { home, holdsKeptFiles });
+    const decision = classifyPermissionPrompt(prompt, { home });
     const decided = (action, why) => {
       try {
         recordDecision(permissionDecisionLine({

@@ -22,7 +22,7 @@ export function createDialogHookStamp({ states = latestPaneStatesCached } = {}) 
     const paneKey = `${agentConfig.name}:${paneIdx}`;
     const pushed = states().get(paneKey);
     // A turn start replaces the pane's newest state, so the last dialog hook is remembered across it
-    if (pushed && pushed.state !== "working") last.set(paneKey, pushed.ts);
+    if (pushed && pushed.state !== "working") last.set(paneKey, `${pushed.ts}:${pushed.state}`);
     return last.get(paneKey) ?? null;
   };
 }

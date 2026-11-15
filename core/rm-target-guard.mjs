@@ -7,6 +7,8 @@
 // three in a session it refuses without asking. Refusing the call here, with the
 // form the check accepts, turns a stopped pane into one quick retry.
 
+import { resolveRmTarget, unsafeRmPath } from "./rm-target-resolution.mjs";
+
 // Claude Code 2.1.284's own tests for a target whose root is a variable, so that an
 // empty value removes from / (its internal placeholder character left out).
 const VARIABLE_ROOT = /^["']*\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::?-(?:["']{2}|"?\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"?)?)?\}|([A-Za-z_][A-Za-z0-9_]*))["']*\\?\/(?:[*?[{]|\$|\/|["']|$)/u;
@@ -18,12 +20,11 @@ const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
 export function bashPermissionDecision(command, home = "") {
   const script = String(command || "");
   const deny = (message) => ({ behavior: "deny", message });
-  if (script.split("\n").some((line) => (line.match(/<<-?(?!<)/gu) || []).length > 1)) {
-    return deny("Nothing ran. Write each heredoc as a separate command so its expansion can be checked.");
-  }
   const stopping = stoppingRmTargets(script);
   if (stopping.length) return deny(formatRmRefusal(stopping));
-  for (const block of heredocBlocks(script)) {
+  const blocks = heredocBlocks(script);
+  if (unreadableHeredoc(script, blocks)) return deny("Nothing ran. Quote the heredoc tag and use one complete delimiter per command, or use the file tool.");
+  for (const block of blocks) {
     if (!block.quoted && /(^|[^\\])(?:\\\\)*(?:\$\(|`)/mu.test(block.body)) return deny("Nothing ran. The shell runs text in backticks or substitutions; quote the heredoc tag or write the file with the file tool.");
     if (block.shell) {
       const nested = bashPermissionDecision(block.body, home);
@@ -46,10 +47,19 @@ export function bashPermissionDecision(command, home = "") {
       if (word.startsWith("-")) continue;
       let path = unquote(word);
       if (path === "~" || path.startsWith("~/")) path = home + path.slice(1);
+      path = path.replace(/^\$HOME(?=\/|$)|^\$\{HOME\}(?=\/|$)/u, home);
+      if (path.includes("$")) {
+        const resolved = resolveRmTarget(word, script, home);
+        if (resolved.why) return deny(`Nothing ran. ${word} is not a known literal path; write the literal path.`);
+        for (const value of resolved.paths) {
+          const why = unsafeRmPath(value, home);
+          if (why) return deny(`Nothing ran. ${why}; use a narrower literal path.`);
+        }
+        continue;
+      }
       if (!path.startsWith("/")) continue;
-      const parts = path.split("/").filter(Boolean), hp = home.split("/").filter(Boolean);
-      if (parts.includes("..") || parts.length < 3 || (hp.length && hp.every((p, n) => parts[n] === p) && parts.length <= hp.length + 1)
-          || (parts[0] === "mnt" && parts.length <= 3)) return deny(`Nothing ran. ${word} is too broad; use a narrower literal path.`);
+      const why = unsafeRmPath(path, home);
+      if (why) return deny(`Nothing ran. ${why}; use a narrower literal path.`);
     }
   }
   return { behavior: "allow" };
@@ -57,17 +67,38 @@ export function bashPermissionDecision(command, home = "") {
 
 function heredocBlocks(script) {
   const blocks = [];
-  const start = /([^\n]*?)<<(-?)[ \t]*(?:(['"])([A-Za-z_][A-Za-z0-9_]*)\3|\\([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))[^\n]*\n/gu;
+  const start = /([^\n]*?)(?<!<)<<(-?)(?!<)[ \t]*(?:(['"])([A-Za-z_][A-Za-z0-9_]*)\3|\\([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))(?=[\s;|&<>]|$)[^\n]*\n/gu;
   let match;
   while ((match = start.exec(script))) {
     const tag = match[4] || match[5] || match[6];
     const end = new RegExp(`^${match[2] ? "\\t*" : ""}${tag}[\\t ]*$`, "mu").exec(script.slice(start.lastIndex));
     if (!end) continue;
     const body = script.slice(start.lastIndex, start.lastIndex + end.index);
-    blocks.push({ body, quoted: Boolean(match[3] || match[5]), shell: /(?:^|[;&|\s])(?:bash|sh|zsh|dash)(?:\s|$)/u.test(match[1]) });
+    blocks.push({ body, open: match.index + match[1].length, end: start.lastIndex + end.index + end[0].length,
+      quoted: Boolean(match[3] || match[5]), shell: /(?:^|[;&|\s])(?:bash|sh|zsh|dash)(?:\s|$)/u.test(match[1]) });
     start.lastIndex += end.index + end[0].length;
   }
   return blocks;
+}
+
+function unreadableHeredoc(script, blocks) {
+  let quote = "", pending = null;
+  for (let i = 0; i < script.length; i++) {
+    const c = script[i];
+    if (c === "\\" && quote !== "'") { i++; continue; }
+    if (quote) { if (c === quote) quote = ""; continue; }
+    if (c === "'" || c === '"' || c === "`") { quote = c; continue; }
+    if (c === "#" && (i === 0 || /[\s;&|]/u.test(script[i - 1]))) {
+      const newline = script.indexOf("\n", i); i = newline < 0 ? script.length : newline - 1; continue;
+    }
+    if (c === "<" && script[i - 1] !== "<" && script[i + 1] === "<" && script[i + 2] !== "<") {
+      const block = blocks.find((b) => b.open === i);
+      if (!block || pending) return true;
+      pending = block;
+      i++;
+    } else if (c === "\n" && pending) { i = pending.end - 1; pending = null; }
+  }
+  return false;
 }
 
 /**
@@ -159,7 +190,7 @@ function simpleCommands(script) {
       word += script.slice(i, end); i = end; continue;
     }
     if (c === "#" && !word) { const j = script.indexOf("\n", i); i = j < 0 ? script.length : j; continue; }
-    if (c === "<" && script[i + 1] === "<" && script[i + 2] !== "<") {
+    if (c === "<" && script[i - 1] !== "<" && script[i + 1] === "<" && script[i + 2] !== "<") {
       const tag = /^<<-?\s*(?:(['"])([A-Za-z_][A-Za-z0-9_]*)\1|\\([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))/u.exec(script.slice(i));
       if (tag) { endWord(); heredocs.push(tag[2] || tag[3] || tag[4]); i += tag[0].length; continue; }
     }
