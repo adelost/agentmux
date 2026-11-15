@@ -104,18 +104,18 @@ feature("the reason the sender of a held handoff reads", () => {
 feature("a stalled queue head is told to the pane that watches it", () => {
   const fakeQueue = (jobs) => {
     const sent = [];
-    return { sent, list: () => jobs, enqueue: (job) => { sent.push(job); return { id: `n${sent.length}` }; },
+    return { sent, list: (agent) => agent === "sandman" ? jobs : [], enqueue: (job) => { sent.push(job); return { id: `n${sent.length}` }; },
       update: (job, patch) => Object.assign(job, { metadata: { ...job.metadata, ...patch.metadata } }) };
   };
   const drafted = (createdAt) => ({ id: "ce875ebc434174e7", agentName: "sandman", pane: "0", status: "drafted", createdAt,
     lastReason: "awaiting exact JSONL receipt", metadata: {} });
   const watcherOf = (target) => (target === "sandman:0" ? { session: "deep", pane: 0, key: "deep:0" } : null);
   unit("after 10 min the watcher hears it once, the stalled pane never", {
-    when: ["a drafted head at 9 and 11 min, and again a minute later", () => {
+    when: ["a drafted head at 9 and 11 min, and again a minute later", async () => {
       const T0 = Date.parse("2026-11-12T07:58:23Z");
       const queue = fakeQueue([drafted(T0), { id: "b", status: "pending", metadata: {} }]);
       const at = (ms) => reportStalledHead({ agentName: "sandman", pane: "0", queue, now: () => T0 + ms, log: () => {}, watcherOf });
-      return { results: [at(9 * 60_000), at(11 * 60_000), at(12 * 60_000)], queue };
+      return { results: [await at(9 * 60_000), await at(11 * 60_000), await at(12 * 60_000)], queue };
     }],
     then: ["one notice to deep:0 naming the head, its state and the waiting count", ({ results, queue }) => {
       expect(results.map(Boolean)).toEqual([false, true, false]);
@@ -125,14 +125,45 @@ feature("a stalled queue head is told to the pane that watches it", () => {
     }],
   });
   unit("a submitted turn the pane is working on is no stall", {
-    when: ["the head was submitted 30 min ago", () => {
+    when: ["the head was submitted 30 min ago", async () => {
       const queue = fakeQueue([{ id: "s", status: "submitted", createdAt: 1_000, metadata: {} }]);
-      return { result: reportStalledHead({ agentName: "sandman", pane: "0", queue, now: () => 1_000 + 30 * 60_000, log: () => {}, watcherOf }), queue };
+      return { result: await reportStalledHead({ agentName: "sandman", pane: "0", queue, now: () => 1_000 + 30 * 60_000, log: () => {}, watcherOf }), queue };
     }],
     then: ["nobody is told", ({ result, queue }) => { expect(result).toBeNull(); expect(queue.sent).toEqual([]); }],
   });
   unit("a watcher is never the stalled pane itself", {
     when: ["the config names sandman:0 for sandman:0", () => stallWatcherOf("sandman:0", { read: () => ({ "sandman:0": "sandman:0", default: "deep:0" }) })],
     then: ["no watcher", (watcher) => { expect(watcher).toBeNull(); }],
+  });
+  unit("a stalled first watcher falls back to the second", {
+    when: ["both the target and its first watcher have old drafted heads", async () => {
+      const head = drafted(1_000);
+      const sent = [];
+      const queue = {
+        list: (agent, pane) => agent === "sandman" && Number(pane) === 0 ? [head] : agent === "deep" ? [drafted(1_000)] : [],
+        enqueue: (job) => { sent.push(job); return { id: "n1" }; },
+        update: (job, patch) => Object.assign(job, { metadata: { ...job.metadata, ...patch.metadata } }),
+      };
+      await reportStalledHead({ agentName: "sandman", pane: 0, queue, now: () => 1_000 + 11 * 60_000, log: () => {},
+        watcherOf: () => [{ session: "deep", pane: 0, key: "deep:0" }, { session: "sandman", pane: 1, key: "sandman:1" }] });
+      return sent;
+    }],
+    then: ["the second watcher receives the notice", (sent) => expect(sent[0]).toMatchObject({ agentName: "sandman", pane: 1 })],
+  });
+  unit("all watchers stalled notifies the human once per head", {
+    when: ["two polls find no available watcher", async () => {
+      const head = drafted(1_000), notices = [];
+      const queue = { list: () => [head], enqueue: () => { throw Error("no watcher is available"); },
+        update: (job, patch) => Object.assign(job, { metadata: { ...job.metadata, ...patch.metadata } }) };
+      const run = () => reportStalledHead({ agentName: "sandman", pane: 0, queue, now: () => 1_000 + 11 * 60_000,
+        log: () => {}, watcherOf: () => [{ session: "deep", pane: 0, key: "deep:0" }],
+        notify: async (message) => { notices.push(message); return { sent: true }; } });
+      await run(); await run();
+      return notices;
+    }],
+    then: ["one notice names the pane and its recovery command", (notices) => {
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatch(/sandman:0.*amux enter/u);
+    }],
   });
 });

@@ -98,6 +98,6 @@ export async function runDeliveryPreflight({ agentName, pane, queue, now, queueE
           && (job.attempts > 0 || job.metadata?.preSubmitPark)) await notifyBlocked(job);
     }
   }
-  reportStalledHead({ agentName, pane, queue, now, log });
+  await reportStalledHead({ agentName, pane, queue, now, log });
   return reportStaleDeliveryJobs({ agentName, pane, queue, now, queueEvent, log });
 }

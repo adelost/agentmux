@@ -89,7 +89,7 @@ import {
 import { eraseKeys, isDeliveryCancelRequested, shouldPastePrompt, submitCheckOrErase, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
 import { deliveryPreparationStage } from "./core/delivery-preparation.mjs";
-import { claudeSafePasteParts, createClaudeComposerGuards } from "./core/claude-composer-guards.mjs";
+import { claudeSafePasteParts, claudeUnfoldedDraftMatches, createClaudeComposerGuards } from "./core/claude-composer-guards.mjs";
 import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
 import { assertCodexWorkModel, createCodexCompact, latestPaneSessionIdentity, startCodexProcess } from "./core/codex-process-launch.mjs";
 export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchCommand, buildQwenLaunchCommand } from "./core/agent-launch-command.mjs";
@@ -1045,6 +1045,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     let alreadyComposed = await deliveryPreparationStage("input:composer-read", () => promptAlreadyInComposer(agentName, pane, prompt, {
       ownedDraft: knownDrafted,
     }));
+    if (dialect === "claude" && !knownDrafted) alreadyComposed = false;
     let busyAtSend = false, ownedPaste = null;
     let exactDraft = dialect === "codex" && alreadyComposed;
     // Claude folds a long paste to "[Pasted text #N +M lines]", so a retry never sees the prompt's head. The paste the first attempt recorded,
@@ -1092,11 +1093,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         await t.sendLiteral(target, prompt);
         await wait(1000);
       }
-      // Durable ownership follows the completed pane write, not a later TUI
-      // repaint. Composer scraping may help recovery, but it is never proof
-      // that the payload was or was not delivered.
+      // Ownership follows the completed pane write; only JSONL proves delivery.
       if (dialect === "claude" && !maintenanceGuard) ownedPaste = await claudeGuards.recordOwnPaste(agentName, pane).catch(() => null);
       if (onDrafted) await onDrafted({ claudeOwnedPaste: ownedPaste });
+      if (dialect === "claude" && !maintenanceGuard && !ownedPaste?.draft)
+        ownedPaste = await claudeGuards.recordAfterSettle(agentName, pane, onDrafted);
     } else if (dialect === "codex" || dialect === "kimi") {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
@@ -1119,13 +1120,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         console.warn(`send ${agentName}:${pane}: exact Codex draft not visible; continuing to JSONL-verified submit`);
       }
     }
-    // A previously queued turn can start during the paste/paint interval.
-    // Re-sample immediately before Enter so the delivery layer treats our
-    // prompt as one queued steering write instead of retrying it as idle.
+    // Re-sample a queued turn before Enter so it is treated as a steering write.
     if ((dialect === "codex" && !busyAtSend) || dialect === "kimi") {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
-    // Claude holds an Enter pressed during "Pasting…" and drops it when the paste lands.
     if (dialect === "claude" && !maintenanceGuard) await claudeGuards.requireSettledPaste(agentName, pane, { maintenance: false });
     // Persist ambiguity before Enter; a crash must never authorize a second paste. A cancel at the fence erases our text.
     const eraseTyped = shouldPastePrompt({ knownDrafted, alreadyComposed }) ? () => t.sendKeys(target, eraseKeys(prompt)) : null;
@@ -1190,6 +1188,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
               : codexComposerEndsWithPrompt(snapshot, prompt)));
       }
       const raw = await capturePane(agentName, pane, 15);
+      if (dialect === "claude" && ownedDraft) return claudeUnfoldedDraftMatches(raw, prompt);
       // Composer lines render as "❯ text" (claude) / "› text" (codex) /
       // "> text" (legacy). COMPOSER_LINE_RE is built from dialect data —
       // a hardcoded [❯>] here missed codex's "›", so retries re-typed a
@@ -1271,6 +1270,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    */
   async function clearForeignComposerText(agentName, pane, target, prompt, knownDialect = null) {
     const dialect = knownDialect || await livePaneDialectName(agentName, pane);
+    if (dialect === "claude") return;
     let raw;
     try {
       raw = dialect === "codex"

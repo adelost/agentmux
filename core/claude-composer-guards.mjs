@@ -4,11 +4,18 @@
 import { appendEvent } from "./events.mjs";
 import { codexDeliveryBlocked } from "./codex-delivery-blocked.mjs";
 import { eraseKeys } from "./delivery-fence.mjs";
-import { composerDraft } from "./dialects.mjs";
+import { composerDraft, composerLines, COMPOSER_LINE_RE } from "./dialects.mjs";
 import { claudeComposerHasCollapsedPaste, claudeComposerIsPasting, holdsOwnCollapsedPaste, ownCollapsedPaste, paneClaudeProcess,
   settleClaudePaste } from "./claude-paste-stall.mjs";
 
 export { claudeSafePasteParts } from "./claude-paste-stall.mjs";
+
+/** WHAT: Checks an owned unfolded draft against the visible composer. WHY: Keeps a changed draft from receiving Enter. */
+export function claudeUnfoldedDraftMatches(screen, prompt) {
+  const lines = composerLines(screen);
+  const visible = lines.map((line, index) => index === 0 ? line.replace(COMPOSER_LINE_RE, "") : line).join("\n").trim();
+  return Boolean(visible) && visible === prompt.trim();
+}
 
 /**
  * WHAT: Maps Claude's held paste to "pasting" and a collapsed paste to "foreign", or returns null.
@@ -77,7 +84,15 @@ export function createClaudeComposerGuards({ capture, panePid, sendLiteral, send
 
   /** Reads the collapsed paste amux's own paste just left in the composer; null when Claude showed the text itself. */
   async function recordOwnPaste(agentName, pane) {
-    return ownCollapsedPaste(await capture(agentName, pane), await claudeProcess(agentName, pane));
+    const process = await claudeProcess(agentName, pane);
+    return ownCollapsedPaste(await capture(agentName, pane), process) ?? (process ? { claudeProcess: process } : null);
+  }
+
+  async function recordAfterSettle(agentName, pane, onDrafted) {
+    await requireSettledPaste(agentName, pane, { maintenance: false });
+    const owned = await recordOwnPaste(agentName, pane).catch(() => null);
+    if (owned?.draft && onDrafted) await onDrafted({ claudeOwnedPaste: owned });
+    return owned;
   }
 
   /**
@@ -99,5 +114,5 @@ export function createClaudeComposerGuards({ capture, panePid, sendLiteral, send
     return holdsOwnCollapsedPaste(await capture(agentName, pane), await claudeProcess(agentName, pane), owned);
   }
 
-  return { settlePaste, requireSettledPaste, refuseToTypeAfterDraft, recordOwnPaste, holdsOwnPaste, pasteTransport };
+  return { settlePaste, requireSettledPaste, refuseToTypeAfterDraft, recordOwnPaste, recordAfterSettle, holdsOwnPaste, pasteTransport };
 }

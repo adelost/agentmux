@@ -90,7 +90,8 @@ function claudePane() {
   async function paste(text) {
     if (!asksClipboardForPath(text)) {
       pane.lookup = { pid: null, text };
-      land();
+      if (pane.delayLand) setTimeout(land, pane.delayLand);
+      else land();
       return;
     }
     const pid = await startLookup("lookup");
@@ -384,6 +385,77 @@ async function recoverAfterThreeMinutes(fixture, home, owned) {
 const enters = ({ calls }) => calls.filter((call) => /send-keys.* Enter$/u.test(call)).length;
 
 feature("amux's own collapsed paste whose Enter Claude dropped is submitted under its own job", () => {
+  component("a folded paste that lands during settling is recorded before submit", {
+    given: ["Claude paints the paste after a delay", () => {
+      const fixture = claudePane();
+      fixture.pane.delayLand = 30;
+      return fixture;
+    }],
+    when: ["the first attempt stops at the submit fence and the job retries", async (fixture) => {
+      let owned = null;
+      const first = await deliver(fixture, FOUR_LINES, {
+        onDrafted: async (facts) => { owned = facts?.claudeOwnedPaste ?? owned; },
+        onSubmitting: async () => { throw Error("test submit fence"); },
+      });
+      const retry = await deliver(fixture, FOUR_LINES, { knownDrafted: true, ownedPaste: owned });
+      return { first, retry, owned };
+    }],
+    then: ["the exact marker is retained and the retry submits once", async (result, fixture) => {
+      try {
+        expect(result.first).toMatch(/test submit fence/u);
+        expect(result.owned?.draft).toBe("[Pasted text #1 +3 lines]");
+        expect(result.retry).toBeNull();
+        expect(fixture.pane.submitted).toEqual([FOUR_LINES]);
+        expect(fixture.pane.calls.filter((call) => call.includes("paste-buffer"))).toHaveLength(1);
+      } finally { await fixture.clean(); }
+    }],
+  });
+  component("an owned unfolded three-line draft with a short sender is retried", {
+    given: ["the exact text remains in the composer", () => {
+      const fixture = claudePane();
+      fixture.pane.composer = "[from x:1]\n\nTransport probe only";
+      return fixture;
+    }],
+    when: ["the drafted job is retried", (fixture) => deliver(fixture, "[from x:1]\n\nTransport probe only", { knownDrafted: true })],
+    then: ["it is submitted once without another paste", async (error, fixture) => {
+      try {
+        expect(error).toBeNull();
+        expect(fixture.pane.submitted).toEqual(["[from x:1]\n\nTransport probe only"]);
+        expect(fixture.pane.calls.filter((call) => call.includes("paste-buffer"))).toHaveLength(0);
+      } finally { await fixture.clean(); }
+    }],
+  });
+  component("an absent or changed unfolded draft cannot be retried", {
+    given: ["a foreign draft with the same short sender", () => {
+      const fixture = claudePane();
+      fixture.pane.composer = "[from x:1]\n\nA different message";
+      return fixture;
+    }],
+    when: ["the missing job is retried", (fixture) => deliver(fixture, "[from x:1]\n\nTransport probe only", { knownDrafted: true })],
+    then: ["no Enter is sent and the foreign text stays intact", async (error, fixture) => {
+      try {
+        expect(error).toMatch(/durable draft is not visible/u);
+        expect(enters(fixture.pane)).toBe(0);
+        expect(fixture.pane.composer).toBe("[from x:1]\n\nA different message");
+      } finally { await fixture.clean(); }
+    }],
+  });
+  component("an unowned draft is neither cleared nor submitted when it matches the new prompt", {
+    given: ["a person's composer already holds the same text", () => {
+      const fixture = claudePane();
+      fixture.pane.composer = "[from someone:123] A matching human draft";
+      return fixture;
+    }],
+    when: ["a new job arrives without a durable draft", (fixture) =>
+      deliver(fixture, "[from someone:123] A matching human draft")],
+    then: ["the draft is preserved and no Enter is sent", async (error, fixture) => {
+      try {
+        expect(error).toMatch(/draft amux did not type/u);
+        expect(enters(fixture.pane)).toBe(0);
+        expect(fixture.pane.composer).toBe("[from someone:123] A matching human draft");
+      } finally { await fixture.clean(); }
+    }],
+  });
   component("one dropped Enter: the bounded rescue submits the job's own collapsed paste once", {
     given: ["an idle Claude pane that drops the first Enter", () => {
       const fixture = claudePane();
@@ -460,6 +532,25 @@ feature("amux's own collapsed paste whose Enter Claude dropped is submitted unde
         expect(enters(fixture.pane)).toBe(result.entersBefore);
         expect(fixture.pane.submitted).toEqual([]);
         expect(fixture.pane.composer).toBe("[Pasted text #1 +3 lines]");
+      } finally { home.restore(); await fixture.clean(); }
+    }],
+  });
+
+  component("a process identity alone cannot claim a later folded paste", {
+    given: ["only the original Claude process is known and a different paste occupies its composer", async () => {
+      const fixture = claudePane();
+      const home = idleHome(fixture);
+      const delivered = await deliverDropped(fixture, 3);
+      fixture.pane.composer = "[Pasted text #2 +3 lines]";
+      return { fixture, home, process: delivered.owned.claudeProcess };
+    }],
+    when: ["the original job retries with process identity only", ({ fixture, process }) =>
+      deliver(fixture, FOUR_LINES, { knownDrafted: true, ownedPaste: { claudeProcess: process } })],
+    then: ["the foreign marker stays untouched", async (error, { fixture, home }) => {
+      try {
+        expect(error).toMatch(/durable draft is not visible/u);
+        expect(fixture.pane.composer).toBe("[Pasted text #2 +3 lines]");
+        expect(fixture.pane.submitted).toEqual([]);
       } finally { home.restore(); await fixture.clean(); }
     }],
   });
