@@ -15,7 +15,7 @@ import { jsonlContextFooter } from "../core/context-footer.mjs";
 import { isHarnessPlaceholder, renderTurn } from "../core/reply-forwarder.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey, pendingGraceDueAt } from "../core/watcher-engine.mjs";
 import {
-  classifyModelChange, changeMessage, stopBrief, shouldStopPane, label as modelLabel,
+  classifyModelChange, changeMessage, reportEffortRule, stopBrief, shouldStopPane, label as modelLabel,
   decideRecovery, resumeBrief, recoveryMessage, interruptUntilIdle,
   MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, MODEL_RECOVERY_TIMEOUT_MS,
 } from "../core/model-watch.mjs";
@@ -315,6 +315,7 @@ export function createJsonlWatcher({
     const key = paneKey(name, idx);
     const prev = paneModelSelection(state, name, idx);
     const next = { model: ctx.model, effort: recordPaneModelReading(state, name, idx, ctx.model, ctx.effort ?? null).effort };
+    await reportEffortRule({ state, name, idx, next, channelId, discord, appendEvent, deliveryBroker, log });
     if (isExpectedCodexModel(state, name, idx, config?.[name]?.panes?.[idx], next)) return;
     // amux model is switching this pane on purpose; its old and new model are both expected.
     if (isPaneModelSwitchReading(state, name, idx, next)) return settleLandedClaudeModelSwitch(state, name, idx, next);
@@ -322,7 +323,6 @@ export function createJsonlWatcher({
 
     const change = classifyModelChange(prev, next);
     if (!change) return;
-
     const paneName = `${name}:${idx}`;
     log(`${paneName} model change: ${change.from} → ${change.to} (${change.direction})`);
     try {

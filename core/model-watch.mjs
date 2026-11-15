@@ -15,13 +15,54 @@
 // recovering. Every change still gets a channel line + ledger row.
 
 import { launchModelId } from "./pane-model-state.mjs";
+import { stallWatcherOf } from "./queue-stall-watch.mjs";
 
 const EFFORT_TIERS = { max: 5, xhigh: 4, high: 3, medium: 2, low: 1, minimal: 0 };
+/** WHAT: Defines the maximum effort, per Mattias 15 Nov 2026 11:19–11:21Z. WHY: Keeps all panels under the same rule. */
+export const EFFORT_RULE_MAX = "high";
 const CLAUDE_FAMILY = { fable: 5, mythos: 5, opus: 4, sonnet: 3, haiku: 2 };
 const CODEX_VARIANT = { sol: 3, terra: 2, luna: 1, mini: 0 };
 
 const normalizeModel = (model) => launchModelId(model).trim().toLowerCase();
 const normalizeEffort = (effort) => String(effort || "").trim().toLowerCase();
+
+/** WHAT: Checks a known effort against the fleet rule. WHY: Keeps model names and unknown levels from becoming false alarms. */
+export function effortOverRule(effort) {
+  const tier = EFFORT_TIERS[normalizeEffort(effort)];
+  return Number.isFinite(tier) && tier > EFFORT_TIERS[EFFORT_RULE_MAX];
+}
+
+/** WHAT: Formats one alarm per pane and offending level while storing the state. WHY: Keeps repeated reads quiet while allowing a corrected pane to rearm. */
+export function effortRuleAlarm(state, paneName, reading) {
+  const level = normalizeEffort(reading?.effort), key = "effort_over_rule_v1";
+  const current = { ...state.get(key, {}) };
+  if (!effortOverRule(level)) {
+    if (paneName in current) { delete current[paneName]; state.set(key, current); }
+    return null;
+  }
+  if (current[paneName] === level) return null;
+  current[paneName] = level;
+  state.set(key, current);
+  const model = String(reading.model || "unknown");
+  const [name, pane] = paneName.split(":");
+  const command = /claude|fable|opus|sonnet|haiku|mythos/iu.test(model)
+    ? "/effort high" : `amux model ${name} -p ${pane} ${model} high`;
+  return `${paneName}: ${model} ${level} exceeds the high maximum; lower with \`${command}\`.`;
+}
+
+/** WHAT: Routes an effort alarm to the ledger, channel and assigned watcher. WHY: Keeps send failures from interrupting model monitoring. */
+export async function reportEffortRule({ state, name, idx, next, channelId, discord, appendEvent, deliveryBroker, log, watcherOf = stallWatcherOf }) {
+  const paneName = `${name}:${idx}`, alarm = effortRuleAlarm(state, paneName, next);
+  if (!alarm) return;
+  try { appendEvent({ ts: new Date().toISOString(), event: "effort_over_rule", session: name, pane: Number(idx) || 0, detail: alarm }); }
+  catch (err) { log(`effort-rule ledger row failed for ${paneName}: ${err.message}`); }
+  try { await discord.send(channelId, alarm); }
+  catch (err) { log(`effort-rule warning failed for ${paneName}: ${err.message}`); }
+  try {
+    const watcher = watcherOf(paneName);
+    if (watcher && deliveryBroker) await deliveryBroker.enqueue({ agentName: watcher.session, pane: watcher.pane, text: alarm, source: "model-watch" });
+  } catch (err) { log(`effort-rule watcher delivery failed for ${paneName}: ${err.message}`); }
+}
 
 /**
  * WHAT: Maps known models and quota fallbacks to family-relative ranks.
@@ -117,11 +158,14 @@ export function changeMessage(paneName, change, contextPct) {
   const ctx = Number.isFinite(contextPct) ? ` (context ${contextPct}%)` : "";
   const stopped = change.direction === "downgrade" && change.kind === "model";
   const effortDrop = change.direction === "downgrade" && change.kind === "effort";
+  const oldEffortOverRule = effortOverRule(change.from?.split(/\s+/u).at(-1));
   return `**${paneName} changed model: ${change.from} → ${change.to}**${ctx}` +
     (stopped
       ? "\n_Downgrade detected. The pane is STOPPED and parked now; new work is blocked until the model is restored. /model switches back._"
       : effortDrop
-        ? "\n_Effort lowered (likely cause: a respawn restored a saved setting). The pane keeps working; set it back with /model when you want._"
+        ? oldEffortOverRule
+          ? "\n_Effort lowered. The pane keeps working._"
+          : "\n_Effort lowered (likely cause: a respawn restored a saved setting). The pane keeps working; set it back with /model when you want._"
         : "");
 }
 

@@ -1,5 +1,50 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { modelRank, classifyModelChange, changeMessage, stopBrief, shouldStopPane, label, decideRecovery, resumeBrief, recoveryMessage, interruptUntilIdle, RECOVERY_COOLDOWN_MS } from "./model-watch.mjs";
+import { modelRank, classifyModelChange, changeMessage, effortOverRule, effortRuleAlarm, reportEffortRule, stopBrief, shouldStopPane, label, decideRecovery, resumeBrief, recoveryMessage, interruptUntilIdle, RECOVERY_COOLDOWN_MS } from "./model-watch.mjs";
+
+feature("effort rule alarms once per pane and level", () => {
+  unit("delivery goes once to the channel, ledger and designated watcher", {
+    when: ["reporting a repeated offending reading", async () => {
+      const data = {}, rows = [], lines = [], sent = [], state = { get: (k, d) => data[k] ?? d, set: (k, v) => { data[k] = v; } };
+      const options = { state, name: "skydive", idx: 9, next: { model: "gpt-6.1-sol", effort: "xhigh" }, channelId: "channel",
+        discord: { send: async (...args) => lines.push(args) }, appendEvent: row => rows.push(row),
+        deliveryBroker: { enqueue: value => sent.push(value) }, log() {}, watcherOf: () => ({ session: "deep", pane: 5 }) };
+      await reportEffortRule(options); await reportEffortRule(options);
+      return { rows, lines, sent };
+    }],
+    then: ["one of each with the same text", ({ rows, lines, sent }) => {
+      expect(rows).toHaveLength(1); expect(rows[0].event).toBe("effort_over_rule");
+      expect(lines).toHaveLength(1); expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({ agentName: "deep", pane: 5, source: "model-watch", text: lines[0][1] });
+      expect(rows[0].detail).toBe(lines[0][1]);
+    }],
+  });
+  unit("first reading alerts, repeats do not; returning within the rule rearms", {
+    when: ["reading xhigh, high, xhigh and max", () => {
+      const data = {}, state = { get: (k, d) => data[k] ?? d, set: (k, v) => { data[k] = v; } };
+      const read = effort => effortRuleAlarm(state, "skydive:9", { model: "gpt-6.1-sol", effort });
+      return [read("xhigh"), read("xhigh"), read("high"), read("xhigh"), read("max")];
+    }],
+    then: ["only new violations warn", result => {
+      expect(result[0]).toContain("skydive:9"); expect(result[0]).toContain("gpt-6.1-sol");
+      expect(result[0]).toContain("xhigh"); expect(result[0]).toContain("amux model skydive -p 9 gpt-6.1-sol high");
+      expect(result[1]).toBeNull(); expect(result[2]).toBeNull(); expect(result[3]).toBeTruthy(); expect(result[4]).toContain("max");
+    }],
+  });
+  unit("only known above-rule efforts trigger, never model name", {
+    when: ["checking ordinary, absent and unknown efforts", () => ["high", "medium", "", null, "unknown"].map(effortOverRule)],
+    then: ["none violate", values => {
+      expect(values).toEqual([false, false, false, false, false]);
+      const state = { get: (_k, d) => d, set() {} };
+      expect(effortRuleAlarm(state, "q:1", { model: "qwen3.8-max" })).toBeNull();
+      expect(effortOverRule("xhigh")).toBe(true); expect(effortOverRule("max")).toBe(true);
+    }],
+  });
+  unit("a correction from an excessive level is not called a mistake", {
+    when: ["formatting two effort drops", () => [changeMessage("p:0", classifyModelChange({ model: "gpt-6.1-sol", effort: "xhigh" }, { model: "gpt-6.1-sol", effort: "high" })),
+      changeMessage("p:0", classifyModelChange({ model: "gpt-6.1-sol", effort: "high" }, { model: "gpt-6.1-sol", effort: "medium" }))]],
+    then: ["only the second suggests restoring it", ([correct, drop]) => { expect(correct).not.toContain("set it back"); expect(drop).toContain("set it back"); }],
+  });
+});
 
 feature("modelRank — comparable within a family", () => {
   unit("codex: version dominates, variant breaks ties", {
@@ -205,9 +250,9 @@ feature("messages — actionable, not just informative", () => {
       direction: "downgrade", kind: "effort", from: "gpt-5.6-sol max", to: "gpt-5.6-sol xhigh",
     }, 82)],
     when: ["rendering", (m) => m],
-    then: ["keeps working + /model hint, no stop wording", (m) => {
+    then: ["keeps working without suggesting a return above the rule", (m) => {
       expect(m).toContain("keeps working");
-      expect(m).toContain("/model");
+      expect(m).not.toContain("set it back");
       expect(m).not.toContain("STOPPED");
     }],
   });
