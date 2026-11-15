@@ -63,6 +63,7 @@ describe("permission watchdog", () => {
       await h.wd.tick(); h.advance(121_000); await h.wd.tick();
       expect(h.agent.typeLiteral).not.toHaveBeenCalled();
       expect(h.agent.sendOnly).toHaveBeenCalled();
+      expect(h.snapshots.at(-1).prompts[0].decision).toContain("needs-owner");
     }
   });
   it("routes an ownerless prompt to sandman and repeats only the agent notice after ten minutes", async () => {

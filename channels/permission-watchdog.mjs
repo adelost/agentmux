@@ -213,7 +213,6 @@ export function createPermissionWatchdog({
     }
     const ageMs = at - prev.firstSeenAt;
     const decision = classifyPermissionPrompt(prompt, { home, holdsKeptFiles });
-    prev.decision = decision.action === "answer" ? "auto-answer" : `needs-owner: ${decision.why}`;
     const decided = (action, why) => {
       try {
         recordDecision(permissionDecisionLine({
@@ -228,6 +227,7 @@ export function createPermissionWatchdog({
     try { if (prev.sessionId) mode = sessionMode(agentConfig, paneIdx, prev.sessionId); }
     catch (err) { log(`permission mode unreadable for ${paneKey}: ${err.message}`); }
     const answerable = decision.action === "answer" && config.autoAnswer && Boolean(prev.sessionId) && permissionModeAllowsAnswer(mode);
+    prev.decision = answerable ? "auto-answer" : `needs-owner: ${decision.action === "answer" ? "bypass mode or auto-answer unavailable" : decision.why}`;
     const ownerPane = agentConfig.orchestrator;
     const hasOrchestrator = Number.isSafeInteger(ownerPane)
       && ownerPane >= 0
