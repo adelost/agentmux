@@ -75,7 +75,8 @@ function permissionControls(lines) {
   const afterQuestion = tail.filter((x) => x.i > question.end);
   const controls = compactPaneRows(afterQuestion);
   const yes = controls.indexOf("1.Yes");
-  const no = controls.indexOf("2.No", yes + 1);
+  const noMatch = /([2-9]\d*)\.No/u.exec(controls.slice(yes + 1));
+  const no = noMatch ? yes + 1 + noMatch.index : -1;
   const cancel = controls.indexOf("Esctocancel", no + 1);
   if (yes < 0 || no < 0 || cancel < 0) return null;
   let cancelEnd = -1;
@@ -88,11 +89,12 @@ function permissionControls(lines) {
   if (lines.slice(cancelEnd + 1).some((l) => /^\s*[❯›>]\s*$/u.test(l) || /^\s*[❯›>]\s+\S/u.test(l))) return null;
   const visibleOptions = afterQuestion.map((x) => x.l.trim()).filter((l) => /^(?:❯\s*)?\d+\.\s+\S/u.test(l));
   const optionWrapped = !visibleOptions.some((o) => /^(?:❯\s*)?1\.\s+Yes\b/u.test(o))
-    || !visibleOptions.some((o) => /^(?:❯\s*)?2\.\s+No\b/u.test(o));
+    || !visibleOptions.some((o) => /^(?:❯\s*)?\d+\.\s+No\b/u.test(o));
+  const optionContinues = afterQuestion.some((x) => /^\s{6,}\S/u.test(x.l) && !/^\s*(?:❯\s*)?\d+\./u.test(x.l));
   return {
     askIdx: question.start,
-    options: optionWrapped ? ["❯ 1. Yes", "2. No"] : visibleOptions,
-    wrapped: question.start !== question.end || optionWrapped || !afterQuestion.some((x) => /Esc to cancel/u.test(x.l)),
+    options: optionWrapped ? ["❯ 1. Yes", `${noMatch[1]}. No`] : visibleOptions,
+    wrapped: question.start !== question.end || optionWrapped || optionContinues || !afterQuestion.some((x) => /Esc to cancel/u.test(x.l)),
   };
 }
 

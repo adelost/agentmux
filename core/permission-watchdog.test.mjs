@@ -22,6 +22,15 @@ it("uses the latest mode of the same session and fails closed on missing data", 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+it("recognizes a real default-mode Bash dialog whose No choice is fourth", () => {
+  const screen = `Bash command\nLook at the test folder\nDo you want to proceed?\n ❯ 1. Yes\n   2. Yes, allow reading from\n      /tmp/example\n   3. Yes, and switch to auto mode\n   4. No\n\n Esc to cancel · Tab to amend`;
+  const prompt = detectPermissionPrompt(screen);
+  expect(prompt).not.toBeNull();
+  expect(prompt.options).toContain("4. No");
+  expect(prompt.options).not.toContain("2. No");
+  expect(prompt.screenWrapped).toBe(true);
+});
+
 // The screen lsrc:0 sat on for 21 minutes on 2026-09-12 (captured with amux log --tmux).
 const LSRC0_SCREEN = `
 ──────────────────────────────────────────────
