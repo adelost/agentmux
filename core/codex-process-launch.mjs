@@ -6,6 +6,7 @@ import { codexModelOverride, resolveCodexModelSelection, selectedCodexProfile } 
 import { verifiedCodexCompact } from "./verified-compact.mjs";
 import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "./context-maintenance.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
+export { latestPaneSessionIdentity } from "./native-session-identity.mjs";
 import { esc } from "../lib.mjs";
 
 /** WHAT: Reads the requested live model after startup. WHY: Prevents an early empty composer from masquerading as a fully rendered startup. */
@@ -84,21 +85,28 @@ function workRefused(message) {
 
 /**
  * WHAT: Checks work against the selected Codex model.
- * WHY: Prevents a failed compact or fallback from spending the next prompt on another model.
- * The selection is the one a restart would launch (pin, then session history,
- * then config): a lost pin must not turn the fleet default into a veto on
- * the model the pane was deliberately relaunched with.
+ * WHY: Prevents work from running on a model other than the restart selection.
  */
-export async function assertCodexWorkModel({ state, name, pane, configured, screen, previous = null, prompt = "" }) {
+export async function assertCodexWorkModel({ state, name, pane, configured, screen, previous = null, session = null, prompt = "" }) {
   if (/^\s*\/model(?:\s|$)/u.test(prompt)) throw new Error(`Raw Codex /model bypasses compact: use amux model ${name} -p ${pane} MODEL or Discord /model`);
   if (/^\s*\//u.test(prompt)) return;
   const profile = selectedCodexProfile(state, name, pane);
-  const record = state?.get?.("codex_session_by_pane_profile_v1", {})?.[`${name}:${pane}@${profile.id}`];
-  if (record?.modelTransitionBlocked) throw workRefused(`Codex work blocked: ${record.modelTransitionBlocked.reason}`);
+  const key = `${name}:${pane}@${profile.id}`, sessions = state?.get?.("codex_session_by_pane_profile_v1", {}) ?? {};
+  const record = sessions[key];
+  let actual;
+  try { actual = parseCodexPaneReading(await screen())?.selected; }
+  catch (error) { if (!record?.modelTransitionBlocked) throw error; }
+  if (record?.modelTransitionBlocked) {
+    let current;
+    try { current = await session?.(); } catch { /* unreadable session cannot clear the block */ }
+    if (!record.sessionId || record.sessionId !== current || !actual?.model || actual.model !== record.modelTransitionBlocked.target)
+      throw workRefused(`Codex work blocked: ${record.modelTransitionBlocked.reason}`);
+    state.set("codex_session_by_pane_profile_v1", { ...state.get("codex_session_by_pane_profile_v1", {}),
+      [key]: { ...record, modelTransitionBlocked: null } });
+  }
   const override = codexModelOverride(state, name, pane);
   const history = override ? null : await previous?.();
   const expected = resolveCodexModelSelection({ override, configured, previous: history });
-  const actual = parseCodexPaneReading(await screen())?.selected;
   if (!expected?.model || actual?.model !== expected.model) {
     throw workRefused(`Codex work blocked: selected ${expected?.model || "unknown"}, running ${actual?.model || "unknown"}; verify /status before retrying`);
   }

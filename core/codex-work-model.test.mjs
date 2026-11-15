@@ -117,6 +117,61 @@ feature("Codex work uses the verified explicit model choice", () => {
     when: ["admitting a work prompt", args => assertCodexWorkModel(args).then(() => true, () => false)],
     then: ["only the proven selection can spend the prompt", result => expect(result).toBe(allowed)],
   });
+  component("a stale transition block clears for its target in the same live session", {
+    given: ["the target model is running in the session that owns the block", () => {
+      const data = { codex_model_by_pane: { "claw:4": { model: "gpt-6-luna" } },
+        codex_session_by_pane_profile_v1: { "claw:4@1": { sessionId: "session-one", status: "ready",
+          modelTransitionBlocked: { target: "gpt-6-luna", reason: "compact-boundary-unverified" } } } };
+      return { data, state: { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } },
+        name: "claw", pane: 4, configured: { model: "gpt-6-luna" }, session: () => "session-one",
+        screen: async () => "› Ask Codex to do anything\n  gpt-6-luna medium · /workspace" };
+    }],
+    when: ["admitting a work prompt", args => assertCodexWorkModel(args).then(() => null, error => error.message)],
+    then: ["work proceeds and only the stale block is cleared", (error, args) => {
+      expect(error).toBeNull();
+      expect(args.data.codex_session_by_pane_profile_v1["claw:4@1"]).toEqual({ sessionId: "session-one", status: "ready", modelTransitionBlocked: null });
+    }],
+  });
+  component("clearing a stale block still refuses a different selected model", {
+    given: ["the block matches the running session, but the current selection is different", () => {
+      const data = { codex_model_by_pane: { "claw:4": { model: "gpt-6-astra" } },
+        codex_session_by_pane_profile_v1: { "claw:4@1": { sessionId: "session-one",
+          modelTransitionBlocked: { target: "gpt-6-luna", reason: "compact-boundary-unverified" } } } };
+      return { data, state: { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } },
+        name: "claw", pane: 4, configured: { model: "gpt-6-luna" }, session: () => "session-one",
+        screen: async () => "› Ask Codex to do anything\n  gpt-6-luna medium · /workspace" };
+    }],
+    when: ["admitting a work prompt", args => assertCodexWorkModel(args).then(() => null, error => error.message)],
+    then: ["the model mismatch still refuses delivery", (error, args) => {
+      expect(error).toBe("Codex work blocked: selected gpt-6-astra, running gpt-6-luna; verify /status before retrying");
+      expect(args.data.codex_session_by_pane_profile_v1["claw:4@1"].modelTransitionBlocked).toBeNull();
+    }],
+  });
+  for (const [name, target, observed, recordedSession, currentSession] of [
+    ["another target model remains blocked", "gpt-6-astra", "gpt-6-luna", "session-one", "session-one"],
+    ["another session remains blocked", "gpt-6-luna", "gpt-6-luna", "session-one", "session-two"],
+    ["an unreadable session remains blocked", "gpt-6-luna", "gpt-6-luna", "session-one", null],
+    ["a failed session read remains blocked", "gpt-6-luna", "gpt-6-luna", "session-one", "read-error"],
+    ["an absent recorded session remains blocked", "gpt-6-luna", "gpt-6-luna", null, null],
+    ["an absent target and unreadable screen remain blocked", null, null, "session-one", "session-one"],
+    ["an unreadable screen remains blocked", "gpt-6-luna", null, "session-one", "session-one"],
+    ["a failed screen read remains blocked", "gpt-6-luna", "read-error", "session-one", "session-one"],
+  ]) component(name, {
+    given: ["a blocked model transition and its live evidence", () => {
+      const record = { sessionId: recordedSession, modelTransitionBlocked: { target, reason: "compact-boundary-unverified" } };
+      const data = { codex_model_by_pane: { "claw:4": { model: "gpt-6-luna" } }, codex_session_by_pane_profile_v1: { "claw:4@1": record } };
+      return { data, record, state: { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } },
+        name: "claw", pane: 4, configured: { model: "gpt-6-luna" },
+        session: () => { if (currentSession === "read-error") throw new Error("session unavailable"); return currentSession; },
+        screen: async () => { if (observed === "read-error") throw new Error("screen unavailable");
+          return observed ? `› Ask Codex to do anything\n  ${observed} medium · /workspace` : "unreadable"; } };
+    }],
+    when: ["admitting a work prompt", args => assertCodexWorkModel(args).then(() => null, error => error.message)],
+    then: ["the existing refusal and record remain intact", (error, args) => {
+      expect(error).toBe("Codex work blocked: compact-boundary-unverified");
+      expect(args.data.codex_session_by_pane_profile_v1["claw:4@1"]).toEqual(args.record);
+    }],
+  });
   // lsrc:3, 2026-09-23: no saved pin, config default Sol 5.6, the session
   // itself ran GPT-6 Sol and AMUX relaunched it on GPT-6 Sol from history.
   // The guard judged against the default alone and refused every prompt for

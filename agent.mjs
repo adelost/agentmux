@@ -91,7 +91,7 @@ import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
 import { deliveryPreparationStage } from "./core/delivery-preparation.mjs";
 import { claudeSafePasteParts, createClaudeComposerGuards } from "./core/claude-composer-guards.mjs";
 import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
-import { assertCodexWorkModel, createCodexCompact, startCodexProcess } from "./core/codex-process-launch.mjs";
+import { assertCodexWorkModel, createCodexCompact, latestPaneSessionIdentity, startCodexProcess } from "./core/codex-process-launch.mjs";
 export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchCommand, buildQwenLaunchCommand } from "./core/agent-launch-command.mjs";
 export { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
@@ -105,23 +105,18 @@ export function paneDir(rootDir, pane) {
   return dir;
 }
 
-// Placed in .agents/CLAUDE.md so Claude Code auto-reads it from any pane
-// (panes run in .agents/N/); as system context it survives /compact.
-// Bump it whenever AGENT_HINTS changes: hints sync warns while the running
-// bridge still serves an older one. Appended content survives upgrades.
+// Placed in .agents/CLAUDE.md for every pane, surviving /compact.
+// Bump when AGENT_HINTS changes; hints sync warns about an older bridge.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
 export const HINTS_VERSION = "1.25.437";
-/** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
-/** DTO: Shared generated instructions, excluding workspace-owned notes. */
 export const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
 ${TOOL_GUIDE_HINTS}
 ${FLEET_PROCESS_HINTS}
 ${HINTS_END_MARKER}
 `;
 
-// Compare generated content on every sync. Preserve the operator's bytes
-// below HINTS_END_MARKER in both harness instruction files.
+// Compare generated content on every sync, preserving both files' operator tails.
 // WHAT: Saves generated agent policy. WHY: Keeps pane instructions synchronized without clobbering operator notes.
 export function ensureAgentHints(rootDir) {
   const agentsDir = join(rootDir, ".agents");
@@ -136,16 +131,12 @@ export function ensureAgentHints(rootDir) {
     const endIdx = content.indexOf(HINTS_END_MARKER);
     if (endIdx < 0) return "";
     const raw = content.slice(endIdx + HINTS_END_MARKER.length);
-    // AGENT_HINTS owns exactly one line ending after the marker. Remove only
-    // that generated delimiter; every subsequent byte belongs to the operator.
+    // Remove only the generated newline; the remaining bytes belong to the operator.
     return raw.startsWith("\n") ? raw.slice(1) : raw;
   };
 
-  // Operator additions below the end marker are workspace RULES, and rules
-  // apply to every agent regardless of harness. CLAUDE.md's tail is the
-  // canonical copy, mirrored verbatim into AGENTS.md — before this, the
-  // worktree ban lived only in CLAUDE.md and codex panes never saw it
-  // (2026-07-10). Edit the tail in CLAUDE.md; AGENTS.md edits get replaced.
+  // Workspace rules live in CLAUDE.md's tail, mirrored verbatim into AGENTS.md.
+  // Edit CLAUDE.md: AGENTS.md tail edits are replaced (2026-07-10).
   let canonicalTail = "";
   try {
     const claudePath = join(agentsDir, "CLAUDE.md");
@@ -1038,6 +1029,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const claudeEchoCursor = dialect === "claude" && !maintenanceGuard ? await capturePromptEchoCursor(agentName, pane, prompt) : null;
     if (dialect === "codex") await deliveryPreparationStage("input:model-proof", () => assertCodexWorkModel({ state, name: agentName, pane, prompt,
       configured: agentConfig(agentName).panes?.[pane], screen: () => captureScreen(agentName, pane),
+      session: () => latestPaneSessionIdentity("codex", paneDir(agentConfig(agentName).dir, pane))?.sessionId,
       previous: () => getContextPercentByDialect(paneDir(agentConfig(agentName).dir, pane), "codex") }));
     if (dialect === "claude") await claudeGuards.requireSettledPaste(agentName, pane, { maintenance: Boolean(maintenanceGuard) });
     if (dialect === "qwen") {
