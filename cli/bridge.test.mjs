@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createBridgeLifecycle } from "./bridge.mjs";
+import { PassThrough } from "node:stream";
 
 function bridgeFixture() {
   const root = mkdtempSync(join(tmpdir(), "amux-bridge-housekeeping-"));
@@ -28,6 +29,59 @@ function bridgeFixture() {
 }
 
 feature("bridge startup housekeeping seam", () => {
+  component("foreground output reaches its terminal streams and log", {
+    given: ["a foreground supervisor that writes to both output streams", () => {
+      const fixture = bridgeFixture();
+      writeFileSync(join(fixture.bridgeDir, "bin", "start.sh"), "#!/usr/bin/env bash\nprintf 'out-marker\\n'\nprintf 'err-marker\\n' >&2\n");
+      const out = new PassThrough(), err = new PassThrough(), captured = { out: "", err: "" };
+      out.on("data", (chunk) => { captured.out += chunk; }); err.on("data", (chunk) => { captured.err += chunk; });
+      const startupHousekeeping = async () => ({ log: { rotated: false, beforeBytes: 0, afterBytes: 0 },
+        sessions: { scanned: 0, candidates: 0, trimmed: 0, unchanged: 0, failed: 0, reclaimedBytes: 0, retentionDays: 14, dryRun: false, oversized: 0, oversizedBytes: 0 } });
+      return { ...fixture, captured, lifecycle: createBridgeLifecycle({ bridgeDir: fixture.bridgeDir, env: fixture.env, startupHousekeeping,
+        terminalOut: out, terminalErr: err }) };
+    }],
+    when: ["starting it", async (ctx) => { await ctx.lifecycle.serve({}, ctx.ctx); return ctx; }],
+    then: ["both streams reach their respective terminal and the file", (ctx) => {
+      try {
+        expect(ctx.captured.out).toContain("out-marker");
+        expect(ctx.captured.err).toContain("err-marker");
+        expect(readFileSync(ctx.env.AMUX_BRIDGE_LOG, "utf8")).toMatch(/\[\d{4}-\d\d-\d\dT.*Z\] foreground bridge start/u);
+        expect(readFileSync(ctx.env.AMUX_BRIDGE_LOG, "utf8")).toContain("out-marker");
+        expect(readFileSync(ctx.env.AMUX_BRIDGE_LOG, "utf8")).toContain("err-marker");
+      } finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
+  component("managed startup writes each output line to its log once", {
+    given: ["an isolated managed supervisor", () => {
+      const fixture = bridgeFixture();
+      writeFileSync(join(fixture.bridgeDir, "bin", "start.sh"), `#!/usr/bin/env bash\nprintf 'managed-marker\\n'\nprintf '%s' "$$" > "$PIDFILE"\nprintf '%s' "$$" > "$READY_FILE"\nsleep 5\n`);
+      const startupHousekeeping = async () => ({ log: { rotated: false, beforeBytes: 0, afterBytes: 0 },
+        sessions: { scanned: 0, candidates: 0, trimmed: 0, unchanged: 0, failed: 0, reclaimedBytes: 0, retentionDays: 14, dryRun: false, oversized: 0, oversizedBytes: 0 } });
+      return { ...fixture, lifecycle: createBridgeLifecycle({ bridgeDir: fixture.bridgeDir, env: fixture.env, startupHousekeeping }) };
+    }],
+    when: ["starting the managed supervisor", async (ctx) => { await ctx.lifecycle.serve({ detach: true }, ctx.ctx); return ctx; }],
+    then: ["one line appears in the log", async (ctx) => {
+      try {
+        const log = readFileSync(ctx.env.AMUX_BRIDGE_LOG, "utf8");
+        expect(log.match(/managed-marker/gu)).toHaveLength(1);
+      } finally { await ctx.lifecycle.stop(ctx.ctx); rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
+  component("an unavailable log does not prevent a foreground start", {
+    given: ["a log path that is a directory", () => {
+      const fixture = bridgeFixture(), marker = join(fixture.root, "launched");
+      fixture.env.AMUX_BRIDGE_LOG = fixture.root;
+      writeFileSync(join(fixture.bridgeDir, "bin", "start.sh"), `#!/usr/bin/env bash\ntouch "${marker}"\n`);
+      const startupHousekeeping = async () => ({ log: { rotated: false, beforeBytes: 0, afterBytes: 0 },
+        sessions: { scanned: 0, candidates: 0, trimmed: 0, unchanged: 0, failed: 0, reclaimedBytes: 0, retentionDays: 14, dryRun: false, oversized: 0, oversizedBytes: 0 } });
+      return { ...fixture, marker, lifecycle: createBridgeLifecycle({ bridgeDir: fixture.bridgeDir, env: fixture.env, startupHousekeeping }) };
+    }],
+    when: ["starting the bridge", async (ctx) => { await ctx.lifecycle.serve({}, ctx.ctx); return ctx; }],
+    then: ["the supervisor still ran", (ctx) => {
+      try { expect(existsSync(ctx.marker)).toBe(true); }
+      finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
   component("does not rotate storage while a ready bridge owns it", {
     given: ["a ready bridge and an injected housekeeper", () => {
       const fixture = bridgeFixture();

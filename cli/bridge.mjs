@@ -11,6 +11,7 @@ import {
   readlinkSync,
   renameSync,
   unlinkSync,
+  writeSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -39,6 +40,8 @@ export function createBridgeLifecycle({
   bridgeDir,
   env = process.env,
   startupHousekeeping = runStartupHousekeeping,
+  terminalOut = process.stdout,
+  terminalErr = process.stderr,
 } = {}) {
   const resolvedBridgeDir = resolve(bridgeDir);
   const pidfile = () => env.PIDFILE || "/tmp/agentmux.pid";
@@ -199,7 +202,35 @@ export function createBridgeLifecycle({
     clearRuntimeState();
     writeMode(BRIDGE_MODE_MANUAL);
     console.log("Bridge running in this terminal. Ctrl+C stops it; use 'amux doctor' from another terminal to inspect it.\n");
-    const child = spawn("bash", ["bin/start.sh"], { cwd: ctx.bridgeDir || resolvedBridgeDir, stdio: "inherit" });
+    let logFd = null;
+    try {
+      mkdirSync(dirname(serviceLogPath()), { recursive: true, mode: 0o700 });
+      logFd = openSync(serviceLogPath(), "a", 0o600);
+      writeSync(logFd, `[${new Date().toISOString()}] foreground bridge start\n`);
+    } catch (error) {
+      if (logFd !== null) closeSync(logFd);
+      logFd = null;
+      console.warn(`bridge log unavailable: ${error.message}`);
+    }
+    const child = spawn("bash", ["bin/start.sh"], { cwd: ctx.bridgeDir || resolvedBridgeDir,
+      stdio: logFd === null ? "inherit" : ["inherit", "pipe", "pipe"] });
+    if (logFd !== null) {
+      let logFailed = false;
+      const copyToLog = (chunk) => {
+        if (logFailed) return;
+        try {
+          for (let offset = 0; offset < chunk.length;) {
+            const written = writeSync(logFd, chunk, offset);
+            if (!written) throw new Error("zero-byte log write");
+            offset += written;
+          }
+        }
+        catch (error) { logFailed = true; console.warn(`bridge log write failed: ${error.message}`); }
+      };
+      child.stdout.pipe(terminalOut, { end: false }); child.stdout.on("data", copyToLog);
+      child.stderr.pipe(terminalErr, { end: false }); child.stderr.on("data", copyToLog);
+      child.once("close", () => closeSync(logFd));
+    }
     return new Promise((resolveChild, rejectChild) => {
       child.once("error", rejectChild);
       child.once("exit", (code) => {
