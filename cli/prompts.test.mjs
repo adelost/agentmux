@@ -45,6 +45,12 @@ describe("amux prompts", () => {
     expect(formatPromptRows(rows)).toBe("No pane is waiting on a permission prompt.");
   });
 
+  it("shows the actual No option instead of a second Yes", () => {
+    const prompt = { reason: "Bash", command: "ls", options: ["1. Yes", "2. Yes, allow", "4. No"] };
+    const text = formatPromptRows([{ paneKey: "ai:0", agentName: "ai", pane: 0, prompt, decision: { action: "notify", why: "test" }, orchestrator: null }]);
+    expect(text).toContain("no: amux prompts answer ai -p 0 4");
+  });
+
   it("sends the choice only while that dialog is still on screen", async () => {
     const agent = fakeAgent({ 1: PROMPT });
     const result = await answerPrompt({ agent, agentName: "skyvw", pane: 1, choice: "1", settleMs: 0, sleep: async () => {} });

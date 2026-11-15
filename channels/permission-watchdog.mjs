@@ -151,6 +151,7 @@ export function createPermissionWatchdog({
       ageMs,
       reason: prompt.reason,
       command: prompt.command,
+      options: prompt.options,
       why: "needs the owner's decision",
     });
     await agent.sendOnly(owner, text, ownerPane);
@@ -257,7 +258,7 @@ export function createPermissionWatchdog({
       catch (err) { log(`permission route failed for ${paneKey}: ${err.message}`); }
     }
     const why = decision.action !== "answer" ? decision.why : !config.autoAnswer ? "auto-answer is off" : "bypass permission mode is not verified";
-    const text = formatPermissionAlert({ paneKey, ageMs, reason: prompt.reason, command: prompt.command, why });
+    const text = formatPermissionAlert({ paneKey, ageMs, reason: prompt.reason, command: prompt.command, why, options: prompt.options });
     log(`alert for ${paneKey}: ${decision.why}`);
     await post(agentConfig.name, paneIdx, text);
     if (notifyUser) {

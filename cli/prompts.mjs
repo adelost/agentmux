@@ -8,7 +8,7 @@
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { classifyPermissionPrompt, detectPermissionPrompt } from "../core/permission-watchdog.mjs";
+import { classifyPermissionPrompt, detectPermissionPrompt, permissionNoOption } from "../core/permission-watchdog.mjs";
 import { openPromptsPath, permissionDecisionLogPath } from "../channels/permission-watchdog.mjs";
 import { listAgents } from "./config.mjs";
 
@@ -59,7 +59,7 @@ export function formatPromptRows(rows, { ages = new Map(), at = Date.now() } = {
       `  ${prompt.command.split("\n")[0].slice(0, 160)}`,
       `  ${verdict}`,
       `  owner: ${owner}${tracked?.orchestratorNotified ? " (already told)" : ""}`,
-      `  yes: amux prompts answer ${agentName} -p ${pane} 1    no: amux prompts answer ${agentName} -p ${pane} 2    cancel: amux esc ${agentName} -p ${pane}`,
+      `  yes: amux prompts answer ${agentName} -p ${pane} 1    no: amux prompts answer ${agentName} -p ${pane} ${permissionNoOption(prompt.options)}    cancel: amux esc ${agentName} -p ${pane}`,
     ].join("\n");
   }).join("\n\n");
 }

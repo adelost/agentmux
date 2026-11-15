@@ -126,12 +126,20 @@ export function detectPermissionPrompt(paneText) {
       break;
     }
   }
+  const bashHeader = lines.findLastIndex((l, i) => i < askIdx && /^\s*Bash command\s*$/u.test(l));
+  const plainBorders = lines.map((l, i) => ({ l, i })).filter(({ l, i }) => i > bashHeader && i < askIdx && /^\s*╌{3,}\s*$/u.test(l));
+  if (plainBorders.length >= 2) {
+    const a = plainBorders.at(-2).i, b = plainBorders.at(-1).i;
+    commandLines.length = 0;
+    commandLines.push(...lines.slice(a + 1, b).map((l) => l.trim()).filter(Boolean));
+  }
   const command = commandLines.join("\n").trim();
   // Reason: the boxed reason with its wrapped lines, else the last non-empty,
   // non-box, non-title line before the question.
   const reason = boxedReasonIdx >= 0
     ? lines.slice(boxedReasonIdx, askIdx).filter((l) => /^\s*│/u.test(l)).map(unbox).filter(Boolean).join(" ")
-    : lines.slice(0, askIdx).map((l) => l.trim()).filter((l) => l && !/^│/u.test(l) && !/^Bash command$/u.test(l) && !/^[─┌┐└┘]+$/u.test(l)).at(-1) || "";
+    : plainBorders.length >= 2 ? "Bash permission request"
+      : lines.slice(0, askIdx).map((l) => l.trim()).filter((l) => l && !/^│/u.test(l) && !/^Bash command$/u.test(l) && !/^[─┌┐└┘]+$/u.test(l)).at(-1) || "";
   const boxedLines = lines.slice(Math.max(0, bodyEnd - commandLines.length), askIdx).filter((l) => /^\s*│/u.test(l));
   const narrowBox = boxedLines.length > 1 && Math.max(...boxedLines.map((l) => l.length)) <= 48;
   const screenWrapped = controls.wrapped || narrowBox;
@@ -231,16 +239,20 @@ export function classifyPermissionPrompt({ reason = "", command = "", screenWrap
   return { action: "answer", keys: "1", why: `the rm targets are sufficiently deep (${paths.join(", ")})` };
 }
 
-/**
- * WHAT: Formats the message a pane's owner or Mattias gets about a stuck prompt.
- * WHY: Keeps the reader from having to open tmux to see what is being asked.
- */
-export function formatPermissionAlert({ paneKey, ageMs, reason, command, why }) {
+/** WHAT: Returns the visible No option. WHY: Keeps the answer command from choosing another Yes. */
+export function permissionNoOption(options = []) {
+  const option = options.find((o) => /^(?:❯\s*)?\d+\.\s+No\b/u.test(o));
+  return option ? Number(/\d+/u.exec(option)[0]) : null;
+}
+
+/** WHAT: Formats a stuck-prompt alert. WHY: Keeps the answer one command away. */
+export function formatPermissionAlert({ paneKey, ageMs, reason, command, why, options = [] }) {
   const cmd = String(command || "").split("\n").slice(0, 8).join("\n");
+  const no = permissionNoOption(options);
   return [
     `Pane ${paneKey} has waited ${Math.round(ageMs / 60_000)} min on a yes/no prompt that amux does not answer itself (${why}).`,
     reason ? `Reason: ${reason}` : "",
     cmd ? `Command:\n${cmd}` : "",
-    `Answer in the pane: amux ${paneKey.replace(":", " -p ")} -- 1   (or 2 for no)`,
+    `Answer in the pane: amux ${paneKey.replace(":", " -p ")} -- 1   (${no ? `or ${no} for no` : "choose No as shown"})`,
   ].filter(Boolean).join("\n");
 }

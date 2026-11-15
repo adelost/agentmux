@@ -99,7 +99,7 @@ export function waitingNotice(job, { waitedMs = 0, permissionPrompt = null } = {
   const hours = Math.floor(Number(waitedMs || 0) / 3_600_000);
   const waited = hours > 0 ? ` (waited ${hours} h)` : "";
   if (permissionPrompt) return `${target(job)} has not got this yet${waited}. It is waiting on a permission dialog. `
-    + `Answer in the pane: amux ${job.agentName} -p ${job.pane} -- 1 (or 2 for no).`;
+    + `Answer in the pane: amux ${job.agentName} -p ${job.pane} -- 1, or choose No as shown.`;
   return `${target(job)} has not got this yet${waited}. Cause: ${plainReason(job.lastReason)}. `
     + "It is sent automatically when it can be.";
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPermissionPrompt, detectPermissionPrompt, nextPromptStep, parsePermissionWatchdogConfig, permissionModeAllowsAnswer, sessionPermissionMode } from "./permission-watchdog.mjs";
+import { classifyPermissionPrompt, detectPermissionPrompt, formatPermissionAlert, nextPromptStep, parsePermissionWatchdogConfig, permissionModeAllowsAnswer, sessionPermissionMode } from "./permission-watchdog.mjs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,12 +23,15 @@ it("uses the latest mode of the same session and fails closed on missing data", 
 });
 
 it("recognizes a real default-mode Bash dialog whose No choice is fourth", () => {
-  const screen = `Bash command\nLook at the test folder\nDo you want to proceed?\n ❯ 1. Yes\n   2. Yes, allow reading from\n      /tmp/example\n   3. Yes, and switch to auto mode\n   4. No\n\n Esc to cancel · Tab to amend`;
+  const screen = `Bash command\nLook at the test folder\n╌╌╌╌\nls /tmp/example\n╌╌╌╌\nDo you want to proceed?\n ❯ 1. Yes\n   2. Yes, allow reading from\n      /tmp/example\n   3. Yes, and switch to auto mode\n   4. No\n\n Esc to cancel · Tab to amend`;
   const prompt = detectPermissionPrompt(screen);
   expect(prompt).not.toBeNull();
   expect(prompt.options).toContain("4. No");
   expect(prompt.options).not.toContain("2. No");
   expect(prompt.screenWrapped).toBe(true);
+  expect(prompt.command).toBe("ls /tmp/example");
+  expect(prompt.reason).toBe("Bash permission request");
+  expect(formatPermissionAlert({ paneKey: "ai:0", ageMs: 120_000, why: "test", options: prompt.options })).toContain("or 4 for no");
 });
 
 // The screen lsrc:0 sat on for 21 minutes on 2026-09-12 (captured with amux log --tmux).
