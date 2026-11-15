@@ -80,6 +80,25 @@ function cleanup(fx) {
 }
 
 feature("asks bind validates an entire bulk command before append", () => {
+  component("ledger row ids accept letters and digits but reject unsafe or missing ids", {
+    given: ["a ledger with exact alphanumeric row ids", () => {
+      const fx = fixture();
+      writeFileSync(join(fx.root, "docs/TASKS.md"), "| # | Outcome |\n| 14z328 | Gateway |\n| S18b | Task |\n");
+      return fx;
+    }],
+    when: ["binding both rows and refusing invalid targets", async fx => {
+      for (const [id, row] of [["one", "14z328"], ["two", "S18b"]]) await dispatch(["asks", "bind", id, "--row", row], fx.ctx);
+      const prior = readFileSync(fx.path, "utf8");
+      for (const row of ["14 z328", "14/z328", "14|z328", "missing"]) {
+        await expect(dispatch(["asks", "bind", "one", "--row", row], fx.ctx)).rejects.toThrow();
+      }
+      expect(readFileSync(fx.path, "utf8")).toBe(prior);
+      return fx;
+    }],
+    then: ["both exact row references are recorded", fx => {
+      expect(readAskBindings().map(row => row.ref)).toEqual([`${fx.root}/docs/TASKS.md:14z328`, `${fx.root}/docs/TASKS.md:S18b`]);
+    }], cleanup,
+  });
   component("an unbound answer persists once and a later binding never rewrites earlier evidence", {
     given: ["two exact ids and an observed provider answer", fixture],
     when: ["persisting the derived unbound state, binding, then trying an invalid batch", async fx => {

@@ -32,7 +32,7 @@ export function askBindingTarget({ kind, value, cwd = process.cwd(), sourcesPath
   const bare = gitIn(cwd, ["rev-parse", "--is-bare-repository"]) === "true";
   const root = gitIn(cwd, ["rev-parse", bare ? "--absolute-git-dir" : "--show-toplevel"]);
   if (kind === "commit") return `${root}@${gitIn(root, ["rev-parse", "--verify", "--end-of-options", `${value}^{commit}`])}`;
-  if (!/^\d+[a-z]?$/u.test(value)) throw Error("--row requires an exact ledger row id");
+  if (!/^[A-Za-z0-9]{1,12}$/u.test(value)) throw Error("--row requires an exact ledger row id");
   const relativePath = askRowLedger(root, { sourcesPath });
   const file = join(root, relativePath);
   const text = bare ? gitIn(root, ["show", `HEAD:${relativePath}`]) : readFileSync(file, "utf8");
