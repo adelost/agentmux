@@ -2,6 +2,14 @@ import { feature, unit, expect } from "bdd-vitest";
 import { detectPaneStatus } from "../cli/format.mjs";
 
 feature("pane status detection", () => {
+  unit("a queued-message editing hint after a finished turn is idle", {
+    given: ["sandman:0's completed turn and empty composer", () => [
+      "✻ Churned for 2m 0s · done 5:38 AM", "❯ ", "────────────────",
+      "❯ Press up to edit queued messages", "────────────────", "1 feedback draft",
+    ].join("\n")],
+    when: ["reading the pane status", screen => detectPaneStatus(screen)],
+    then: ["the hint is not a working turn", status => expect(status).toBe("idle")],
+  });
   unit("treats compacting with a visible prompt and queued message as working", {
     given: ["Claude compact UI with queued prompt", () => [
       "❯ /compact",

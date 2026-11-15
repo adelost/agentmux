@@ -21,7 +21,7 @@ export const LIMIT_BANNER = CLAUDE_STOP_BANNER;
 export function detectPaneStatus(paneContent, { limitReceipt = null, now = Date.now() } = {}) {
   const text = stripAnsi(paneContent);
   const lines = text.split("\n");
-  const tailRaw = lines.slice(-15).join("\n");
+  const tailRaw = lines.slice(-15).filter(line => !/^\s*❯\s*Press up to edit queued messages\s*$/u.test(line)).join("\n");
 
   // Working signals — match any of them in the LAST 15 lines so we don't
   // false-positive on scrollback residue from completed turns.

@@ -93,6 +93,8 @@ export async function observeNightlyPane(ctx, target, { queue, now = Date.now } 
   const before = latestPaneSessionIdentity(engine, paneDir);
   const process = await ctx.agent.paneProcessState(agent.name, pane.index).catch(() => null);
   const screen = await ctx.agent.captureScreen(agent.name, pane.index).catch(() => "");
+  const transport = typeof ctx.agent.promptTransportState === "function"
+    ? await ctx.agent.promptTransportState(agent.name, pane.index, "").catch(() => null) : null;
   const observed = await inspectPane(ctx, agent, { ...pane, command: process?.command, dead: process?.dead });
   const quality = await readDreamOwnerQuality({ agent: agent.name, pane: pane.index, engine, paneDir }, {
     captureScreen: async () => screen,
@@ -107,7 +109,7 @@ export async function observeNightlyPane(ctx, target, { queue, now = Date.now } 
     engine, backend: agent.backend, running: process?.running === true && !process.dead && !process.shell
       && (engine === "claude" ? process.command === "claude" : ["node", "codex"].includes(process.command)),
     sessionId: stable ? after.sessionId : null, sessionPath: stable ? after.path : null,
-    status: observed.status, composerEmpty: composerText(screen, engine) === "", queued,
+    status: observed.status, composerEmpty: transport ? transport.state === "empty-idle" : composerText(screen, engine) === "", queued,
     tokens: observed.context?.tokens ?? null, tokensObservedAt: observed.context?.observedAt ?? null,
     model: quality?.sessionId === after?.sessionId ? quality.model : null,
     effort: quality?.sessionId === after?.sessionId ? quality.effort : null,
