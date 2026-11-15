@@ -67,8 +67,20 @@ describe("permission watchdog", () => {
     expect(after.discord.send).not.toHaveBeenCalled();
     expect(after.agent.sendOnly).toHaveBeenCalledTimes(1);
     const different = harness({ screens, saved: before.snapshots.at(-1), start: 122_000, sessionIds: { 0: "other" } });
-    await different.wd.tick(); different.advance(1_000); await different.wd.tick();
-    expect(different.agent.sendOnly).not.toHaveBeenCalled();
+    await different.wd.tick(); different.advance(121_000); await different.wd.tick();
+    expect(different.discord.send).toHaveBeenCalledTimes(1);
+  });
+  it("rechecks a saved dialog when the first capture after restart is blank", async () => {
+    const screens = { 0: UNSAFE };
+    const before = harness({ screens, realActivity: true });
+    await before.wd.tick(); before.advance(121_000); await before.wd.tick();
+    screens[0] = IDLE;
+    const after = harness({ screens, saved: before.snapshots.at(-1), start: 122_000, realActivity: true });
+    await after.wd.tick();
+    screens[0] = UNSAFE; after.advance(10_000); await after.wd.tick();
+    after.advance(589_000); await after.wd.tick();
+    expect(after.agent.sendOnly).toHaveBeenCalledTimes(1);
+    expect(after.discord.send).not.toHaveBeenCalled();
   });
   it("keeps the alert clock across a transient blank without duplicate notices", async () => {
     const screens = { 0: UNSAFE };

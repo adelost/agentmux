@@ -77,6 +77,16 @@ export function createPermissionWatchdog({
   try { savedPrompts = loadOpenPrompts()?.prompts ?? []; }
   catch (err) { if (err.code !== "ENOENT") log(`open-prompt snapshot read failed: ${err.message}`); }
   if (!Array.isArray(savedPrompts)) savedPrompts = [];
+  const startedAt = now();
+  for (const saved of savedPrompts) {
+    if (!saved || typeof saved !== "object") continue;
+    const firstSeenAt = Date.parse(saved?.firstSeenAt);
+    if (typeof saved.pane !== "string" || !saved.sessionId || !/^[a-f0-9]{64}$/u.test(saved.signature)
+        || saved.answered !== false || !Number.isFinite(firstSeenAt) || firstSeenAt > startedAt
+        || typeof saved.orchestratorNotified !== "boolean" || typeof saved.humanNotified !== "boolean"
+        || !(saved.lastAgentNoticeAt === null || (Number.isFinite(saved.lastAgentNoticeAt) && saved.lastAgentNoticeAt <= startedAt))) continue;
+    seen.set(saved.pane, { ...saved, firstSeenAt, missingSince: startedAt });
+  }
   let intervalId = null;
   let publishedPrompts = null;
   let ticking = false;
@@ -184,25 +194,10 @@ export function createPermissionWatchdog({
     // its numbered options and "Esc to cancel" in the last lines with no
     // composer below, so a footer-less capture is still recognised.
     const prompt = detectPermissionPrompt(content);
-    if (!prompt) {
-      savedPrompts = savedPrompts.filter((p) => p.pane !== paneKey);
-      markMissing(paneKey, at);
-      return null;
-    }
+    if (!prompt) { markMissing(paneKey, at); return null; }
     const sessionId = sessionIdentity(agentConfig, paneIdx);
 
-    let prev = seen.get(paneKey);
-    if (!prev && sessionId) {
-      const saved = savedPrompts.find((p) => p.pane === paneKey && p.sessionId === sessionId && p.signature === prompt.signature);
-      savedPrompts = savedPrompts.filter((p) => p.pane !== paneKey);
-      const firstSeenAt = Date.parse(saved?.firstSeenAt);
-      if (saved && saved.answered === false && Number.isFinite(firstSeenAt) && firstSeenAt <= at
-          && typeof saved.orchestratorNotified === "boolean" && typeof saved.humanNotified === "boolean"
-          && (saved.lastAgentNoticeAt === null || (Number.isFinite(saved.lastAgentNoticeAt) && saved.lastAgentNoticeAt <= at))) {
-        prev = { ...saved, firstSeenAt, answerObservedAt: at, reason: prompt.reason };
-        seen.set(paneKey, prev);
-      }
-    }
+    const prev = seen.get(paneKey);
     if (!prev || (prev.missingSince != null && prev.answered) || prev.signature !== prompt.signature || prev.sessionId !== sessionId) {
       seen.set(paneKey, {
         signature: prompt.signature,
