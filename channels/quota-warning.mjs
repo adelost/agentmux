@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { buildQuotaOverview, weeklyQuotaOf } from "./quota-overview.mjs";
+import { buildQuotaOverview, fableQuotaOf, weeklyQuotaOf } from "./quota-overview.mjs";
 
 const HOUR = 3_600_000;
 // Mattias 2026-10-16: "en cool down på 6 timmar på 80-90% och sen cooldown på 3 timmar på 90 till 100 %".
@@ -74,7 +74,9 @@ function weeklyReadings(sent, accounts, now, { record = false } = {}) {
     if (!account.account?.email || !Number.isFinite(weekly?.usedPercent) || !(resetAt > now)) continue;
     const key = weeklyWindowKey(identityOf(account), weekly.resetsAt), at = Date.parse(account.observation?.observedAt);
     // A reading without its own time cannot measure a pace; the forecast then uses the week's average.
-    if (record && Number.isFinite(at)) sent.observe(key, { at, usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt }, { now, resetAt });
+    const fable = fableQuotaOf(account);
+    if (record && Number.isFinite(at)) sent.observe(key, { at, usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt,
+      ...(Number.isFinite(fable?.usedPercent) ? { fableUsedPercent: fable.usedPercent, fableResetsAt: fable.resetsAt } : {}) }, { now, resetAt });
     readings.set(account, sent.readings(key));
   }
   return readings;
@@ -130,8 +132,8 @@ export async function postDueQuotaWarnings({ snapshot, notify, sent, config = pa
   return warned.map(state => ({ ...state, edited: true }));
 }
 
-/** WHAT: Formats the quota box for /quota and amux quota with the pace the warnings recorded. WHY: Keeps a view on demand from writing the warning's store. */
+/** WHAT: Formats the quota box for /quota and amux quota using observed pace. WHY: Keeps both windows' readings together for the Fable forecast. */
 export function quotaBoxText(snapshot, { sent = createSentNoticeStore(), config = parseQuotaWarningConfig(), now = Date.now() } = {}) {
-  const readings = weeklyReadings(sent, snapshot?.accounts || [], now);
+  const readings = weeklyReadings(sent, snapshot?.accounts || [], now, { record: true });
   return buildQuotaOverview(snapshot, { config, now, readingsOf: account => readings.get(account) || [] }).text;
 }

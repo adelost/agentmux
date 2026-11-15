@@ -142,6 +142,48 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
 // three days: three days was worth a reset, two would have been doubtful. The advice shows the week's own return and when each
 // free reset ends, then one verdict.
 feature("advice about a free reset says what the press is worth", () => {
+  unit("Ultra Fable resets show their week value and warn only when week wins the race", {
+    when: ["E at 16/2 and a second account at 90/60 with week growing twice as fast as Fable's week share", () => {
+      const make = (name, week, fable) => {
+        const account = claude(name, week, "2026-10-21T07:00:00Z", ["deep:1"], { name,
+          subscription: { planTier: "Ultra", freeResetsLeft: 1, freeResetsReadAt: "2026-10-17T10:00:00Z",
+            limitResets: [{ kind: "fable", expires: "2026-11-30T20:25:00Z" }] } });
+        account.limits.push({ kind: "weekly_scoped", scopeName: "Fable", usedPercent: fable, resetsAt: "2026-10-21T07:00:00Z" });
+        return account;
+      };
+      const e = make("E", 16, 2), risk = make("Risk", 90, 60);
+      const readingsOf = account => account === risk ? [{ at: NOW - 3600000, usedPercent: 80, fableUsedPercent: 50,
+        resetsAt: "2026-10-21T07:00:00Z", fableResetsAt: "2026-10-21T07:00:00Z" }] : [];
+      e.observation = risk.observation = { observedAt: new Date(NOW).toISOString() };
+      return buildQuotaOverview({ accounts: [e, risk] }, { config, now: NOW, readingsOf }).text;
+    }],
+    then: ["E gives one point without warning, Risk gives 30 and warns", text => {
+      expect(text).toContain("E: Fable-reset ger 1 veckopoäng");
+      expect(text).toContain("Risk: Fable-reset ger 30 veckopoäng");
+      expect(text).toContain("Risk: veckan tar slut före Fable");
+      expect(text).not.toContain("E: veckan tar slut före Fable");
+    }],
+  });
+  unit("at the floor press the Fable reset, and do not estimate another plan", {
+    when: ["Ultra at 98/60, Max at 98/60, and Ultra without a Fable reset", () => {
+      const make = (name, tier, resets) => {
+        const account = claude(name, 98, "2026-10-21T07:00:00Z", ["deep:1"], { name,
+          subscription: { planTier: tier, freeResetsLeft: resets.length, freeResetsReadAt: "2026-10-17T10:00:00Z", limitResets: resets } });
+        account.limits.push({ kind: "weekly_scoped", scopeName: "Fable", usedPercent: 60, resetsAt: "2026-10-21T07:00:00Z" });
+        return account;
+      };
+      const fable = [{ kind: "fable", expires: "2026-11-30T20:25:00Z" }];
+      return render([make("Ultra", "Ultra", fable), make("Max", "Max", fable), make("None", "Ultra", [])]).join("\n");
+    }],
+    then: ["only Ultra with a reset gets 30 points and a press", text => {
+      expect(text).toContain("Ultra: Fable-reset ger 30 veckopoäng");
+      expect(text).toContain("Ultra: tryck Fable-reset nu");
+      expect(text).not.toContain("Max: Fable-reset ger");
+      expect(text).toContain("Max: tryck Fable-reset nu");
+      expect(text).not.toContain("None: Fable-reset ger");
+      expect(text).not.toContain("→ Use");
+    }],
+  });
   const READ = "2026-10-17T10:00:00Z";
   const weekly = (...expires) => ({ freeResetsLeft: expires.length, freeResetsReadAt: READ, limitResets: expires.map(at => ({ kind: "weekly", expires: at })) });
   const spent = (resetsAt, subscription) => render([{ ...codex("2", "mattias.wetterlind", 100, resetsAt, panes("lsrc", 4)), subscription }]).slice(-3);

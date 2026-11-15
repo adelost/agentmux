@@ -567,8 +567,9 @@ first of them ends when the login's entry has them; what does not fit 32
 characters gets a line of its own. At most one action follows: the switch command, when a used-up
 window comes back, or a free reset. Advice about a free reset stands under two facts, when the week
 comes back by itself and when each free weekly reset ends, and reads press now or wait: wait when the
-week is back within two days, unless a reset ends before that. A model's reset is never offered for a
-spent week. A week that lasts until its reset at the
+week is back within two days, unless a reset ends before that. An Ultra Fable reset shows its estimated
+week points, warns when measured pace would exhaust the week first, and is advised at full Fable or the week floor.
+A week that lasts until its reset at the
 last day's pace gets no advice. The box is the warning (80/90/100 percent), the
 `/quota` reply and the top of `amux quota`. Bridge notices and command replies
 are in English, without emoji.
@@ -583,7 +584,7 @@ when each free reset ends, as the usage page gives it
 passed. `limitResets` optionally names each reset's kind as the usage page
 does (`[{"kind": "weekly", "expires": "2026-12-10T23:00+01:00"}, {"kind":
 "fable", "expires": "2027-03-09T08:59+01:00"}]`): a weekly reset gives the
-whole week back, a model's reset only that model's allowance. The quota line
+whole week back; a model reset restores that model's allowance and its share of the week. The quota line
 then reads `free resets 2 (1 weekly, 1 fable)`. `amux quota --json` puts `name` and `subscription` on every account,
 also when its reading failed. Version 1 files still give their slot homes.
 

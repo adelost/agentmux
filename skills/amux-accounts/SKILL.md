@@ -34,7 +34,10 @@ activates an account and says it should be used, that word covers every pane.
    days, unless a reset ends before that (Mattias 2026-11-15: three days was
    worth a reset, two would have been doubtful). `amux quota` prints the same
    lines under its table while the login's entry was read within a day. A
-   model's reset (Fable) gives back that model's allowance, never the week.
+   model's reset (Fable) restores that model's allowance and its share of the week.
+   On Ultra, 100 % Fable restores 50 week points, measured on E and V. Run Fable
+   to 100 % first, but press at the week floor if it arrives first. Other plans'
+   refund is unknown until measured.
    amux knows free resets only from the login's entry in
    `~/.agentmux/account-profiles.json`, filled in by hand: after a press,
    update its count, ends and kinds together.

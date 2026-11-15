@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { feature, unit, expect } from "bdd-vitest";
 import { afterAll, vi } from "vitest";
-import { createSentNoticeStore, parseQuotaWarningConfig, postDueQuotaWarnings } from "./quota-warning.mjs";
+import { createSentNoticeStore, parseQuotaWarningConfig, postDueQuotaWarnings, quotaBoxText } from "./quota-warning.mjs";
 
 vi.stubEnv("TZ", "Europe/Stockholm");
 afterAll(() => vi.unstubAllEnvs());
@@ -44,6 +44,26 @@ const posted = async (snapshot, now = NOW) => {
 // These accounts have no entry with a freshly read free reset, so since 293f9284 (24 Oct, a manually read reset is only
 // actionable while its evidence is fresh) their advice is when the week is back. The reset advice itself: quota-overview.test.mjs.
 feature("active-account warning with the quota box, 2026-10-17", () => {
+  unit("two quota reads retain Fable and week together for the race", {
+    when: ["the week rises 80 to 90 and Fable 50 to 60 in an hour", () => {
+      const { sent } = fixture();
+      const snapshot = (week, fable, at) => {
+        const item = account("claude", "e", week);
+        item.name = "E";
+        item.observation = { observedAt: new Date(at).toISOString() };
+        item.subscription = { planTier: "Ultra", freeResetsLeft: 1, freeResetsReadAt: new Date(NOW).toISOString(),
+          limitResets: [{ kind: "fable", expires: "2026-12-01T00:00:00Z" }] };
+        item.limits.push({ kind: "weekly_scoped", scopeName: "Fable", usedPercent: fable, resetsAt: RESET });
+        return { accounts: [item] };
+      };
+      quotaBoxText(snapshot(80, 50, NOW), { sent, now: NOW });
+      return quotaBoxText(snapshot(90, 60, NOW + HOUR), { sent, now: NOW + HOUR });
+    }],
+    then: ["the second call reports 30 points and warns", text => {
+      expect(text).toContain("E: Fable-reset ger 30 veckopoäng");
+      expect(text).toContain("E: veckan tar slut före Fable");
+    }],
+  });
   unit("09:15 posts once for Codex A and gives inactive ai:2 no advice", {
     when: ["rendering the original readings with measured inactivity", () => posted(morning())],
     then: ["one box; the idle ai:2 account gets a row but no advice", texts => expect(texts).toEqual([[

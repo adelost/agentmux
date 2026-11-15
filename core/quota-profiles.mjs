@@ -149,7 +149,7 @@ const isMoment = (value) => typeof value === "string"
 // The names are the ones stats.v1d.io reads (api:0, 2026-10-17), so the push forwards them unchanged.
 // freeResetsExpire: lsrc:0 the same day, when each reset ends, so the box can show the first.
 // limitResets: Mattias 2026-11-14 (deep:3), each free reset's kind as the usage page names it. A Weekly reset gives the
-// whole week back, a Fable reset only that model's allowance; the count alone made two resets read as two weeks.
+// whole week back; a Fable reset restores its allowance and its share of the week. The count alone made two resets read as two weeks.
 const isLimitReset = (value) => !!value && typeof value === "object" && !Array.isArray(value)
   && typeof value.kind === "string" && /^[a-z][a-z0-9-]{0,19}$/u.test(value.kind) && isMoment(value.expires);
 const SUBSCRIPTION_FIELDS = Object.freeze({

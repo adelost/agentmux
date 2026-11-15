@@ -10,7 +10,7 @@ export function manualFactAge(readAt, now) {
   return { stale: elapsed > DAY, text: `${elapsed > DAY ? "STALE · " : ""}manual read ${readAt} · age ${age}` };
 }
 
-/** WHAT: Names each kind of free reset with its count, " (1 weekly, 1 fable)". WHY: Keeps a model's reset from reading as a week back. */
+/** WHAT: Names each kind of free reset with its count, " (1 weekly, 1 fable)". WHY: Keeps a model's reset distinct from a whole week. */
 const resetKinds = (resets) => {
   if (!Array.isArray(resets) || !resets.length) return "";
   const counts = new Map();

@@ -8,6 +8,7 @@ import { accountName, loginOfEmail } from "../core/account-names.mjs";
 import { weeklyForecast } from "../core/quota-forecast.mjs";
 import { clockOf, creditsText, nearestMinute } from "../core/quota-format.mjs";
 import { manualSubscriptionFacts, manualFactText } from "../core/quota-manual-facts.mjs";
+import { quotaFloorPercent } from "../core/quota-park.mjs";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -17,6 +18,9 @@ const HOUR = 3_600_000, DAY = 24 * HOUR, PHONE_WIDTH = 32;
 const WAIT_WITHIN_MS = 2 * DAY;
 const LOGGED_OUT = new Set(["login_expired", "credentials_expired", "credentials_unavailable", "login_required"]);
 const codexWindows = account => (account.limits?.find(limit => limit.limitId === "codex") || account.limits?.[0])?.windows || [];
+/** WHAT: Extracts Claude's Fable window. WHY: Keeps other model windows out of its reset advice. */
+export const fableQuotaOf = account => account?.ok && account.provider === "claude"
+  ? account.limits?.find(limit => limit.kind === "weekly_scoped" && (limit.id === "weekly_fable" || limit.scopeName === "Fable")) : null;
 
 // Each engine's five-hour window and the command that moves its panes to another of its accounts.
 const ENGINES = [
@@ -139,11 +143,39 @@ function actionLines(facts, { config, now }) {
     worthPressing(weekBackAt, resetEnds, now) ? `→ Free reset ${fact.name} ${when}` : `→ Wait for ${fact.name}${spent ? "" : ` ${when}`}`];
 }
 
+/** WHAT: Calculates Fable reset value and its race against the week for measured Ultra plans.
+ * WHY: Keeps an unmeasured plan or a reset between readings from becoming a false forecast. */
+function fableAdvice(fact, { now, readingsOf, floorPercent }) {
+  const { account, week, name } = fact, fable = fableQuotaOf(account);
+  const reset = account.subscription?.limitResets?.some(item => item.kind === "fable" && Date.parse(item.expires) > now);
+  if (!reset || !week || !Number.isFinite(fable?.usedPercent)) return [];
+  const ultra = account.subscription?.planTier?.toLowerCase() === "ultra";
+  const value = Number((fable.usedPercent * 0.5).toFixed(1)).toString().replace(".", ",");
+  const lines = ultra ? [`${name}: Fable-reset ger ${value} veckopoäng`] : [];
+  if (fable.usedPercent >= 100 || (floorPercent > 0 && 100 - week.usedPercent <= floorPercent)) {
+    lines.push(`${name}: tryck Fable-reset nu`);
+    return lines;
+  }
+  if (!ultra) return lines;
+  const at = Date.parse(account.observation?.observedAt);
+  const same = (a, b) => Number.isFinite(Date.parse(a)) && Math.abs(Date.parse(a) - Date.parse(b)) < 30 * 60_000;
+  const previous = readingsOf(account).filter(p => Number.isFinite(p.at) && p.at < at && now - p.at <= 24 * HOUR
+    && Number.isFinite(p.fableUsedPercent) && Number.isFinite(p.usedPercent)
+    && p.usedPercent <= week.usedPercent && p.fableUsedPercent <= fable.usedPercent
+    && same(p.resetsAt, week.resetsAt) && same(p.fableResetsAt, fable.resetsAt)).sort((a, b) => b.at - a.at)[0];
+  if (previous) {
+    const weekRise = week.usedPercent - previous.usedPercent, fableRise = fable.usedPercent - previous.fableUsedPercent;
+    if (weekRise > 0 && (fableRise === 0 || (100 - week.usedPercent) * fableRise < weekRise * (100 - fable.usedPercent)))
+      lines.push(`${name}: veckan tar slut före Fable`);
+  }
+  return lines;
+}
+
 /**
  * WHAT: Formats the quota box: every account's week as a monospace table, then one action or none.
  * WHY: Keeps what is left, when it resets and what to do in one view a phone can read.
  */
-export function buildQuotaOverview(snapshot, { config, now = Date.now(), readingsOf = () => [] }) {
+export function buildQuotaOverview(snapshot, { config, now = Date.now(), readingsOf = () => [], floorPercent = quotaFloorPercent() }) {
   const accounts = (snapshot?.accounts || []).filter(account => !isIdleLoggedOut(account));
   const shown = ENGINES.flatMap(engine => accounts.filter(account => account.provider === engine.provider)
     .sort((a, b) => (b.inUse?.length || 0) - (a.inUse?.length || 0)));
@@ -151,5 +183,7 @@ export function buildQuotaOverview(snapshot, { config, now = Date.now(), reading
   const width = Math.max(0, ...facts.map(fact => fact.name.length));
   // The percent is what is left, as Mattias asked; the detail lines of amux quota give what is used.
   const table = [`${" ".repeat(width)} panes  left  reset`, ...facts.flatMap(fact => linesOf(fact, width, now))];
-  return { text: ["```", ...table, "```", ...actionLines(facts, { config, now })].join("\n") };
+  const fable = facts.flatMap(fact => fableAdvice(fact, { now, readingsOf, floorPercent }));
+  const action = fable.some(line => line.endsWith("tryck Fable-reset nu")) ? [] : actionLines(facts, { config, now });
+  return { text: ["```", ...table, "```", ...fable, ...action].join("\n") };
 }
