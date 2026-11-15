@@ -479,6 +479,13 @@ feature("generated agent policy", () => {
     }],
   });
 
+  unit("keeps release decisions independent of verification", {
+    when: ["reading the push policy", () => readFileSync(new URL("../docs/fleet/merge-release.md", import.meta.url), "utf8")],
+    then: ["the release rule is explicit", content => {
+      expect(content).toContain("no leader, decider or Deep pane may put a condition on a release (freeze, window, alone, turn order, review before push); a quality goal is met with faster repair, never slower release; verification governs DONE, never the push.");
+    }],
+  });
+
   unit("makes reversible choices owner-decided instead of parked on the human", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));

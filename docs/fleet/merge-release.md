@@ -4,6 +4,8 @@
 
 ### Push without waiting (every repository)
 
+no leader, decider or Deep pane may put a condition on a release (freeze, window, alone, turn order, review before push); a quality goal is met with faster repair, never slower release; verification governs DONE, never the push.
+
 Panes that wait on each other's gates stall the whole fleet. Panes that push
 past each other and mend afterwards keep parallel work possible. So every
 repository pushes this way (Mattias 12 Nov 2026 18:5xZ, written down for all
