@@ -4,6 +4,11 @@
 # one vendor is installed.
 agents: {}
 
+# Push wait measures landed commits only; replay another repository before adding it.
+push_wait_watch:
+  repos: ["~/lsrc/cutkit"]
+  tell: "sandman:0"
+
 # Optional Discord integration. Uncomment after adding DISCORD_TOKEN.
 # guild: "YOUR_SERVER_ID"
 # category: "Agent Cave"

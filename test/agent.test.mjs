@@ -465,7 +465,7 @@ feature("generated agent policy", () => {
     }],
     then: ["local proof stays small without weakening correctness requirements", (content) => {
       // Mattias 4 Nov 2026 (delivery:2c931a8c): no new test files; existing targeted tests, lint and a hand trial in the real app.
-      expect(content).toMatch(/existing targeted tests and lint, exercise the feature by hand in the real\s+app/u);
+      expect(content).toMatch(/existing targeted tests and lint, exercise the feature by\s+hand in the real app/u);
       expect(content).toMatch(/Write no new\s+test files/u);
       expect(content).toContain("one relevant local smoke of at most 5 minutes");
       // lsrc:0, 2026-10-22 (release philosophy, testing-philosophy.md): release checks follow that file's
@@ -483,6 +483,7 @@ feature("generated agent policy", () => {
     when: ["reading the push policy", () => readFileSync(new URL("../docs/fleet/merge-release.md", import.meta.url), "utf8")],
     then: ["the release rule is explicit", content => {
       expect(content).toContain("no leader, decider or Deep pane may put a condition on a release (freeze, window, alone, turn order, review before push); a quality goal is met with faster repair, never slower release; verification governs DONE, never the push.");
+      expect(content).toContain("A pane told to wait by another pane pushes when its own gates are green and names this section in its reply; only Mattias's own order, with its delivery id and an end time, holds a push.");
     }],
   });
 
@@ -513,7 +514,7 @@ feature("generated agent policy", () => {
     }],
     then: ["the three rules hold and the old quote rule is gone everywhere", ({ content, skill }) => {
       expect(content).toMatch(/Hand a lead role only to a running pane that acknowledged it; until\s+then\s+the sender keeps it/u);
-      expect(content).toMatch(/needing neither his hands \(a login\) nor new money,\s+is decided by its owner, or by the lead after 30 minutes unanswered; log why/u);
+      expect(content).toMatch(/Design, order and measurement choices within the assigned outcome and cap\s+belong to the owner/u);
       expect(content).toMatch(/restate it in the sender's words; never paste his text/u);
       expect(content).not.toContain("keeps the human quote byte-for-byte");
       expect(skill).toContain("Never paste the human's text into a brief");
@@ -651,7 +652,7 @@ feature("generated agent policy", () => {
     }],
     then: ["rule 5 ends with the exact Source sentence", (content) => {
       const rule5 = content.slice(content.indexOf("5. **A configured board")).split(/\n(?=\d+\. \*\*)/u)[0];
-      expect(rule5.replace(/\s+/gu, " ").trim()).toMatch(/A row may carry a `Source` column: a pointer to his decision-log entry \(file, date, and time to the precision the log proves, or a stable message id\), `own`, after his pointer if any, or `inferred:` before the pointer when the row rests on your reading of his words\.$/u);
+      expect(rule5.replace(/\s+/gu, " ").trim()).toMatch(/The `Source` column also retains a pointer to his decision-log entry \(file, date, and time to the precision the log proves, or a stable message id\), `own`, after his pointer if any, or `inferred:` before the pointer when the row rests on your reading of his words\.$/u);
     }],
   });
 

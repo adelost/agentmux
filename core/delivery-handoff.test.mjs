@@ -1,6 +1,61 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { blockedHandoffSender, deliveryBlockerDetail } from "./delivery-handoff.mjs";
 import { reportStalledHead, stallWatcherOf } from "./queue-stall-watch.mjs";
+import { pushWaitVerdict, pollPushWaitOnce } from "./push-wait-watch.mjs";
+
+feature("push wait watch", () => {
+  const t = Date.parse("2026-11-15T15:00:00Z");
+  const commits = (late, total = 9) => Array.from({ length: total }, (_, i) => ({ sha: `${i}`, subject: `code ${i}`,
+    authorMs: t - (i < late ? 40 : 10) * 60_000, committerMs: t, files: ["src/main.js"] }));
+  unit("counts only code and requires both thresholds", {
+    when: ["four, two, and a docs-only late commit", () => [
+      pushWaitVerdict([...commits(4), { ...commits(1, 1)[0], files: ["docs/TASKS.md", "README.md"] }], t),
+      pushWaitVerdict(commits(2), t), pushWaitVerdict(commits(2, 2), t),
+    ]],
+    then: ["only four of nine raises an alarm", ([yes, no, small]) => {
+      expect(yes).toMatchObject({ on: true, landed: 9 }); expect(yes.late).toHaveLength(4);
+      expect(no.on).toBe(false); expect(small.on).toBe(false);
+    }],
+  });
+  unit("alarms once, repeats only to the pane, and opens a new episode after 30 quiet minutes", {
+    when: ["polling an episode and its recovery", async () => {
+      let state = {}, clock = t, rows = commits(4); const sent = [], notified = [];
+      const poll = () => pollPushWaitOnce({ repos: ["cut"], readCommits: async () => rows,
+        readState: () => state, writeState: value => { state = structuredClone(value); },
+        send: async (...args) => { sent.push(args); return { sent: true }; },
+        notify: async (...args) => { notified.push(args); return { sent: true }; }, now: () => clock });
+      await poll(); clock += 10 * 60_000; await poll(); clock += 50 * 60_000; await poll();
+      rows = []; clock += 10 * 60_000; await poll(); clock += 30 * 60_000; await poll();
+      rows = commits(4).map(c => ({ ...c, committerMs: clock, authorMs: clock - 40 * 60_000 }));
+      clock += 60_000; await poll(); return { sent, notified };
+    }],
+    then: ["three pane notices and two human notices", ({ sent, notified }) => {
+      expect(sent).toHaveLength(3); expect(notified).toHaveLength(2);
+    }],
+  });
+  unit("a failed git read neither changes state nor sends", {
+    when: ["fetch fails", async () => {
+      const before = { cut: { episode: "old" } }, writes = [], sends = [];
+      await pollPushWaitOnce({ repos: ["cut"], readCommits: async () => { throw Error("fetch failed"); },
+        readState: () => before, writeState: x => writes.push(x), send: x => sends.push(x),
+        notify: x => sends.push(x), now: () => t, log: () => {} }); return { writes, sends };
+    }],
+    then: ["nothing changes", ({ writes, sends }) => { expect(writes).toEqual([]); expect(sends).toEqual([]); }],
+  });
+  unit("caps human alerts at three per UTC day while retaining the unlanded count", {
+    when: ["a fourth episode starts", async () => {
+      let state = { cut: { humanAlerts: { day: "2026-11-15", count: 3 } } }; const sent = [], notified = [];
+      await pollPushWaitOnce({ repos: ["cut"], readCommits: async () => commits(4), readUnlanded: async () => 7,
+        readState: () => state, writeState: value => { state = structuredClone(value); },
+        send: async (...args) => { sent.push(args); return { sent: true }; },
+        notify: async (...args) => { notified.push(args); return { sent: true }; }, now: () => t });
+      return { state, sent, notified };
+    }],
+    then: ["the pane hears it, the human does not, and the gap is recorded", ({ state, sent, notified }) => {
+      expect(sent).toHaveLength(1); expect(notified).toHaveLength(0); expect(state.cut.unlanded).toBe(7);
+    }],
+  });
+});
 
 // 2026-10-20 18:12Z: the quota floor held api:0's note to api:6 (Codex A's 5 h window spent), and the sender's stop
 // notice said the pane's process could not be started, with advice to hand the work to another owner.

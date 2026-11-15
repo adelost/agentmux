@@ -46,8 +46,7 @@ Mellan agenter gäller:
    Regeln har inget slutdatum (Mattias 4 nov 2026,
    delivery:2c931a8c583165bff6e83695c6609c03).
 
-Delade träd fryses bara under korta koordinerade gate-fönster med utsedd
-koordinator, aldrig genom en annan panels långvariga blanket-fence.
+Inga frysningar eller turordningar för push; varje ägare följer merge-release.md.
 No skill names or bracketed labels in replies. Comments explain intent, risks or constraints, not a work diary. Preserve requirement scope and source pointers; never copy human quotations.
 
 ## Framdrift
