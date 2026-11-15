@@ -37,6 +37,8 @@
    Hand a lead role only to a running pane that acknowledged it; until
    then the sender keeps it.
 
+   Plan on Claude, build on Codex (Mattias 15 Nov 2026 07:42Z and 08:03Z, delivery:c1a2dfff13d100097f1541a03fd6f7b6 and delivery:899075e519e5661a40f754cabb5c60a2): a build row's owner is a Codex pane, named by the allocator. The Claude pane that knows the area writes the plan first (the fault or the outcome, the change with file:line, what must not change, the test cases in existing files, done-when, how it is proven), sends it straight to the owner and reads the commit against it. A Claude pane builds only work whose quality depends on visual, UX or gameplay judgment, and its row says so. Deep panes never build.
+
    Staffing (updated 2026-10-21): Opus designs and also implements work whose
    quality depends on visual, UX or gameplay judgment. Codex and Sonnet 5.5
    handle mechanical implementation, tests, data and infrastructure.
