@@ -9,6 +9,8 @@ import { weeklyForecast } from "../core/quota-forecast.mjs";
 import { clockOf, creditsText, nearestMinute } from "../core/quota-format.mjs";
 import { manualSubscriptionFacts, manualFactText } from "../core/quota-manual-facts.mjs";
 import { quotaFloorPercent } from "../core/quota-park.mjs";
+import { fableFullWeekPoints, fableQuotaOf } from "../core/fable-quota.mjs";
+export { fableQuotaOf } from "../core/fable-quota.mjs";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -18,9 +20,6 @@ const HOUR = 3_600_000, DAY = 24 * HOUR, PHONE_WIDTH = 32;
 const WAIT_WITHIN_MS = 2 * DAY;
 const LOGGED_OUT = new Set(["login_expired", "credentials_expired", "credentials_unavailable", "login_required"]);
 const codexWindows = account => (account.limits?.find(limit => limit.limitId === "codex") || account.limits?.[0])?.windows || [];
-/** WHAT: Extracts Claude's Fable window. WHY: Keeps other model windows out of its reset advice. */
-export const fableQuotaOf = account => account?.ok && account.provider === "claude"
-  ? account.limits?.find(limit => limit.kind === "weekly_scoped" && (limit.id === "weekly_fable" || limit.scopeName === "Fable")) : null;
 
 // Each engine's five-hour window and the command that moves its panes to another of its accounts.
 const ENGINES = [
@@ -149,8 +148,8 @@ function fableAdvice(fact, { now, readingsOf, floorPercent }) {
   const { account, week, name } = fact, fable = fableQuotaOf(account);
   const reset = account.subscription?.limitResets?.some(item => item.kind === "fable" && Date.parse(item.expires) > now);
   if (!reset || !week || !Number.isFinite(fable?.usedPercent)) return [];
-  const ultra = account.subscription?.planTier?.toLowerCase() === "ultra";
-  const value = Number((fable.usedPercent * 0.5).toFixed(1)).toString().replace(".", ",");
+  const fullPoints = fableFullWeekPoints(account.subscription), ultra = fullPoints !== null;
+  const value = Number((fable.usedPercent * (fullPoints ?? 0) / 100).toFixed(1)).toString().replace(".", ",");
   const lines = ultra ? [`${name}: Fable reset gives ${value} week ${value === "1" ? "point" : "points"}`] : [];
   if (fable.usedPercent >= 100 || (floorPercent > 0 && 100 - week.usedPercent <= floorPercent)) {
     if (account.activeInUse?.length && Date.parse(week.resetsAt) - now > WAIT_WITHIN_MS)

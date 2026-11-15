@@ -2,6 +2,7 @@
 // Mattias 2026-10-17 13:04Z: "Bättre att kalla demd för claude wetterlind eller Claude W och Claude A.. tror faktist jag
 // föredrar det egentlige... Claude W och Claude A.. och Codex A och Codex W ... överallt .. konsekvent.. gärna.."
 import { subscriptionAt } from "./quota-profiles.mjs";
+import { fableFullWeekPoints } from "./fable-quota.mjs";
 
 const ENGINE_NAMES = Object.freeze({ claude: "Claude", codex: "Codex", kimi: "Kimi" });
 
@@ -35,7 +36,9 @@ export function withAccountEntries(accounts, entries = new Map(), now = Date.now
   return accounts.map((account) => {
     const login = loginOfEmail(account.account?.email);
     const entry = login ? entries.get(`${account.provider}:${login}`) : null;
+    const subscription = entry?.subscription ? subscriptionAt(entry.subscription, now) : account.subscription;
     return { ...account, name: entry?.name || accountName(account, peers),
-      ...(entry?.subscription ? { subscription: subscriptionAt(entry.subscription, now) } : {}) };
+      ...(entry?.subscription ? { subscription } : {}),
+      ...(account.provider === 'claude' ? { fableFullWeekPoints: fableFullWeekPoints(subscription) } : {}) };
   });
 }

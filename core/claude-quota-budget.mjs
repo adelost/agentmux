@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { readClaudeProfileIdentity, readClaudeQuota } from "./claude-account-quota.mjs";
 import { tryLockDir } from "./dir-lock.mjs";
+import { fableQuotaOf } from "./fable-quota.mjs";
 
 /** WHAT: Defines the minimum time between usage calls for one account. WHY: Keeps all readers inside the provider's per-account budget. */
 export const CLAUDE_USAGE_MIN_INTERVAL_MS = 5 * 60_000;
@@ -68,7 +69,9 @@ const HISTORY_MAX_POINTS = 400;
 const weeklyPoint = (result, at) => {
   const weekly = result?.ok === true && Array.isArray(result.limits)
     ? result.limits.find((limit) => limit?.kind === "weekly_all") : null;
-  return Number.isFinite(weekly?.usedPercent) ? { at, usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt } : null;
+  const fable = fableQuotaOf(result);
+  return Number.isFinite(weekly?.usedPercent) ? { at, usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt,
+    ...(Number.isFinite(fable?.usedPercent) ? { fableUsedPercent: fable.usedPercent, fableResetsAt: fable.resetsAt ?? null } : {}) } : null;
 };
 
 const withHistory = (previous, at, result) => {

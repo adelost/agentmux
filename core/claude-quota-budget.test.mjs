@@ -145,6 +145,23 @@ feature("one Claude usage call per account per five minutes", () => {
       ]);
     }],
   });
+  unit("a Fable window travels with its weekly history point", {
+    given: ["one reading with Fable and one without", () => {
+      const week = { kind: "weekly_all", usedPercent: 40, resetsAt: "2026-10-14T07:00:00Z" };
+      const fable = { kind: "weekly_scoped", id: "weekly_fable", usedPercent: 60, resetsAt: "2026-10-15T07:00:00Z" };
+      return budget({ read: vi.fn().mockResolvedValueOnce({ ok: true, provider: "claude", limits: [week, fable] })
+        .mockResolvedValueOnce({ ok: true, provider: "claude", limits: [week] }) });
+    }],
+    when: ["both readings are saved", async ctx => {
+      await readClaudeQuotaBudgeted({ ...ctx, profile: slot("1"), now: () => NOW });
+      await readClaudeQuotaBudgeted({ ...ctx, profile: slot("1"), now: () => NOW + CLAUDE_USAGE_MIN_INTERVAL_MS });
+      return readClaudeQuotaHistory(slot("1"), ctx);
+    }],
+    then: ["Fable is present only on the point that measured it", history => {
+      expect(history[0]).toMatchObject({ usedPercent: 40, fableUsedPercent: 60, fableResetsAt: "2026-10-15T07:00:00Z" });
+      expect(history[1]).toEqual({ at: NOW + CLAUDE_USAGE_MIN_INTERVAL_MS, usedPercent: 40, resetsAt: "2026-10-14T07:00:00Z" });
+    }],
+  });
 });
 
 // 2026-10-17: one dropped request stood five minutes in every reader, and the stats push missed Claude W.

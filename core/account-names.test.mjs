@@ -30,6 +30,16 @@ feature("account names by engine and login", () => {
 });
 
 feature("each account carries its login's entry", () => {
+  unit("only a measured Ultra plan has a full Fable value", {
+    when: ["attaching an Ultra, Max, and unknown plan", () => withAccountEntries([
+      account("claude", "ultra@example.test"), account("claude", "max@example.test"), account("claude", "unknown@example.test"),
+      account("codex", "ultra@example.test"),
+    ], new Map([["claude:ultra", { subscription: { planTier: "Ultra" } }], ["claude:max", { subscription: { planTier: "Max" } }]]))],
+    then: ["the Claude JSON fields are 50, null and null", accounts => {
+      expect(accounts.slice(0, 3).map(item => item.fableFullWeekPoints)).toEqual([50, null, null]);
+      expect(accounts[3]).not.toHaveProperty("fableFullWeekPoints");
+    }],
+  });
   unit("the entry's name and subscription apply, also to a failed reading", {
     when: ["merging entries into a live-shaped snapshot", () => withAccountEntries([
       account("claude", "adelost@example.test"),
