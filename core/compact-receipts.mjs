@@ -2,6 +2,7 @@ import { claudeCompactRefusalAfterSubmit } from "./claude-submit-boundary.mjs";
 import { compactAccessBlocker } from "./nightly-compact.mjs";
 import { selectedRuntimeProfile } from "./runtime-account-profiles.mjs";
 import { readClaudeQuotaBudgeted } from "./claude-quota-budget.mjs";
+import { claudeWeeklyRoom } from "./claude-quota-recovery.mjs";
 
 /** WHAT: Names the shared compact receipt store. WHY: Keeps every trigger's evidence in one state key. */
 export const COMPACT_RECEIPTS_STATE = "context_maintenance_by_pane_v1";
@@ -127,6 +128,39 @@ export async function recoverLoginRefusedCompact(state, name, pane, identity, { 
     return { ...current, status: "NOT_SENT", spentNothing: true, reason: "login-authentication-recovered",
       authRefusals: [...(current.authRefusals || []), { profileId: profile.id, observedAt: quota.fetchedAt, at: now,
         priorAt: current.at, reason: "claude-login-required", spentNothing: true }] };
+  });
+  return recovered;
+}
+
+/** WHAT: Resolves a usage refusal after a completed exact-session account move. WHY: Prevents the old account's reset from holding a pane already running on a spare account. */
+export async function recoverRotatedQuotaCompact(state, name, pane, identity, { now = Date.now(),
+  profile = selectedRuntimeProfile({ state, agentName: name, pane, provider: "claude" }),
+  readQuota = readClaudeQuotaBudgeted } = {}) {
+  const key = `${name}:${pane}`, prior = compactReceipt(state, key);
+  const rotationKey = `claude_account_request_v1:${key}`, rotation = state?.get?.(rotationKey, null);
+  if (prior?.status !== "FAILED" || prior.reason !== "provider-usage-limited"
+      || prior.sessionId !== identity?.sessionId || !identity?.path || !Number.isFinite(prior.at)
+      || !(identity.path in (prior.cursor?.positions || {})) || !profile
+      || rotation?.phase !== "complete" || rotation.outcome !== "switched"
+      || rotation.sessionId !== identity.sessionId || rotation.sessionPath !== identity.path
+      || rotation.target !== profile.id || !rotation.compact?.sourceProfileId
+      || rotation.compact.sourceProfileId === profile.id
+      || prior.authRefusals?.some(item => item.rotationId === rotation.id)) return false;
+  const refusal = claudeCompactRefusalAfterSubmit({ ...prior.cursor, kind: "claude-prompt-events-v1" }, prior.at);
+  if (compactAccessBlocker(refusal) !== "provider-usage-limited"
+      && !/You(?:'|’)ve reached your (?:Fable|Opus|Sonnet) limit\b/iu.test(refusal || "")) return false;
+  const after = typeof prior.finishedAt === "number" ? prior.finishedAt : Date.parse(prior.finishedAt) || prior.at;
+  const quota = await readQuota({ profile, notBefore: after });
+  if (quota?.profile?.id !== profile.id || Date.parse(quota.fetchedAt) <= after
+      || claudeWeeklyRoom(quota) === null || quota.limits.some(limit => limit.usedPercent >= 100)) return false;
+  let recovered = false;
+  updateCompactReceipt(state, key, current => {
+    if (current.status !== "FAILED" || current.sessionId !== prior.sessionId || current.at !== prior.at
+        || state.get(rotationKey, null)?.id !== rotation.id) return current;
+    recovered = true;
+    return { ...current, status: "NOT_SENT", spentNothing: true, reason: "quota-account-rotation-recovered",
+      authRefusals: [...(current.authRefusals || []), { profileId: profile.id, observedAt: quota.fetchedAt,
+        at: now, priorAt: current.at, reason: "provider-usage-limited", rotationId: rotation.id, spentNothing: true }] };
   });
   return recovered;
 }

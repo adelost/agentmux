@@ -21,7 +21,7 @@ import { QUOTA_PARK_ORIGIN } from "./quota-park.mjs";
 import { QUOTA_WIND_DOWN_ORIGIN } from "./quota-wind-down.mjs";
 import { withdrawDraft } from "./draft-withdrawal.mjs";
 import { assertDeliveryPreparation, onUnsentPreparationTimeout } from "./delivery-preparation.mjs";
-import { COMPACT_RECEIPTS_STATE, compactReceipt, recoverLoginRefusedCompact, compactWriterGone, resolveExpiredCompact, updateCompactReceipt } from "./compact-receipts.mjs";
+import { COMPACT_RECEIPTS_STATE, compactReceipt, recoverLoginRefusedCompact, recoverRotatedQuotaCompact, compactWriterGone, resolveExpiredCompact, updateCompactReceipt } from "./compact-receipts.mjs";
 import { randomUUID } from "node:crypto";
 import { createJournalHold, fileStamp } from "./pulse/journal-hold.mjs";
 
@@ -242,6 +242,8 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       prior = null;
     }
     if (prior && safe && target.engine === "claude" && await recoverLoginRefusedCompact(state, name, pane, identity,
+      { now: now(), ...loginRecoveryFor(name, pane) })) prior = null;
+    if (prior && safe && target.engine === "claude" && await recoverRotatedQuotaCompact(state, name, pane, identity,
       { now: now(), ...loginRecoveryFor(name, pane) })) prior = null;
     const attempt = prior ? "FAILED" : "NEW";
     const facts = { tokens: context?.tokens, idleMs: Number.isFinite(activity) ? now() - activity : NaN, cold, pauseTokens,

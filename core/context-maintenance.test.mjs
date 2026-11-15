@@ -36,6 +36,38 @@ function fixture({ fail = false, jobs = [] } = {}) {
 }
 
 feature("warm and cold compaction share a durable one-attempt fence", () => {
+  for (const [status, rotation, target, used, fresh, expected, retried] of [
+    ["FAILED", "complete", "new", 3, true, true],
+    ["UNKNOWN", "complete", "new", 3, true, false],
+    ["ATTEMPTING", "complete", "new", 3, true, false],
+    ["FAILED", "pending", "new", 3, true, false],
+    ["FAILED", "complete", "old", 3, true, false],
+    ["FAILED", "complete", "new", 100, true, false],
+    ["FAILED", "complete", "new", 3, false, false],
+    ["FAILED", "complete", "new", 3, true, false, true],
+  ]) component(`rotation recovery ${status}/${rotation}/${target}/${used}/${fresh}/${retried}`, {
+    given: ["a journal-proven usage refusal and an exact-session account rotation", () => {
+      const ctx = fixture(), identity = ctx.identityFor(), at = ctx.now() - 1000;
+      const cursor = captureJsonlAppendCursor("context-maintenance-v1", [identity.path]);
+      ctx.state.set("context_maintenance_by_pane_v1", { "claw:2": { sessionId: identity.sessionId,
+        sessionPath: identity.path, cursor, status, at, finishedAt: at, reason: "provider-usage-limited",
+        ...(retried && { authRefusals: [{ rotationId: "rotation-one" }] }) } });
+      ctx.state.set("claude_account_request_v1:claw:2", { id: "rotation-one", phase: rotation,
+        outcome: "switched", target, sessionId: identity.sessionId, sessionPath: identity.path,
+        compact: { sourceProfileId: "old" } });
+      ctx.append({ type: "system", subtype: "local_command", commandRun: { command: "compact" },
+        commandOutcome: { kind: "failed" }, timestamp: new Date(at).toISOString(),
+        content: "<local-command-stderr>Error during compaction: You've reached your Fable limit.</local-command-stderr>" });
+      ctx.loginRecoveryFor = () => ({ profile: { id: "new" }, readQuota: async () => ({ ok: true,
+        fetchedAt: new Date(fresh ? ctx.now() : at - 1).toISOString(), profile: { id: "new" },
+        limits: [{ kind: "weekly_all", usedPercent: used }, { kind: "session", usedPercent: 0 }] }) });
+      return ctx;
+    }],
+    when: ["ordinary delivery admission checks the existing head", ctx => createContextMaintenance(ctx).run("claw", 2, { cold: true })],
+    then: ["only a proved refusal on the old account retries on the new account with room", (result, ctx) => {
+      expect(result.ok).toBe(expected); expect(ctx.calls).toHaveLength(expected ? 1 : 0);
+    }], cleanup: ctx => ctx.cleanup(),
+  });
   for (const [status, refusal, authenticated, expected] of [
     ["FAILED", "Login expired · Please run /login", true, true],
     ["FAILED", "Login expired · Please run /login", false, false],

@@ -2,7 +2,7 @@ import { sendToPane } from "./tmux.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { beginContextCompact, contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
-import { recoverLoginRefusedCompact, overrideFailedCompact, updateCompactReceipt } from "../core/compact-receipts.mjs";
+import { recoverLoginRefusedCompact, recoverRotatedQuotaCompact, overrideFailedCompact, updateCompactReceipt } from "../core/compact-receipts.mjs";
 import { getContextPercent } from "../core/context.mjs";
 import { waitForSessionLease } from "../core/session-lease.mjs";
 
@@ -17,6 +17,7 @@ export async function sendRecordedCompact(ctx, agent, pane, engine, command, { o
     if (!identity?.sessionId || !identity.path) return { delivered: false, blocked: true, reason: "exact-session-unknown" };
     if (override) overrideFailedCompact(ctx.state, `${agent.name}:${pane}`, identity, override);
     if (engine === "claude") await recoverLoginRefusedCompact(ctx.state, agent.name, pane, identity);
+    if (engine === "claude") await recoverRotatedQuotaCompact(ctx.state, agent.name, pane, identity);
     const previous = contextMaintenanceAttempt(ctx.state, agent.name, pane, identity);
     if (previous && previous.status !== "VERIFIED") return { delivered: false, blocked: true, reason: `compact-${previous.status.toLowerCase()}` };
     const tokens = getContextPercent(panePathFor(agent, pane), engine)?.tokens ?? null;
