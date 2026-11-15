@@ -105,8 +105,19 @@ export function createControlTransport({
   let stopped = false;
   let sawServer = false;
   let unavailableServer = false;
+  let waitingSince = null, waitingTimer = null;
   const waitingForServer = () => !sawServer && (unavailableServer || !existsSync(socket));
   const publicText = (text) => String(text).split(socket).join("AMUX socket");
+  function noteWaiting() {
+    if (waitingSince !== null) return;
+    waitingSince = Date.now();
+    log("waiting for AMUX socket: 0s");
+    waitingTimer = setInterval(() => {
+      if (waitingForServer()) log(`waiting for AMUX socket: ${Math.floor((Date.now() - waitingSince) / 1000)}s`);
+    }, 60_000);
+    waitingTimer.unref?.();
+  }
+  function clearWaiting() { clearInterval(waitingTimer); waitingTimer = null; waitingSince = null; }
 
   const record = (path, question, asker = null) => counters?.record({ path, verb: question?.verb ?? null, target: question?.target ?? null, asker });
   const setState = (next, why = null) => {
@@ -114,7 +125,7 @@ export function createControlTransport({
     state = next;
     reason = why;
     counters?.setTransport({ mode, state, reason });
-    if (next === "ready") sawServer = true;
+    if (next === "ready") { sawServer = true; clearWaiting(); }
     if (!(next === "connecting" && !sawServer) && !waitingForServer()) log(publicText(`control client ${next}${why ? ` (${why})` : ""}`));
   };
 
@@ -178,6 +189,7 @@ export function createControlTransport({
     reconnectTimer = null;
     if (stopped || mode === "exec") return;
     unavailableServer = false;
+    if (waitingForServer()) noteWaiting();
     setState("connecting");
     const args = ["-N", "-S", socket, "-C", "new-session", "-A", "-s", PULSE_SESSION,
       "-f", "no-output,ignore-size", "sleep 2147483647"];
@@ -195,6 +207,7 @@ export function createControlTransport({
     child.stderr?.on("data", (chunk) => {
       const detail = String(chunk).trim();
       if (!sawServer && /no server running|no such file or directory|connection refused/iu.test(detail)) unavailableServer = true;
+      if (waitingForServer()) noteWaiting();
       if (!waitingForServer()) log(publicText(`client stderr: ${detail.slice(0, 160)}`));
     });
     child.stdin.on("error", (error) => { if (client === child) broken(`client stdin: ${error.message}`); });
@@ -287,6 +300,7 @@ export function createControlTransport({
     clientPid: () => client?.pid ?? null,
     stop() {
       stopped = true;
+      clearWaiting();
       clearTimeout(reconnectTimer);
       clearTimeout(deadTimer);
       const old = client;

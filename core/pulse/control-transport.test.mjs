@@ -7,6 +7,9 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { promisify } from "util";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { vi } from "vitest";
 import { feature, integration, component, expect } from "bdd-vitest";
 import { createControlTransport, readOnlyQuestion, PULSE_SESSION } from "./control-transport.mjs";
 import { createIoCounters } from "./io-counters.mjs";
@@ -222,7 +225,7 @@ feature("Pulse control transport", () => {
       return { settled, socketExists: existsSync(f.socket), lines };
     }],
     then: ["it stays broken and no server or socket appears", (r) => {
-      expect(r).toEqual({ settled: true, socketExists: false, lines: [] });
+      expect(r).toEqual({ settled: true, socketExists: false, lines: ["waiting for AMUX socket: 0s"] });
     }],
     cleanup: (f) => f.close(),
   });
@@ -254,7 +257,24 @@ feature("Pulse control transport", () => {
       transport.stop();
       return lines;
     }],
-    then: ["no waiting or socket error is logged", (lines) => expect(lines).toEqual([])],
+    then: ["only the waiting status is logged", (lines) => expect(lines).toEqual(["waiting for AMUX socket: 0s"])],
     cleanup: (f) => f.close(),
+  });
+  component("a missing server reports waiting at start and each minute", {
+    when: ["no tmux server appears for 61 seconds", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      const lines = [];
+      const child = new EventEmitter();
+      child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.stdin = new PassThrough();
+      child.kill = () => {};
+      const transport = createControlTransport({ socket: "/tmp/amux198-no-such-socket", processExec: async () => ({}), mode: "control",
+        timeoutMs: 100_000, spawnClient: () => child, log: (line) => lines.push(line) });
+      try { await vi.advanceTimersByTimeAsync(61_000); return [...lines]; }
+      finally { transport.stop(); vi.useRealTimers(); }
+    }],
+    then: ["two waiting lines and no error lines", (lines) => expect(lines).toEqual([
+      "waiting for AMUX socket: 0s", "waiting for AMUX socket: 60s",
+    ])],
   });
 });
