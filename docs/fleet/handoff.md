@@ -1,5 +1,29 @@
 # Handing work on and staffing
 
+## Row brief
+
+A row goes to its builder with these eight things, in this order, in one message or one file. A brief that lacks an applicable part is not sent.
+
+1. **Outcome**: one sentence, what a person can do or see when it is done. The source (his delivery id or the time of his words).
+2. **Where**: every file the change touches, as `path:line`, read by the planner in today's master. The builder opens them; it does not look for them.
+3. **Sizes**: for anything seen, numbers (px, the token's name, the place in the row), not only a picture. A board is attached with its width.
+4. **Kit first**: which kit part draws it, and whether the part gets an option or a new default. No page CSS for a look other apps share.
+5. **Removed**: every control, word or function that goes away, each with his word that says it may. An open question from him is not a yes; without his word it stays.
+6. **Unchanged**: what must look and work the same, at 390 and 1280 when the row has a view.
+7. **Proof**: for a view, one image, live beside the board at the same width, with the differences that remain listed by the builder. Existing tests named; no new test files.
+8. **Done when**: the sentence that closes the row.
+
+Sizes, kit first and the picture beside the board apply to rows that change something seen. A row without a view names its proof as a command or a log line.
+
+After the brief:
+
+- The builder builds, runs its own gates, rebases, pushes and releases when green. Nobody is asked first and nobody waits.
+- The builder writes one message at DONE or at a real stop: the change, the main number, the image or the sha. No progress notes.
+- The planner reads the pair after the release and answers yes or what is missing; what is missing is mended forward.
+- Rows that touch the same files name each other in the brief, and each builder rebases on the other; neither waits for the other's release.
+
+Source: deep:0's row brief, 15 Nov 2026, from Mattias in deep:0's channel about 20:3xZ; deep:5's conditions for rows with and without a view.
+
 ## Staffing and review economics
 
 1. **One owner per feature, end to end.** The direct recipient owns it;
