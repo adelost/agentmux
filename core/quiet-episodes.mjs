@@ -9,6 +9,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DREAM_ANSWER_KINDS } from "./dream-conversation.mjs";
+import { isHumanAsk } from "./ask-origin.mjs";
 import { classifyQuiet, normalizedLine } from "./quiet-classify.mjs";
 import { operatorName } from "./runtime-defaults.mjs";
 
@@ -35,6 +36,12 @@ const SEEN_KEEP_MS = 24 * 3_600_000;
 
 const paneOf = (row) => `${row.agent}:${row.pane}`;
 const timeOf = (row) => Date.parse(row.ts);
+const repliesToOperator = (ask, operator) => {
+  if (isHumanAsk(ask)) return true;
+  if (ask?.originEvidence?.kind !== "native-scheduled") return false;
+  const name = operator.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`\\b(?:åt|till|for|to)\\s+${name}\\b`, "iu").test(ask.verbatim ?? "");
+};
 
 function rowsByPane({ asks = [], posts = [] }) {
   const panes = new Map();
@@ -54,9 +61,10 @@ function rowsByPane({ asks = [], posts = [] }) {
 function replyUnits(rows) {
   const units = [];
   let open = null;
+  let ask = null;
   const close = (ms) => { if (open) open.endedMs = ms; open = null; };
   for (const { ms, kind, row } of rows) {
-    if (kind === "ask") { close(ms); continue; }
+    if (kind === "ask") { close(ms); ask = row; continue; }
     if (row.status === "failed" || !DREAM_ANSWER_KINDS.has(row.kind)) continue;
     const isChunk = open && row.kind === "reply" && ms - open.endMs <= CHUNK_GAP_MS && open.lastChars >= CHUNK_MIN_CHARS;
     if (isChunk) {
@@ -65,7 +73,7 @@ function replyUnits(rows) {
     }
     close(ms);
     if (row.kind !== "reply") continue;
-    open = { replyId: row.id, reply: row.text, startMs: ms, endMs: ms, lastChars: row.text.length, endedMs: null };
+    open = { replyId: row.id, reply: row.text, startMs: ms, endMs: ms, lastChars: row.text.length, endedMs: null, ask };
     units.push(open);
   }
   return units;
@@ -88,7 +96,7 @@ export function quietEpisodes(log, { untilMs, quietMs = QUIET_AFTER_MS, operator
   for (const [pane, rows] of rowsByPane(log)) {
     const [agent, paneIndex] = [pane.slice(0, pane.lastIndexOf(":")), Number(pane.slice(pane.lastIndexOf(":") + 1))];
     const units = replyUnits(rows).map((unit) => {
-      const verdict = classifyQuiet(unit.reply, { parked: isParked(pane, unit), operator, delegate });
+      const verdict = classifyQuiet(unit.reply, { parked: isParked(pane, unit), operator, delegate, repliesToOperator: repliesToOperator(unit.ask, operator) });
       const needMs = quietNeedMs(verdict, quietMs);
       return { ...unit, pane, agent, paneIndex, verdict, key: episodeKey(pane, verdict, unit.replyId), needMs, quietFromMs: unit.endMs + needMs };
     });

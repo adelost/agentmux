@@ -12,6 +12,24 @@ const visibleAt = (rows, clock) => toLog(rows.filter((row) => Date.parse(row.ts)
 const scan = (rows, clock) => quietEpisodes(visibleAt(rows, clock), { untilMs: ms(clock), operator: OPERATOR });
 
 feature("quiet: one episode per pane and waiting line", () => {
+  unit("his yes in a reply to him stays with him", {
+    given: ["the same yes in a human reply, an operator-scheduled pane prompt, and a reply to another pane", () => [
+      askRow("deep:9", "10:00:00", "How is it?", { source: "discord" }),
+      postRow("deep:9", "10:01:00", "Det kräver ditt ja."),
+      askRow("deep:9", "10:10:00", "Report for the operator", { source: "pane-hook" }),
+      postRow("deep:9", "10:11:00", "It needs your yes."),
+      askRow("deep:9", "10:20:00", "[from claw:0]\nDecision?", { source: "cli" }),
+      postRow("deep:9", "10:21:00", "Det kräver ditt ja."),
+      askRow("deep:9", "10:25:00", "Report for Mattias", { source: "pane-hook", originEvidence: { kind: "native-scheduled" } }),
+      postRow("deep:9", "10:26:00", "It needs your yes."),
+    ]],
+    when: ["classifying the episodes", (rows) => scan(rows, "10:30").map(({ verdict }) => verdict)],
+    then: ["his own and scheduled replies are his hands, and the agent's request is a delegate decision", (verdicts) => {
+      expect(verdicts.map(({ class: cls }) => cls)).toEqual(["hands", "hands", "decision", "hands"]);
+      expect(verdicts[0].what).toBe("decision");
+    }],
+  });
+
   unit("sends one forward for three replies with the same line", {
     given: ["claw:0's three replies with one line, and a cron that looks every 2 minutes from 09:20 to 09:40", () => ({
       rows: CLAW_156,
