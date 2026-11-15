@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { startMemoryGuard } from "./memory-guard.mjs";
+import { parseMeminfo, startMemoryGuard } from "./memory-guard.mjs";
 
 const GRADLE_DAEMON = /\sorg\.gradle\.launcher\.daemon\.bootstrap\.GradleDaemon (\d+(?:\.\d+)+)(?:\s|$)/u;
 const STATUS_ROW = /^\s*(\d+)\s+(IDLE|BUSY|STOPPED|CANCELED|\S+)\s+(\d+(?:\.\d+)+)/u;
@@ -127,12 +127,20 @@ export function formatMemoryRelief(result) {
 const gibText = (kb) => Math.round((kb || 0) / 1024 / 1024 * 10) / 10;
 
 /** WHAT: Returns clean page cache to WSL's host without blocking the bridge. WHY: Linux available memory can hide Windows starvation. */
-export function dropWslPageCache({ run = execFile, clock = Date.now, log = console.warn, state } = {}) {
+export function dropWslPageCache({ run = execFile, clock = Date.now, log = console.warn, readSample = () => parseMeminfo(readFileSync("/proc/meminfo", "utf8")) } = {}) {
   const started = clock();
+  const sample = () => { try { return readSample(); } catch { return null; } };
+  const format = (value) => {
+    if (!value || value.memFreeKb == null || value.cachedKb == null || value.swapFreeKb == null || value.swapTotalKb == null) return "unavailable";
+    const swap = value.swapTotalKb > 0 ? `${(100 * value.swapFreeKb / value.swapTotalKb).toFixed(1)}%` : "no swap";
+    return `MemFree ${gibText(value.memFreeKb)} GiB, Cached ${gibText(value.cachedKb)} GiB, SwapFree ${swap}`;
+  };
+  const before = sample();
   return new Promise((resolve) => {
     run("sudo", ["-n", "sysctl", "-w", "vm.drop_caches=1"], (error) => {
       const durationMs = clock() - started;
-      log(`[memory-guard] page-cache drop ${error ? `failed: ${error.message}` : "complete"}; ${durationMs}ms; MemFree ${gibText(state.sample.memFreeKb)} GiB, Cached ${gibText(state.sample.cachedKb)} GiB`);
+      const after = sample();
+      log(`[memory-guard] page-cache drop ${error ? `failed: ${error.message}` : "complete"}; ${durationMs}ms; before: ${format(before)}; after: ${format(after)}`);
       resolve({ ok: !error, durationMs });
     });
   });

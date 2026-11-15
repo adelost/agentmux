@@ -25,13 +25,17 @@ feature("memory relief", () => {
   unit("runs only page-cache reclaim asynchronously and reports a failed command", {
     then: ["the privileged boundary is fixed, and its result is visible", async () => {
       const calls = [], logs = [];
-      const result = await dropWslPageCache({ state: { sample: { memFreeKb: 1, cachedKb: 9 } },
+      const samples = [{ memFreeKb: 1048576, cachedKb: 2097152, swapFreeKb: 1, swapTotalKb: 4 },
+        { memFreeKb: 3145728, cachedKb: 1048576, swapFreeKb: 2, swapTotalKb: 4 }];
+      const result = await dropWslPageCache({ readSample: () => samples.shift(),
         clock: () => 100, log: (message) => logs.push(message),
         run: (command, args, done) => { calls.push([command, args]); done(new Error("denied")); } });
       expect(calls).toEqual([["sudo", ["-n", "sysctl", "-w", "vm.drop_caches=1"]]]);
       expect(result.ok).toBe(false);
       expect(logs).toHaveLength(1);
       expect(logs[0]).toContain("failed: denied");
+      expect(logs[0]).toContain("before: MemFree 1 GiB, Cached 2 GiB, SwapFree 25.0%");
+      expect(logs[0]).toContain("after: MemFree 3 GiB, Cached 1 GiB, SwapFree 50.0%");
     }],
   });
   unit("finds only Gradle daemons, with version, JVM and size", {
