@@ -227,9 +227,12 @@ export function createBridgeLifecycle({
         }
         catch (error) { logFailed = true; console.warn(`bridge log write failed: ${error.message}`); }
       };
+      const outError = (error) => { child.stdout.unpipe(terminalOut); copyToLog(Buffer.from(`terminal stdout unavailable: ${error.message}\n`)); };
+      const errError = (error) => { child.stderr.unpipe(terminalErr); copyToLog(Buffer.from(`terminal stderr unavailable: ${error.message}\n`)); };
+      terminalOut.on("error", outError); terminalErr.on("error", errError);
       child.stdout.pipe(terminalOut, { end: false }); child.stdout.on("data", copyToLog);
       child.stderr.pipe(terminalErr, { end: false }); child.stderr.on("data", copyToLog);
-      child.once("close", () => closeSync(logFd));
+      child.once("close", () => { terminalOut.off("error", outError); terminalErr.off("error", errError); closeSync(logFd); });
     }
     return new Promise((resolveChild, rejectChild) => {
       child.once("error", rejectChild);

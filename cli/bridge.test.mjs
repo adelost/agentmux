@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createBridgeLifecycle } from "./bridge.mjs";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 
 function bridgeFixture() {
   const root = mkdtempSync(join(tmpdir(), "amux-bridge-housekeeping-"));
@@ -80,6 +80,24 @@ feature("bridge startup housekeeping seam", () => {
     then: ["the supervisor still ran", (ctx) => {
       try { expect(existsSync(ctx.marker)).toBe(true); }
       finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
+  component("terminal errors leave the foreground log copying", {
+    given: ["a supervisor writing twice to both streams and failing terminal streams", () => {
+      const fixture = bridgeFixture();
+      writeFileSync(join(fixture.bridgeDir, "bin", "start.sh"), "#!/usr/bin/env bash\nprintf 'first-out\\n'; printf 'first-err\\n' >&2\nsleep 0.1\nprintf 'later-out\\n'; printf 'later-err\\n' >&2\n");
+      const failing = () => new Writable({ write(_chunk, _encoding, callback) { callback(Object.assign(new Error("terminal gone"), { code: "EPIPE" })); } });
+      const startupHousekeeping = async () => ({ log: { rotated: false, beforeBytes: 0, afterBytes: 0 },
+        sessions: { scanned: 0, candidates: 0, trimmed: 0, unchanged: 0, failed: 0, reclaimedBytes: 0, retentionDays: 14, dryRun: false, oversized: 0, oversizedBytes: 0 } });
+      return { ...fixture, lifecycle: createBridgeLifecycle({ bridgeDir: fixture.bridgeDir, env: fixture.env, startupHousekeeping,
+        terminalOut: failing(), terminalErr: failing() }) };
+    }],
+    when: ["starting the supervisor", async (ctx) => { await ctx.lifecycle.serve({}, ctx.ctx); return ctx; }],
+    then: ["later output from both streams remains in the log", (ctx) => {
+      try {
+        const log = readFileSync(ctx.env.AMUX_BRIDGE_LOG, "utf8");
+        expect(log).toContain("later-out"); expect(log).toContain("later-err");
+      } finally { rmSync(ctx.root, { recursive: true, force: true }); }
     }],
   });
   component("does not rotate storage while a ready bridge owns it", {
