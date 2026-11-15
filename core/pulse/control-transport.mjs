@@ -9,6 +9,7 @@
 // tmux-continuum restore of the whole fleet.
 
 import { spawn } from "child_process";
+import { existsSync } from "fs";
 import { esc } from "../../lib.mjs";
 import { askerOf } from "./asker.mjs";
 
@@ -102,6 +103,10 @@ export function createControlTransport({
   let deadTimer = null;
   let sampled = 0;
   let stopped = false;
+  let sawServer = false;
+  let unavailableServer = false;
+  const waitingForServer = () => !sawServer && (unavailableServer || !existsSync(socket));
+  const publicText = (text) => String(text).split(socket).join("AMUX socket");
 
   const record = (path, question, asker = null) => counters?.record({ path, verb: question?.verb ?? null, target: question?.target ?? null, asker });
   const setState = (next, why = null) => {
@@ -109,7 +114,8 @@ export function createControlTransport({
     state = next;
     reason = why;
     counters?.setTransport({ mode, state, reason });
-    log(`control client ${next}${why ? ` (${why})` : ""}`);
+    if (next === "ready") sawServer = true;
+    if (!(next === "connecting" && !sawServer) && !waitingForServer()) log(publicText(`control client ${next}${why ? ` (${why})` : ""}`));
   };
 
   function rejectAll(error) {
@@ -171,6 +177,7 @@ export function createControlTransport({
   function connect() {
     reconnectTimer = null;
     if (stopped || mode === "exec") return;
+    unavailableServer = false;
     setState("connecting");
     const args = ["-N", "-S", socket, "-C", "new-session", "-A", "-s", PULSE_SESSION,
       "-f", "no-output,ignore-size", "sleep 2147483647"];
@@ -185,7 +192,11 @@ export function createControlTransport({
       carry = lines.pop();
       for (const line of lines) onLine(line);
     });
-    child.stderr?.on("data", (chunk) => log(`client stderr: ${String(chunk).trim().slice(0, 160)}`));
+    child.stderr?.on("data", (chunk) => {
+      const detail = String(chunk).trim();
+      if (!sawServer && /no server running|no such file or directory|connection refused/iu.test(detail)) unavailableServer = true;
+      if (!waitingForServer()) log(publicText(`client stderr: ${detail.slice(0, 160)}`));
+    });
     child.stdin.on("error", (error) => { if (client === child) broken(`client stdin: ${error.message}`); });
     child.on("exit", (code) => { if (client === child) broken(`client exited with ${code}`); });
     child.on("error", (error) => { if (client === child) broken(`client error: ${error.message}`); });

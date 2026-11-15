@@ -13,6 +13,16 @@ import { warnQuotaOnHumanMessage, createQuotaLimitPoll } from "./channels/quota-
 const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
 const READY_FILE = process.env.READY_FILE || "/tmp/agentmux.ready";
 
+/** WHAT: Checks configured channels and summarizes stopped panes. WHY: Keeps startup errors readable when many panes are stopped. */
+export async function preflightAgentChannels({ channelMap, agent, log = console.log, warn = console.warn }) {
+  const stopped = [];
+  for (const [channelId, { name, pane = 0 }] of channelMap) {
+    try { await agent.checkAgent(name); log(`  ${name} -> #${channelId} [ok]`); }
+    catch { stopped.push(`${name}:${pane}`); }
+  }
+  if (stopped.length) warn(`  ${stopped.length} stopped panes: ${stopped.join(", ")}`);
+}
+
 /** WHAT: Tracks bridge shutdown by clearing its readiness sentinel. WHY: Keeps health checks from trusting a stopped process. */
 function clearReadyFile() {
   try { unlinkSync(READY_FILE); } catch {}
@@ -103,14 +113,7 @@ export function startBot({
   // --- Preflight ---
 
   async function preflight() {
-    for (const [channelId, { name }] of channelMap) {
-      try {
-        await agent.checkAgent(name);
-        console.log(`  ${name} -> #${channelId} [ok]`);
-      } catch {
-        console.warn(`  ${name} -> #${channelId} [not running]`);
-      }
-    }
+    await preflightAgentChannels({ channelMap, agent });
     try {
       await fetch(whisperUrl.replace("/transcriptions", ""));
       console.log(`  whisper -> ${whisperUrl} [ok]`);

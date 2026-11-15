@@ -3,7 +3,7 @@
 // user's tmux-continuum restores the whole fleet into any new server that loads ~/.tmux.conf (2026-10-28).
 
 import { execFile, execFileSync, exec as execCallback } from "child_process";
-import { existsSync, mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { promisify } from "util";
@@ -215,14 +215,46 @@ feature("Pulse control transport", () => {
   integration("never starts a tmux server", {
     given: ["a socket with no server behind it", () => privateTmux({ start: false })],
     when: ["a transport tries to connect", async (f) => {
-      const transport = createControlTransport({ socket: f.socket, processExec: f.processExec, mode: "control", timeoutMs: 500, backoffMs: [5000] });
+      const lines = [];
+      const transport = createControlTransport({ socket: f.socket, processExec: f.processExec, mode: "control", timeoutMs: 500, backoffMs: [5000], log: (line) => lines.push(line) });
       const settled = await until(() => transport.state().state === "broken");
       transport.stop();
-      return { settled, socketExists: existsSync(f.socket) };
+      return { settled, socketExists: existsSync(f.socket), lines };
     }],
     then: ["it stays broken and no server or socket appears", (r) => {
-      expect(r).toEqual({ settled: true, socketExists: false });
+      expect(r).toEqual({ settled: true, socketExists: false, lines: [] });
     }],
+    cleanup: (f) => f.close(),
+  });
+  integration("a failure after tmux existed remains visible", {
+    given: ["a connected private tmux", async () => {
+      const lines = [];
+      const f = await readyTransport({ log: (line) => lines.push(line), backoffMs: [5000] });
+      return { ...f, lines };
+    }],
+    when: ["the private tmux server stops", async (f) => {
+      f.lines.length = 0;
+      await execFileText("tmux", ["-S", f.socket, "kill-server"]);
+      await until(() => f.transport.state().state === "broken");
+      return f.lines;
+    }],
+    then: ["the connection failure is logged", (lines) => expect(lines.join("\n")).toMatch(/broken/u)],
+    cleanup: (f) => f.close(),
+  });
+  integration("a stale socket before tmux starts is quiet", {
+    given: ["a socket path left behind without a server", () => {
+      const f = privateTmux({ start: false });
+      writeFileSync(f.socket, "stale");
+      return f;
+    }],
+    when: ["the transport attempts to connect", async (f) => {
+      const lines = [];
+      const transport = createControlTransport({ socket: f.socket, processExec: f.processExec, mode: "control", timeoutMs: 500, backoffMs: [5000], log: (line) => lines.push(line) });
+      await until(() => transport.state().state === "broken");
+      transport.stop();
+      return lines;
+    }],
+    then: ["no waiting or socket error is logged", (lines) => expect(lines).toEqual([])],
     cleanup: (f) => f.close(),
   });
 });

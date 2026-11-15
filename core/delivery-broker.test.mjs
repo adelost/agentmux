@@ -8,8 +8,26 @@ import { createDeliveryBroker } from "./delivery-broker.mjs";
 import { deliveryStateNotice } from "./delivery-notices.mjs";
 import { composerAgent } from "../test/fixtures/composer-agent.mjs";
 import { restartAfterDeliveries } from "../bot.mjs";
+import * as botRuntime from "../bot.mjs";
 
 const tempRoot = () => join(tmpdir(), `amux-delivery-broker-${process.pid}-${Math.random().toString(36).slice(2)}`);
+
+feature("boot log for stopped panes", () => {
+  component("stopped panes produce one summary with names and count", {
+    when: ["preflighting one running and two stopped names", async () => {
+      const logs = [], warnings = [];
+      await botRuntime.preflightAgentChannels({ channelMap: new Map([["1", { name: "claw", pane: 0 }], ["2", { name: "deep", pane: 1 }], ["3", { name: "ai", pane: 2 }]]),
+        agent: { checkAgent: async (name) => { if (name !== "claw") throw Error("stopped"); } },
+        log: (line) => logs.push(line), warn: (line) => warnings.push(line) });
+      return { logs, warnings };
+    }],
+    then: ["one warning names both stopped panes", ({ logs, warnings }) => {
+      expect(logs).toHaveLength(1);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/2.*deep:1.*ai:2/u);
+    }],
+  });
+});
 
 function acceptingAgent() {
   const echoed = new Set();
