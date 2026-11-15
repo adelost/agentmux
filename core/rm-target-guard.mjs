@@ -18,6 +18,9 @@ const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
 export function bashPermissionDecision(command, home = "") {
   const script = String(command || "");
   const deny = (message) => ({ behavior: "deny", message });
+  if (script.split("\n").some((line) => (line.match(/<<-?(?!<)/gu) || []).length > 1)) {
+    return deny("Nothing ran. Write each heredoc as a separate command so its expansion can be checked.");
+  }
   const stopping = stoppingRmTargets(script);
   if (stopping.length) return deny(formatRmRefusal(stopping));
   for (const block of heredocBlocks(script)) {
@@ -28,6 +31,10 @@ export function bashPermissionDecision(command, home = "") {
     }
   }
   for (const words of simpleCommands(script)) {
+    if (words.some((word) => !(word.startsWith("'") && word.endsWith("'"))
+        && /(?:\$\([^)]*|`[^`]*)(?:\brm\b|\brmdir\b)/u.test(word))) {
+      return deny("Nothing ran. Run the command substitution separately and use a narrower literal removal target.");
+    }
     let i = 0;
     while (i < words.length && (LEADING_WORDS.has(words[i]) || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[i]))) i++;
     if (SHELLS.has((words[i] || "").replace(/^\\/u, "")) && words.includes("-c")) {

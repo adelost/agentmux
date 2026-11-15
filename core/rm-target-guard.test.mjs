@@ -6,7 +6,7 @@ const targets = (command) => stoppingRmTargets(command).map((f) => f.target);
 describe("stoppingRmTargets", () => {
   it("decides bypass dialogs without running a dangerous removal or shell-expanded heredoc", () => {
     const decision = (command) => bashPermissionDecision(command, "/home/adelost");
-    for (const cmd of ["rm -rf $S/$2", "rm -rf ~/lsrc", "rm -rf /", "rm -rf /mnt/c/Users", "cat <<EOF\n$(touch file)\nEOF", "cat <<EOF\n`touch file`\nEOF", "bash <<'EOF'\nrm -rf /\nEOF", "bash -c 'rm -rf /'"]) {
+    for (const cmd of ["rm -rf $S/$2", "rm -rf ~/lsrc", "rm -rf /", "rm -rf /mnt/c/Users", "cat <<EOF\n$(touch file)\nEOF", "cat <<EOF\n`touch file`\nEOF", "bash <<'EOF'\nrm -rf /\nEOF", "bash -c 'rm -rf /'", "echo $(rm -rf /)", "cat <<A <<B\none\nA\n$(touch file)\nB"]) {
       expect(decision(cmd).behavior, cmd).toBe("deny");
     }
     for (const cmd of ["cat <<'EOF'\n$(touch file)\nEOF", "cat <<\\EOF\n$(touch file)\nEOF", "cat <<EOF\n\\$(touch file)\nEOF", "cat <<EOF\n${NAME}\nEOF", "cd $S && rm -rf fresh42d"]) {
