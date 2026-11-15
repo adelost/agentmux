@@ -6,6 +6,26 @@ import { vi } from "vitest";
 import { readCodexQuotaBudgeted } from "./codex-quota-budget.mjs";
 
 feature("Codex dashboard quota budget", () => {
+  unit("floor-held jobs share one refreshed provider observation per account and minute", {
+    given: ["a spent cached account and provider room after reset", () => ({
+      profile: { provider: "codex", id: "1", home: "/example/held" },
+      budgetDir: mkdtempSync(join(tmpdir(), "codex-held-")),
+      read: vi.fn().mockResolvedValueOnce({ ok: true, observation: { usedPercent: 100 } })
+        .mockResolvedValue({ ok: true, observation: { usedPercent: 0 } }),
+    })],
+    when: ["many held jobs refresh together at one minute", async fx => {
+      await readCodexQuotaBudgeted(fx.profile, { ...fx, now: () => 0 });
+      const results = await Promise.all(Array.from({ length: 25 }, () =>
+        readCodexQuotaBudgeted(fx.profile, { ...fx, now: () => 60000, heldRefresh: true })));
+      return { results, normal: await readCodexQuotaBudgeted(fx.profile, { ...fx, now: () => 60001 }) };
+    }],
+    then: ["one fresh provider read lifts all holds and ordinary reads reuse it", ({ results, normal }, fx) => {
+      expect(fx.read).toHaveBeenCalledTimes(2);
+      expect(results.every(x => x.observation.usedPercent === 0)).toBe(true);
+      expect(normal.observation.usedPercent).toBe(0);
+    }],
+    cleanup: fx => rmSync(fx.budgetDir, { recursive: true, force: true }),
+  });
   unit("native and dashboard profile shapes share the authenticated quota cache", {
     given: ["one fake account, with and without the dashboard credentialsPath field", () => {
       const home = mkdtempSync(join(tmpdir(), "codex-quota-identity-"));

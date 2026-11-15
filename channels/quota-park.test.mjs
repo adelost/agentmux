@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createQuotaParkFacts } from "./quota-park.mjs";
+import { quotaFloorRefusal } from "../core/delivery-wake.mjs";
+import { readCodexQuotaBudgeted } from "../core/codex-quota-budget.mjs";
 import { afterEach, vi } from "vitest";
 afterEach(() => vi.useRealTimers());
 import { execFileSync, exec } from "node:child_process";
@@ -16,6 +18,30 @@ import { createTmuxAdapter } from "../core/tmux.mjs";
 // lsrc:0 2026-10-19: a pane quota recovery moved to an account with room keeps working under the floor,
 // even while the five-minute snapshot still lists it on the account it left.
 feature("which account a pane's quota facts come from", () => {
+  component("held Codex delivery sees its reset account through the actual floor", {
+    given: ["25 held panes, one spent snapshot and one provider account with room", () => {
+      const root = mkdtempSync(join(tmpdir(), "quota-floor-reset-"));
+      const profile = { key: "codex:w", provider: "codex", home: join(root, "home") };
+      const inUse = Array.from({ length: 25 }, (_, i) => `test:${i}`);
+      const limits = used => [{ limitId: "codex", windows: [{ windowMinutes: 10080, usedPercent: used,
+        resetsAt: "2026-11-22T00:00:00Z" }] }];
+      const spent = { ok: true, provider: "codex", name: "W", profile: { key: profile.key }, inUse, limits: limits(100) };
+      const provider = vi.fn(async () => ({ ...spent, limits: limits(0) }));
+      const budgetDir = join(root, "budget"), now = () => Date.parse("2026-11-15T17:25:00Z");
+      const facts = createQuotaParkFacts({ read: async () => ({ accounts: [spent] }), profiles: () => [profile], now,
+        readPanes: async () => inUse.map(key => ({ key, engine: "codex", home: profile.home })),
+        readHeldCodex: p => readCodexQuotaBudgeted(p, { budgetDir, now, read: provider, heldRefresh: true }) });
+      return { root, facts, provider, now };
+    }],
+    when: ["all held jobs enter the real floor decision", fx => Promise.all(Array.from({ length: 25 }, (_, pane) =>
+      quotaFloorRefusal({ now: fx.now, quotaFloor: { percent: 3, windowsFor: fx.facts },
+        job: { agentName: "test", pane, kind: "prompt", status: "pending", costHold: true,
+          lastReason: "wake-refused:quota-floor: spent" } })))],
+    then: ["the reset lifts every hold with one provider read", (reasons, fx) => {
+      expect(reasons).toEqual(Array(25).fill(null)); expect(fx.provider).toHaveBeenCalledTimes(1);
+    }],
+    cleanup: fx => rmSync(fx.root, { recursive: true, force: true }),
+  });
   unit("a stalled shared read releases all waiters and then reads again", {
     given: ["a quota reader with one unresolved read and a later good reading, under a named fake clock", () => {
       vi.useFakeTimers();

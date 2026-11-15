@@ -4,6 +4,7 @@
 import { readLivePaneHomes, readQuotaSnapshotWithPanes, withPanesInUse } from "../core/quota-in-use.mjs";
 import { quotaAccountCatalog } from "../core/quota-profiles.mjs";
 import { accountWindows, STALE_READING_POLICY } from "../core/quota-park.mjs";
+import { readCodexQuotaBudgeted } from "../core/codex-quota-budget.mjs";
 import { quotaObservedAt } from "../core/quota-wind-down.mjs";
 
 const quotaProfiles = () => quotaAccountCatalog().filter((profile) => profile.provider !== "kimi");
@@ -46,6 +47,7 @@ export function paneQuotaFacts({ snapshot, lastGood = new Map(), paneKey, now })
 export function createQuotaParkFacts({
   read = () => readQuotaSnapshotWithPanes({ profiles: quotaProfiles() }),
   readPanes = () => readLivePaneHomes(),
+  readHeldCodex = profile => readCodexQuotaBudgeted(profile, { heldRefresh: true }),
   profiles = quotaProfiles,
   now = Date.now,
   maxAgeMs = 5 * 60_000,
@@ -75,7 +77,7 @@ export function createQuotaParkFacts({
   }
   // `fresh: true` keeps the cached readings but re-reads which account each pane runs on, so a pane quota
   // recovery just moved is judged by its new account (lsrc:0, 2026-10-19).
-  return async (paneKey, { fresh: freshPanes = false } = {}) => {
+  return async (paneKey, { fresh: freshPanes = false, heldRefresh = false } = {}) => {
     let current = await fresh();
     if (freshPanes && current) {
       try {
@@ -83,6 +85,22 @@ export function createQuotaParkFacts({
         if (!Array.isArray(panes)) return { unavailable: true };
         current = withPanesInUse(current, panes, profiles());
       } catch (error) { log(`pane reading failed: ${error.message}`); return { unavailable: true }; }
+    }
+    if (heldRefresh && current) {
+      const listed = current.accounts?.find(account => account.inUse?.includes(paneKey));
+      const profile = profiles().find(item => item.key === listed?.profile?.key && item.provider === "codex");
+      if (profile) {
+        try {
+          const result = await quotaReadWithin(() => readHeldCodex(profile), readTimeoutMs);
+          if (!result?.ok) return { unavailable: true };
+          const updated = { ...listed, ...result, inUse: listed.inUse };
+          current = { ...current, accounts: current.accounts.map(account => account === listed ? updated : account) };
+          // Preserve the pane listing on the shared snapshot while replacing the account observation.
+          if (snapshot) snapshot = { ...snapshot, accounts: snapshot.accounts.map(account =>
+            accountKey(account) === accountKey(listed) ? { ...updated, inUse: account.inUse } : account) };
+          lastGood.set(accountKey(updated), updated);
+        } catch (error) { log(`held account reading failed: ${error.message}`); return { unavailable: true }; }
+      }
     }
     return paneQuotaFacts({ snapshot: current, lastGood, paneKey, now: now() });
   };
