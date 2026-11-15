@@ -4,6 +4,7 @@
 import { readLivePaneHomes, readQuotaSnapshotWithPanes, withPanesInUse } from "../core/quota-in-use.mjs";
 import { quotaAccountCatalog } from "../core/quota-profiles.mjs";
 import { accountWindows, STALE_READING_POLICY } from "../core/quota-park.mjs";
+import { readClaudeQuotaBudgeted } from "../core/claude-quota-budget.mjs";
 import { readCodexQuotaBudgeted } from "../core/codex-quota-budget.mjs";
 import { quotaObservedAt } from "../core/quota-wind-down.mjs";
 
@@ -48,6 +49,7 @@ export function createQuotaParkFacts({
   read = () => readQuotaSnapshotWithPanes({ profiles: quotaProfiles() }),
   readPanes = () => readLivePaneHomes(),
   readHeldCodex = profile => readCodexQuotaBudgeted(profile, { heldRefresh: true }),
+  readHeldClaude = profile => readClaudeQuotaBudgeted({ profile, heldRefresh: true }),
   profiles = quotaProfiles,
   now = Date.now,
   maxAgeMs = 5 * 60_000,
@@ -88,10 +90,10 @@ export function createQuotaParkFacts({
     }
     if (heldRefresh && current) {
       const listed = current.accounts?.find(account => account.inUse?.includes(paneKey));
-      const profile = profiles().find(item => item.key === listed?.profile?.key && item.provider === "codex");
+      const profile = profiles().find(item => item.key === listed?.profile?.key && ["codex", "claude"].includes(item.provider));
       if (profile) {
         try {
-          const result = await quotaReadWithin(() => readHeldCodex(profile), readTimeoutMs);
+          const result = await quotaReadWithin(() => profile.provider === "codex" ? readHeldCodex(profile) : readHeldClaude(profile), readTimeoutMs);
           if (!result?.ok) return { unavailable: true };
           const updated = { ...listed, ...result, inUse: listed.inUse };
           current = { ...current, accounts: current.accounts.map(account => account === listed ? updated : account) };

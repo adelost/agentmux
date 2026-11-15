@@ -41,10 +41,10 @@ export const claudeQuotaBudgetKey = (profile, identity) => createHash("sha256")
 const windowResetSince = (result, now) => result?.ok === true && Array.isArray(result.limits)
   && result.limits.some((limit) => Date.parse(limit?.resetsAt) <= now);
 
-const isFresh = (entry, now, notBefore) => Number.isFinite(entry?.attemptedAt)
-  && now - entry.attemptedAt < (entry.result?.error === "network_error" ? CLAUDE_NETWORK_RETRY_MS : CLAUDE_USAGE_MIN_INTERVAL_MS)
+const isFresh = (entry, now, notBefore, heldRefresh = false) => Number.isFinite(entry?.attemptedAt)
+  && now - entry.attemptedAt < (heldRefresh || entry.result?.error === "network_error" ? CLAUDE_NETWORK_RETRY_MS : CLAUDE_USAGE_MIN_INTERVAL_MS)
   && entry.attemptedAt >= notBefore
-  && !windowResetSince(entry.result, now);
+  && (heldRefresh || !windowResetSince(entry.result, now));
 
 const readEntry = (path) => {
   try { return JSON.parse(readFileSync(path, "utf8")); }
@@ -100,6 +100,7 @@ const asCallersProfile = (result, profile) => ({ ...result, profile: {
 export async function readClaudeQuotaBudgeted({
   profile,
   cacheOnly = false,
+  heldRefresh = false,
   notBefore = 0,
   now = Date.now,
   read = readClaudeQuota,
@@ -113,7 +114,7 @@ export async function readClaudeQuotaBudgeted({
   const entryPath = join(budgetDir, `${key}.json`);
   const stored = () => {
     const entry = readEntry(entryPath);
-    return isFresh(entry, now(), notBefore) ? asCallersProfile(entry.result, profile) : null;
+    return isFresh(entry, now(), notBefore, heldRefresh) ? asCallersProfile(entry.result, profile) : null;
   };
   const cached = stored();
   if (cached) return cached;

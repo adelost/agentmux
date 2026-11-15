@@ -27,6 +27,18 @@ const budget = (overrides = {}) => {
 };
 
 feature("one Claude usage call per account per five minutes", () => {
+  unit("a floor-held account refreshes after a minute, shared by its slots", {
+    given: ["one account last read as spent", async () => {
+      const ctx = budget({ read: vi.fn().mockResolvedValueOnce({ ...usage(slot("1")), limits: [{ kind: "weekly_all", usedPercent: 100, resetsAt: "2026-10-14T07:00:00Z" }] })
+        .mockImplementation(async ({ profile }) => usage(profile)) });
+      await readClaudeQuotaBudgeted({ ...ctx, profile: slot("1"), now: () => NOW }); return ctx;
+    }],
+    when: ["two held slots ask at one minute", ctx => Promise.all(["1", "2"].map(id =>
+      readClaudeQuotaBudgeted({ ...ctx, profile: slot(id), now: () => NOW + 60_000, heldRefresh: true })))],
+    then: ["one fresh account reading reaches both", (results, ctx) => {
+      expect(ctx.read).toHaveBeenCalledTimes(2); expect(results.map(r => r.limits[0].usedPercent)).toEqual([40, 40]);
+    }],
+  });
   unit("cache-only reminder reads never spend provider budget", {
     given: ["a cold usage cache", () => budget()],
     when: ["a reminder, dashboard and second reminder read", async ctx => {

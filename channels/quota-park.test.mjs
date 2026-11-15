@@ -42,6 +42,24 @@ feature("which account a pane's quota facts come from", () => {
     }],
     cleanup: fx => rmSync(fx.root, { recursive: true, force: true }),
   });
+  unit("a held Claude account's fresh usage reaches the delivery floor", {
+    given: ["a held pane on a spent shared account", () => {
+      const profile = { key: "claude:1", provider: "claude", home: "/example/claude" };
+      const spent = { ok: true, provider: "claude", profile: { key: profile.key }, inUse: ["test:0"],
+        limits: [{ kind: "weekly_all", usedPercent: 100, resetsAt: "2026-11-22T00:00:00Z" }] };
+      const readHeldClaude = vi.fn(async () => ({ ...spent, limits: [{ ...spent.limits[0], usedPercent: 0 }] }));
+      const now = () => Date.parse("2026-11-15T17:25:00Z");
+      const facts = createQuotaParkFacts({ read: async () => ({ accounts: [spent] }), profiles: () => [profile], now,
+        readPanes: async () => [{ key: "test:0", engine: "claude", home: profile.home }], readHeldClaude });
+      return { now, facts, readHeldClaude };
+    }],
+    when: ["the delivery floor revisits the held job", fx => quotaFloorRefusal({ now: fx.now,
+      quotaFloor: { percent: 3, windowsFor: fx.facts }, job: { agentName: "test", pane: 0, kind: "prompt",
+        status: "pending", costHold: true, lastReason: "wake-refused:quota-floor: spent" } })],
+    then: ["the actual floor sees room", (reason, fx) => {
+      expect(reason).toBeNull(); expect(fx.readHeldClaude).toHaveBeenCalledTimes(1);
+    }],
+  });
   unit("a stalled shared read releases all waiters and then reads again", {
     given: ["a quota reader with one unresolved read and a later good reading, under a named fake clock", () => {
       vi.useFakeTimers();
