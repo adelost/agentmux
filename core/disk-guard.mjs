@@ -21,19 +21,28 @@ function writeState(state) {
 
 const HIGH_USE_PERCENT=80;
 const NIGHTLY_HOUR=3;
+const PRESSURE_BELOW_BYTES=100e9;
 const HIGH_USE_CLEANUP_EVERY_MS=6*3600000;
+// Under 100 GB free the day's writing outruns a six-hour wait: on 15 Nov 2026 / fell 11.6 GB between 06:00Z and 07:00Z.
+const PRESSURE_CLEANUP_EVERY_MS=2*3600000;
+// The timer polls on the hour and a start is stamped seconds after its poll, so the poll six hours later finds a few
+// seconds less than six hours. 14 Nov 2026: the start of 16:00:04Z made the 22:00:00Z poll start nothing at about 50 GB free.
+const POLL_SLACK_MS=5*60000;
 
 /** WHAT: Returns used share the way df's Use% does, without the root reserve. WHY: Keeps the 80 % trigger on the number people read in df. */
 export const usedPercent=({usedBytes,availableBytes})=>100*usedBytes/(usedBytes+availableBytes);
 
 const localDate=(ms)=>{const date=new Date(ms);return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;};
 
-// Once each night after 03:00, and while use stays at or above 80 % at most every six hours.
+// Once each night after 03:00, while use stays at or above 80 % at the sixth hourly poll after the last start, and under
+// 100 GB free at the second.
 /** WHAT: Checks whether this poll starts the cleanup. WHY: Prevents its long scans from repeating every hour. */
 export function cleanupDue({sample,previous,nowMs}) {
   const last=previous?.cleanup;
   if(new Date(nowMs).getHours()>=NIGHTLY_HOUR && last?.nightlyDate!==localDate(nowMs)) return "nightly";
-  if(usedPercent(sample)>=HIGH_USE_PERCENT && !(nowMs-Date.parse(last?.startedAt??0)<HIGH_USE_CLEANUP_EVERY_MS)) return "high-use";
+  const waited=(every)=>!(nowMs-Date.parse(last?.startedAt??0)<every-POLL_SLACK_MS);
+  if(sample.availableBytes<PRESSURE_BELOW_BYTES && waited(PRESSURE_CLEANUP_EVERY_MS)) return "pressure";
+  if(usedPercent(sample)>=HIGH_USE_PERCENT && waited(HIGH_USE_CLEANUP_EVERY_MS)) return "high-use";
   return null;
 }
 
@@ -43,7 +52,7 @@ export async function pollDiskGuardOnce({sample=sampleRootDisk,readState:read=re
   const before=sample();
   if(!Number.isFinite(before.availableBytes)||before.availableBytes<0) throw new Error("invalid df available bytes");
   const previous=read();
-  const pressure=before.availableBytes<100e9, highUse=usedPercent(before)>=HIGH_USE_PERCENT;
+  const pressure=before.availableBytes<PRESSURE_BELOW_BYTES, highUse=usedPercent(before)>=HIGH_USE_PERCENT;
   const state={schemaVersion:1,observedAt:new Date(now()).toISOString(),sample:before,
     level:before.availableBytes<30e9?"critical":pressure?"pressure":"normal",
     episode:pressure?(previous?.episode??randomUUID()):null,

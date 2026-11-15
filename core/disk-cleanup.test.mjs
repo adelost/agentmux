@@ -296,4 +296,18 @@ feature("disk cleanup removes only what regenerates and prunes old artifacts to 
       expect(starts).toBe(3);
     }],
   });
+
+  // 14 Nov 2026: the cleanup of 16:00:04Z was stamped four seconds after its poll, so the 22:00:00Z poll found 5 h 59 min 56 s,
+  // started nothing, and / stood at about 50 GB free until a manual run at 22:27Z.
+  unit("a start stamped seconds after its poll is due at the sixth hourly poll, and every two hours under 100 GB free", {
+    then: ["the sixth poll starts it, and short space shortens the wait", () => {
+      const at = (hour) => new Date(2026, 9, 22, hour).getTime();
+      const free = (gigabytes) => ({ usedBytes: 2000e9 - gigabytes * 1e9, availableBytes: gigabytes * 1e9 });
+      const previous = { cleanup: { nightlyDate: "2026-10-22", startedAt: new Date(at(16) + 4_400).toISOString() } };
+      expect(cleanupDue({ sample: free(150), previous, nowMs: at(21) })).toBe(null);
+      expect(cleanupDue({ sample: free(150), previous, nowMs: at(22) })).toBe("high-use");
+      expect(cleanupDue({ sample: free(90), previous, nowMs: at(17) })).toBe(null);
+      expect(cleanupDue({ sample: free(90), previous, nowMs: at(18) })).toBe("pressure");
+    }],
+  });
 });

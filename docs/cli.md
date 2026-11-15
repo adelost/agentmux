@@ -500,7 +500,8 @@ the `agentmux-disk-cleanup.service` unit and
 deadline. Every poll reads `df /`, trims Gradle and checks the Chrome launchers
 below. The first poll after 03:00
 each night starts the cleanup unit, and so does a poll at 80 % used or more,
-at most every six hours. Reaching 80 % notifies the human once per episode.
+at the sixth hourly poll after the last start, or at the second while less
+than 100 GB is free. Reaching 80 % notifies the human once per episode.
 
 Chrome's shared memory stays in RAM. Playwright adds `--disable-dev-shm-usage`
 to every Chromium launch, which moves that memory to files in `/tmp` that the
