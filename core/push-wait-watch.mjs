@@ -71,6 +71,8 @@ export async function pollPushWaitOnce({ repos, readCommits, readUnlanded = asyn
     const history = [...(state[repo]?.history || [])];
     const day = new Date(at).toISOString().slice(0, 10);
     const humanAlerts = state[repo]?.humanAlerts?.day === day ? { ...state[repo].humanAlerts } : { day, count: 0 };
+    const unlandedSamples = [...(state[repo]?.unlandedSamples || []).filter(sample => sample.at > at - 8 * 24 * 60 * MINUTE),
+      { at, count: unlanded }];
     if (verdict.on) {
       if (!episode) episode = { id: randomUUID(), startedAt: at, openedVerdict: verdict, paneAt: null, notified: false, offSince: null };
       episode.offSince = null;
@@ -78,7 +80,7 @@ export async function pollPushWaitOnce({ repos, readCommits, readUnlanded = asyn
       episode.offSince ??= at;
       if (at - episode.offSince >= 30 * MINUTE) { history.push({ ...episode, endedAt: episode.offSince }); episode = null; }
     }
-    state = { ...state, [repo]: { observedAt: at, verdict, episode, history, humanAlerts, unlanded } };
+    state = { ...state, [repo]: { observedAt: at, verdict, episode, history, humanAlerts, unlanded, unlandedSamples } };
     writeState(state);
     if (verdict.on && (episode.paneAt === null || at - episode.paneAt >= 60 * MINUTE)) {
       const items = verdict.late.map(c => `${c.sha.slice(0, 12)} ${c.subject} (${c.minutes} min)`).join("\n");

@@ -53,6 +53,7 @@ feature("push wait watch", () => {
     }],
     then: ["the pane hears it, the human does not, and the gap is recorded", ({ state, sent, notified }) => {
       expect(sent).toHaveLength(1); expect(notified).toHaveLength(0); expect(state.cut.unlanded).toBe(7);
+      expect(state.cut.unlandedSamples).toEqual([{ at: t, count: 7 }]);
     }],
   });
 });
