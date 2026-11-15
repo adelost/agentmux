@@ -27,9 +27,9 @@ feature("fresh-account handover preserves exact task text and operational receip
 });
 
 feature("fresh account recovery accepts the fleet model", () => {
-  unit("a pane showing GPT-6.1 Terra xhigh passes the model check", {
+  unit("a pane showing GPT-6.1 Terra high passes the model check", {
     when: ["recovering a Terra pane that has just started a turn", () => freshCodexAccount({ name: "claw", pane: 5, handover: { ok: true },
-      agent: { captureScreen: async () => TERRA_SCREEN, isBusy: async () => true } })],
+      agent: { captureScreen: async () => TERRA_SCREEN.replaceAll("xhigh", "high"), isBusy: async () => true } })],
     then: ["only the busy check stops it", (result) => {
       expect(result).toEqual({ kind: "failed", error: "pane started working before fresh account recovery" });
     }],

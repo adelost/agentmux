@@ -67,6 +67,27 @@ const runCodexModel = (ctx, model) => cmdModel(["fixture", "-p", "0", model, "xh
 }, { codexModelChanger: ctx.changer, codexModels: () => ACCOUNT }).catch(error => error);
 
 feature("CLI Codex model selection", () => {
+  component("an omitted effort on a fresh session uses the configured fleet effort", {
+    given: ["a Codex pane configured with high", () => {
+      const ctx = codexPane();
+      writeFileSync(ctx.configPath, `fixture:\n  dir: ${ctx.root}\n  panes:\n    - { name: codex, cmd: codex, effort: high }\n`);
+      return ctx;
+    }],
+    when: ["starting Terra without an effort", async ctx => {
+      const fresh = vi.fn(async () => ({ model: "gpt-6.1-terra", effort: "high", sessionId: "new" }));
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await cmdModel(["fixture", "-p", "0", "gpt-6.1-terra", "--new-session"], {
+          configPath: ctx.configPath, agent: {}, state: { get: (_, fallback) => fallback, set() {} }, deliveryQueue: {},
+        }, { codexModels: () => ({ ok: true, models: [{ id: "gpt-6.1-terra", listed: true }] }), freshCodexStarter: fresh });
+        return fresh;
+      } finally { output.mockRestore(); }
+    }],
+    then: ["the configured effort reaches the new-session coordinator", (fresh, ctx) => {
+      try { expect(fresh.mock.calls[0][0].targetEffort).toBe("high"); }
+      finally { rmSync(ctx.root, { recursive: true, force: true }); }
+    }],
+  });
   component("an explicit new-session choice uses the supported fresh Sol path", {
     given: ["a configured stopped Codex pane", codexPane],
     when: ["requesting Sol xhigh with a new session", async ctx => {

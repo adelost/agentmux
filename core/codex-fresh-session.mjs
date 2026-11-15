@@ -4,9 +4,9 @@ import { driveCodexStatus } from "./codex-status.mjs";
 import { unparkPane } from "./pane-park.mjs";
 
 /** WHAT: Builds an explicitly requested new fleet-model session on one idle pane. WHY: Keeps unavailable historical models from forcing paid compact retries or silent context replacement. */
-export async function startFreshCodexSession({ agent, state, queue, name, pane, targetModel, targetEffort,
+export async function startFreshCodexSession({ agent, state, queue, name, pane, targetModel, targetEffort = "high",
   statusDriver = driveCodexStatus, unpark = unparkPane }) {
-  if (targetModel !== FLEET_CODEX_MODEL || targetEffort !== "xhigh") throw new Error("--new-session requires terra xhigh");
+  if (targetModel !== FLEET_CODEX_MODEL) throw new Error("--new-session requires terra");
   const lease = queue.acquireSessionLease(name, pane);
   if (!lease) throw new Error("new session blocked: a delivery holds this session");
   try {

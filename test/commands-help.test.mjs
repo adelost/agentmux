@@ -2,8 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dispatch, parseFlags } from "../cli/commands.mjs";
+import { cutoverModelAndEffort, dispatch, parseFlags } from "../cli/commands.mjs";
 import { isDispatchHelp } from "../cli/command-args.mjs";
+
+it("uses high only when Codex cutover effort is unknown", async () => {
+  const root = mkdtempSync(join(tmpdir(), "amux-cutover-effort-"));
+  try {
+    const sourceConfigPath = join(root, "agentmux.yaml");
+    writeFileSync(sourceConfigPath, "agents:\n  fixture: {}\n");
+    const ctx = { sourceConfigPath, agent: { getContext: async () => null } };
+    const spec = { engine: "codex", pane: 0, paneConfig: {} };
+    expect((await cutoverModelAndEffort(ctx, { name: "fixture" }, spec)).effort).toBe("high");
+    ctx.agent.getContext = async () => ({ effort: "medium" });
+    expect((await cutoverModelAndEffort(ctx, { name: "fixture" }, spec)).effort).toBe("medium");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 const effects = vi.hoisted(() => ({
   serve: vi.fn(), stop: vi.fn(), stopAll: vi.fn(), revive: vi.fn(), sleep: vi.fn(),

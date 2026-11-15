@@ -46,7 +46,7 @@ export function resolveCodexModelName(requested) {
 export function allowedCodexLaunchModel(requested) {
   const model = resolveCodexModelName(requested || FLEET_CODEX_MODEL);
   return /^gpt-6-astra(?:-|$)/u.test(model)
-    ? { ok: false, reason: "Mattias's model rule forbids Astra. Use GPT-6.1 Terra; if the old session cannot compact, use amux model AGENT -p N terra xhigh --new-session." }
+    ? { ok: false, reason: "Mattias's model rule forbids Astra. Use GPT-6.1 Terra; if the old session cannot compact, use amux model AGENT -p N terra --new-session." }
     : { ok: true, model };
 }
 

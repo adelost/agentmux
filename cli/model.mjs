@@ -13,7 +13,7 @@ export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaude
   codexModelChanger = runLockedCodexModelChange, codexModels, freshCodexStarter = startFreshCodexSession } = {}) {
   const { flags, positional } = parseFlags(args, { p: "number", help: "boolean", "new-session": "boolean" });
   if (flags.help) {
-    console.log("Usage: amux model AGENT [-p N] MODEL [EFFORT] [--new-session]\nOrdinary changes verify exact-session compact. --new-session starts terra xhigh on a stopped pane, preserves the old journal and does not replay old prompts.");
+    console.log("Usage: amux model AGENT [-p N] MODEL [EFFORT] [--new-session]\nOrdinary changes verify exact-session compact and preserve the pane's effort when omitted. --new-session starts terra high by default on a stopped pane, preserves the old journal and does not replay old prompts.");
     return;
   }
   const [name, model, effort] = positional, pane = flags.p ?? 0;
@@ -42,7 +42,7 @@ export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaude
   if (!ok) throw new Error(`${reason}. ${name}:${pane} keeps its current model.`);
   if (flags["new-session"]) {
     const result = await freshCodexStarter({ agent: ctx.agent, state: ctx.state, queue: ctx.deliveryQueue,
-      name, pane, targetModel, targetEffort: effort });
+      name, pane, targetModel, targetEffort: effort || entry.panes?.[pane]?.effort || entry.effort || "high" });
     console.log(`${name}:${pane} now runs ${result.model} ${result.effort} in new session ${result.sessionId}. The old journal is preserved.`);
     return;
   }

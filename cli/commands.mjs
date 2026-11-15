@@ -273,7 +273,8 @@ export function signalBridgeReload({
   return pid;
 }
 
-const cutoverModelAndEffort = async (ctx, target, paneSpec) => {
+/** WHAT: Resolves a pane's cutover model and effort. WHY: Keeps observed and configured selections ahead of fleet fallbacks. */
+export const cutoverModelAndEffort = async (ctx, target, paneSpec) => {
   const source = loadSourceYaml(ctx).agents[target.name];
   let context = null;
   try { context = await ctx.agent.getContext(target.name, paneSpec.pane); } catch {}
@@ -282,11 +283,10 @@ const cutoverModelAndEffort = async (ctx, target, paneSpec) => {
     model: context?.model || commandModel
       || (paneSpec.engine === "claude" ? source.claudeModel : source.codexModel)
       || (paneSpec.engine === "claude" ? "claude-opus-5" : "gpt-6.1-terra"),
-    effort: context?.effort || source.effort || (paneSpec.engine === "codex" ? "xhigh" : "medium"),
+    effort: context?.effort || source.effort || (paneSpec.engine === "codex" ? "high" : "medium"),
     inferred: !context?.model || !context?.effort,
   };
 };
-
 /** Two independent idle samples plus exact JSONL identity and an empty lane. */
 export async function collectCutoverEvidence(ctx, plan, {
   allowEmpty = false,

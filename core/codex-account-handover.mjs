@@ -39,7 +39,7 @@ export function prepareCodexAccountHandover({ name, pane, current, target, dir, 
 export async function freshCodexAccount({ agent, state, name, pane, dir, current, target, statusDriver, handover, expectedEmail }) {
   if (!handover.ok) return { kind: "failed", error: handover.reason };
   const selected = parseCodexPaneReading(await agent.captureScreen(name, pane))?.selected;
-  if (selected?.model !== FLEET_CODEX_MODEL || selected.effort !== "xhigh") return { kind: "failed", error: `fresh account recovery requires observed ${FLEET_CODEX_MODEL} xhigh` };
+  if (selected?.model !== FLEET_CODEX_MODEL || !selected.effort) return { kind: "failed", error: `fresh account recovery requires observed ${FLEET_CODEX_MODEL} and effort` };
   if (await agent.isBusy(name, pane)) return { kind: "failed", error: "pane started working before fresh account recovery" };
   setCodexProfile(state, name, pane, target.id);
   await agent.restartCodex(name, pane, { profile: target, model: selected.model, effort: selected.effort, newSession: true });
