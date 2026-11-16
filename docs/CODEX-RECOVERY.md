@@ -7,6 +7,8 @@ pane run `amux compact --self --continue-file /absolute/path/handoff.txt`.
 The bridge waits for the turn and background work to end, verifies the native
 compact boundary, then queues the exact saved handoff once. `--self -m TEXT`
 uses TEXT as the handoff too; `--no-resume` requests maintenance only.
+A pane's request, in any form, runs only above 400k tokens. Under that nothing
+is stored and it is not an error: go on, AMUX compacts a resting pane itself.
 
 Targeting your own pane takes this deferred path, even with `--force`.
 Codex accepts bare `/compact`, not a focus argument. AMUX refuses focus text

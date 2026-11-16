@@ -11,7 +11,9 @@
 - Idle panes compact before their prompt cache expires, Codex panes sooner since theirs expires sooner.
 - A pane idle past its cache's life compacts before its next delivery, when that pays back.
 - A pane's own recurring check waits less than its idle compaction after its last call: Claude under 50 minutes (Claude Code's self-paced /loop, never an hourly cron), Codex under 25.
-- At banked boundaries: `amux compact --self --continue-file HANDOFF`. `--no-resume` means maintenance only.
+- A pane at work is never compacted under 400k. Finished is proven by rest: the idle rules above compact a resting pane by themselves (Mattias 16 Nov 2026).
+- At banked boundaries above 400k: `amux compact --self --continue-file HANDOFF`. `--no-resume` means maintenance only.
+- Under 400k no pane asks for a compact, its own in any form or another pane's: nothing is stored, and that is not an error. Go on.
 - Bounded tasks go to a fresh subagent with a brief; continue your own work after a compact.
 - Preserve numbers, decisions and source pointers in the existing task handoff
   before a compact. Conversation logging and day digests follow [memory.md](memory.md);

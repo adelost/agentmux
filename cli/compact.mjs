@@ -7,12 +7,12 @@ import { dialectFor, inspectPane } from "./inspect-pane.mjs";
 import { isCompactUnsafe } from "../core/pane-status.mjs";
 import { formatTokens } from "./format.mjs";
 import { runNightlyCompact } from "./nightly-compact.mjs";
-import { CONTEXT_COST_POLICY } from "../policies/context-cost.mjs";
+import { AT_WORK_COMPACT_TOKENS, CONTEXT_COST_POLICY, PAUSE_COMPACT_POLICY } from "../policies/context-cost.mjs";
 import { execSync } from "node:child_process";
 import { detectPaneAddress } from "../core/sender-detect.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import { latestJournalCompactMs } from "../core/pause-compact.mjs";
-import { SELF_COMPACT_POLICY, createSelfCompactStore } from "../core/self-compact.mjs";
+import { SELF_COMPACT_POLICY, atWorkDetail, createSelfCompactStore } from "../core/self-compact.mjs";
 import { captureJsonlAppendCursor } from "../core/jsonl-append-cursor.mjs";
 import { contextMaintenanceAttempt } from "../core/context-maintenance.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
@@ -20,17 +20,20 @@ import { readFileSync, statSync } from "node:fs";
 
 const COMPACT_MIN_TOKENS = CONTEXT_COST_POLICY.maxTokens;
 const ownPane = () => detectPaneAddress(process.env, command => execSync(command, { encoding: "utf8", timeout: 2000 }));
+/** WHAT: Checks whether a pane, not a person, runs this command. WHY: Keeps the emergency override and the 400k floor on agents while a person's shell stays free. */
+const calledFromPane = (caller, env) => Boolean(caller || env.TMUX || env.AMUX_AGENT_NAME);
 
 /** WHAT: Routes manual and nightly compaction. WHY: Keeps explicit targeting separate from absolute-token admission. */
 export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions = {}) {
   if (flags.help || flags.h) {
-    console.log(`Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --self [-m HANDOFF | --continue-file FILE] [--no-resume]\n       amux compact --nightly [AGENT -p N] [--dry]\n--override-failed "reason": targeted emergency retry, human or sandman:0 only; exact FAILED/UNVERIFIED receipt audited.\nBulk default: over ${COMPACT_MIN_TOKENS} tokens. Percent thresholds are not supported.\n--self: this pane asks to be compacted when its turn ends (a stage boundary), from ${SELF_COMPACT_POLICY.minTokens} tokens,\nat most once per ${SELF_COMPACT_POLICY.spacingMs / 60_000} minutes, never while a subagent or job writes.\nAfter a verified compact, its saved handoff continues once through the durable queue. New input supersedes it.\n--no-resume requests maintenance only. Targeting your own pane also uses this safe path, even with --force.`);
+    console.log(`Usage: amux compact [AGENT -p N] [--dry] [--min-tokens N] [-m FOCUS]\n       amux compact --self [-m HANDOFF | --continue-file FILE] [--no-resume]\n       amux compact --nightly [AGENT -p N] [--dry]\n--override-failed "reason": targeted emergency retry, human or sandman:0 only; exact FAILED/UNVERIFIED receipt audited.\nBulk default: over ${COMPACT_MIN_TOKENS} tokens. Percent thresholds are not supported.\nCalled from a pane, any compact (--self in every form, a targeted pane, bulk, --min-tokens) runs only above ${AT_WORK_COMPACT_TOKENS} tokens:\na pane at work is not compacted under that (owner's decision 16 Nov 2026). Under it nothing is stored, and that is not an error:\nAMUX compacts a pane by itself once it has rested (Claude after ${CONTEXT_COST_POLICY.idleMs / 60_000} min from ${CONTEXT_COST_POLICY.maxTokens / 1000}k, Codex after ${PAUSE_COMPACT_POLICY.codexIdleMs / 60_000} min from ${PAUSE_COMPACT_POLICY.codexMinTokens / 1000}k).\n--self: this pane asks to be compacted when its turn ends (a stage boundary), at most once per ${SELF_COMPACT_POLICY.spacingMs / 60_000} minutes,\nnever while a subagent or job writes.\nAfter a verified compact, its saved handoff continues once through the durable queue. New input supersedes it.\n--no-resume requests maintenance only. Targeting your own pane also uses this safe path, even with --force.`);
     return { help: true };
   }
+  const env = selfOptions.env ?? process.env;
   let override = null;
   if (flags["override-failed"] !== undefined) {
     const caller = (selfOptions.detect ?? ownPane)();
-    if (caller && caller.key !== "sandman:0" || !caller && (process.env.TMUX || process.env.AMUX_AGENT_NAME)) {
+    if (calledFromPane(caller, env) && caller?.key !== "sandman:0") {
       throw new Error("override-failed is only for a human or sandman:0, never an automatic caller");
     }
     const reason = flags["override-failed"];
@@ -59,18 +62,25 @@ export async function cmdCompact(ctx, flags = {}, positional = [], selfOptions =
   // Targeted mode: `amux compact <agent> [-p N] [-m "preserve ..."]`.
   // A non-numeric first positional is an agent name. An explicit target skips
   // the bulk thresholds (you chose the pane deliberately) but KEEPS the
-  // working-pane guard — compacting mid-turn drops in-flight work.
+  // working-pane guard: compacting mid-turn drops in-flight work. A pane
+  // that targets another pane compacts it only above 400k, in compactOnePane.
   if (positional[0] != null && Number.isNaN(Number(positional[0]))) {
     const caller = (selfOptions.detect ?? ownPane)();
     if (caller?.session === positional[0] && caller.pane === (Number.isFinite(flags.p) ? flags.p : 0)) {
       return requestSelfCompact(ctx, flags, selfOptions);
     }
-    return compactOnePane(ctx, String(positional[0]), flags, compactText, override);
+    return compactOnePane(ctx, String(positional[0]), flags, compactText, override, calledFromPane(caller, env));
   }
 
   if (positional[0] != null) throw new Error("Percentage thresholds are no longer supported; use --min-tokens N");
-  const minTokens = flags["min-tokens"] != null ? Number(flags["min-tokens"]) : COMPACT_MIN_TOKENS;
+  // Row 214: a pane that compacts other panes cannot know that they rest, so its bulk pass starts above 400k.
+  const fromPane = calledFromPane((selfOptions.detect ?? ownPane)(), env);
+  const defaultMinTokens = fromPane ? AT_WORK_COMPACT_TOKENS : COMPACT_MIN_TOKENS;
+  const minTokens = flags["min-tokens"] != null ? Number(flags["min-tokens"]) : defaultMinTokens;
   if (!Number.isSafeInteger(minTokens) || minTokens < 1) throw new Error("--min-tokens requires a positive integer");
+  if (fromPane && minTokens < AT_WORK_COMPACT_TOKENS) {
+    throw new Error(`--min-tokens ${minTokens} is under ${AT_WORK_COMPACT_TOKENS}: a pane compacts other panes only above that. AMUX compacts a resting pane by itself.`);
+  }
   const dry = !!flags.dry;
   const force = !!flags.force;
   if (dry) printSelfRequests(createSelfCompactStore().list());
@@ -167,10 +177,11 @@ function compactAttemptWithoutNewWork(state, agent, paneIndex, engine) {
  * WHY: Bulk mode is threshold-driven and touches EVERY qualifying pane — but
  * before handing a pane a heavy new brief, the orchestrator wants to compact
  * exactly that pane and steer what the summary preserves. Thresholds don't
- * gate here (the human/orchestrator chose the pane); the working-pane guard
- * still does, because compacting mid-turn drops in-flight work.
+ * gate a person's target (the human chose the pane); a pane's target is
+ * compacted only above 400k (Row 214). The working-pane guard gates both,
+ * because compacting mid-turn drops in-flight work.
  */
-async function compactOnePane(ctx, name, flags, compactText, override = null) {
+async function compactOnePane(ctx, name, flags, compactText, override = null, fromPane = false) {
   const paneIdx = Number.isFinite(flags.p) ? flags.p : 0;
   const agents = listAgents(ctx.configPath);
   const a = agents.find((x) => x.name === name);
@@ -195,6 +206,12 @@ async function compactOnePane(ctx, name, flags, compactText, override = null) {
   }
   const { status, context } = await inspectPane(ctx, a, p);
   const ctxStr = context ? `${context.percent}% ${formatTokens(context.tokens)}` : "context unknown";
+  // Row 214: a neighbour cannot know that this pane rests, so it compacts it only above 400k, also with --force or an override.
+  if (fromPane && !(context?.tokens > AT_WORK_COMPACT_TOKENS)) {
+    const detail = atWorkDetail(context?.tokens);
+    console.log(`No compact for ${name} p${paneIdx} (at-work): ${detail}.`);
+    return { ok: false, cell: "at-work", detail };
+  }
   if (isCompactUnsafe(status) && !flags.force) {
     console.error(
       `${name} p${paneIdx} is ${status} (${ctxStr}), compacting mid-turn drops in-flight work. Use --force to override.`
@@ -276,6 +293,10 @@ export async function requestSelfCompact(ctx, flags, {
     lastCompactAt: lastCompactAt(engine, dir), continuation,
     identity: identity ? { ...identity, engine, dir } : null,
     cursor: identity ? captureJsonlAppendCursor("self-compact-request-v1", [identity.path]) : null });
+  if (result.cell === "at-work") {
+    console.log(`No compact for ${address.key} (at-work): ${result.detail}.`);
+    return result;
+  }
   if (!result.ok) {
     console.log(`Self-compact refused for ${address.key} (${result.cell}): ${result.detail}.`);
     process.exitCode = 1;

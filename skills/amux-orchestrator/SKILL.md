@@ -102,7 +102,8 @@ Read each view for what it is:
   Compaction follows the amux layer's context rules. Before your own
   `amux compact --self --continue-file HANDOFF` at a stage boundary, preserve
   task state and technical evidence in the handoff, with source pointers for
-  decisions. Do not copy quotations or write a day diary. A refusal means: go on.
+  decisions. Do not copy quotations or write a day diary. A pane's request, for
+  itself or another pane, runs only above 400k. A refusal means: go on.
 - Ordinary coordination adds no second test suite, reviewer, benchmark or
   approval hop. An old memory note is not a new approval gate.
 

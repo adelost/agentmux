@@ -123,6 +123,7 @@ Usage:
     -- command ...                Override gate discovery with an explicit argv-safe command\n  agent proof --config FILE [--output FILE]  Run a clean red-first measurement
   agent compact                  Bulk: /compact to idle panes above 80k tokens
   agent compact <agent> [-p N]    Target ONE pane (skips thresholds, keeps working-guard)
+                                  Called from a pane: every form runs only above 400k; a resting pane is compacted by amux itself
     --self --continue-file FILE    At turn end: verified compact, then own exact handoff once
     -m "handoff"                  Self: own continuation; other Claude pane: summary focus
     --no-resume                   Maintenance only, without a follow-up work prompt

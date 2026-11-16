@@ -12,7 +12,7 @@ import { contextMaintenanceAttempt, lastContextCompactAt } from "../core/context
 import { codexBackgroundActivity, latestJournalCompactMs, leaderPanes, oversizeNotice, oversizeWhileWorking, pauseAskTokens, pauseCompactDecision,
   pauseCompactLimit, sessionBackgroundActivity } from "../core/pause-compact.mjs";
 import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
-import { SELF_COMPACT_POLICY, formatSelfCompactNotice } from "../core/self-compact.mjs";
+import { formatSelfCompactNotice, selfCompactAdmission, selfCompactFloor } from "../core/self-compact.mjs";
 import { QUOTA_FLOOR_DEFAULT_PERCENT, QUOTA_PARK_ORIGIN, QUOTA_PARK_POLICY, codexCreditHold,
   quotaParkDecision, quotaStopEpisode } from "../core/quota-park.mjs";
 import { activeClaudeLimitReceipt } from "../core/claude-quota-recovery.mjs";
@@ -74,6 +74,20 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
   function endRequest(paneKey, request, line) {
     const ending = contextMaintenance.finishSelfRequest?.(request, line) ?? line;
     if (!contextMaintenance.finishSelfRequest) selfRequests.clear(request.agent, request.pane);
+    announceEnding(paneKey, request, ending);
+  }
+
+  // Row 214: a pane's request not above 400k gets no compact, so nothing may wait for one. It is refused and removed, and
+  // the turn-end and idle rules decide for the pane as if it had not asked. A handoff whose verified compact already
+  // followed its checkpoint still continues once.
+  function refuseAtWork(paneKey, request, line) {
+    const finished = contextMaintenance.finishSelfRequest?.(request, { ...line, outcome: "satisfied" });
+    const continued = Boolean(finished?.continuationJobId || finished?.continuationSuperseded);
+    if (!continued) selfRequests.clear(request.agent, request.pane);
+    announceEnding(paneKey, request, continued ? finished : { ...line, outcome: "refused" });
+  }
+
+  function announceEnding(paneKey, request, ending) {
     report(paneKey, request.requestedAt, ending);
     const text = formatSelfCompactNotice(paneKey, { ...ending, focus: request.focus });
     Promise.resolve().then(() => notify(request.agent, request.pane, text))
@@ -249,8 +263,15 @@ export function createPauseCompact({ contextMaintenance, state, modes, policy = 
       }
       return false;
     }
-    // A pane that asked at a stage boundary is compacted from about 80k, the size rule waits for its budget: 400k for builders, 700k for a leader or thinker.
-    const limit = request ? SELF_COMPACT_POLICY.minTokens : pauseCompactLimit(agentConfig, pane, policy, engine);
+    // The CLI's own admission, read again at the turn end from the request's origin.
+    const admission = request && mode === "on" ? selfCompactAdmission({ tokens: contextTokens, origin: request.origin, now: now() }) : null;
+    if (admission?.cell === "at-work") {
+      refuseAtWork(paneKey, request, { ...base, detail: admission.detail });
+      return false;
+    }
+    // A pane that asked at a stage boundary is compacted above 400k, a park or wind-down the bridge filed from about 80k;
+    // the size rule waits for its budget: 400k for builders, 700k for a leader or thinker.
+    const limit = request ? selfCompactFloor(request) : pauseCompactLimit(agentConfig, pane, policy, engine);
     const askAt = pauseAskTokens(agentConfig, pane, policy);
     // Codex's cache lives about 30 minutes, so its idle rule is 25 minutes instead of the shared 50.
     const codexIdle = engine === "codex" ? { idleLimit: policy.codexMinTokens, idleMs: policy.codexIdleMs } : {};

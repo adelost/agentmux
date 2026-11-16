@@ -41,6 +41,19 @@ export const PAUSE_COMPACT_POLICY = Object.freeze({ builderTokens: 400_000, clau
   settleMs: 60_000, spacingMs: 30 * 60_000, backgroundQuietMs: 5 * 60_000, hungJobMs: 60 * 60_000,
   codexIdleMs: 25 * 60_000, codexMinTokens: 150_000 });
 
+// Row 214 (Mattias to plan:3 16 Nov 2026, about 16:35Z and his corrections the same day): a pane in the middle of work
+// is never compacted under 400k; finished is proven by rest, and a resting pane is always compacted before its cache
+// runs out (Claude after 50 min from 80k, Codex after 25 min from 150k). That day two agents told panes to compact far
+// below the Row 169 and 170 budgets, and deep:0 asked four times (705k at 09:51Z, 376k at 14:03Z, 357k at 15:47Z, then
+// 185k), each time without a handoff, and worked on after each as new deliveries arrived: a request without a handoff
+// does not prove finished work. So every compact a pane asks for through the CLI, its own in any form or another
+// pane's (a neighbour cannot know that the pane rests), runs only above this number. The requests AMUX files itself
+// (quota park, wind-down) and the idle, before-delivery, turn-end and nightly rules do not read it.
+// A compact pays back after about 9 calls at 600k (Claude, claude-subagent-cache-2026-10-10.md), 7 at 370k and 34 at
+// 150k (Codex, above); from 4-14 Nov the 200k builder budget made 521 compacts, 47 per day, and saved 5.1%, forgone.
+/** WHAT: Defines the size a compact asked for by a pane must exceed. WHY: Keeps a pane at work from being compacted under the 400k turn-end budget. */
+export const AT_WORK_COMPACT_TOKENS = 400_000;
+
 /** WHAT: Reads operator cost-policy overrides. WHY: Keeps daytime and cold-wake thresholds consistent after restart. */
 export function readContextCostPolicy(env = process.env) {
   const maxTokens = Number(env.AUTO_COMPACT_MAX_TOKENS || CONTEXT_COST_POLICY.maxTokens);

@@ -56,6 +56,25 @@ feature("decideAutoCompactAction — disabled config", () => {
   });
 });
 
+// Row 214, the owner's decision of 16 Nov 2026: a pane that has rested until its cache is about to run out is always
+// compacted from the usual small amount. The 400k of a pane's own request is not read here.
+feature("decideAutoCompactAction: a resting pane under 400k is still compacted after 50 minutes", () => {
+  for (const contextTokens of [120_000, 200_000, 300_000, 399_999]) {
+    unit(`an idle pane at ${contextTokens} is warned at 50 quiet minutes and compacted after the grace`, {
+      given: ["the default policy and a turn that ended exactly 50 minutes ago", () => ({ ...base, contextTokens, lastActivityMs: base.now - 50 * 60_000 })],
+      when: ["deciding at 49 minutes, at 50, and after the warning's grace", (args) => [
+        decideAutoCompactAction({ ...args, lastActivityMs: base.now - 49 * 60_000 }),
+        decideAutoCompactAction(args),
+        decideAutoCompactAction({ ...args, warnings: new Map([[key, { warned_at: base.now - DEFAULT_CONFIG.graceMs }]]) }),
+      ].map(result => result.action)],
+      then: ["none, warn, compact", (actions) => {
+        expect(actions).toEqual(["none", "warn", "compact"]);
+        expect(DEFAULT_CONFIG).toMatchObject({ maxTokens: 80_000, minIdleMs: 50 * 60_000 });
+      }],
+    });
+  }
+});
+
 feature("decideAutoCompactAction — first crossing (warn)", () => {
   unit("idle pane over threshold with no prior warning → warn", {
     given: ["80% idle, no warning", () => base],

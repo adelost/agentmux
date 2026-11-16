@@ -2,7 +2,7 @@ import { warmQuotaHold, claimQuotaCompact, finishQuotaCompact, blocksQuotaCompac
 import { contextCostDecision, readContextCostPolicy, workAdmission } from "../policies/context-cost.mjs";
 import { recordCompactCall } from "./compact-log.mjs";
 import { isOwnerChannelJob } from "./ask-origin.mjs";
-import { SELF_COMPACT_POLICY, formatSelfCompactNotice, selfCompactAdmission } from "./self-compact.mjs";
+import { formatSelfCompactNotice, selfCompactAdmission, selfCompactFloor } from "./self-compact.mjs";
 import { latestConversationActivityMs } from "./pane-activity.mjs";
 import { latestPaneSessionIdentity } from "./native-session-identity.mjs";
 import { captureJsonlAppendCursor, cursorAfterLastJsonlEvent, cursorForCopiedJsonl, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
@@ -403,7 +403,8 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
     return { ok: true, cell: "delivered-uncompacted", reason: result.reason };
   }
   // A pane that asked to be compacted at its stage boundary gets it before the next
-  // prompt lands, under the same guards: no subagent or job still writing, 80k, 30 minutes.
+  // prompt lands, under the same guards: no subagent or job still writing, its limit (400k for a pane's
+  // own request, 80k for one the bridge filed), 30 minutes.
   const noticeSelf = (request, ending) => Promise.resolve()
     .then(() => notify(request.agent, request.pane, formatSelfCompactNotice(`${request.agent}:${request.pane}`, { ...ending, focus: request.focus })))
     .catch((error) => log(`${request.agent}:${request.pane} self-compact notice failed: ${error.message}`));
@@ -417,13 +418,15 @@ export function createContextMaintenance({ agent, state, queue, resolveTarget, n
       sessionPath: identity.path, sessionId: identity.sessionId, paneDir: target.dir, now: now() }) : null;
     if (background) { log(`${agentName}:${pane} self-compact held before delivery: ${background}`); return null; }
     const context = await (agent.getContext?.(agentName, pane) ?? agent.getContextPercent(agentName, pane));
-    const admission = selfCompactAdmission({ tokens: context?.tokens, lastCompactAt: lastContextCompactAt(state, agentName, pane), now: now() });
+    const admission = selfCompactAdmission({ tokens: context?.tokens, origin: request.origin,
+      lastCompactAt: lastContextCompactAt(state, agentName, pane), now: now() });
     if (!admission.ok) {
+      // Row 214: a pane's stored request not above 400k is refused here, not run; the before-delivery rule still decides below.
       selfRequests.clear(agentName, pane);
-      noticeSelf(request, { outcome: "satisfied", detail: admission.detail });
+      noticeSelf(request, { outcome: admission.cell === "at-work" ? "refused" : "satisfied", detail: admission.detail });
       return null;
     }
-    const result = await run(agentName, pane, { pauseTokens: SELF_COMPACT_POLICY.minTokens, pauseSettleMs: 0, beforeDelivery: true,
+    const result = await run(agentName, pane, { pauseTokens: selfCompactFloor(request), pauseSettleMs: 0, beforeDelivery: true,
       focus: request.focus, trigger: "self-request", leaseHeld: true, heldLease: lease, jobId: id });
     if (!result.compacted && !result.attempted) return null;
     // The waiting delivery already continues or replaces the task. Do not

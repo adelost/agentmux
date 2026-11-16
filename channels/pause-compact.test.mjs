@@ -2,8 +2,8 @@ import { component, expect, feature } from "bdd-vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPauseCompact, createQuotaParkStore } from "./pause-compact.mjs";
-import { createSelfCompactStore } from "../core/self-compact.mjs";
+import { createColdDeliveryRule, createPauseCompact, createQuotaParkStore } from "./pause-compact.mjs";
+import { SELF_COMPACT_POLICY, createSelfCompactStore } from "../core/self-compact.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { createDeliveryBroker } from "../core/delivery-broker.mjs";
 
@@ -244,6 +244,32 @@ feature("pause compaction in the bridge poll", () => {
       expect(ctx.lines[0]).toMatchObject({ outcome: "would-compact", cell: "codex-idle", limit: 150_000, mode: "dry" });
     }],
   });
+  // Row 214 (16 Nov 2026) leaves the idle rule alone: a resting Codex pane is compacted from 150k after 25 minutes.
+  component("a resting Codex pane is compacted after 25 minutes from 150k, also at 200k and 300k", {
+    given: ["both engines live", () => controller("on", { codexMode: "on" })],
+    when: ["polling Codex lsrc:4 at 120k, 200k and 300k, 24 and then 26 minutes after its turn", async ctx => {
+      const sent = [];
+      for (const minutes of [24, 26]) {
+        for (const contextTokens of [120_000, 200_000, 300_000]) {
+          sent.push(`${minutes}:${contextTokens}:${await ctx.poll({ pane: 4, engine: "codex", contextTokens, lastActivityMs: NOW - minutes * 60_000 })}`);
+        }
+      }
+      return sent;
+    }],
+    then: ["nothing before 25 minutes or at 120k; 200k and 300k each get the idle compact against 150k", (sent, ctx) => {
+      expect(sent).toEqual(["24:120000:false", "24:200000:false", "24:300000:false", "26:120000:false", "26:200000:true", "26:300000:true"]);
+      expect(ctx.runs).toEqual([{ pane: "lsrc:4", pauseTokens: 150_000, dry: false, trigger: "codex-idle" },
+        { pane: "lsrc:4", pauseTokens: 150_000, dry: false, trigger: "codex-idle" }]);
+    }],
+  });
+  component("the before-delivery rule keeps its own limits beside the 400k of a pane's request", {
+    when: ["reading the limits the bridge gives context maintenance", () => {
+      const rule = createColdDeliveryRule({ modes: { claude: "on", codex: "on" }, record: () => {} });
+      return { claude: rule.limits("claude"), codex: rule.limits("codex"), pane: SELF_COMPACT_POLICY.paneTokens, bridge: SELF_COMPACT_POLICY.minTokens };
+    }],
+    then: ["Claude 50 minutes from 80k, Codex 25 from 150k; only a pane's request reads 400k", limits => expect(limits).toEqual({
+      claude: { idleMs: 50 * 60_000, tokens: 80_000 }, codex: { idleMs: 25 * 60_000, tokens: 150_000 }, pane: 400_000, bridge: 80_000 })],
+  });
   component("off mode does nothing", {
     given: ["off mode", () => controller("off")],
     when: ["polling lsrc:2 at the pause", ctx => ctx.poll()],
@@ -310,29 +336,33 @@ feature("a Claude builder's budget of 400k", () => {
 });
 
 // lsrc:0, a leader at 150k: far under its 700k pause limit, so only its own request compacts it.
-function selfController({ background = null, superseded = false } = {}) {
+function selfController({ background = null, superseded = false, finish = null } = {}) {
   let now = NOW;
   const dir = mkdtempSync(join(tmpdir(), "amux-self-compact-"));
   const requests = createSelfCompactStore({ dir, now: () => now });
   const runs = [], lines = [], notices = [];
   const pause = createPauseCompact({ modes: { claude: "on", codex: "on" }, now: () => now, state: { get: () => ({}) },
     contextMaintenance: { run: async (name, pane, options) => { runs.push({ pane: `${name}:${pane}`, ...options }); return { ok: true, compacted: true }; },
-      selfRequestSuperseded: () => superseded },
+      selfRequestSuperseded: () => superseded, ...(finish ? { finishSelfRequest: (request, ending) => finish(request, ending, requests) } : {}) },
     record: line => lines.push(line), identityFor: () => ({ path: "/projects/lsrc-0/s1.jsonl", sessionId: "s1" }),
     backgroundFor: { claude: () => background, codex: () => background }, journalCompactFor: () => null,
     selfRequests: requests, notify: async (agent, pane, text) => notices.push(`${agent}:${pane} ${text}`) });
   const poll = (facts = {}) => pause.consider({ agentConfig: lsrc, pane: 0, engine: "claude", paneDir: "/lsrc/.agents/0",
     status: "idle", inCopyMode: false, contextTokens: 150_000, lastActivityMs: now, ...facts });
-  return { requests, runs, lines, notices, poll, later: ms => { now += ms; }, at: () => now,
+  // A pane's request stored at or under 400k: one filed before Row 214, or one whose size the bridge reads lower than the CLI did.
+  const storeBeforeRow214 = (tokens, { handoff = true, path = "/projects/lsrc-0/s1.jsonl" } = {}) =>
+    createSelfCompactStore({ dir, now: () => now, policy: { ...SELF_COMPACT_POLICY, paneTokens: 0 } }).request({ agent: "lsrc", pane: 0, tokens,
+      ...(handoff ? { continuation: "continue row 214", identity: { sessionId: "s1", path }, cursor: { positions: { [path]: 0 } } } : {}) });
+  return { requests, runs, lines, notices, poll, storeBeforeRow214, later: ms => { now += ms; }, at: () => now,
     cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 feature("a pane's own request to be compacted", () => {
   component("a superseded handoff is reported without restarting old work", {
-    given: ["a saved continuation and later input", () => {
+    given: ["a saved continuation at 450k (150k before Row 214, 16 Nov 2026) and later input", () => {
       const ctx = selfController({ superseded: true });
       const path = "/projects/lsrc-0/s1.jsonl";
-      ctx.requests.request({ agent: "lsrc", pane: 0, tokens: 150_000, continuation: "finish the film",
+      ctx.requests.request({ agent: "lsrc", pane: 0, tokens: 450_000, continuation: "finish the film",
         identity: { sessionId: "s1", path }, cursor: { positions: { [path]: 0 } } });
       return ctx;
     }],
@@ -347,39 +377,158 @@ feature("a pane's own request to be compacted", () => {
     }],
   });
   component("a request made mid-turn compacts when the turn ends, not during it", {
-    given: ["lsrc:0 at 150k asks at a stage boundary while its turn runs", () => {
+    given: ["lsrc:0 at 450k (150k before Row 214, 16 Nov 2026) asks at a stage boundary while its turn runs", () => {
       const ctx = selfController();
-      ctx.requests.request({ agent: "lsrc", pane: 0, tokens: 150_000, focus: "behåll G4-siffrorna" });
+      ctx.requests.request({ agent: "lsrc", pane: 0, tokens: 450_000, focus: "behåll G4-siffrorna" });
       return ctx;
     }],
     when: ["polling during the turn, then a minute after it ends", async ctx => {
-      const during = await ctx.poll({ status: "working", lastActivityMs: ctx.at() });
+      const during = await ctx.poll({ contextTokens: 450_000, status: "working", lastActivityMs: ctx.at() });
       const turnEnded = ctx.at();
       ctx.later(61_000);
-      const after = await ctx.poll({ lastActivityMs: turnEnded });
+      const after = await ctx.poll({ contextTokens: 450_000, lastActivityMs: turnEnded });
       return { during, after };
     }],
     then: ["nothing during the turn, one focused compact after it, the request ended and mirrored", ({ during, after }, ctx) => {
       try {
         expect(during).toBe(false);
         expect(after).toBe(true);
-        expect(ctx.runs).toEqual([{ pane: "lsrc:0", pauseTokens: 80_000, dry: false, focus: "behåll G4-siffrorna", trigger: "self-request" }]);
+        expect(ctx.runs).toEqual([{ pane: "lsrc:0", pauseTokens: 400_000, dry: false, focus: "behåll G4-siffrorna", trigger: "self-request" }]);
         expect(ctx.requests.list()).toEqual([]);
         expect(ctx.lines.at(-1)).toMatchObject({ outcome: "compacted", cell: "self-request" });
-        expect(ctx.notices).toEqual(["lsrc:0 Self-compact **lsrc:0** at the end of its turn (150000 tokens), focus: behåll G4-siffrorna."]);
+        expect(ctx.notices).toEqual(["lsrc:0 Self-compact **lsrc:0** at the end of its turn (450000 tokens), focus: behåll G4-siffrorna."]);
       } finally { ctx.cleanup(); }
     }],
   });
-  component("a request waits while a subagent writes", {
-    given: ["lsrc:0 asked; its subagent wrote 20 s ago", () => {
-      const ctx = selfController({ background: "subagent wrote 20 s ago" });
-      ctx.requests.request({ agent: "lsrc", pane: 0, tokens: 150_000 });
+  // Row 214, the owner's decision of 16 Nov 2026: a pane at work is never compacted under 400k; finished is proven by
+  // rest, and the idle rules compact a resting pane by themselves. One comparison at the CLI and here: above 400 000.
+  for (const [tokens, handoff, runs] of [[400_001, true, true], [450_000, true, true], [450_000, false, true], [400_000, true, false]]) {
+    component(`a pane's request at ${tokens}${handoff ? " with a handoff" : ""} is ${runs ? "compacted at its turn end against 400k" : "refused here as at the CLI"}`, {
+      given: ["lsrc:0 asked", () => {
+        const ctx = selfController();
+        return { ...ctx, asked: (runs ? ctx.requests : { request: () => ctx.storeBeforeRow214(tokens, { handoff }) }).request({ agent: "lsrc", pane: 0, tokens,
+          ...(handoff ? { continuation: "continue row 214", identity: { sessionId: "s1", path: "/projects/lsrc-0/s1.jsonl" }, cursor: { positions: { "/projects/lsrc-0/s1.jsonl": 0 } } } : {}) }) };
+      }],
+      when: ["polling a minute after the turn ended", async ctx => {
+        const turnEnded = ctx.at();
+        ctx.later(61_000);
+        return ctx.poll({ contextTokens: tokens, lastActivityMs: turnEnded });
+      }],
+      then: ["the bridge runs exactly what the CLI admits", (sent, ctx) => {
+        try {
+          expect(ctx.asked.ok).toBe(true);
+          expect(sent).toBe(runs);
+          expect(ctx.runs).toEqual(runs ? [{ pane: "lsrc:0", pauseTokens: 400_000, dry: false, focus: "", trigger: "self-request" }] : []);
+          expect(ctx.requests.list()).toEqual([]);
+        } finally { ctx.cleanup(); }
+      }],
+    });
+  }
+  for (const [label, engine, tokens, handoff] of [
+    ["deep:0's case of 16 Nov 2026, a bare Claude request at 185k,", "claude", 185_000, false],
+    ["a Claude --no-resume request at 300k", "claude", 300_000, false],
+    ["a Claude request with a handoff at 300k", "claude", 300_000, true],
+    ["a bare Codex request at 300k", "codex", 300_000, false],
+    ["a Codex request with a handoff at 300k", "codex", 300_000, true],
+  ]) component(`${label} stored before the rule is refused and removed, never run`, {
+    given: [`lsrc:0 at ${tokens} with its own request in the store`, () => {
+      const ctx = selfController();
+      expect(ctx.storeBeforeRow214(tokens, { handoff }).ok).toBe(true);
+      return ctx;
+    }],
+    when: ["polling during the turn and a minute after it ends", async ctx => {
+      const during = await ctx.poll({ engine, contextTokens: tokens, status: "working" });
+      const turnEnded = ctx.at();
+      ctx.later(61_000);
+      return [during, await ctx.poll({ engine, contextTokens: tokens, lastActivityMs: turnEnded })];
+    }],
+    then: ["no compact, the request gone, one notice in plain words, and the poll hands the pane to the idle rules", (sent, ctx) => {
+      try {
+        expect(sent).toEqual([false, false]);
+        expect(ctx.runs).toEqual([]);
+        expect(ctx.requests.list()).toEqual([]);
+        expect(ctx.lines.map(line => `${line.outcome}:${line.cell}`)).toEqual(["refused:self-request"]);
+        expect(ctx.notices).toEqual([`lsrc:0 Self-compact **lsrc:0** refused: ${tokens} tokens is not above 400000. This is not an error: a pane at work is not compacted under that `
+          + "(owner's decision 16 Nov 2026), and AMUX compacts the pane by itself once it has rested (Claude after 50 min from 80k, Codex after 25 min from 150k)"]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a quota park's own request at 120k is still compacted at the turn end against 80k", {
+    given: ["lsrc:0 at 120k with the request the bridge files for a park", () => {
+      const ctx = selfController();
+      return { ...ctx, asked: ctx.requests.request({ agent: "lsrc", pane: 0, tokens: 120_000, origin: "quota-park" }) };
+    }],
+    when: ["polling a minute after the turn ended", async ctx => {
+      const turnEnded = ctx.at();
+      ctx.later(61_000);
+      return ctx.poll({ contextTokens: 120_000, lastActivityMs: turnEnded });
+    }],
+    then: ["admitted and run as before Row 214", (sent, ctx) => {
+      try {
+        expect(ctx.asked.ok).toBe(true);
+        expect(sent).toBe(true);
+        expect(ctx.runs).toEqual([{ pane: "lsrc:0", pauseTokens: 80_000, dry: false, focus: "", trigger: "self-request" }]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  // core/self-compact-resume.mjs answers "held" while a handoff has no verified compact after its checkpoint, and queues
+  // the handoff, removing the request, once it has one.
+  for (const [label, finish, outcome] of [
+    ["with no compact since its checkpoint is refused and removed, not left waiting",
+      (_request, ending) => ({ ...ending, outcome: "held", detail: "waiting for a verified compact after this checkpoint" }), "refused"],
+    ["whose verified compact already followed its checkpoint still continues once",
+      (request, ending, requests) => { requests.clear(request.agent, request.pane); return { ...ending, continuationJobId: "job-1" }; }, "satisfied"],
+  ]) component(`a stored handoff at 300k ${label}`, {
+    given: ["lsrc:0 at 300k with its own request and handoff in the store", () => {
+      const ctx = selfController({ finish });
+      ctx.storeBeforeRow214(300_000);
       return ctx;
     }],
     when: ["polling a minute after the turn ended", async ctx => {
       const turnEnded = ctx.at();
       ctx.later(61_000);
-      return ctx.poll({ lastActivityMs: turnEnded });
+      return ctx.poll({ contextTokens: 300_000, lastActivityMs: turnEnded });
+    }],
+    then: ["no compact runs and no request is left to hold the idle rules", (sent, ctx) => {
+      try {
+        expect(sent).toBe(false);
+        expect(ctx.runs).toEqual([]);
+        expect(ctx.requests.list()).toEqual([]);
+        expect(ctx.lines.map(line => line.outcome)).toEqual([outcome]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a Codex pane whose own request at 300k was refused is still compacted by the idle rule when it rests", {
+    given: ["Codex lsrc:0 at 300k with its own bare request in the store", () => {
+      const ctx = selfController();
+      ctx.storeBeforeRow214(300_000, { handoff: false });
+      return ctx;
+    }],
+    when: ["polling at its turn end, then after 26 quiet minutes", async ctx => {
+      const turnEnded = ctx.at();
+      ctx.later(61_000);
+      const atTurnEnd = await ctx.poll({ engine: "codex", contextTokens: 300_000, lastActivityMs: turnEnded });
+      ctx.later(25 * 60_000);
+      return [atTurnEnd, await ctx.poll({ engine: "codex", contextTokens: 300_000, lastActivityMs: turnEnded })];
+    }],
+    then: ["the refusal leaves nothing behind: the idle compact runs against 150k under its own name", (sent, ctx) => {
+      try {
+        expect(sent).toEqual([false, true]);
+        expect(ctx.runs).toEqual([{ pane: "lsrc:0", pauseTokens: 150_000, dry: false, trigger: "codex-idle" }]);
+        expect(ctx.lines.map(line => `${line.outcome}:${line.cell}`)).toEqual(["refused:self-request", "compacted:codex-idle"]);
+      } finally { ctx.cleanup(); }
+    }],
+  });
+  component("a request waits while a subagent writes", {
+    given: ["lsrc:0 asked at 450k (150k before Row 214, 16 Nov 2026); its subagent wrote 20 s ago", () => {
+      const ctx = selfController({ background: "subagent wrote 20 s ago" });
+      ctx.requests.request({ agent: "lsrc", pane: 0, tokens: 450_000 });
+      return ctx;
+    }],
+    when: ["polling a minute after the turn ended", async ctx => {
+      const turnEnded = ctx.at();
+      ctx.later(61_000);
+      return ctx.poll({ contextTokens: 450_000, lastActivityMs: turnEnded });
     }],
     then: ["held, no compact, the request kept", (sent, ctx) => {
       try {

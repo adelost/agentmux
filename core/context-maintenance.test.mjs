@@ -7,7 +7,7 @@ import { resolveExpiredCompact } from "./compact-receipts.mjs";
 import { deliveryHead, wakeDeliveryTarget } from "./delivery-wake.mjs";
 import { captureJsonlAppendCursor } from "./jsonl-append-cursor.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
-import { createSelfCompactStore } from "./self-compact.mjs";
+import { SELF_COMPACT_POLICY, createSelfCompactStore } from "./self-compact.mjs";
 import { verifiedClaudeCompact } from "./verified-compact.mjs";
 import { composerAgent } from "../test/fixtures/composer-agent.mjs";
 import { withDeliveryPreparation } from "./delivery-preparation.mjs";
@@ -1041,6 +1041,22 @@ feature("a pane idle past its cache's life is compacted before a delivery", () =
       try { expect(result.cell).toBe("within-policy"); expect(ctx.calls).toEqual([]); expect(ctx.coldBeforeDelivery.lines).toEqual([]); } finally { ctx.cleanup(); }
     }],
   });
+  // Row 214 (16 Nov 2026) leaves this rule alone: it reads its own 80k and 150k, never the 400k of a pane's request.
+  for (const [engine, tokens, idleMinutes, compacted] of [
+    ["claude", 120_000, 51, true], ["claude", 200_000, 51, true], ["claude", 300_000, 51, true], ["claude", 300_000, 49, false],
+    ["codex", 120_000, 26, false], ["codex", 200_000, 26, true], ["codex", 300_000, 26, true], ["codex", 300_000, 24, false],
+  ]) component(`a ${engine} pane at ${tokens} idle ${idleMinutes} minutes is ${compacted ? "compacted before its delivery" : "delivered as it is"}`, {
+    given: ["the pane with the rule on", () => pane({ engine, tokens, idleMinutes, rule: coldRule("on") })],
+    when: ["a delivery arrives", deliver],
+    // The fixture's pane has no Codex composer to type into, so the rule's own line is the proof for both engines.
+    then: ["the before-delivery limits decide, under 400k too", (_result, ctx) => {
+      try {
+        expect(ctx.coldBeforeDelivery.lines.slice(0, 1)).toMatchObject(compacted
+          ? [{ cell: "before-delivery", outcome: "compacting", tokens, limit: engine === "codex" ? 150_000 : 80_000 }] : []);
+        if (engine === "claude") expect(ctx.calls).toEqual(compacted ? ["compact"] : []);
+      } finally { ctx.cleanup(); }
+    }],
+  });
   component("an active subagent holds the compact and the work is delivered", {
     given: ["a Claude pane idle 55 minutes whose subagent wrote 40 s ago", () =>
       pane({ idleMinutes: 55, rule: coldRule("on", { background: "a subagent or background job wrote 40s ago" }) })],
@@ -1100,13 +1116,13 @@ feature("a self-request before the next delivery", () => {
     }],
   });
   component("a pane that asked is compacted with its focus before a waiting prompt lands", {
-    given: ["claw:2 at 120k, its turn ended 5 s ago, a self-request and a delivery waiting", () => {
+    given: ["claw:2 at 450k (120k before Row 214, 16 Nov 2026), its turn ended 5 s ago, a self-request and a delivery waiting", () => {
       const ctx = fixture();
-      ctx.agent.getContext = async () => ({ tokens: 120_000 });
+      ctx.agent.getContext = async () => ({ tokens: 450_000 });
       ctx.activityFor = () => ctx.now() - 5_000;
       const dir = mkdtempSync(join(tmpdir(), "amux-self-compact-"));
       const requests = createSelfCompactStore({ dir, now: ctx.now });
-      requests.request({ agent: "claw", pane: 2, tokens: 120_000, focus: "behåll G4-siffrorna" });
+      requests.request({ agent: "claw", pane: 2, tokens: 450_000, focus: "behåll G4-siffrorna" });
       const commands = [], notices = [];
       ctx.compactFor = () => async ({ command }) => {
         commands.push(command ?? "/compact");
@@ -1123,7 +1139,7 @@ feature("a self-request before the next delivery", () => {
         expect(ctx.commands).toEqual(["/compact behåll G4-siffrorna"]);
         expect(ctx.requests.list()).toEqual([]);
         await Promise.resolve();
-        expect(ctx.notices).toEqual(["Self-compact **claw:2** at the end of its turn (120000 tokens), focus: behåll G4-siffrorna. Cause: pane request: 120000 tokens (minimum 80000)."]);
+        expect(ctx.notices).toEqual(["Self-compact **claw:2** at the end of its turn (450000 tokens), focus: behåll G4-siffrorna. Cause: pane request: 450000 tokens (minimum 400000)."]);
       } finally { ctx.cleanup(); rmSync(ctx.dir, { recursive: true, force: true }); }
     }],
   });
@@ -1146,6 +1162,71 @@ feature("a self-request before the next delivery", () => {
       try {
         expect(result.ok).toBe(true);
         expect(ctx.calls).toEqual(["compact"]);
+      } finally { ctx.cleanup(); rmSync(ctx.dir, { recursive: true, force: true }); }
+    }],
+  });
+  // Row 214, the owner's decision of 16 Nov 2026: a pane at work is never compacted under 400k, with or without a handoff.
+  // The comparison is the CLI's: above 400 000. The park above, filed by the bridge at 120k, still runs.
+  for (const [label, tokens, handoff, compacted] of [
+    ["deep:0's case of 16 Nov 2026, a bare request at 185k,", 185_000, false, false],
+    ["a request with a handoff at 300k", 300_000, true, false],
+    ["a request at exactly 400 000", 400_000, false, false],
+    ["a request at 400 001", 400_001, false, true],
+    ["a request with a handoff at 450k", 450_000, true, true],
+  ]) component(`${label} is ${compacted ? "compacted against 400k" : "refused and removed, not run,"} before the waiting prompt`, {
+    given: ["claw:2 with its own stored request, its turn ended 5 s ago, and a delivery waiting", () => {
+      const ctx = fixture(), path = ctx.identityFor().path;
+      ctx.agent.getContext = async () => ({ tokens });
+      ctx.activityFor = () => ctx.now() - 5_000;
+      const dir = mkdtempSync(join(tmpdir(), "amux-self-compact-"));
+      // A request at or under 400k stands for one stored before the rule, or read smaller by the bridge than by the CLI.
+      const stored = createSelfCompactStore({ dir, now: ctx.now, policy: { ...SELF_COMPACT_POLICY, paneTokens: 0 } }).request({ agent: "claw", pane: 2, tokens,
+        ...(handoff ? { continuation: "continue row 214", identity: { sessionId: "one", path }, cursor: { positions: { [path]: 0 } } } : {}) });
+      expect(stored.ok).toBe(true);
+      return { ...ctx, requests: createSelfCompactStore({ dir, now: ctx.now }), notices: [], dir };
+    }],
+    when: ["admitting the delivery", ctx => createContextMaintenance({ ...ctx, selfRequests: ctx.requests,
+      notify: async (agent, pane, text) => ctx.notices.push(text) }).beforeWork({ agentName: "claw", pane: 2, id: "next" })],
+    then: ["the prompt is admitted, the request is gone and its channel hears why", async (result, ctx) => {
+      try {
+        expect(result.ok).toBe(true);
+        expect(ctx.calls).toEqual(compacted ? ["compact"] : []);
+        expect(ctx.requests.list()).toEqual([]);
+        await Promise.resolve();
+        expect(ctx.notices).toEqual([compacted
+          ? `Self-compact **claw:2** at the end of its turn (${tokens} tokens). Cause: pane request: ${tokens} tokens (minimum 400000).`
+          : `Self-compact **claw:2** refused: ${tokens} tokens is not above 400000. This is not an error: a pane at work is not compacted under that `
+            + "(owner's decision 16 Nov 2026), and AMUX compacts the pane by itself once it has rested (Claude after 50 min from 80k, Codex after 25 min from 150k)"]);
+      } finally { ctx.cleanup(); rmSync(ctx.dir, { recursive: true, force: true }); }
+    }],
+  });
+});
+
+// Row 214, the owner's decision of 16 Nov 2026: a pane that has rested until its cache is about to run out is always
+// compacted from the usual small amount. The idle rule reads its own 80k and 50 minutes, also for a pane whose own
+// request was just refused under 400k: the refusal stores nothing that could hold it.
+feature("a resting pane is compacted by the idle rule whatever it asked while it worked", () => {
+  for (const [tokens, idleMinutes, compacted] of [
+    [120_000, 50, true], [200_000, 50, true], [300_000, 50, true], [399_999, 50, true], [300_000, 49, false],
+  ]) component(`claw:2 at ${tokens}, refused its own request, is ${compacted ? "compacted" : "left alone"} after ${idleMinutes} quiet minutes`, {
+    given: ["a Claude pane whose own request was refused while it worked", () => {
+      const ctx = fixture(), path = ctx.identityFor().path;
+      ctx.agent.getContext = async () => ({ tokens });
+      const dir = mkdtempSync(join(tmpdir(), "amux-self-compact-"));
+      const requests = createSelfCompactStore({ dir, now: ctx.now });
+      const refusal = requests.request({ agent: "claw", pane: 2, tokens, continuation: "continue row 214",
+        identity: { sessionId: "one", path }, cursor: { positions: { [path]: 0 } } });
+      ctx.activityFor = () => ctx.now() - idleMinutes * 60_000;
+      return { ...ctx, requests, refusal, dir };
+    }],
+    when: ["the idle rule reaches the pane", ctx => createContextMaintenance({ ...ctx, selfRequests: ctx.requests }).run("claw", 2)],
+    then: ["nothing of the refusal remains, and 50 minutes over 80k decide", (result, ctx) => {
+      try {
+        expect(ctx.refusal).toMatchObject({ ok: false, cell: "at-work" });
+        expect(ctx.requests.list()).toEqual([]);
+        expect(ctx.calls).toEqual(compacted ? ["compact"] : []);
+        if (compacted) expect(ctx.state.get("context_maintenance_by_pane_v1")["claw:2"].compactCause).toBe(`50 min idle: ${tokens} tokens > 80000`);
+        else expect(result).toMatchObject({ ok: true, cell: "within-policy" });
       } finally { ctx.cleanup(); rmSync(ctx.dir, { recursive: true, force: true }); }
     }],
   });
