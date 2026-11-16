@@ -31,12 +31,16 @@ export function agentCommand(agent, text, session, started) {
   throw new Error(`unknown agent "${agent}": use claude or copilot`);
 }
 
-/** WHAT: Pairs this computer with a box. WHY: The key file is readable by its owner alone. */
-function setup([box, deviceKey], api) {
+/** WHAT: Pairs this computer with a box. WHY: The key file is readable by its owner alone, and what the box held before pairing is never
+ *  run: the relay starts after the box's last number, read from the box, not from a clock that may differ from the server's. */
+async function setup([box, deviceKey], api) {
   if (!/^mbx_[a-f0-9]{32}$/.test(box || "") || !/^v1dm\.[A-Za-z0-9_-]{43}$/.test(deviceKey || "")) fail("usage: setup <mbx_…> <v1dm.…>");
   mkdirSync(HOME, { recursive: true, mode: 0o700 });
   writeFileSync(CONFIG, JSON.stringify({ api, box, deviceKey }, null, 2) + "\n", { mode: 0o600 });
   chmodSync(CONFIG, 0o600);
+  let after = 0;
+  for (let page; (page = await mailbox({ api, box, deviceKey }, "GET", `?after=${after}`)).data.length;) after = page.last;
+  saveState({ after });
   console.log(`paired with ${box}; start with: node agent-relay.mjs run --agent claude`);
 }
 
@@ -111,7 +115,7 @@ const option = (args, name, fallback) => { const at = args.indexOf(name); return
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("agent-relay.mjs")) {
   const [command, ...args] = process.argv.slice(2);
-  if (command === "setup") setup(args.filter((arg, i) => !arg.startsWith("--") && args[i - 1] !== "--api"), option(args, "--api", DEFAULT_API));
+  if (command === "setup") await setup(args.filter((arg, i) => !arg.startsWith("--") && args[i - 1] !== "--api"), option(args, "--api", DEFAULT_API));
   else if (command === "run") await run({ agent: option(args, "--agent", "claude"), dir: option(args, "--dir", process.cwd()) });
   else if (command === "send" && args.join(" ").trim()) await send(readConfig(), args.join(" "));
   else fail("usage: setup <box id> <device key> | run [--agent claude|copilot] [--dir PATH] | send \"text\"");
