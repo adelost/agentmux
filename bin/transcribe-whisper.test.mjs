@@ -359,3 +359,28 @@ describe("151 gateway adapter contract, real codec and stubbed HTTP only", () =>
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });
+
+// 207: 19 s parts left a trailing sliver of under a second (16 Nov 06:45Z: 76.42 s gave a 0.42 s fifth part). The gateway's
+// Flash-Lite ends such a sliver at its output ceiling, provider_limit, every time, and the whole message failed; 9 of the 10
+// provider_limit failures 10-16 Nov had a tail under 1 s. The stub refuses a part under a second the way the gateway does.
+describe("207 v1d parts are equal, never a trailing sliver", () => {
+  it("sends 19.6 s as two parts of about 9.8 s and transcribes it", () => {
+    const root = mkdtempSync(join(tmpdir(), "voice-equal-parts-"));
+    try {
+      const audio = join(root, "input.wav"), out = join(root, "out.json"), key = join(root, "key");
+      writeFileSync(key, "stub-key");
+      execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=300:duration=19.6", audio]);
+      const code = readFileSync(process.env.AMUX_TRANSCRIBE_SOURCE || resolve("bin/transcribe"), "utf8").split("<<'PY'\nimport base64,")[1].split("\nPY\n}")[0];
+      const runner = `import base64, io, json, sys, urllib.request, wave\nfrom unittest.mock import patch\nparts=[]\nclass Response(io.BytesIO):\n status=200\ndef request(req, **kwargs):\n body=json.loads(req.data)\n with wave.open(io.BytesIO(base64.b64decode(body['file']['data']))) as w: seconds=w.getnframes()/w.getframerate()\n parts.append(round(seconds, 2))\n if seconds < 1: return Response(json.dumps({'id':'run_stub','status':'failed','cost_usd':0,'error':{'type':'provider_unavailable','message':'provider_limit'}}).encode())\n return Response(json.dumps({'id':'run_stub','status':'succeeded','error':None,'output':{'text':'ja'}}).encode())\ntry:\n with patch('urllib.request.urlopen', request): exec('import base64,'+sys.stdin.read())\nfinally:\n print(json.dumps({'parts':parts}))\n`;
+      const result = spawnSync("python3", ["-c", runner, audio, out, "equal"], {
+        input: code, encoding: "utf8", timeout: 20000,
+        env: { ...process.env, WORK: root, V1D_KEY_FILE: key, LANG: "sv", V1D_CONTEXT: "", V1D_HINTS: "" },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(readFileSync(out)).text).toBe("ja ja");
+      const parts = JSON.parse(result.stdout.trim().split("\n").at(-1)).parts;
+      expect(parts).toHaveLength(2);
+      for (const seconds of parts) expect(seconds).toBeCloseTo(9.8, 0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
