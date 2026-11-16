@@ -19,13 +19,12 @@ async function bounded(work) {
 }
 
 /** WHAT: Checks the per-account builder cap for a durable delivery. WHY: Keeps automatic idle starts in the existing queue. */
-export function createBuilderCap({ readCap = () => readFileSync(defaultPath, "utf8"), factsFor, fallbackFacts = async () => null, isBusy, jobs,
+export function createBuilderCap({ readCap = () => readFileSync(defaultPath, "utf8"), factsFor, fallbackFacts = async () => null, isCodexTarget = () => true, isBusy, jobs,
   now = Date.now, log = error => appendEvent({ ts: new Date().toISOString(), event: "delivery_builder_cap_fault", reason: error }) } = {}) {
   let fault = false, serial = Promise.resolve();
   const reservations = new Map();
   const faultOnce = reason => { if (!fault) { fault = true; try { log(reason); } catch { /* no cap on a logging fault */ } } };
-  async function check(job) {
-    assertDeliveryPreparation();
+  function limit() {
     let raw;
     try { raw = readCap(); }
     catch (error) {
@@ -38,13 +37,12 @@ export function createBuilderCap({ readCap = () => readFileSync(defaultPath, "ut
       return null;
     }
     fault = false;
-    if (!eligible(job)) return null;
-    let facts;
-    try { facts = await bounded(async () => await factsFor(keyOf(job), { fresh: true }) || await fallbackFacts(job)); }
-    catch { return "quota-floor: builder-cap: account unavailable; queued until it can be identified"; }
+    return cap;
+  }
+  async function check(job, facts) {
     assertDeliveryPreparation();
-    if (facts?.unknownCapTarget) return "quota-floor: builder-cap: account unavailable; queued until it can be identified";
-    if (facts?.account?.provider !== "codex") return null;
+    const cap = limit();
+    if (cap === null) return null;
     const account = facts.accounts?.find(a => a.inUse?.includes(keyOf(job)));
     if (!account || !Array.isArray(account.inUse)) return "quota-floor: builder-cap: account unavailable; queued until it can be identified";
     const accountId = account.profile?.key || account.name || facts.account.key;
@@ -85,8 +83,15 @@ export function createBuilderCap({ readCap = () => readFileSync(defaultPath, "ut
     reservations.set(job.id, { pane: keyOf(job), account: accountId, at: now() });
     return null;
   }
-  return job => {
-    const result = serial.then(() => check(job));
+  return async job => {
+    if (!eligible(job) || !isCodexTarget(job.agentName, job.pane) || limit() === null) return null;
+    let facts;
+    try { facts = await bounded(async () => await factsFor(keyOf(job), { fresh: true }) || await fallbackFacts(job)); }
+    catch { return "quota-floor: builder-cap: account unavailable; queued until it can be identified"; }
+    assertDeliveryPreparation();
+    if (facts?.unknownCapTarget) return "quota-floor: builder-cap: account unavailable; queued until it can be identified";
+    if (facts?.account?.provider !== "codex") return null;
+    const result = serial.then(() => check(job, facts));
     serial = result.catch(() => {});
     return result;
   };

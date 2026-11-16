@@ -6,13 +6,18 @@ import { createState } from "./state.mjs";
 
 const profileKeys = account => new Set([account?.profile?.key, ...(account?.sharedBy || []).map(item => item.key)].filter(Boolean));
 
+/** WHAT: Checks the configured target engine. WHY: Keeps Claude delivery out of all builder-cap reads. */
+export function isConfiguredCodex(name, pane, configPath = runtimeAgentsPath()) {
+  try { return /\bcodex\b/u.test(String(getAgent(configPath, name).panes?.[pane]?.cmd || "")); }
+  catch { return false; }
+}
+
 /** WHAT: Resolves a sleeping Codex target's account and queued peers. WHY: Keeps a wake on the same cap as running panes. */
 export function createBuilderCapFacts({ factsFor, queue, configPath = runtimeAgentsPath(),
   state = createState(process.env.STATE_FILE || "/tmp/agentmux-state.json"), readSnapshot = readQuotaSnapshotWithPanes,
   configuredKey = (name, pane) => {
     try {
-      const target = getAgent(configPath, name).panes?.[pane];
-      if (!/\bcodex\b/u.test(String(target?.cmd || ""))) return null;
+      if (!isConfiguredCodex(name, pane, configPath)) return null;
       return `codex:${selectedCodexProfile(state, name, pane).id}`;
     } catch { return null; }
   } } = {}) {

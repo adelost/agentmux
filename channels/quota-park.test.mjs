@@ -17,6 +17,35 @@ import { createBuilderCap } from "../core/delivery-builder-cap.mjs";
 import { createBuilderCapFacts } from "../core/delivery-builder-cap-facts.mjs";
 
 feature("builder cap on automatic delivery", () => {
+  unit("Claude passes even when the account reader is unavailable", {
+    given: ["a Claude target and a reader that throws", () => {
+      const factsFor = vi.fn(async () => { throw Error("unavailable"); });
+      return { factsFor, cap: createBuilderCap({ readCap: () => "1", factsFor, isCodexTarget: () => false }) };
+    }],
+    when: ["an automatic prompt arrives", fx => fx.cap({ kind: "prompt", status: "pending", source: "cli",
+      agentName: "deep", pane: 5, metadata: { sender: "claw:5" } })],
+    then: ["it passes without reading quota facts", (result, fx) => {
+      expect(result).toBeNull(); expect(fx.factsFor).not.toHaveBeenCalled();
+    }],
+  });
+  unit("a human message passes while a Codex cap check is waiting", {
+    given: ["a stalled process reader on a Codex account", () => {
+      let resume; const waiting = new Promise(resolve => { resume = resolve; });
+      const account = { provider: "codex", inUse: ["x:1"] };
+      const cap = createBuilderCap({ readCap: () => "1", factsFor: async () => ({ account, accounts: [account] }),
+        isBusy: () => waiting, jobs: () => [] });
+      return { cap, resume };
+    }],
+    when: ["a human message arrives during that check", async fx => {
+      const automatic = fx.cap({ id: "a", agentName: "x", pane: 1, kind: "prompt", status: "pending",
+        source: "cli", metadata: { sender: "lead:0" } });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      const human = await Promise.race([fx.cap({ kind: "prompt", status: "pending", source: "discord", text: "Hello" }),
+        new Promise(resolve => setTimeout(() => resolve("blocked"), 100))]);
+      fx.resume(false); await automatic; return human;
+    }],
+    then: ["the person does not wait on the cap check", result => expect(result).toBeNull()],
+  });
   unit("sleeping Codex targets use their next account and keep their age order", {
     given: ["one live Codex pane and two sleeping targets on the same account", () => {
       const account = { provider: "codex", profile: { key: "codex:2" }, inUse: ["x:0"] };
@@ -63,8 +92,9 @@ feature("builder cap on automatic delivery", () => {
         log: reason => logs.push(reason) }), setCode: value => { code = value; } };
     }],
     when: ["the file is read repeatedly", async fx => {
-      const missing = await fx.cap({}); fx.setCode("EACCES");
-      return [missing, await fx.cap({}), await fx.cap({})];
+      const job = { kind: "prompt", status: "pending", source: "cli", agentName: "x", pane: 1, metadata: { sender: "lead:0" } };
+      const missing = await fx.cap(job); fx.setCode("EACCES");
+      return [missing, await fx.cap(job), await fx.cap(job)];
     }],
     then: ["nothing is held and the unreadable file logs once", (results, fx) => {
       expect(results).toEqual([null, null, null]); expect(fx.logs).toEqual(["EACCES"]);

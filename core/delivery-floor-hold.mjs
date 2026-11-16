@@ -10,7 +10,7 @@ import { isBusyFromCodexJsonl } from "./codex-jsonl-reader.mjs";
 import { panePathFor } from "./jsonl-reader.mjs";
 import { runtimeAgentsPath } from "./runtime-defaults.mjs";
 import { getAgent } from "../cli/config.mjs";
-import { createBuilderCapFacts } from "./delivery-builder-cap-facts.mjs";
+import { createBuilderCapFacts, isConfiguredCodex } from "./delivery-builder-cap-facts.mjs";
 
 const unsentPrompt = job => job.kind === "prompt" && job.status === "pending" && !job.draftOwned
   && !job.submittedAt && !job.submitFenceAt && !job.cancelRequestStatus;
@@ -20,7 +20,7 @@ const unsentPrompt = job => job.kind === "prompt" && job.status === "pending" &&
  * WHY: Keeps a refused wake from locking the session rotation needs to move the pane off.
  */
 export function createFloorHold({ queue, quotaFloor, now, preparationTimeoutMs, queueEvent, maybeNotifyBlocked, exactEcho, acknowledge, log, agent, configured = false }) {
-  if (quotaFloor && configured && !quotaFloor.builderCap) quotaFloor.builderCap = createBuilderCap({ factsFor: createBuilderCapFacts({ factsFor: quotaFloor.windowsFor, queue }), now,
+  if (quotaFloor && configured && !quotaFloor.builderCap) quotaFloor.builderCap = createBuilderCap({ factsFor: createBuilderCapFacts({ factsFor: quotaFloor.windowsFor, queue }), isCodexTarget: isConfiguredCodex, now,
     isBusy: (name, pane) => { try { return isBusyFromCodexJsonl(panePathFor(getAgent(runtimeAgentsPath(), name), pane)); } catch { return null; } },
     jobs: () => queue.targets().flatMap(({ agentName, pane }) => queue.list(agentName, pane)) });
   return async function floorHold(agentName, pane) {
