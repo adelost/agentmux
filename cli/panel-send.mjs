@@ -48,7 +48,7 @@ export async function cmdSend(name, prompt, flags, ctx) {
     session: address?.session ?? null, pane: address?.pane ?? null, target: `${name}:${pane}`, reason: admission.override });
   saveLast(ctx.lastFile, name);
   const res = await sendToPane(ctx, name, pane, finalPrompt, {
-    force: !!flags.force, idempotencyKey: idempotencyKey || null, ...(waitMs != null ? { waitMs } : {}),
+    force: !!flags.force, idempotencyKey: idempotencyKey || null, capAnyway: anyway, ...(waitMs != null ? { waitMs } : {}),
   });
   if (res?.blocked || !res?.delivered) { process.exitCode = 1; return; }
   if (res?.unverified) {

@@ -561,7 +561,7 @@ export function createDeliveryBroker({
     return recoverHiddenDeliveryTui({ job, reason, agent, queue, now, queueEvent, log });
   }
 
-  const floorHold = createFloorHold({ queue, quotaFloor, now, preparationTimeoutMs, queueEvent, maybeNotifyBlocked, exactEcho, acknowledge, log, agent });
+  const floorHold = createFloorHold({ queue, quotaFloor, now, preparationTimeoutMs, queueEvent, maybeNotifyBlocked, exactEcho, acknowledge, log, agent, configured: Boolean(bridgeDir) });
   async function drainTarget(agentName, pane) {
     if (typeof validateTarget === "function") {
       try {

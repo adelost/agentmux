@@ -13,6 +13,89 @@ import { pathToFileURL } from "node:url";
 import { createDeliveryBroker } from "../core/delivery-broker.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { createTmuxAdapter } from "../core/tmux.mjs";
+import { createBuilderCap } from "../core/delivery-builder-cap.mjs";
+import { createBuilderCapFacts } from "../core/delivery-builder-cap-facts.mjs";
+
+feature("builder cap on automatic delivery", () => {
+  unit("sleeping Codex targets use their next account and keep their age order", {
+    given: ["one live Codex pane and two sleeping targets on the same account", () => {
+      const account = { provider: "codex", profile: { key: "codex:2" }, inUse: ["x:0"] };
+      const factsFor = createBuilderCapFacts({ factsFor: async () => null,
+        readSnapshot: async () => ({ accounts: [account] }), configuredKey: () => "codex:2",
+        queue: { targets: () => [{ agentName: "x", pane: 1 }, { agentName: "x", pane: 2 }] } });
+      return factsFor;
+    }],
+    when: ["the first sleeping target is identified", factsFor => factsFor("x:1")],
+    then: ["both sleeping targets join the account without being called working", facts => {
+      expect(facts.account.inUse).toEqual(["x:0", "x:1", "x:2"]);
+      expect(facts.dormantTargets).toEqual(["x:1", "x:2"]);
+    }],
+  });
+  unit("held jobs are released oldest first and exemptions pass", {
+    given: ["two idle builders and one busy builder on Codex W with cap one", () => {
+      const busy = new Set(["x:0"]);
+      const jobs = [1, 2].map((n) => ({ id: String(n), agentName: "x", pane: n, kind: "prompt", status: "pending",
+        source: "cli", metadata: { sender: "lead:0" }, orderKey: String(n) }));
+      const account = { provider: "codex", name: "Codex W", inUse: ["x:0", "x:1", "x:2"] };
+      const cap = createBuilderCap({ readCap: () => "1", factsFor: async () => ({ account, accounts: [account] }),
+        isBusy: async (name, pane) => busy.has(`${name}:${pane}`), jobs: () => jobs });
+      return { busy, jobs, cap };
+    }],
+    when: ["the cap is checked before and after the busy turn ends", async fx => {
+      const held = await fx.cap(fx.jobs[0]);
+      const human = await fx.cap({ ...fx.jobs[1], source: "discord", text: "Please check this", metadata: {} });
+      const override = await fx.cap({ ...fx.jobs[1], metadata: { sender: "lead:0", capAnyway: "urgent" } });
+      const reply = await fx.cap({ ...fx.jobs[0], pane: 0 });
+      fx.busy.clear();
+      const younger = await fx.cap(fx.jobs[1]);
+      const older = await fx.cap(fx.jobs[0]);
+      return { held, human, override, reply, younger, older };
+    }],
+    then: ["the cap holds, exemptions pass, and the oldest job goes first", result => {
+      expect(result.held).toMatch(/builder-cap/); expect(result.human).toBeNull(); expect(result.override).toBeNull(); expect(result.reply).toBeNull();
+      expect(result.younger).toMatch(/builder-cap/); expect(result.older).toBeNull();
+    }],
+  });
+  unit("a missing or unreadable cap fails open and reports one fault", {
+    given: ["a missing, then unreadable cap", () => {
+      let code = "ENOENT"; const logs = [];
+      return { logs, cap: createBuilderCap({ readCap: () => { throw Object.assign(new Error(), { code }); },
+        log: reason => logs.push(reason) }), setCode: value => { code = value; } };
+    }],
+    when: ["the file is read repeatedly", async fx => {
+      const missing = await fx.cap({}); fx.setCode("EACCES");
+      return [missing, await fx.cap({}), await fx.cap({})];
+    }],
+    then: ["nothing is held and the unreadable file logs once", (results, fx) => {
+      expect(results).toEqual([null, null, null]); expect(fx.logs).toEqual(["EACCES"]);
+    }],
+  });
+  unit("simultaneous starts reserve the last place once", {
+    given: ["two idle Codex panes, no turns and one slot", () => {
+      const jobs = [1, 2].map(pane => ({ id: String(pane), agentName: "x", pane, kind: "prompt", status: "pending",
+        source: "cli", metadata: { sender: "lead:0" }, orderKey: String(pane) }));
+      const account = { provider: "codex", inUse: ["x:1", "x:2"] };
+      return { jobs, cap: createBuilderCap({ readCap: () => "1", factsFor: async () => ({ account, accounts: [account] }),
+        isBusy: async () => false, jobs: () => jobs }) };
+    }],
+    when: ["the oldest and the next job both race for admission", fx => Promise.all(fx.jobs.map(fx.cap))],
+    then: ["only the oldest enters", result => { expect(result[0]).toBeNull(); expect(result[1]).toMatch(/builder-cap/); }],
+  });
+  unit("a restarted bridge counts an uncertain in-flight job", {
+    given: ["one in-flight job and one idle target on a one-slot account", () => {
+      const jobs = [
+        { id: "one", agentName: "x", pane: 1, kind: "prompt", status: "submitted", source: "cli" },
+        { id: "two", agentName: "x", pane: 2, kind: "prompt", status: "pending", source: "cli",
+          metadata: { sender: "lead:0" }, orderKey: "2" },
+      ];
+      const account = { provider: "codex", inUse: ["x:1", "x:2"] };
+      return { jobs, cap: createBuilderCap({ readCap: () => "1", factsFor: async () => ({ account, accounts: [account] }),
+        isBusy: async () => false, jobs: () => jobs }) };
+    }],
+    when: ["the new bridge checks the second job", fx => fx.cap(fx.jobs[1])],
+    then: ["the unresolved first delivery still occupies its slot", reason => expect(reason).toMatch(/builder-cap/)],
+  });
+});
 
 
 // lsrc:0 2026-10-19: a pane quota recovery moved to an account with room keeps working under the floor,

@@ -404,7 +404,7 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     pane,
     text,
     source: opts.source || "cli",
-    metadata: { sender: sender?.key || null, channelId: targetChannelId },
+    metadata: { sender: sender?.key || null, channelId: targetChannelId, ...(opts.capAnyway ? { capAnyway: opts.capAnyway } : {}) },
     idempotencyKey: opts.idempotencyKey || null,
   });
   const settled = await waitForDeliveryJob(queue, job.id, {
@@ -421,7 +421,7 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
       unverified: settled?.status === DELIVERED_UNVERIFIED_STATE,
       via: acknowledged ? "broker" : "broker-queue",
       jobId: job.id,
-      queueState: settled?.status || job.status,
+      queueState: settled?.status || job.status, holdReason: settled?.lastReason || null,
     };
   if (outcome.delivered && outcome.pending) warnQuotaStoppedRecipient(outcome, name, pane, ctx);
 

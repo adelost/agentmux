@@ -79,6 +79,22 @@ feature("sendToPane delivery outcome", () => {
     }],
   });
 
+  unit("a reasoned cap override reaches the durable job", {
+    given: ["an unparked pane and a reasoned override", () => {
+      const path = tmpPath(); writeFileSync(path, "");
+      const oldPath = process.env.AMUX_PARK_STATE_PATH; process.env.AMUX_PARK_STATE_PATH = path;
+      return { path, oldPath, deliveryQueue: fakeDeliveryQueue() };
+    }],
+    when: ["sending an override", async ({ path, oldPath, deliveryQueue }) => {
+      try { await sendToPane({ configPath: null, deliveryQueue, deliveryWaitMs: 0 }, "skydive", 3,
+        "[from claw:5] urgent", { mirror: false, capAnyway: "urgent repair" }); }
+      finally { if (oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH; else process.env.AMUX_PARK_STATE_PATH = oldPath;
+        try { unlinkSync(path); } catch {} }
+      return deliveryQueue.enqueue.mock.calls[0][0];
+    }],
+    then: ["the persisted request carries the reason", request => expect(request.metadata.capAnyway).toBe("urgent repair")],
+  });
+
   unit("verified delivery is returned to the caller", {
     given: ["an unparked pane", () => {
       const path = tmpPath();

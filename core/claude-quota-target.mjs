@@ -63,6 +63,9 @@ export function warnQuotaStoppedRecipient(outcome, agentName, pane, {
   configPath = null,
   recipientLimit = null,
 } = {}, warn = console.error) {
+  if (String(outcome.holdReason || "").startsWith("wake-refused:quota-floor: builder-cap:")) {
+    warn(`Delivery held by builder cap: ${outcome.holdReason.slice("wake-refused:quota-floor: ".length)}`);
+  }
   let receipt = null;
   try {
     receipt = recipientLimit ? recipientLimit(agentName, pane)

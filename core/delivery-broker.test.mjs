@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createSpentWindows, withSpentWindows } from "./codex-spent-windows.mjs";
 import { createDeliveryBroker } from "./delivery-broker.mjs";
+import { createBuilderCap } from "./delivery-builder-cap.mjs";
 import { deliveryStateNotice } from "./delivery-notices.mjs";
 import { composerAgent } from "../test/fixtures/composer-agent.mjs";
 import { restartAfterDeliveries } from "../bot.mjs";
@@ -2999,6 +3000,29 @@ feature("a cancelled delivery never leaves its own text in a composer", () => {
 // lsrc:0 2026-10-19: amux had no quota floor. An account with 3 % of its week left still got new automatic work,
 // so its panes ran it to the limit with nothing left to stop cleanly, compact and hand over.
 feature("the quota floor holds new automatic work on an account near its weekly limit", () => {
+  component("the builder cap parks and releases the same durable job", {
+    given: ["a Codex account with one busy pane and an automatic job for an idle pane", () => {
+      const w = floorWorld({ weekUsed: 0, job: { metadata: { sender: "claw:0" } } });
+      let busy = true;
+      const account = { provider: "codex", name: "Codex W", inUse: ["claw:0", "claw:1"] };
+      const quotaFloor = { percent: 3, windowsFor: async () => ({ account, accounts: [account], windows: [] }) };
+      quotaFloor.builderCap = createBuilderCap({ readCap: () => "1", factsFor: quotaFloor.windowsFor,
+        isBusy: async (_name, pane) => pane === 0 && busy,
+        jobs: () => w.queue.targets().flatMap(t => w.queue.list(t.agentName, t.pane)) });
+      w.broker = createDeliveryBroker({ agent: w.agent, queue: w.queue, now: () => w.clock, quotaFloor, log: () => {} });
+      w.clock = Date.parse("2026-10-19T19:55:00Z");
+      return { ...w, release: () => { busy = false; w.clock += 65_000; } };
+    }],
+    when: ["the broker retries after the other turn ends", async w => {
+      await w.broker.kickTarget("claw", 1); const held = w.current(); w.release();
+      await w.broker.kickTarget("claw", 1); return { held, final: w.current() };
+    }],
+    then: ["the same job remains pending then is acknowledged once", (result, w) => {
+      try { expect(result.held.lastReason).toMatch(/builder-cap/); expect(result.held.status).toBe("pending");
+        expect(result.final.status).toBe("acknowledged"); expect(w.agent.sends).toHaveLength(1); }
+      finally { w.cleanup(); }
+    }],
+  });
   component("the 3 % wind-down nudge uses the reserve for a clean stop", {
     given: ["a wind-down nudge at the weekly floor", () => floorWorld({ job: {
       text: "[AMUX QUOTA WIND-DOWN · 3 %] Claude S is about to stop. End your turn at the next clean boundary; amux compacts this session then.",

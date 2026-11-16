@@ -48,6 +48,12 @@ export async function quotaFloorRefusal({ job, quotaFloor, now }) {
 
 /** WHAT: Returns the account the pane moves to from a floor reason, or null. WHY: Lets the sender's notice say where the message goes. */
 export const floorMoveTarget = reason => String(reason || "").split(`; ${MOVING_TO}`)[1]?.trim() || null;
+
+/** WHAT: Checks both conditions at the existing floor seam. WHY: Keeps the cap on the durable hold and recovery path. */
+export async function deliveryFloorRefusal({ job, quotaFloor, now }) {
+  const floor = await quotaFloorRefusal({ job, quotaFloor, now });
+  return floor || await quotaFloor?.builderCap?.(job) || null;
+}
 /** WHAT: Routes one stopped target through wake gates. WHY: Keeps a wake attempt from becoming a false delivery ACK. */
 export async function wakeDeliveryTarget({
   agent,
@@ -82,8 +88,12 @@ export async function wakeDeliveryTarget({
 
   const costGate = async () => {
     if (job.kind !== "prompt") return { proceed: true, job };
-    const floor = await quotaFloorRefusal({ job, quotaFloor, now });
+    const floor = await deliveryFloorRefusal({ job, quotaFloor, now });
     if (floor) return refuse(floor, true);
+    if (String(job.lastReason || "").startsWith("wake-refused:quota-floor: builder-cap:")) {
+      queueEvent(job, "builder_cap_released", { waitMs: Math.max(0, now() - Number(job.createdAt || now())) });
+      job = queue.update(job, { lastReason: null });
+    }
     if (!costAdmission) return { proceed: true, job: job.costHold ? queue.update(job, { costHold: null }) : job };
     const verdict = await deliveryPreparationStage("cost-admission", () => costAdmission(job, { lease })).catch(error => ({ ok: false, reason: error.message }));
     if (!verdict?.ok) return refuse(verdict?.reason || "context-cost-unverified", verdict?.held === true);
@@ -139,7 +149,10 @@ export const isHeldByPaneQuotaFloor = (job, paneJobs) => isQuotaFloorHeldJob(job
 export function deliveryHead(jobs) {
   const open = jobs.filter(job => !TERMINAL_DELIVERY_STATES.has(job.status));
   if (!heldForCost(open[0])) return open[0] || null;
-  const owner = open.find(job => isOwnerChannelJob(job) && !heldForCost(job));
+  const isCapHold = String(open[0].lastReason || "").startsWith("wake-refused:quota-floor: builder-cap:");
+  const owner = open.find(job => !heldForCost(job) && (isOwnerChannelJob(job)
+    || (isCapHold && !open[0].submitFenceAt && !open[0].submittedAt
+      && (job.metadata?.capAnyway || (job.source === "cli" && !job.metadata?.sender)))));
   if (owner) return owner;
   // An explicitly requested compact can settle an untouched cost hold. Never
   // jump any physical submit fence or a draft owned by either job.

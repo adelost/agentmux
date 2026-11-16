@@ -5,6 +5,20 @@ import { vi } from "vitest";
 import { notifyUser } from "../cli/send-notify.mjs";
 vi.mock("../cli/send-notify.mjs", () => ({ notifyUser: vi.fn(async () => ({ sent: true })) }));
 import { pushWaitVerdict, pollPushWaitOnce } from "./push-wait-watch.mjs";
+import { deliveryHead } from "./delivery-wake.mjs";
+
+feature("builder cap override in the durable queue", () => {
+  unit("a reasoned override passes a cap hold without crossing a submit fence", {
+    when: ["selecting behind a cap-held job before and after its fence", () => {
+      const held = { id: "held", status: "pending", kind: "prompt", costHold: true,
+        lastReason: "wake-refused:quota-floor: builder-cap: full" };
+      const urgent = { id: "urgent", status: "pending", kind: "prompt", source: "cli",
+        metadata: { sender: "claw:5", capAnyway: "urgent" } };
+      return [deliveryHead([held, urgent]).id, deliveryHead([{ ...held, submitFenceAt: 1 }, urgent]).id];
+    }],
+    then: ["only the untouched head may be bypassed", result => expect(result).toEqual(["urgent", "held"])],
+  });
+});
 
 feature("push wait watch", () => {
   const t = Date.parse("2026-11-15T15:00:00Z");
