@@ -1,5 +1,5 @@
 import { component, feature, expect } from 'bdd-vitest';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dispatch } from './commands.mjs';
@@ -32,5 +32,17 @@ feature('panel send recipient budget',()=>{
     given:['one configured isolated target',fixture],
     when:['sending with an empty exception reason',async f=>{try{let error=null;try{await f.send(0,'--fanout=');}catch(e){error=e.message;}return{error,jobs:f.count()};}finally{f.restore();}}],
     then:['the reason is required before enqueue',r=>{expect(r.error).toContain('--fanout requires');expect(r.jobs).toBe(0);}],
+  });
+});
+
+feature('panel order guard integration', () => {
+  component('refusal precedes enqueue, a reason is audited, and malformed guard fails open', {
+    given: ['a pilot sender and its local guard', () => { const f=fixture(); const dir=join(f.root,'.local/state/fleet-orch'); mkdirSync(dir,{recursive:true});
+      writeFileSync(join(dir,'guard.json'),JSON.stringify({at:Date.now(),pilot:['sender:0'],leads:['target0:0'],over:{},limit:6})); return {...f,dir}; }],
+    when: ['sending through dispatch', async f => { try { let refused=''; try { await dispatch(['target0','-p','0','--wait-ms','0','-q','3066 DONE: x'],f.ctx); } catch(e) { refused=e.message; }
+      const before=f.count(); await dispatch(['target0','-p','0','--wait-ms','0','-q','--anyway','urgent','3066 DONE: x'],f.ctx);
+      writeFileSync(join(f.dir,'guard.json'),'{'); await f.send(1); return {refused,before,after:f.count(),audit:readFileSync(join(f.root,'events.jsonl'),'utf8')};
+    } finally { f.restore(); } }],
+    then: ['the blocked send never queues and both audit records exist', r => { expect(r.refused).toContain('ticket done 3066'); expect(r.before).toBe(0); expect(r.after).toBe(2); expect(r.audit).toContain('panel_send_order'); expect(r.audit).toContain('urgent'); expect(r.audit).toContain('panel_send_order_fault'); }],
   });
 });

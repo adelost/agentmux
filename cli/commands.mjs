@@ -2599,7 +2599,7 @@ export function cmdScopedGate(args) {
 const FUNCTION_CHURN_ACTIONS = new Set(["functions", "check", "verdict"]);
 
 const FLAG_SPECS = {
-  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number", fanout: "string" },
+  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number", fanout: "string", anyway: "string" },
   runtime: { port: "number", "data-dir": "string", "state-dir": "string", "no-legacy-migration": "boolean", force: "boolean" },
   services: { force: "boolean" },
   cutover: {

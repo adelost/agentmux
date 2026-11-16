@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createState } from './state.mjs';
+import { orderRefusal } from './panel-order.mjs';
 import { admitPanelSend } from './panel-fanout.mjs';
 
 const run=promisify(execFile);
@@ -39,5 +40,21 @@ feature('atomic rolling panel recipient window',()=>{
       return await Promise.all(['fourth:0','fifth:0'].map(async target=>(await run(process.execPath,['--input-type=module','-e',script,f.path,target])).stdout.trim()));
     }finally{f.restore();}}],
     then:['exactly one process is admitted',rows=>expect(rows.sort()).toEqual(['accepted','refused'])],
+  });
+});
+
+feature('pilot order guard', () => {
+  component('stops pilot sends while exempt and non-row texts pass', {
+    given: ['a current pilot and a row over its message limit', () => ({at: 0, pilot: ['lsrc:9', 'sandman:0', 'deep:5'], leads: ['sandman:0'], over: {'3058': 9, '2026': 8}, limit: 6})],
+    when: ['checking messages with and without exceptions', guard => {
+      const ask = (sender, target, text, more = {}) => orderRefusal({sender, target, text, guard, now: 60000, ...more});
+      return {done: ask('lsrc:9','sandman:0','3066 DONE: x'), over: ask('lsrc:9','sandman:0','3058 red'),
+        pass: [ask('sandman:0','lsrc:9','3058 red'), ask('deep:5','lsrc:9','3058 red'),
+          ask('lsrc:9','lsrc:9','3058 red'), ask('lsrc:9','deep:5','3058 red'),
+          ...['Read 2026-11-16T10:18Z', 'Since 16 Nov 2026', '2026 px', 'at 10:18Z 2026 ms'].map(text => ask('lsrc:9','sandman:0',text)),
+          ask('lsrc:9','sandman:0','3066 DONE', {anyway:'emergency'}), ask('lsrc:9','sandman:0','3066 DONE', {now:660000})],
+        empty: ask('lsrc:9','sandman:0','3066 DONE',{anyway:' '})};
+    }],
+    then: ['refusal names the command and exemptions pass', r => { expect(r.done).toContain('ticket done 3066'); expect(r.over).toContain('row 3058'); expect(r.pass).toEqual(Array(r.pass.length).fill(null)); expect(r.empty).toContain('--anyway requires'); }],
   });
 });
