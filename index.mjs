@@ -14,7 +14,7 @@ process.on("uncaughtException", (err) => {
 
 import { exec as execCb } from "child_process";
 import { promisify } from "util";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, rmSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
@@ -28,6 +28,7 @@ import { createHandlers } from "./handlers.mjs";
 import { openWatcherJournal } from "./core/watcher-journal.mjs";
 import { startBot } from "./bot.mjs";
 import { createDiscordChannel } from "./channels/discord.mjs";
+import { createMailboxChannels, loadMailboxChannels } from "./channels/mailbox-channel.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
 import { codexCreditsAllowed, createPauseCompact, createQuotaParkFacts, createQuotaParkStore, quotaFloorPercent } from "./channels/pause-compact.mjs";
@@ -283,8 +284,17 @@ if (!TOKEN) {
 const claimGuard = createClaimGuardRuntime({ discord, broker: deliveryBroker, configPath: AGENTS_YAML });
 // --- Wire up ---
 
+// Mailbox channels (row 211): a Discord channel to an agent on another computer through api.v1d.io; ~/.agentmux/mailboxes.json names them.
+const mailboxConfig = discord ? loadMailboxChannels(join(homedir(), ".agentmux", "mailboxes.json")) : null;
+const mailboxes = mailboxConfig && createMailboxChannels({
+  config: mailboxConfig, channel: discord, state: appState,
+  ownerKey: readFileSync(process.env.V1D_TRANSCRIBE_KEY_FILE || join(homedir(), ".config/v1d-api/amux-voice-key"), "utf8").trim(),
+  buildPrompt: async (msg) => {const tmpFiles = []; try { return await attachments.buildPrompt(msg, tmpFiles); } finally { for (const file of tmpFiles) rmSync(file, {force: true}); }},
+});
+
 const { getMapping, overrides, channelMap, reloadConfig, ready: bridgeReady, restart: restartBridge } = startBot({
   channels: [discord],
+  mailboxes,
   agentsYaml: AGENTS_YAML,
   whisperUrl: WHISPER_URL,
   agent,

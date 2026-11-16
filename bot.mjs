@@ -71,7 +71,7 @@ export async function restartAfterDeliveries({
 export function startBot({
   channels, agentsYaml, whisperUrl, agent, tts, state, onMessage, inboundStore = null,
   prepareMessage = null, onHumanMessage = warnQuotaOnHumanMessage,
-  onClaimGuardHumanMessage = () => {}, settleDeliveries = async () => {},
+  onClaimGuardHumanMessage = () => {}, settleDeliveries = async () => {}, mailboxes = null,
 }) {
   ensureSingleInstance();
 
@@ -168,6 +168,7 @@ export function startBot({
 
   for (const channel of channels) {
     channel.onMessage((msg) => {
+      if (mailboxes?.owns(msg?.channelId)) return mailboxes.deliver(msg);   // a channel to another computer, never a pane (row 211)
       const handled = inbound.enqueue(msg, channel).catch((err) =>
         console.warn(`inbound delivery failed for #${msg?.channelId || "unknown"}: ${err.message}`));
       if (!msg?.isBot && getMapping(msg?.channelId)) void Promise.resolve().then(() => onClaimGuardHumanMessage(msg))
@@ -201,6 +202,7 @@ export function startBot({
       console.log(`${channel.name} | ${channelMap.size} channel(s)${ttsLabel}${userLabel}`);
     }
     for (const [chId, { name }] of channelMap) console.log(`  ${name} -> #${chId}`);
+    mailboxes?.start();
     markReady();
     await preflight();
     await reconcileAllInbound();
