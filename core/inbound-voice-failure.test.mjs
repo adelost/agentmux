@@ -8,7 +8,7 @@ import { createAttachmentHandler } from "../attachments.mjs";
 
 describe("voice failure is still delivered", () => {
   for (const outcome of ["no_speech", "unknown", "refused"]) for (const text of ["", "Behåll min skrivna text"]) {
-    const audio = outcome === "unknown" ? " and sends the audio" : "";
+    const audio = outcome === "no_speech" ? "" : " and sends the audio";
     it(`terminal ${outcome} posts a notice once, keeps accompanying text${audio} and never retries STT`, async () => {
       const root = mkdtempSync(join(tmpdir(), "voice-terminal-"));
       const store = createDiscordInboundStore({ rootDir: root, downloadBuffer: async () => Buffer.from("audio") });
@@ -30,9 +30,11 @@ describe("voice failure is still delivered", () => {
         await reconciler.enqueue(voice, channel);
         expect(calls).toBe(1);
         expect(posted).toHaveLength(1);
-        // An unknown outcome still reaches the pane as its audio (10 Nov 21:55Z: a voice message to deep:0 was dropped here).
-        if (outcome === "unknown") expect(delivered).toEqual([expect.stringMatching(new RegExp(
-          `^${text ? `${text}\\n` : ""}\\[voice message not transcribed \\(outcome unknown\\); audio attached: \\S+\\]$`, "u"))]);
+        // An unknown or refused outcome still reaches the pane as its audio (10 Nov 21:55Z: a voice message to deep:0 was dropped
+        // for unknown; 14 Nov 19:14Z: nine refused ones reached no pane; Mattias 16 Nov: his messages must arrive).
+        const why = { unknown: "outcome unknown", refused: "transcription refused" }[outcome];
+        if (why) expect(delivered).toEqual([expect.stringMatching(new RegExp(
+          `^${text ? `${text}\\n` : ""}\\[voice message not transcribed \\(${why}\\); audio attached: \\S+\\]$`, "u"))]);
         else expect(delivered).toEqual(text ? [text] : []);
         expect(store.read("channel", "terminal").status).toBe("completed");
       } finally { rmSync(root, { recursive: true, force: true }); }

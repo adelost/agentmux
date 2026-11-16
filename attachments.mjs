@@ -11,6 +11,11 @@ import { terminalVoiceOutcome } from "./core/voice-transcriber.mjs";
 // No whitelist needed. All non-audio attachments are downloaded and passed
 // to Claude, which can read most file types (PDF, images, text, archives, etc).
 
+/** WHAT: The terminal voice outcomes whose audio still goes to the pane, with the words the pane reads.
+ *  WHY: Neither is transcribed again, but the message must arrive (10 Nov 21:55Z: an unknown 57 s message to deep:0 was dropped;
+ *  14 Nov 19:14Z: nine refused messages reached no pane). No speech alone sends nothing. */
+const UNTRANSCRIBED_AUDIO = { unknown: "outcome unknown", refused: "transcription refused" };
+
 /** WHAT: Dates a transcript that arrives after the pane got a failure notice. WHY: The pane may already have answered the person, so it must see the text is old. */
 function lateVoiceNote(msg) {
   if (!msg.voiceFailedEarlier || !msg.createdTimestamp) return "";
@@ -95,22 +100,21 @@ export function createAttachmentHandler({
     }
   }
 
-  /** WHAT: One audio attachment's line for the pane: its transcript, or its audio when the outcome is unknown; "" when a notice is all, null to stop.
+  /** WHAT: One audio attachment's line for the pane: its transcript, or its audio when the outcome is unknown or refused; "" for no speech, null to stop.
    *  WHY: Keeps the voice rules in one place; they took five fixes in sixty days inside buildPrompt (agentmux churn, 10 Nov). */
   async function voiceLine(msg, att, tmpFiles) {
     let transcribed = await takeTranscription(msg, att, tmpFiles);
     if (msg.isInboundCompleted?.() || transcribed === null) return null;
     const terminal = terminalVoiceOutcome(transcribed);
     if (terminal) {
-      const notice = terminal.code === "unknown" ? `${terminal.notice} The audio goes to the pane as a file.` : terminal.notice;
+      const why = UNTRANSCRIBED_AUDIO[terminal.code];
+      const notice = why ? `${terminal.notice} The audio goes to the pane as a file.` : terminal.notice;
       if (typeof msg.sendTranscriptOnce === "function") {
         await msg.sendTranscriptOnce(att.id, [notice], { kind: "notice" });
       } else await msg.reply(notice);
-      // An unknown outcome is never transcribed again, but the message still reaches its pane: the audio goes as a file
-      // (10 Nov 21:55Z: Mattias's 57 s voice message to deep:0 was dropped here).
-      if (terminal.code !== "unknown") return "";
+      if (!why) return "";
       const path = await downloadToTmp(msg, att, tmpFiles);
-      return path ? `[voice message not transcribed (outcome unknown); audio attached: ${path}]` : null;
+      return path ? `[voice message not transcribed (${why}); audio attached: ${path}]` : null;
     }
     // The wrapper marks reserve transcripts (the primary refused or was
     // unavailable → faster-whisper on our own machine took over). The mark
