@@ -32,9 +32,14 @@ workspace.
 ## Panel send limits
 
 A panel's ordinary `amux PROJECT -p N` sends may address four different recipients in a rolling15-minute window.
-The fifth new recipient is refused before enqueue. Repeated sends to a recipient share its slot. An explicit
-`--fanout "reason"` admits an exception and records its reason in the event ledger. The check counts admitted
-send attempts, not recipient execution. `--force` does not bypass it.
+A fifth new recipient is outside that order. It is a warning, never a stop: the send is delivered, the sender is
+told the count against the limit on the send's own output, the receiver sees AMUX's mark ahead of the text
+(`[outside the order: 5 recipients in 15 minutes, limit 4]`), and one `panel_send_fanout` event is recorded in the
+event ledger. Repeated sends to a recipient share its slot. `--fanout "reason"` states the reason, which is added
+to the mark and the event; it does not decide whether the send goes. The check counts send attempts, not recipient
+execution. The pilot send order works the same way with `--anyway "reason"` and the event `panel_send_order`: a
+pilot builder's ROW DONE or BLOCKED to a lead, or a message on a row that has drawn more messages than its limit,
+is delivered, marked and logged. Outside the order is for emergencies.
 
 Operator/Discord input, the internal stall watchdog, self-sends and the `lsrc:0` dispatcher do not consume those
 slots. Sender identity still comes from the existing configured-pane detection, not message text.

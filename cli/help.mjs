@@ -20,8 +20,11 @@ Usage:
     --                            Treat remaining arguments as literal prompt text
     --idempotency-key <key>       Reuse one durable queue identity on retry
     --wait-ms <0-12000>           Bound automation receipt wait (enqueue is already durable)
-    --anyway <reason>             Log an exception to the pilot send order
-    --fanout <reason>             Log an exception to 4 panel recipients per 15 min
+    --anyway <reason>             State why a send goes outside the pilot order (emergencies)
+    --fanout <reason>             State why a send passes 4 panel recipients per 15 min
+                                  Neither rule stops a send: it is delivered, the sender is
+                                  told the rule, the receiver sees AMUX's mark ahead of the
+                                  text, and it is logged with or without a reason
   agent add <name> <dir>          Add new agent
   agent rm <name|:nr>             Remove agent
   agent stop <name|:nr>           Stop tmux session (keep config); first compacts large idle panes while warm
