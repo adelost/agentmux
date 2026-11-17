@@ -17,7 +17,10 @@
 # paid Whisper-1, so no paid provider is left behind the primary, and the
 # spending cap's refusal may take the reserve like any other refusal before a
 # run. Measured that morning at load 25: a 31 s message took 68 s, of which
-# 47 s loaded the model.
+# 47 s loaded the model. Since 17 Nov the reserve also hears what the primary
+# left unknown or failed on (Mattias 19:13Z, delivery:ba9a41b79567f657e8694d2cde009cd7:
+# 17 Nov 19:08Z the gateway's 503 unknown_outcome on his 53 s message reached
+# the pane as a file while the free reserve stood unused).
 #
 # Usage: transcribe-whisper.sh <audio_file> [language]
 
@@ -36,9 +39,9 @@ range_marker() { # $1=label $2=start $3=end
 DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO_FILE") || exit 1
 TOTAL_SECONDS="${DURATION%.*}"
 [[ "$TOTAL_SECONDS" =~ ^[0-9]+$ ]] || { echo "[stt] invalid audio duration" >&2; exit 1; }
-# One primary attempt. A verified unavailable admission may use the local
-# reserve once, after CPU VAD; a timeout, UNKNOWN, refusal or empty answer never
-# resends audio. Keys load inside transcribe. CPU VAD precedes every call; only
+# One primary attempt, never resent: a timeout or UNKNOWN may already be paid.
+# Any primary failure except a known refusal goes to the local reserve once,
+# after CPU VAD; an empty answer is no speech. Keys load inside transcribe. CPU VAD precedes every call; only
 # the reserve uses the GPU.
 GEMINI_CAP_S="${AMUX_STT_GEMINI_CAP_S:-100}"
 # A clip of at most 45 s needs about 400 answer tokens, so a thinking or
@@ -108,8 +111,9 @@ sys.exit(0 if speech else 20)
 PYVAD
 }
 
-# Empty/typed no-speech is an answer. UNKNOWN may already be paid: never
-# resend it to another provider. Exit 21 alone proves primary unavailable.
+# Empty/typed no-speech is an answer. UNKNOWN may already be paid, so the paid
+# primary is never called again; the local reserve spends nothing and hears it
+# instead. A known refusal (23) stays a refusal.
 transcribe_clip() { # $1=clip $2=start $3=end
   local clip="$1" TEXT rc errlog started
   # An RMS/peak test cannot distinguish noise from speech. Silero runs on CPU
@@ -134,11 +138,7 @@ transcribe_clip() { # $1=clip $2=start $3=end
   rm -f "$errlog"
   if [ "$rc" -eq 20 ]; then echo '[stt:no_speech]'; return 0; fi
   if [ "$rc" -eq 23 ]; then return 23; fi
-  if [ "$rc" -ne 21 ]; then
-    echo '[stt] primary outcome is not verified unavailable; no fallback' >&2
-    return 22
-  fi
-  echo '[stt] primary unavailable; using local Whisper after speech detection' >&2
+  echo "[stt] primary gave no transcript (exit $rc); using local Whisper after speech detection" >&2
   if TEXT=$(try_backend local "${LOCAL_CAP_S}s" "$clip"); then
     if has_words "$TEXT"; then printf '[stt-fallback:local] %s\n' "$TEXT"; else echo '[stt:no_speech]'; fi
     return 0

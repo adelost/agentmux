@@ -192,21 +192,24 @@ ${fakeTranscribe}
   return { run, calls, args, failures, root, audio, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-// Row 151 supersedes retry-on-empty and retry-on-timeout: neither proves an outage.
+// Row 151 supersedes retry-on-empty and retry-on-timeout: neither proves an outage, so the paid primary is never
+// called twice. Row 217 (Mattias 17 Nov 19:13Z, delivery:ba9a41b79567f657e8694d2cde009cd7): the free local reserve hears them.
 describe("primary calls are never repeated after uncertain outcomes", () => {
-  it("does not replace a timed-out Gemini job", () => {
-    const fx = providerFixture(`[ "$backend" = gemini ] && exec sleep 30`);
+  it("hears a timed-out Gemini job locally without calling Gemini again", () => {
+    const fx = providerFixture(`[ "$backend" = gemini ] && exec sleep 30
+echo "whisper words"`);
     try {
       const result = fx.run({ AMUX_STT_GEMINI_CAP_S: "1" });
-      expect(result.status).toBe(22); expect(result.stdout).toBe("");
-      expect(fx.calls()).toEqual(["gemini"]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("[stt-fallback:local] whisper words");
+      expect(fx.calls()).toEqual(["gemini", "local"]);
     } finally { fx.close(); }
   });
-  it("does not infer unavailability from a generic provider error", () => {
+  it("ends unknown when a generic provider error and the reserve both fail", () => {
     const fx = providerFixture(`echo "503 UNAVAILABLE" >&2; exit 1`);
     try {
       const result = fx.run();
-      expect(result.status).toBe(22); expect(fx.calls()).toEqual(["gemini"]);
+      expect(result.status).toBe(22); expect(fx.calls()).toEqual(["gemini", "local"]);
       expect(fx.failures()).toHaveLength(1);
     } finally { fx.close(); }
   });
@@ -301,13 +304,23 @@ echo "401 insufficient_quota" >&2; exit 1`);
 });
 
 describe("151 terminal speech outcomes", () => {
-  for (const code of [20, 22, 23]) it(`does not fall back for terminal exit ${code}`, () => {
+  for (const code of [20, 23]) it(`does not fall back for terminal exit ${code}`, () => {
     const fx = providerFixture(`[ "$backend" = v1d ] && exit ${code}\necho invented`);
     try {
       const result = fx.run({ AMUX_STT_PRIMARY: "v1d" });
       expect(fx.calls()).toEqual(["v1d"]);
       expect(result.stdout.trim()).toBe(code === 20 ? "[stt:no_speech]" : "");
       expect(result.status).toBe(code === 20 ? 0 : code);
+    } finally { fx.close(); }
+  });
+  // 17 Nov 19:08Z: the gateway's 503 unknown_outcome on his 53 s message reached plan:3 as a file (row 217).
+  it("hears an unknown primary outcome with the local reserve, never with the primary again", () => {
+    const fx = providerFixture(`[ "$backend" = v1d ] && exit 22\necho "whisper words"`);
+    try {
+      const result = fx.run({ AMUX_STT_PRIMARY: "v1d" });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("[stt-fallback:local] whisper words");
+      expect(fx.calls()).toEqual(["v1d", "local"]);
     } finally { fx.close(); }
   });
   it("blocks real silence and noise before Whisper, but preserves short and quiet speech", () => {

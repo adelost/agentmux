@@ -87,7 +87,7 @@ export function createAttachmentHandler({
   async function replyWithTranscript(msg, attachmentId, text, viaFallback) {
     const heading = viaFallback ? "**Transcript · local Whisper reserve**" : "**Transcript**";
     const note = viaFallback
-      ? "-# The main transcription was refused or unavailable. Technical terms may be less accurate."
+      ? "-# The main transcription failed. Technical terms may be less accurate."
       : "-# Speech-to-text may contain errors.";
     const chunks = splitMessage(`${heading}\n${text}\n${note}`);
     if (typeof msg.sendTranscriptOnce === "function") {
@@ -116,8 +116,8 @@ export function createAttachmentHandler({
       const path = await downloadToTmp(msg, att, tmpFiles);
       return path ? `[voice message not transcribed (${why}); audio attached: ${path}]` : null;
     }
-    // The wrapper marks reserve transcripts (the primary refused or was
-    // unavailable → faster-whisper on our own machine took over). The mark
+    // The wrapper marks reserve transcripts (the primary failed or left its
+    // outcome unknown → faster-whisper on our own machine took over). The mark
     // must survive into BOTH destinations: the reserve has no context to spell
     // technical terms against, and a silent fallback would be a quality
     // downgrade nobody knows to compensate for.
@@ -130,7 +130,7 @@ export function createAttachmentHandler({
     // the prompt — anyone seeing it knows this is AI-transcribed and
     // may have word-level errors.
     const tagged = viaFallback
-      ? `[transcribed voice via the local Whisper RESERVE (primary transcription refused or unavailable); extra error-prone on technical terms, interpret intent${lateVoiceNote(msg)}] ${transcribed}`
+      ? `[transcribed voice via the local Whisper RESERVE (primary transcription failed); extra error-prone on technical terms, interpret intent${lateVoiceNote(msg)}] ${transcribed}`
       : `[transcribed voice, may contain speech-to-text errors; interpret intent${lateVoiceNote(msg)}] ${transcribed}`;
     await replyWithTranscript(msg, att.id, transcribed, viaFallback);
     return tagged;
