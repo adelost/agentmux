@@ -96,8 +96,11 @@ feature("every Discord send point records what it posted", () => {
       const fetch = vi.fn(async (url, init) => (String(init?.body || "").includes("avvisad")
         ? { ok: false, status: 403, text: async () => "Missing Access" }
         : { ok: true, json: async () => ({ id: `r-${++next}` }) }));
-      const restore = { token: process.env.DISCORD_TOKEN, config: process.env.AGENTS_YAML, ledger: process.env.AMUX_ASK_LEDGER_PATH };
+      const restore = { token: process.env.DISCORD_TOKEN, config: process.env.AGENTS_YAML, ledger: process.env.AMUX_ASK_LEDGER_PATH,
+        guard: process.env.AMUX_TEST_NO_NOTIFICATIONS };
       vi.stubGlobal("fetch", fetch);
+      // test/setup-env.mjs blocks every CLI send; this case proves the send path, so it lifts the block over its stubbed fetch.
+      delete process.env.AMUX_TEST_NO_NOTIFICATIONS;
       Object.assign(process.env, { DISCORD_TOKEN: "test", AGENTS_YAML: ws.configPath, AMUX_ASK_LEDGER_PATH: ws.path });
       return { ws, audio, restore };
     }],
@@ -120,7 +123,8 @@ feature("every Discord send point records what it posted", () => {
         ]));
       } finally {
         vi.unstubAllGlobals();
-        for (const [key, name] of [["token", "DISCORD_TOKEN"], ["config", "AGENTS_YAML"], ["ledger", "AMUX_ASK_LEDGER_PATH"]]) {
+        for (const [key, name] of [["token", "DISCORD_TOKEN"], ["config", "AGENTS_YAML"], ["ledger", "AMUX_ASK_LEDGER_PATH"],
+          ["guard", "AMUX_TEST_NO_NOTIFICATIONS"]]) {
           if (restore[key] === undefined) delete process.env[name]; else process.env[name] = restore[key];
         }
         ws.cleanup();
