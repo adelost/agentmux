@@ -2,7 +2,7 @@
 // Replaces dispatch.sh + inline plan logic in bash agent script.
 
 import { spawn } from "child_process";
-import { readFileSync, writeFileSync, existsSync, copyFileSync } from "fs";
+import { readFileSync, readdirSync, writeFileSync, existsSync, copyFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { runOneshot } from "./run.mjs";
@@ -215,7 +215,6 @@ export function cmdPlan(rest) {
 
 /** Show latest plan log. */
 export function showPlanLog(lines = 50) {
-  const { readdirSync } = require("fs");
   try {
     const logs = readdirSync("/tmp").filter((f) => f.startsWith("agent-pd-")).sort().reverse();
     if (logs.length) {

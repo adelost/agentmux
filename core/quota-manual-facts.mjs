@@ -40,5 +40,29 @@ export function manualSubscriptionFacts(subscription = {}, now = Date.now()) {
   return facts;
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2026-11-02T10:47:00Z" and "2026-11-02" are both "2 Nov": the day as it was written down. */
+const dayMonth = day => `${Number(day.slice(8, 10))} ${MONTHS[Number(day.slice(5, 7)) - 1]}`;
+
+/** WHAT: Formats when a manual fact was read: nothing while fresh, its day once stale, a question mark when unknown. WHY: Keeps a dated billing fact from reading as current in the short box. */
+const shortRead = (readAt, now) => !manualFactAge(readAt, now).stale ? ""
+  : Number.isFinite(Date.parse(readAt)) ? ` (read ${dayMonth(readAt)})` : " (read ?)";
+
+// 17 Nov 2026: the box carried every fact's full line with its ISO reading time, passed Discord's 2000 characters and no
+// quota warning reached him; the full lines stand in amux quota's detail.
+/** WHAT: Formats the renewal day and the free resets as the quota box's short lines. WHY: Keeps the box inside one phone-width Discord message. */
+export function shortSubscriptionFacts(subscription = {}, now = Date.now()) {
+  const s = subscription || {}, lines = [];
+  if (s.renewsOn) {
+    const passed = s.renewsOn < new Date(now).toLocaleDateString("en-CA");
+    lines.push(`${passed ? `renewed ${dayMonth(s.renewsOn)}, PASSED` : `renews ${dayMonth(s.renewsOn)}`}${shortRead(s.renewsReadAt, now)}`);
+  }
+  if (Number.isInteger(s.freeResetsLeft)) {
+    const first = s.freeResetsLeft > 0 && s.freeResetsExpire?.[0] ? `, ${s.freeResetsLeft === 1 ? "" : "1st "}ends ${dayMonth(s.freeResetsExpire[0])}` : "";
+    lines.push(`${s.freeResetsLeft} free reset${s.freeResetsLeft === 1 ? "" : "s"}${resetKinds(s.limitResets)}${first}${shortRead(s.freeResetsReadAt || s.freeResetsReadOn, now)}`);
+  }
+  return lines;
+}
+
 /** WHAT: Formats a dated manual fact. WHY: Keeps its value and freshness inseparable. */
 export const manualFactText = fact => `${fact.text} (${fact.ageText})`;

@@ -7,7 +7,7 @@
 import { accountName, loginOfEmail } from "../core/account-names.mjs";
 import { weeklyForecast } from "../core/quota-forecast.mjs";
 import { clockOf, creditsText, nearestMinute } from "../core/quota-format.mjs";
-import { manualSubscriptionFacts, manualFactText } from "../core/quota-manual-facts.mjs";
+import { manualSubscriptionFacts, shortSubscriptionFacts } from "../core/quota-manual-facts.mjs";
 import { quotaFloorPercent } from "../core/quota-park.mjs";
 import { fableFullWeekPoints, fableQuotaOf } from "../core/fable-quota.mjs";
 export { fableQuotaOf } from "../core/fable-quota.mjs";
@@ -71,14 +71,12 @@ function accountFact(engine, account, shown, context) {
 
 /** WHAT: Phrases the renewal date and free resets the login's entry holds, or nothing. WHY: Keeps a renewal from being forgotten. */
 function subscriptionLines(subscription, now) {
-  return manualSubscriptionFacts(subscription, now).map(fact => `  ${manualFactText(fact)}`);
+  return shortSubscriptionFacts(subscription, now).map(line => `  ${line}`);
 }
 
 /** WHAT: Phrases one account's panes and week, its blocking five-hour window and its subscription. WHY: The week is what he plans by. */
 function linesOf(fact, width, now) {
-  const account = fact.account;
-  const subscription = account.provider === "claude" && !account.subscription?.planTier && account.account?.plan
-    ? { ...account.subscription, planTier: account.account.plan } : account.subscription;
+  const subscription = fact.account.subscription;
   const head = `${fact.name.padEnd(width)} ${String(fact.account.inUse?.length || 0).padStart(5)}`;
   if (!fact.week) return [`${head}  unreadable`, ...subscriptionLines(subscription, now)];
   const left = Math.max(0, Math.min(100, Math.round(100 - fact.week.usedPercent)));

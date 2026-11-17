@@ -10,6 +10,10 @@ const HOUR = 3_600_000;
 const WARN_COOLDOWN_MS = 6 * HOUR, RESERVE_COOLDOWN_MS = 3 * HOUR;
 // The pace that decides whether an account runs out before its reset uses the last day of readings, as weeklyForecast measures it.
 const READING_SPAN_MS = 24 * HOUR;
+// A post Discord itself refused is tried again after this long, not at the limit poll's next beat (17 Nov 2026: 50035
+// every 33 s for seven hours). A notice with no channel yet was never posted and goes out at the first beat that has one.
+const RETRY_REFUSED_POST_MS = 10 * 60_000;
+const refusedByDiscord = error => Number.isFinite(Number(error?.code));
 // One overview message covers every account, so its reference is stored once.
 const OVERVIEW_KEY = "overview";
 const positiveNumber = (value, fallback) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
@@ -51,7 +55,8 @@ export function createSentNoticeStore(path = join(homedir(), ".agentmux", "quota
   return {
     entry: key => read()[key] || null,
     record(key, usedPercent, options) { update(key, { reminder: { at: options.now, usedPercent } }, options); },
-    saveNotice(key, notice, options) { update(key, { notice }, options); },
+    saveNotice(key, notice, options) { update(key, { notice, refusedAt: null }, options); },
+    saveRefusal(key, options) { update(key, { refusedAt: options.now }, options); },
     readings: key => read()[key]?.readings || [],
     observe(key, point, options) {
       const kept = (read()[key]?.readings || []).filter(earlier => earlier.at >= options.now - READING_SPAN_MS);
@@ -110,7 +115,11 @@ export async function postDueQuotaWarnings({ snapshot, notify, sent, config = pa
   // A first warning and a reached limit are news; anything else edits the overview he already has (Sky e2e815d6).
   const due = warned.filter(state => state.justFull || (!fullOnly && (state.first || (!existing?.messageId && state.cooledDown))));
   if (due.length) {
-    const posted = await notify(text, due);
+    if (now - (sent.entry(OVERVIEW_KEY)?.refusedAt ?? -Infinity) < RETRY_REFUSED_POST_MS) return [];
+    const posted = await notify(text, due).catch((error) => {
+      if (refusedByDiscord(error)) sent.saveRefusal(OVERVIEW_KEY, keep);
+      throw error;
+    });
     const messageId = posted?.messageId || posted?.id;
     for (const state of warned) {
       sent.record(state.accountKey, state.usedPercent, { now, resetAt: state.resetAt });

@@ -136,6 +136,21 @@ feature("account warning cooldown and reached-limit delivery", () => {
       expect(fx.notify.mock.calls[1][0]).toContain("→ Claude A back Wed 02:00");
     }],
   });
+  // 17 Nov 2026 (row 219): Discord refused the overview (50035, over 2000 characters) and the limit poll posted it again
+  // every 33 s for seven hours, into deep:2's channel log.
+  unit("a refused post waits ten minutes before the next try", {
+    when: ["Discord refuses every post while the poll beats at 33 s, 9 min and 10 min, and accepts one after that", async () => {
+      const fx = fixture(); fx.notify.mockRejectedValue(Object.assign(new Error("Invalid Form Body"), { code: 50035 }));
+      const errors = [];
+      for (const after of [0, 33_000, 9 * 60_000, 10 * 60_000]) await fx.check(100, NOW + after).catch(error => errors.push(error.message));
+      const refused = fx.notify.mock.calls.length;
+      fx.notify.mockResolvedValue({ messageId: "m1" });
+      const delivered = await fx.check(100, NOW + 20 * 60_000);
+      return { errors, refused, delivered: delivered.length, tries: fx.notify.mock.calls.length };
+    }],
+    then: ["two tries in ten minutes, each failure said once, and the notice still goes out when Discord takes it", r =>
+      expect(r).toEqual({ errors: ["Invalid Form Body", "Invalid Form Body"], refused: 2, delivered: 1, tries: 3 })],
+  });
   unit("the background check emits only newly full accounts", {
     when: ["a background check sees 95 percent then 100", async () => {
       const fx = fixture(); await fx.check(95, NOW, { fullOnly: true }); await fx.check(100, NOW + 1_000, { fullOnly: true }); return fx;

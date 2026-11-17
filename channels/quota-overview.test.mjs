@@ -115,10 +115,11 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
     ])],
     then: ["each line fits a phone", lines => {
       const text = lines.join("\n");
-      expect(text).toContain("renews 2026-10-20 (STALE · read unknown · age unknown)");
-      expect(text).toContain("renews 2026-11-05 (STALE · read unknown · age unknown)");
-      expect(text).toContain("free resets 0 (manual read 2026-10-17 · age 11h)");
-      expect(text).toContain("free resets 1 (manual read 2026-10-17 · age 11h)");
+      // 17 Nov 2026 (row 219): the box's lines are short again; a day nobody dated says so, a count read today says nothing more.
+      expect(text).toContain("  renews 20 Oct (read ?)\n  0 free resets\n");
+      expect(text).toContain("  renews 5 Nov (read ?)\n");
+      expect(text).toContain("  1 free reset\n");
+      expect(Math.max(...lines.map(line => line.length))).toBeLessThanOrEqual(32);
     }],
   });
   // lsrc:0 2026-10-17: Codex W's two resets end Oct 29 20:24 and Nov 7 00:48 (GMT+1); the box shows the first.
@@ -131,9 +132,9 @@ feature("the quota box leads with each account's week, lsrc:0 for Mattias 2026-1
     ])],
     then: ["each line fits a phone", lines => {
       const text = lines.join("\n");
-      expect(text).toContain("first expires 2026-11-07T00:48+01:00");
-      expect(text).toContain("first expires 2026-10-29T20:24+01:00");
-      expect(text).toContain("age 11h");
+      expect(text).toContain("  renews 3 Nov (read ?)\n  1 free reset, ends 7 Nov\n");
+      expect(text).toContain("  2 free resets, 1st ends 29 Oct\n");
+      expect(Math.max(...lines.map(line => line.length))).toBeLessThanOrEqual(32);
     }],
   });
 });
