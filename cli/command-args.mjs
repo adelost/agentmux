@@ -17,6 +17,15 @@ export function isDispatchHelp([command, ...args]) {
   return false;
 }
 
+/** Commands whose every form begins with a directory or a word of their own, never with a flag. */
+const DIRECTORY_FIRST_COMMANDS = new Set(["plan", "run"]);
+
+// 17 Nov 2026: `amux plan -p 2 --stdin` took `-p` as the plan command's directory and died as `spawn claude ENOENT`,
+// so the agent plan's panes were reached only as `:N`.
+/** WHAT: Checks for a flag-first send to a configured agent named as such a command. WHY: Keeps a send to the agent `plan` from running the plan command. */
+export const isSendToCommandNamedAgent = (command, args, agentNames) =>
+  DIRECTORY_FIRST_COMMANDS.has(command) && !!args[0]?.startsWith("-") && agentNames.includes(command);
+
 const LONG_FLAG_WITH_ATTACHED_VALUE = /^--([^=\s]+)=(.*)$/;
 const SHORT_FLAG_WITH_ATTACHED_VALUE = /^-([A-Za-z])(.+)$/;
 /** A lone token that reads as a flag: no whitespace, so real prose never matches. */

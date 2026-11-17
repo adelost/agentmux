@@ -8,7 +8,7 @@ import { createHash } from "crypto";
 import { loadConfig, listAgents, getAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens } from "./format.mjs";
 import { paneRuntimeLabel } from "./pane-runtime-label.mjs";
-import { isDispatchHelp, parseFlags, flagShapedPromptTokens } from "./command-args.mjs";
+import { isDispatchHelp, isSendToCommandNamedAgent, parseFlags, flagShapedPromptTokens } from "./command-args.mjs";
 export { parseFlags, flagShapedPromptTokens } from "./command-args.mjs";
 import {
   clearPaneComposer,
@@ -84,7 +84,7 @@ import { defaultCodingEngine } from "../core/default-engine.mjs";
 import yaml from "js-yaml";
 import { spawn, execSync } from "child_process";
 import { runOneshot, showRunLog } from "./run.mjs";
-import { executePlan, showPlanLog } from "./plan.mjs";
+import { cmdPlan } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
 import { cleanSpeechText, DEFAULT_SPEECH_VOICE, publishSpeechEvent, synthesizeSpeech } from "./speech.mjs";
 import {
@@ -2755,6 +2755,7 @@ async function dispatchAgentTarget(name, rest, ctx) {
 export async function dispatch(argv, ctx) {
   if (isDispatchHelp(argv)) return argv[0] === "compact" ? cmdCompact(ctx, { help: true }) : cmdHelp(ctx);
   const [cmd, ...rest] = argv;
+  if (isSendToCommandNamedAgent(cmd, rest, listAgents(ctx.configPath).map((agent) => agent.name))) return dispatchAgentTarget(cmd, rest, ctx);
 
   switch (cmd) {
     case undefined:
@@ -3110,16 +3111,8 @@ export async function dispatch(argv, ctx) {
       return runOneshot({ dir: rest[0], prompt: rest[1], timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, notifyUser: !!(flags["notify-user"] || flags["notify-me"]), model: flags.model, fg: flags.fg ?? false });
     }
 
-    case "plan": {
-      if (rest[0] === "log") return showPlanLog();
-      if (rest[0] === "status") { console.log("TODO: plan status"); return; }
-      if (rest.length < 2 && !rest[0]?.startsWith("-")) { console.error("Usage: agent plan <dir> \"goal\" [-n channel]"); process.exit(1); }
-      const dir = rest[0];
-      const { flags, positional } = parseFlags(rest.slice(1), { n: "string", m: "string", t: "number", p: "boolean", d: "boolean", fg: "boolean", model: "string", "notify-user": "boolean", "notify-me": "boolean" });
-      const goal = positional[0] || "";
-      if (!goal && !flags.d) { console.error("Usage: agent plan <dir> \"goal\" [-n channel]"); process.exit(1); }
-      return executePlan({ dir, goal, timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, notifyUser: !!(flags["notify-user"] || flags["notify-me"]), model: flags.model, planOnly: flags.p, dispatchOnly: flags.d, fg: flags.fg ?? false });
-    }
+    case "plan":
+      return cmdPlan(rest);
 
     case "events": {
       const { flags } = parseFlags(rest, { n: "number", f: "boolean" });

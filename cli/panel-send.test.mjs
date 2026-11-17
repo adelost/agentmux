@@ -9,7 +9,7 @@ import { createDeliveryQueue } from '../core/delivery-queue.mjs';
 
 function fixture() {
   const root=mkdtempSync(join(tmpdir(),'amux-fanout-')), configPath=join(root,'agents.yaml');
-  writeFileSync(configPath,['sender','lsrc',...Array.from({length:6},(_,i)=>'target'+i)].map(name=>`${name}:\n  dir: ${root}\n  panes:\n    - name: claude\n      cmd: claude\n`).join(''));
+  writeFileSync(configPath,['sender','lsrc','plan',...Array.from({length:6},(_,i)=>'target'+i)].map(name=>`${name}:\n  dir: ${root}\n  panes:\n    - name: claude\n      cmd: claude\n`).join(''));
   const previous={HOME:process.env.HOME,AMUX_AGENT_NAME:process.env.AMUX_AGENT_NAME,AMUX_PANE:process.env.AMUX_PANE,AMUX_EVENTS_PATH:process.env.AMUX_EVENTS_PATH};
   Object.assign(process.env,{HOME:root,AMUX_AGENT_NAME:'sender',AMUX_PANE:'0',AMUX_EVENTS_PATH:join(root,'events.jsonl')});
   const queue=createDeliveryQueue({rootDir:join(root,'queue')});
@@ -55,6 +55,15 @@ feature('panel send recipient budget',()=>{
     given:['one configured isolated target',fixture],
     when:['sending with an empty exception reason',async f=>{try{let error=null;try{await f.send(0,'--fanout=');}catch(e){error=e.message;}return{error,jobs:f.count()};}finally{f.restore();}}],
     then:['the reason is required before enqueue',r=>{expect(r.error).toContain('--fanout requires');expect(r.jobs).toBe(0);}],
+  });
+});
+
+feature('an agent named as a command', () => {
+  component('a send to the agent plan reaches its pane, not the plan command (17 Nov 2026: spawn claude ENOENT)', {
+    given: ['a configured agent named plan', fixture],
+    when: ['sending to its pane by name', async f => { try { await dispatch(['plan', '-p', '0', '--wait-ms', '0', '-q', 'work'], f.ctx);
+      return { jobs: f.queue.list('plan', 0).map(job => job.text) }; } finally { f.restore(); } }],
+    then: ['one job is queued for plan:0', r => { expect(r.jobs).toEqual(['[from sender:0]\n\nwork']); }],
   });
 });
 

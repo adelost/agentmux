@@ -9,6 +9,7 @@ import { runOneshot } from "./run.mjs";
 import { createEventLogger } from "./events.mjs";
 import { sendToChannel, sendToSession, notifyUser as sendToUser } from "./send-notify.mjs";
 import { CLAUDE_AUTONOMOUS_ARGS } from "../core/execution-safety.mjs";
+import { parseFlags } from "./command-args.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const MAX_PLAN_RETRIES = 2;
@@ -195,6 +196,21 @@ export async function executePlan({ dir, goal, timeout, notifyChannel, msgSessio
 
   log("✅", "plan", 0, "COMPLETE", `All ${taskCount} tasks done`);
   console.log(`\n✅ Plan complete! ${taskCount} tasks executed.`);
+}
+
+const PLAN_USAGE = "Usage: agent plan <dir> \"goal\" [-n channel]";
+const PLAN_FLAGS = { n: "string", m: "string", t: "number", p: "boolean", d: "boolean", fg: "boolean", model: "string", "notify-user": "boolean", "notify-me": "boolean" };
+
+/** WHAT: Dispatches `amux plan` to its log or to a goal planned in a directory. WHY: Keeps a flag from standing as the directory, where claude was once spawned in `-p`. */
+export function cmdPlan(rest) {
+  if (rest[0] === "log") return showPlanLog();
+  if (rest[0] === "status") { console.log("TODO: plan status"); return; }
+  if (rest.length < 2 || rest[0].startsWith("-")) { console.error(PLAN_USAGE); process.exit(1); }
+  const { flags, positional } = parseFlags(rest.slice(1), PLAN_FLAGS);
+  const goal = positional[0] || "";
+  if (!goal && !flags.d) { console.error(PLAN_USAGE); process.exit(1); }
+  return executePlan({ dir: rest[0], goal, timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m,
+    notifyUser: !!(flags["notify-user"] || flags["notify-me"]), model: flags.model, planOnly: flags.p, dispatchOnly: flags.d, fg: flags.fg ?? false });
 }
 
 /** Show latest plan log. */
