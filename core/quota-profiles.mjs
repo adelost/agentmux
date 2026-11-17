@@ -152,6 +152,7 @@ const isMoment = (value) => typeof value === "string"
 // whole week back; a Fable reset restores its allowance and its share of the week. The count alone made two resets read as two weeks.
 const isLimitReset = (value) => !!value && typeof value === "object" && !Array.isArray(value)
   && typeof value.kind === "string" && /^[a-z][a-z0-9-]{0,19}$/u.test(value.kind) && isMoment(value.expires);
+const SOURCE_MAX = 500;
 const SUBSCRIPTION_FIELDS = Object.freeze({
   renewsReadAt: { valid: isMoment, need: "an ISO time with offset" },
   freeResetsReadAt: { valid: isMoment, need: "an ISO time with offset" },
@@ -161,7 +162,9 @@ const SUBSCRIPTION_FIELDS = Object.freeze({
   creditsReadAt: { valid: isMoment, need: "an ISO time with offset" },
   autoReload: { valid: value => typeof value === "boolean", need: "a boolean" },
   autoReloadReadAt: { valid: isMoment, need: "an ISO time with offset" },
-  source: { valid: value => typeof value === "string" && value.length <= 500, need: "a source pointer" },
+  // A pointer to where the facts were read, not their history: a longer text is dropped whole, so the problem says its length.
+  source: { valid: value => typeof value === "string" && value.length <= SOURCE_MAX,
+    need: value => `a source pointer of at most ${SOURCE_MAX} characters${typeof value === "string" ? ` (has ${value.length})` : ""}` },
   renewsOn: { valid: isDay, need: "YYYY-MM-DD" },
   freeResetsLeft: { valid: (value) => Number.isInteger(value) && value >= 0, need: "a whole number" },
   freeResetsReadOn: { valid: isDay, need: "YYYY-MM-DD" },
@@ -184,7 +187,7 @@ function subscriptionOf(key, value, problems) {
   for (const [field, rule] of Object.entries(SUBSCRIPTION_FIELDS)) {
     if (value[field] === undefined) continue;
     if (rule.valid(value[field])) kept[field] = value[field];
-    else problems.push(`${key}: subscription.${field} needs ${rule.need}`);
+    else problems.push(`${key}: subscription.${field} needs ${typeof rule.need === "function" ? rule.need(value[field]) : rule.need}`);
   }
   if ((kept.freeResetsLeft === undefined) !== (kept.freeResetsReadOn === undefined)) {
     problems.push(`${key}: subscription.freeResetsLeft and freeResetsReadOn go together`);

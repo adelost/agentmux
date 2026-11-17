@@ -50,6 +50,15 @@ feature("manual quota facts cannot masquerade as current provider readings", () 
       expect(boundary[0]).toContain("age 24h"); expect(boundary[0]).not.toContain("STALE");
     }],
   });
+  // 17 Nov 2026 (row 221): Claude E's source had grown to 816 characters; "needs a source pointer" did not say why.
+  unit("a source over 500 characters is refused in words that say the limit", {
+    when: ["reading a profile whose source has 501 characters", () => accountEntries({ HOME: "/test" }, { readFile: () => JSON.stringify({ version: 2,
+      accounts: { "claude:andersson": { subscription: { planTier: "Ultra", source: "x".repeat(501) } } } }) })],
+    then: ["the problem names the limit and the length, and the other facts stay", result => {
+      expect(result.problems).toEqual(["claude:andersson: subscription.source needs a source pointer of at most 500 characters (has 501)"]);
+      expect(result.entries.get("claude:andersson").subscription).toEqual({ planTier: "Ultra" });
+    }],
+  });
   unit("the actual profile reader retains dated manual facts", {
     when: ["reading an operator profile", () => accountEntries({ HOME: "/test" }, { readFile: () => JSON.stringify({ version: 2,
       accounts: { "claude:wetterlind": { subscription: { planTier: "Max (20x)", planReadAt: "2026-10-24T06:00:00Z",
