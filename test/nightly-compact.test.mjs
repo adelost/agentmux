@@ -391,9 +391,13 @@ feature("nightly context budget", () => {
   unit("attributes a provider refusal to the last visible turn, not older scrollback", {
     when: ["reading current and superseded failures", () => {
       const failure = "Your organization has disabled Claude subscription access for Claude Code";
-      return [compactAccessBlocker(`❯ /compact\n${failure}\n❯ `), compactAccessBlocker(`${failure}\n❯ new task\n● finished\n❯ `)];
+      // 18 Nov 2026: Claude W's payment fell past due; the wrapped refusal held nine deep panes on a compact that could not run.
+      const pastDue = "Error during compaction: Claude Code can't use your Claude subscription, usually because a payment is past\n     due";
+      return [compactAccessBlocker(`❯ /compact\n${failure}\n❯ `), compactAccessBlocker(`${failure}\n❯ new task\n● finished\n❯ `),
+        compactAccessBlocker(`❯ /compact\n  ⎿  ${pastDue}\n❯ `)];
     }],
-    then: ["only the current refusal blocks", (result) => expect(result).toEqual(["claude-subscription-access-disabled", null])],
+    then: ["only the current refusal blocks", (result) => expect(result).toEqual(["claude-subscription-access-disabled", null,
+      "claude-subscription-access-disabled"])],
   });
   unit("recognizes a current login refusal without accepting generic errors or old scrollback", {
     when: ["reading the refused source turn", () => [

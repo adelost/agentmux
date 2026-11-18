@@ -112,7 +112,8 @@ export function compactAccessBlocker(screen) {
   const lastTurn = lines.findLastIndex((line) => /^\s*[❯›]\s*\S/u.test(line));
   const text = lines.slice(Math.max(0, lastTurn)).join("\n");
   if (/(?:Login expired|Not logged in)\s*·\s*Please run \/login\b/iu.test(text)) return "claude-login-required";
-  if (/organization has disabled Claude subscription access/iu.test(text)) return "claude-subscription-access-disabled";
+  if (/organization has disabled Claude subscription access/iu.test(text)
+      || /can['’]t\s+use\s+your\s+Claude\s+subscription/iu.test(text)) return "claude-subscription-access-disabled";
   if (CLAUDE_STOP_BANNER.test(text) || /usage limit reached|out of extra usage/iu.test(text)) return "provider-usage-limited";
   return null;
 }
