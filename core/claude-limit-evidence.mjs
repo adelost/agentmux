@@ -9,6 +9,9 @@ import { CLAUDE_TERMINAL_STOP_REASONS, isClaudeTaskNotification } from "./claude
 //   You've hit your monthly spend limit · raise it at … · your session limit resets 3:10am (Europe/Stockholm)
 const PLAN_STOP_TEXT = /^You(?:'|’)ve hit your (session|usage|weekly) limit(?:\s*·\s*resets\s+(.+?))?\s*$/iu;
 const SPEND_STOP_TEXT = /^You(?:'|’)ve hit your monthly spend limit\b/iu;
+// A stop for one model while the week has room (18 Nov 2026, seven Fable panes stood 85 min on it unseen):
+//   You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.
+const MODEL_STOP_TEXT = /^You(?:'|’)ve reached your ([A-Za-z][A-Za-z0-9 .-]*?) limit\b/iu;
 const SPEND_STOP_WINDOW = /·\s*your (session|weekly) limit resets\s+(.+?)\s*$/iu;
 
 // Claude Code warns the model before it cuts a turn at the limit, and lifts the
@@ -27,7 +30,7 @@ export function claudeLimitNote(event) {
 }
 
 /** DTO: Any Claude plan-stop banner on a screen, for pane status and compact refusals. */
-export const CLAUDE_STOP_BANNER = /You(?:'|’)ve hit your (?:session|usage|weekly|monthly spend) limit/iu;
+export const CLAUDE_STOP_BANNER = /You(?:'|’)ve (?:hit your (?:session|usage|weekly|monthly spend)|reached your [A-Za-z][A-Za-z0-9 .-]*?) limit/iu;
 
 /**
  * WHAT: Reads the stopped window and its displayed reset from one exact Claude stop text.
@@ -37,6 +40,9 @@ export function claudeLimitFromText(text) {
   const trimmed = String(text || "").trim();
   const plan = PLAN_STOP_TEXT.exec(trimmed);
   if (plan) return { kind: plan[1].toLowerCase(), reset: plan[2] || null };
+  // The text names no reset; the quota reading of that model's window decides when the pane resumes, or that it moves.
+  const model = MODEL_STOP_TEXT.exec(trimmed);
+  if (model) return { kind: "model", model: model[1].toLowerCase(), reset: null };
   if (!SPEND_STOP_TEXT.test(trimmed)) return null;
   const window = SPEND_STOP_WINDOW.exec(trimmed);
   return window ? { kind: window[1].toLowerCase(), reset: window[2] } : { kind: "usage", reset: null };
@@ -212,6 +218,8 @@ export function activeClaudeLimitReceiptFromEvents(events, {
     sessionPath,
     limitEventId: found.event.uuid,
     limitKind: found.limit.kind,
+    // The model a model limit stopped ("fable"); null for a plan window.
+    limitModel: found.limit.model ?? null,
     // Where the stop was read: Claude's grace note or its stop banner.
     stop: found.resumedBy === isNewPromptAfterNote ? "grace-note" : "banner",
     text: found.text,

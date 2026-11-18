@@ -61,7 +61,7 @@ if (!config.enabled) {
       profile: lifecycle.profileFor(agentName, pane),
       notBefore: Number.isFinite(receipt?.observedAt) ? receipt.observedAt : notBefore,
     }),
-    // The same shared budget reads the other logins, and only for a pane whose week is spent.
+    // The same shared budget reads the other logins, and only for a pane whose week, or whose model's week, is spent.
     findSpareAccount: ({ current, receipt }) => spareClaudeAccount({
       current,
       catalog: runtimeProfileCatalog("claude"),
@@ -72,6 +72,7 @@ if (!config.enabled) {
         notBefore: Number.isFinite(receipt?.observedAt) ? receipt.observedAt : 0,
       }),
       reservePercent: parseQuotaWarningConfig().reservePercent,
+      model: receipt?.limitModel ?? null,
     }),
     resetGraceMs: config.resetGraceMs,
     parkPending: (agentName, pane) => parkHoldsMove(selfRequests.read(agentName, pane), Date.now()),

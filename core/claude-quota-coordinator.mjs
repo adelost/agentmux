@@ -270,7 +270,7 @@ export function createClaudeQuotaCoordinator({
   }
 
   // Only an actual limit receipt plus a reading after it that shows the pane's own
-  // week spent moves a pane; forecasts and session windows never do.
+  // week spent (or its model's week, for a model limit) moves a pane; forecasts and session windows never do.
   async function spareAccountFor(target, readiness) {
     if (readiness.ready || !switchAccounts || !findSpareAccount || !claudeWeekSpent(readiness)) return null;
     try {

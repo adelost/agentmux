@@ -6,6 +6,7 @@ import {
   activeClaudeLimitReceipt,
   activeClaudeLimitReceiptFromEvents,
   claudeQuotaRecoveryReadiness,
+  claudeWeekSpent,
   parseClaudeLimitResetAt,
   quotaRecoveryJobKey,
   spareClaudeAccount,
@@ -303,6 +304,48 @@ feature("the spare Claude account for a spent week", () => {
       readQuota: async (candidate) => accounts[candidate.key].quota,
     })],
     then: ["there is no spare", (spare) => expect(spare).toBeNull()],
+  });
+});
+
+// 2026-11-18 14:50Z: Claude A's Fable window reached 100 % with 49 % of its week left. Seven Fable panes at work got
+// "You've reached your Fable limit" and stood about 85 min: the text was no stop, so nothing moved them.
+feature("a pane stopped at its account's limit for one model", () => {
+  const fableStop = "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.";
+  const usage = (weekly, fable) => ({ ok: true, limits: [{ kind: "session", usedPercent: 0 }, { kind: "weekly_all", usedPercent: weekly, isActive: true },
+    { kind: "weekly_scoped", id: "weekly_fable", scopeName: "Fable", usedPercent: fable }] });
+  const receiptOf = () => activeClaudeLimitReceiptFromEvents([{ type: "user", uuid: "prompt", message: { content: "ship it" } },
+    limitEvent({ text: fableStop })], { sessionId: "session-a" });
+  const profile = (key) => ({ key, id: key.split(":").at(-1) });
+
+  unit("the model's stop text is a limit receipt that names the model", {
+    when: ["the journal ends at the Fable stop", receiptOf],
+    then: ["the receipt is a model limit for fable", (receipt) => expect(receipt).toMatchObject({ limitKind: "model", limitModel: "fable", resetAt: null })],
+  });
+
+  unit("the pane waits for a move while its account's model window is spent, though the week has room", {
+    when: ["the reading after the stop shows the week at 51 % and Fable at 100 %", () => claudeQuotaRecoveryReadiness(receiptOf(), usage(51, 100))],
+    then: ["it is not ready, for the model's limit", (readiness) => {
+      expect(readiness).toEqual({ ready: false, reason: "model-limit-still-exhausted" });
+      expect(claudeWeekSpent(readiness)).toBe(true);
+    }],
+  });
+
+  unit("the pane goes on where it is once the model window has room again", {
+    when: ["a free reset put Fable at 0 %", () => claudeQuotaRecoveryReadiness(receiptOf(), usage(51, 0))],
+    then: ["it is ready from the reading", (readiness) => expect(readiness).toMatchObject({ ready: true, via: "quota-api" })],
+  });
+
+  unit("the spare account is the one with the most room for that model, not the most week", {
+    given: ["I has most week left but little Fable, S the other way, E has Fable spent", () => ({
+      "claude:a": { email: "a@example.test", quota: usage(51, 100) }, "claude:i": { email: "i@example.test", quota: usage(20, 85) },
+      "claude:s": { email: "s@example.test", quota: usage(60, 40) }, "claude:e": { email: "e@example.test", quota: usage(10, 100) },
+      "claude:v": { email: "v@example.test", quota: usage(30, 95) },
+    })],
+    when: ["a spare is chosen for the Fable stop", (accounts) => spareClaudeAccount({
+      current: profile("claude:a"), catalog: Object.keys(accounts).map(profile), authenticated: () => true,
+      emailOf: (candidate) => accounts[candidate.key].email, readQuota: async (candidate) => accounts[candidate.key].quota, reservePercent: 90, model: "fable",
+    })],
+    then: ["S, by its Fable room; V at 95 % is past the reserve", (spare) => expect(spare).toMatchObject({ profile: { key: "claude:s" }, usedPercent: 40 })],
   });
 });
 

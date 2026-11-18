@@ -95,6 +95,8 @@ export function claudeQuotaRecoveryReadiness(receipt, quota, {
   resetGraceMs = 15_000,
 } = {}) {
   if (!receipt) return { ready: false, reason: "no-active-limit-receipt" };
+  // A model's own window is spent while the week has room: the pane cannot go on where it is, whatever the plan windows say.
+  if (receipt.limitKind === "model" && Number(modelWindow(quota, receipt.limitModel)?.usedPercent) >= 100) return { ready: false, reason: "model-limit-still-exhausted" };
   if (quota?.ok && Array.isArray(quota.limits)) {
     const windows = planWindows(quota);
     const spent = windows.find((limit) => Number(limit.usedPercent) >= 100);
@@ -112,11 +114,15 @@ export function claudeQuotaRecoveryReadiness(receipt, quota, {
   return { ready: false, reason: quota?.error || "quota-not-yet-available" };
 }
 
+/** WHAT: Returns one model's weekly window of a good reading, or null. WHY: A model limit is judged on its own window, not the week's. */
+export const modelWindow = (quota, model) => (model && quota?.ok && Array.isArray(quota.limits) ? quota.limits : [])
+  .find((limit) => limit?.kind === "weekly_scoped" && (limit.id === `weekly_${model}` || String(limit.scopeName || "").toLowerCase() === model)) ?? null;
+
 /**
- * WHAT: Tells whether a parked pane's own account has spent its week, per a reading taken after the limit.
+ * WHAT: Tells whether a parked pane's own account has spent its week, or its model's week, per a reading taken after the limit.
  * WHY: Only a reached weekly limit moves a pane to another account; a session window returns within hours.
  */
-export const claudeWeekSpent = (readiness) => readiness?.reason === "weekly-limit-still-exhausted";
+export const claudeWeekSpent = (readiness) => readiness?.reason === "weekly-limit-still-exhausted" || readiness?.reason === "model-limit-still-exhausted";
 
 /**
  * WHAT: Returns an account's used weekly percent when every plan window has room, else null.
@@ -130,7 +136,7 @@ export function claudeWeeklyRoom(quota, { reservePercent = 90 } = {}) {
 }
 
 /**
- * WHAT: Picks the logged-in Claude account with the most weekly room, other than the pane's own login.
+ * WHAT: Picks the logged-in Claude account with the most weekly room (for a `model` limit, the most room for that model), other than the pane's own login.
  * WHY: A pane stopped at a spent week resumes where the paid subscription can still answer
  * (2026-10-18: six panes waited 5.8 h on Claude W while Claude S had 100 % free).
  */
@@ -141,6 +147,7 @@ export async function spareClaudeAccount({
   readQuota,
   emailOf,
   reservePercent = 90,
+  model = null,
 }) {
   const ownEmail = current ? emailOf(current) : null;
   let best = null;
@@ -149,7 +156,10 @@ export async function spareClaudeAccount({
     // Another dir of the spent login is the same spent week.
     if (ownEmail && emailOf(profile) === ownEmail) continue;
     const quota = await readQuota(profile);
-    const usedPercent = claudeWeeklyRoom(quota, { reservePercent });
+    const weekUsed = claudeWeeklyRoom(quota, { reservePercent }), scoped = model ? modelWindow(quota, model) : null;
+    // For a model's limit the account must have room for that model, and the one with most of it wins: the week's room alone
+    // would move the pane to an account whose model window is as spent (18 Nov 2026: E had week left and Fable at 100 %).
+    const usedPercent = weekUsed === null || !model ? weekUsed : Number.isFinite(scoped?.usedPercent) && scoped.usedPercent < reservePercent ? Number(scoped.usedPercent) : null;
     if (usedPercent !== null && (!best || usedPercent < best.usedPercent)) best = { profile, quota, usedPercent };
   }
   return best;
