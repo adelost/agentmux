@@ -147,7 +147,7 @@ function fableAdvice(fact, { now, readingsOf, floorPercent, warnPercent = 80 }) 
   const reset = account.subscription?.limitResets?.some(item => item.kind === "fable" && Date.parse(item.expires) > now);
   // Near its end the Fable window stands in the box before it stops a pane: what is left, when it returns, and whether a free reset
   // waits (18 Nov 2026: A's Fable ended with 49 % of its week left and nothing had said so).
-  const near = Number.isFinite(fable?.usedPercent) && fable.usedPercent >= warnPercent && account.activeInUse?.length
+  const near = Number.isFinite(fable?.usedPercent) && fable.usedPercent >= warnPercent && (account.activeInUse ?? account.inUse)?.length
     ? [`${name}: Fable ${Math.max(0, Math.round(100 - fable.usedPercent))}% left, back ${dayAndClock(fable.resetsAt)}${reset ? ", free Fable reset ready" : ""}`] : [];
   if (!reset || !week || !Number.isFinite(fable?.usedPercent)) return near;
   return [...near, ...fableResetAdvice(fact, fable, { now, readingsOf, floorPercent })];
