@@ -50,19 +50,19 @@ export function claudeRotationStatusCommand(ctx, args, output = console.log) {
 }
 
 /** WHAT: Stores or reuses one exact-session switch episode. WHY: Keeps a busy retry bound to its compact outcome after more work. */
-export function beginClaudeRotation(state, entry, target, identity, { automatic = false } = {}) {
+export function beginClaudeRotation(state, entry, target, identity, { automatic = false, forced = false } = {}) {
   if (!state?.set || !identity?.sessionId || !identity.path) return null;
   const key = claudeRotationKey(entry.agentName, entry.pane), prior = state.get(key, null);
   if (automatic && prior?.phase === "pending" && prior.target !== target) return null;
   if (prior?.phase === "pending" && prior.target === target
       && prior.sessionId === identity.sessionId && prior.sessionPath === identity.path) {
-    if (!automatic && prior.automatic) {
-      const explicit = { ...prior, automatic: false };
+    if (!automatic && prior.automatic || forced && !prior.forced) {
+      const explicit = { ...prior, automatic: automatic && prior.automatic, ...(forced ? { forced: true } : {}) };
       return saveClaudeRotation(state, explicit, prior.id) ? explicit : null;
     }
     return prior;
   }
-  const request = { id: randomUUID(), phase: "pending", automatic, target,
+  const request = { id: randomUUID(), phase: "pending", automatic, ...(forced ? { forced: true } : {}), target,
     name: entry.agentName, pane: entry.pane, sessionId: identity.sessionId, sessionPath: identity.path };
   return saveClaudeRotation(state, request, prior?.id || null) ? request : null;
 }

@@ -38,6 +38,15 @@ feature("the compact step of an account switch", () => {
       }],
     });
   }
+  // 18 Nov 2026: his dashboard switch W -> A left nine deep panes blocked on a compact that could not run.
+  unit("a forced switch restarts a warm large pane whose compact is refused or unknown", {
+    when: ["planning the same panes with and without force", () => {
+      const refused = { mode: "running", facts: { tokens: 305_000, idleMs: 60_000 }, compactRefusal: "not-idle:working" };
+      const unknown = { mode: "running", facts: { tokens: null, idleMs: null } };
+      return [refused, unknown].flatMap(pane => [accountSwitchPlan(pane).action, accountSwitchPlan({ ...pane, forced: true }).action]);
+    }],
+    then: ["only the forced plans restart", actions => expect(actions).toEqual(["HOLD", "RESTART", "HOLD", "RESTART"])],
+  });
   // lsrc:0 and skyvw:0, 27 Oct: 61 and 1 prompts held by Claude V's quota floor kept both large contexts from
   // compacting, so rotate could never move them to an account with room.
   const floorHeld = { status: "pending", costHold: true, attempts: 41,

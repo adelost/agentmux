@@ -242,7 +242,8 @@ async function planPanes(ctx, observed, target, deps, compactedKeys = new Set())
       : accountSwitchPlan({ mode: pane.mode, alreadySelected, facts: context?.facts,
       compactRefusal: proof && proof.status !== "verified" && !compactNeverSent(proof) ? `previous-switch-compact-${proof.status}`
         : context?.compactRefusal,
-      compacted: proof?.status === "verified" || context?.compacted || compactedKeys.has(pane.key) }, deps.policy);
+      compacted: proof?.status === "verified" || context?.compacted || compactedKeys.has(pane.key),
+      forced: deps.forced || request?.forced === true }, deps.policy);
     planned.push({ ...pane, plan, compactTarget: context?.target || null, contextTokens: context?.facts?.tokens ?? null });
   }
   return planned;
@@ -411,8 +412,11 @@ export async function rotateClaudeFleet(ctx, requested, {
   dry = false,
   // The quota stop mover moves only the panes its stopped account holds.
   only = null,
+  // Mattias's forced switch restarts idle panes without the compact; busy ones keep a forced request for their turn end.
+  force = false,
 } = {}, dependencies = {}) {
   const deps = {
+    forced: force,
     requestCurrent: request => ctx.state?.get?.(requestKey(request.name, request.pane), null),
     agents: dependencies.agents || listAgents(ctx.configPath),
     leaseWaitMs: dependencies.leaseWaitMs ?? 30_000,
@@ -462,7 +466,7 @@ export async function rotateClaudeFleet(ctx, requested, {
   const chosen = configuredClaudePanes(deps.agents).filter((pane) => !only || only.includes(paneKey(pane.agentName, pane.pane)));
   deps.requests = new Map(chosen.map(entry => [paneKey(entry.agentName, entry.pane), dry ? null
     : beginClaudeRotation(ctx.state, entry, target.id,
-      deps.latestIdentity(join(entry.agent.dir, ".agents", String(entry.pane))), { automatic: dependencies.persistBlocked === false })]));
+      deps.latestIdentity(join(entry.agent.dir, ".agents", String(entry.pane))), { automatic: dependencies.persistBlocked === false, forced: force })]));
   for (const [agentName, panes] of projectsFor(chosen)) {
     await rotateProject(ctx, agentName, panes, target, deps, { dry, rows, prepareOnce });
   }
@@ -486,7 +490,7 @@ export async function runRequestedClaudeRotation(ctx, name, pane, dependencies =
     saveClaudeRotation(ctx.state, { ...request, phase: "blocked", reason: "session-changed-or-unavailable" }, request.id);
     return null;
   }
-  const result = await rotateClaudeFleet(ctx, request.target, { only: [paneKey(name, pane)] },
+  const result = await rotateClaudeFleet(ctx, request.target, { only: [paneKey(name, pane)], force: request.forced === true },
     { ...dependencies, agents, persistBlocked: false, leaseWaitMs: 0, output: () => {}, setExitCode: () => {} });
   const row = result.rows?.[0];
   const latest = ctx.state.get(key, null);

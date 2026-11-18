@@ -15,6 +15,8 @@ import { CONTEXT_COST_POLICY } from "./context-cost.mjs";
 // way back to work, and the plan says so instead of blocking the pane forever.
 // A pane with a persisted limit receipt is planned like a dormant one: the
 // switch only selects the target, and quota recovery resumes its exact session.
+// A forced switch (Mattias 2026-11-18, delivery:6580b5ab873857bd06be5cd2694b6ff4: his dashboard switch must
+// move the panes) restarts an idle pane in its exact session without the compact: he accepts the cache miss.
 
 /** WHAT: Names the decision table for one pane's account switch. WHY: Keeps every switch path inspectable before any process or model change. */
 export const accountSwitchCostRules = defineDecisionTable({
@@ -27,29 +29,31 @@ export const accountSwitchCostRules = defineDecisionTable({
     size: ["SMALL", "LARGE"],
     source: ["OPEN", "LIMITED"],
     compact: ["ADMISSIBLE", "REFUSED"],
+    request: ["NORMAL", "FORCED"],
   },
   columns: { action: choice(["KEEP", "SELECT", "RESTART", "COMPACT_THEN_RESTART", "HOLD"]) },
   cells: [
     on("interrupted-switch", { process: "RECOVERING" }, { action: "RESTART" }),
     on("already-selected", { process: ["DORMANT", "RUNNING"], selected: "TARGET" }, { action: "KEEP" }),
     on("dormant", { process: "DORMANT", selected: "OTHER" }, { action: "SELECT" }),
-    on("context-unknown", { process: "RUNNING", selected: "OTHER", evidence: "UNKNOWN" }, { action: "HOLD" }),
-    on("cache-cold", { process: "RUNNING", selected: "OTHER", evidence: "KNOWN", cache: "COLD" }, { action: "RESTART" }),
-    on("context-small", { process: "RUNNING", selected: "OTHER", evidence: "KNOWN", cache: "WARM", size: "SMALL" },
+    on("context-unknown", { process: "RUNNING", selected: "OTHER", request: "NORMAL", evidence: "UNKNOWN" }, { action: "HOLD" }),
+    on("cache-cold", { process: "RUNNING", selected: "OTHER", request: "NORMAL", evidence: "KNOWN", cache: "COLD" }, { action: "RESTART" }),
+    on("context-small", { process: "RUNNING", selected: "OTHER", request: "NORMAL", evidence: "KNOWN", cache: "WARM", size: "SMALL" },
       { action: "RESTART" }),
-    on("source-limited", { process: "RUNNING", selected: "OTHER", evidence: "KNOWN", cache: "WARM", size: "LARGE",
+    on("source-limited", { process: "RUNNING", selected: "OTHER", request: "NORMAL", evidence: "KNOWN", cache: "WARM", size: "LARGE",
       source: "LIMITED" }, { action: "RESTART" }),
-    on("compact-refused", { process: "RUNNING", selected: "OTHER", evidence: "KNOWN", cache: "WARM", size: "LARGE",
+    on("compact-refused", { process: "RUNNING", selected: "OTHER", request: "NORMAL", evidence: "KNOWN", cache: "WARM", size: "LARGE",
       source: "OPEN", compact: "REFUSED" }, { action: "HOLD" }),
-    on("compact-first", { process: "RUNNING", selected: "OTHER", evidence: "KNOWN", cache: "WARM", size: "LARGE",
+    on("compact-first", { process: "RUNNING", selected: "OTHER", request: "NORMAL", evidence: "KNOWN", cache: "WARM", size: "LARGE",
       source: "OPEN", compact: "ADMISSIBLE" }, { action: "COMPACT_THEN_RESTART" }),
+    on("forced", { process: "RUNNING", selected: "OTHER", request: "FORCED" }, { action: "RESTART" }),
   ],
   invariants: [
     { refuse: "a warm large context on an answering source never moves without compact",
-      when: d => d.at.process === "RUNNING" && d.at.selected === "OTHER" && d.at.evidence === "KNOWN"
+      when: d => d.at.request === "NORMAL" && d.at.process === "RUNNING" && d.at.selected === "OTHER" && d.at.evidence === "KNOWN"
         && d.at.cache === "WARM" && d.at.size === "LARGE" && d.at.source === "OPEN" && d.values.action === "RESTART" },
     { refuse: "unknown context evidence never authorizes a restart or compact",
-      when: d => d.at.process === "RUNNING" && d.at.selected === "OTHER" && d.at.evidence === "UNKNOWN"
+      when: d => d.at.request === "NORMAL" && d.at.process === "RUNNING" && d.at.selected === "OTHER" && d.at.evidence === "UNKNOWN"
         && d.values.action !== "HOLD" },
     { refuse: "a dormant pane is never woken, restarted or compacted",
       when: d => d.at.process === "DORMANT" && !["SELECT", "KEEP"].includes(d.values.action) },
@@ -62,7 +66,7 @@ const SOURCE_LIMITS = new Set(["provider-usage-limited", "claude-subscription-ac
  * WHAT: Maps one pane's observed facts to its switch action and the cell that chose it.
  * WHY: Keeps token, idle and source limits outside the restart code and unknown facts out of permissive defaults.
  */
-export function accountSwitchPlan({ mode, alreadySelected = false, facts = null, compactRefusal = null, compacted = false },
+export function accountSwitchPlan({ mode, alreadySelected = false, facts = null, compactRefusal = null, compacted = false, forced = false },
   policy = CONTEXT_COST_POLICY) {
   const process = mode === "dormant" || mode === "quota-stopped" ? "DORMANT"
     : mode === "recovering" ? "RECOVERING" : "RUNNING";
@@ -79,6 +83,7 @@ export function accountSwitchPlan({ mode, alreadySelected = false, facts = null,
     size: small ? "SMALL" : "LARGE",
     source: SOURCE_LIMITS.has(facts?.blocker) ? "LIMITED" : "OPEN",
     compact: compactRefusal ? "REFUSED" : "ADMISSIBLE",
+    request: forced ? "FORCED" : "NORMAL",
   });
   const detail = decision.cell === "source-limited" ? `source-limited:${facts.blocker}`
     : decision.cell === "compact-refused" ? `compact-refused:${compactRefusal}`

@@ -21,7 +21,7 @@ const usage = `Usage:
   amux accounts                                  same view as amux quota
   amux accounts login <codex|kimi>:<1|2>
   amux accounts login claude:<1|2|login|email>   a new login name gets its own dir
-  amux accounts rotate claude:<1|2|login|email> [--dry] [--only agent:pane,...]
+  amux accounts rotate claude:<1|2|login|email> [--dry] [--force] [--only agent:pane,...]
   amux accounts rotate-status (--request-id ID | --only agent:pane) [--json]
   amux accounts switch codex:<1|2> PROJECT [-p N] [--dry] [--continue-file PATH]
   amux accounts switch codex:<1|2> --all [--dry] [--json] [--request-id ID]
@@ -36,6 +36,7 @@ Login dirs: ~/.config/agent/account-profiles/claude/<login>, one account per dir
   "limitResets": [{"kind": "weekly", "expires": "..."}, {"kind": "fable", "expires": "..."}] names each reset's kind:
   weekly gives the whole week back; a model reset restores its allowance and its share of the week.
 rotate --dry prints the plan per pane and changes nothing; Discord: /byt <login>.
+rotate --force restarts idle panes in their exact session without the compact first (a cache miss); working panes switch at their turn end.
 Codex switch compacts running panes first and preserves model/effort and the exact session when portable.
 Busy panes keep a durable request for the existing watcher; dormant panes are selected for their next start, never woken.
 --continue-file is single-pane only and queues that continuation once after a verified switch.
@@ -101,13 +102,14 @@ export async function cmdAccounts(args, ctxOrOptions = null, suppliedOptions = {
     if (!ctx || args.length < 2) throw new Error(usage);
     const [provider, id] = String(args[1]).split(":");
     if (provider !== "claude" || !id) throw new Error(usage);
-    let dry = false, only = null;
+    let dry = false, force = false, only = null;
     for (let i = 2; i < args.length; i++) {
       if (args[i] === "--dry") dry = true;
+      else if (args[i] === "--force") force = true;
       else if (args[i] === "--only" && /^[\w.-]+:\d+(?:,[\w.-]+:\d+)*$/u.test(args[i + 1] || "")) only = args[++i].split(",");
       else throw new Error(usage);
     }
-    return rotate(ctx, id, { dry, ...(only ? { only } : {}) });
+    return rotate(ctx, id, { dry, ...(force ? { force } : {}), ...(only ? { only } : {}) });
   }
   if (args[0] === "switch-status") {
     if (!ctx) throw new Error(usage);
