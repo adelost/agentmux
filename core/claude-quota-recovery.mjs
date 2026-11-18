@@ -148,6 +148,7 @@ export async function spareClaudeAccount({
   emailOf,
   reservePercent = 90,
   model = null,
+  crowding = () => 0,
 }) {
   const ownEmail = current ? emailOf(current) : null;
   let best = null;
@@ -159,7 +160,11 @@ export async function spareClaudeAccount({
     const weekUsed = claudeWeeklyRoom(quota, { reservePercent }), scoped = model ? modelWindow(quota, model) : null;
     // For a model's limit the account must have room for that model, and the one with most of it wins: the week's room alone
     // would move the pane to an account whose model window is as spent (18 Nov 2026: E had week left and Fable at 100 %).
-    const usedPercent = weekUsed === null || !model ? weekUsed : Number.isFinite(scoped?.usedPercent) && scoped.usedPercent < reservePercent ? Number(scoped.usedPercent) : null;
+    // The fuller of the two windows is what the pane has there: an account with Fable left and its week nearly gone is no better home.
+    // `crowding` is the points other panes just sent there will use before the next reading shows them (one reading serves a whole
+    // tick, so eleven panes stopped together would all pick the same account: V's week had 17 points on 18 Nov).
+    const own = weekUsed === null || !model ? weekUsed : Number.isFinite(scoped?.usedPercent) ? Math.max(Number(scoped.usedPercent), weekUsed) : null;
+    const usedPercent = own === null ? null : model ? (own + crowding(profile) < reservePercent ? own + crowding(profile) : null) : own;
     if (usedPercent !== null && (!best || usedPercent < best.usedPercent)) best = { profile, quota, usedPercent };
   }
   return best;

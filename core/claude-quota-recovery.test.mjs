@@ -345,7 +345,25 @@ feature("a pane stopped at its account's limit for one model", () => {
       current: profile("claude:a"), catalog: Object.keys(accounts).map(profile), authenticated: () => true,
       emailOf: (candidate) => accounts[candidate.key].email, readQuota: async (candidate) => accounts[candidate.key].quota, reservePercent: 90, model: "fable",
     })],
-    then: ["S, by its Fable room; V at 95 % is past the reserve", (spare) => expect(spare).toMatchObject({ profile: { key: "claude:s" }, usedPercent: 40 })],
+    then: ["S, by the fuller of its two windows (week 60 %); V at 95 % Fable is past the reserve", (spare) => expect(spare).toMatchObject({ profile: { key: "claude:s" }, usedPercent: 60 })],
+  });
+
+  unit("panes stopped together do not all pick the one account: what was just sent there counts against it", {
+    given: ["V has most Fable but 17 points of week; I and S have week", () => ({
+      "claude:a": { email: "a@example.test", quota: usage(51, 100) }, "claude:v": { email: "v@example.test", quota: usage(83, 61) },
+      "claude:i": { email: "i@example.test", quota: usage(43, 86) }, "claude:s": { email: "s@example.test", quota: usage(45, 88) },
+    })],
+    when: ["three panes choose in turn, each sending counted as 4 points", async (accounts) => {
+      const sent = {}, picks = [];
+      for (let pane = 0; pane < 3; pane += 1) {
+        const spare = await spareClaudeAccount({ current: profile("claude:a"), catalog: Object.keys(accounts).map(profile), authenticated: () => true,
+          emailOf: (candidate) => accounts[candidate.key].email, readQuota: async (candidate) => accounts[candidate.key].quota, reservePercent: 90, model: "fable",
+          crowding: (candidate) => 4 * (sent[candidate.key] || 0) });
+        picks.push(spare?.profile.key ?? null); if (spare) sent[spare.profile.key] = (sent[spare.profile.key] || 0) + 1;
+      }
+      return picks;
+    }],
+    then: ["V (83), then I (86 against V's 87), then V again (87 against S's 88; I would pass the reserve)", (picks) => expect(picks).toEqual(["claude:v", "claude:i", "claude:v"])],
   });
 });
 

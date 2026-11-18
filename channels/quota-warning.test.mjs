@@ -66,6 +66,22 @@ feature("active-account warning with the quota box, 2026-10-17", () => {
       expect(observe).not.toHaveBeenCalled();
     }],
   });
+  // 18 Nov 2026: Claude A's Fable window ended with 49 % of its week left; seven panes stood on it and no warning had come.
+  unit("a Fable window near its end warns though the week has room, and says when it returns", {
+    when: ["a working account reads week 51 % and Fable 86 %, then 91 % twenty minutes on", async () => {
+      const fx = fixture(), at = (fable) => ({ accounts: [{ ...account("claude", "adelost", 51, ["deep:5"]),
+        limits: [{ kind: "weekly_all", usedPercent: 51, resetsAt: RESET }, { kind: "weekly_scoped", scopeName: "Fable", usedPercent: fable, resetsAt: "2026-10-19T10:00:00Z" }] }] });
+      await postDueQuotaWarnings({ snapshot: at(86), sent: fx.sent, notify: fx.notify, now: NOW });
+      await postDueQuotaWarnings({ snapshot: at(91), sent: fx.sent, notify: fx.notify, now: NOW + 20 * 60_000 });
+      return fx.notify.mock.calls.map(call => call[0]);
+    }],
+    then: ["both are posted, each with what is left of Fable and its return", (texts) => {
+      expect(texts).toHaveLength(2);
+      expect(texts[0]).toContain("Fable 14% left, back");
+      expect(texts[1]).toContain("Fable 9% left, back");
+    }],
+  });
+
   unit("09:15 posts once for Codex A and gives inactive ai:2 no advice", {
     when: ["rendering the original readings with measured inactivity", () => posted(morning())],
     then: ["one box; the idle ai:2 account gets a row but no advice", texts => expect(texts).toEqual([[

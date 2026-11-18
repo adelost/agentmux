@@ -68,8 +68,11 @@ export function createSentNoticeStore(path = join(homedir(), ".agentmux", "quota
 
 const identityOf = account => account.provider === "claude" ? account.account.email : `${account.provider}:${account.account.email}`;
 const activePanes = account => [...new Set(account.activeInUse || [])];
+/** WHAT: Returns how used an account is where it will stop first: its week or its Fable window. WHY: A Fable window ends with week left, and that stop is warned of too. */
+const pressureOf = account => Math.max(weeklyQuotaOf(account)?.usedPercent ?? -Infinity, fableQuotaOf(account)?.usedPercent ?? -Infinity);
+const fableLeads = account => (fableQuotaOf(account)?.usedPercent ?? -Infinity) > (weeklyQuotaOf(account)?.usedPercent ?? -Infinity);
 const warnedAccounts = (accounts, config) => accounts.filter(account => activePanes(account).length
-  && Number.isFinite(weeklyQuotaOf(account)?.usedPercent) && weeklyQuotaOf(account).usedPercent >= config.warnPercent);
+  && Number.isFinite(weeklyQuotaOf(account)?.usedPercent) && pressureOf(account) >= config.warnPercent);
 
 /** WHAT: Returns each account's recent weekly readings, saving its newest first when told to. WHY: Lets "runs out before the reset" follow the current pace, not the week's average. */
 function weeklyReadings(sent, accounts, now, { record = false } = {}) {
@@ -90,13 +93,16 @@ function weeklyReadings(sent, accounts, now, { record = false } = {}) {
 /** WHAT: Reads one warned account's warning history. WHY: Separates a first warning, a reached limit and a cooled-down reminder. */
 function warningState(account, sent, config, now) {
   const weekly = weeklyQuotaOf(account), email = account.account?.email;
-  const resetAt = Date.parse(weekly?.resetsAt), cooldownMs = warningCooldownMs(weekly?.usedPercent, config);
+  const usedPercent = pressureOf(account), resetAt = Date.parse(weekly?.resetsAt), cooldownMs = warningCooldownMs(usedPercent, config);
   if (!email || cooldownMs === null || !(resetAt > now)) return null;
   const key = weeklyWindowKey(identityOf(account), weekly.resetsAt), accountKey = weeklyWindowKey(identityOf(account), "1970-01-01T00:00:00Z");
   const previous = sent.entry(key)?.reminder;
   const lastAt = Math.max(previous?.at ?? -Infinity, sent.entry(accountKey)?.reminder?.at ?? -Infinity);
-  return { account, panes: activePanes(account), provider: account.provider, email, usedPercent: weekly.usedPercent, key, accountKey, resetAt,
-    justFull: weekly.usedPercent >= 100 && !(previous?.usedPercent >= 100), first: !previous, cooledDown: now - lastAt >= cooldownMs };
+  return { account, panes: activePanes(account), provider: account.provider, email, usedPercent, key, accountKey, resetAt,
+    justFull: usedPercent >= 100 && !(previous?.usedPercent >= 100), // A Fable window goes from the warning level to its end within the hour with many panes on it, so its passing the reserve is news too;
+    // the week keeps his cooldowns alone.
+    first: !previous || (fableLeads(account) && usedPercent >= config.reservePercent && !(previous.usedPercent >= config.reservePercent)),
+    cooledDown: now - lastAt >= cooldownMs };
 }
 
 /**

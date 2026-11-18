@@ -50,6 +50,11 @@ if (!config.enabled) {
   const lifecycle = createClaudeQuotaLifecycle({ configPath, tmuxSocket, tmuxExec, state });
   const selfRequests = createSelfCompactStore();
   const parkStore = createQuotaParkStore();
+  // Panes sent to an account for a model's limit in the last quarter of an hour, by account: each counts CROWD_POINTS against the next pane's
+  // choice of that account, so panes stopped together spread over the accounts with room.
+  const CROWD_POINTS = 4, CROWD_MS = 15 * 60_000, sends = new Map();
+  const sentTo = (key, self) => [...(sends.get(key) || new Map())].filter(([paneKey, at]) => paneKey !== self && Date.now() - at < CROWD_MS).length;
+  const noteSent = (key, paneKey) => { if (!sends.has(key)) sends.set(key, new Map()); if (!sends.get(key).has(paneKey)) sends.get(key).set(paneKey, Date.now()); };
   const coordinator = createClaudeQuotaCoordinator({
     queue,
     lifecycle,
@@ -62,7 +67,7 @@ if (!config.enabled) {
       notBefore: Number.isFinite(receipt?.observedAt) ? receipt.observedAt : notBefore,
     }),
     // The same shared budget reads the other logins, and only for a pane whose week, or whose model's week, is spent.
-    findSpareAccount: ({ current, receipt }) => spareClaudeAccount({
+    findSpareAccount: ({ current, receipt, agentName, pane }) => spareClaudeAccount({
       current,
       catalog: runtimeProfileCatalog("claude"),
       authenticated: runtimeProfileAuthenticated,
@@ -73,7 +78,8 @@ if (!config.enabled) {
       }),
       reservePercent: parseQuotaWarningConfig().reservePercent,
       model: receipt?.limitModel ?? null,
-    }),
+      crowding: (profile) => CROWD_POINTS * sentTo(profile.key, `${agentName}:${pane}`),
+    }).then((spare) => { if (spare && receipt?.limitModel) noteSent(spare.profile.key, `${agentName}:${pane}`); return spare; }),
     resetGraceMs: config.resetGraceMs,
     parkPending: (agentName, pane) => parkHoldsMove(selfRequests.read(agentName, pane), Date.now()),
     parkStore,

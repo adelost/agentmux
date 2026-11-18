@@ -142,10 +142,18 @@ function actionLines(facts, { config, now, skipAccounts = new Set() }) {
 
 /** WHAT: Calculates Fable reset value and its race against the week for measured Ultra plans.
  * WHY: Keeps an unmeasured plan or a reset between readings from becoming a false forecast. */
-function fableAdvice(fact, { now, readingsOf, floorPercent }) {
+function fableAdvice(fact, { now, readingsOf, floorPercent, warnPercent = 80 }) {
   const { account, week, name } = fact, fable = fableQuotaOf(account);
   const reset = account.subscription?.limitResets?.some(item => item.kind === "fable" && Date.parse(item.expires) > now);
-  if (!reset || !week || !Number.isFinite(fable?.usedPercent)) return [];
+  // Near its end the Fable window stands in the box before it stops a pane: what is left, when it returns, and whether a free reset
+  // waits (18 Nov 2026: A's Fable ended with 49 % of its week left and nothing had said so).
+  const near = Number.isFinite(fable?.usedPercent) && fable.usedPercent >= warnPercent && account.activeInUse?.length
+    ? [`${name}: Fable ${Math.max(0, Math.round(100 - fable.usedPercent))}% left, back ${dayAndClock(fable.resetsAt)}${reset ? ", free Fable reset ready" : ""}`] : [];
+  if (!reset || !week || !Number.isFinite(fable?.usedPercent)) return near;
+  return [...near, ...fableResetAdvice(fact, fable, { now, readingsOf, floorPercent })];
+}
+function fableResetAdvice(fact, fable, { now, readingsOf, floorPercent }) {
+  const { account, week, name } = fact;
   const fullPoints = fableFullWeekPoints(account.subscription), ultra = fullPoints !== null;
   const value = Number((fable.usedPercent * (fullPoints ?? 0) / 100).toFixed(1)).toString().replace(".", ",");
   const lines = ultra ? [`${name}: Fable reset gives ${value} week ${value === "1" ? "point" : "points"}`] : [];
@@ -181,7 +189,7 @@ export function buildQuotaOverview(snapshot, { config, now = Date.now(), reading
   const width = Math.max(0, ...facts.map(fact => fact.name.length));
   // The percent is what is left, as Mattias asked; the detail lines of amux quota give what is used.
   const table = [`${" ".repeat(width)} panes  left  reset`, ...facts.flatMap(fact => linesOf(fact, width, now))];
-  const fable = facts.map(fact => ({ fact, lines: fableAdvice(fact, { now, readingsOf, floorPercent }) }));
+  const fable = facts.map(fact => ({ fact, lines: fableAdvice(fact, { now, readingsOf, floorPercent, warnPercent: config.warnPercent }) }));
   const skipAccounts = new Set(fable.filter(item => item.lines.some(line => line.endsWith("press Fable reset now"))).map(item => item.fact.account));
   return { text: ["```", ...table, "```", ...fable.flatMap(item => item.lines), ...actionLines(facts, { config, now, skipAccounts })].join("\n") };
 }
