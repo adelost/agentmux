@@ -30,7 +30,8 @@ feature("wind-down exact-session restart (component)", () => {
 
 function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch = false,
   selected = null, configuredCmd = "claude", observed = null, selectedProfile = "1", liveSessionId = null,
-  sessionExists = true, afterLimitMenu = "❯  " } = {}) {
+  sessionExists = true, afterLimitMenu = "❯  ",
+  limitText = "You've hit your session limit · resets 8:50pm (Europe/Stockholm)" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-quota-lifecycle-"));
   const homeDir = join(root, "home");
   const repoDir = join(root, "repo");
@@ -62,7 +63,7 @@ function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch =
       timestamp: "2026-07-16T17:01:11.018Z",
       message: {
         stop_reason: "stop_sequence",
-        content: [{ type: "text", text: "You've hit your session limit · resets 8:50pm (Europe/Stockholm)" }],
+        content: [{ type: "text", text: limitText }],
       },
     }),
     "",
@@ -398,6 +399,20 @@ feature("Claude quota delivery guard", () => {
     }],
     then: ["the transport receives a typed quota fence", (error, ctx) => {
       expect(error).toMatchObject({ code: "AMUX_DELIVERY_BLOCKED", quotaLimited: true });
+      ctx.cleanup();
+    }],
+  });
+
+  // deep:4 19 Nov 2026 02:37Z: stopped on its Fable limit, Claude's own way out (/model) was fenced with the work.
+  component("a switch away from the one spent model crosses its limit, the same model does not", {
+    given: ["a target stopped on its Fable limit", () => fixture({
+      limitText: "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model." })],
+    when: ["checking a switch to Opus and one to Fable", (ctx) => ["/model claude-opus-5-5", "/model fable"].map((prompt) => {
+      try { assertClaudeQuotaAvailable("claw", 0, { configPath: ctx.configPath, homeDir: ctx.homeDir, prompt }); return "passes"; }
+      catch (error) { return error.code; }
+    })],
+    then: ["only the other model's switch passes", (outcomes, ctx) => {
+      expect(outcomes).toEqual(["passes", "AMUX_DELIVERY_BLOCKED"]);
       ctx.cleanup();
     }],
   });

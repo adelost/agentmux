@@ -1,5 +1,6 @@
 import { isRequestedClaudeModel, normalizeClaudeModelName, resolveClaudeModel } from "./claude-model.mjs";
 import { keepClaudeDefaultModel, putBackLandedDefault } from "./claude-default-model.mjs";
+import { activeClaudeLimitForTarget, switchesAroundModelLimit } from "./claude-quota-target.mjs";
 import { readClaudeFooterModel } from "./claude-statusline.mjs";
 import { beginContextCompact, contextMaintenanceAttempt, rememberContextCompact } from "./context-maintenance.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
@@ -68,6 +69,7 @@ export async function runLockedClaudeModelChange({
   compact = verifiedClaudeCompact,
   sendSlash = sendSlashVerified,
   keepDefault = keepClaudeDefaultModel,
+  limitFor = activeClaudeLimitForTarget,
   wait = pause,
 } = {}) {
   if (!state || !queue || !paneDir || !targetModel) return { ok: false, stage: "input", reason: "model-change-boundary-missing" };
@@ -91,10 +93,15 @@ export async function runLockedClaudeModelChange({
     return { ok: true, unchanged: true, model: previousModel };
   }
 
+  // Stopped on this model's own limit, the pane cannot compact on it: the new model compacts the context once,
+  // at its own price, and the messages that limit parked follow the switch (deep:4, 19 Nov 2026).
+  const limit = limitFor(name, pane);
+  const aroundLimit = switchesAroundModelLimit(limit, `/model ${model}`);
   const lease = queue.acquireSessionLease(name);
   if (!lease) return { ok: false, stage: "lease", reason: "delivery-lease-busy" };
   try {
-    if (queue.list(name, pane).some(job => !TERMINAL_DELIVERY_STATES.has(job.status))) {
+    if (queue.list(name, pane).some(job => !TERMINAL_DELIVERY_STATES.has(job.status)
+      && !(aroundLimit && job.status === "pending"))) {
       return { ok: false, stage: "delivery", reason: "older-message-pending" };
     }
     const [busy, input] = await Promise.all([
@@ -106,11 +113,12 @@ export async function runLockedClaudeModelChange({
     const identity = identityFor(paneDir);
     if (!identity?.sessionId || !identity.path) return { ok: false, stage: "identity", reason: "exact-session-missing" };
     const prior = contextMaintenanceAttempt(state, name, pane, identity);
-    if (prior && prior.status !== "VERIFIED") {
+    // An attempt made after the limit was refused by it.
+    const refusedByLimit = aroundLimit && prior?.at >= limit.observedAt;
+    if (prior && prior.status !== "VERIFIED" && !refusedByLimit) {
       return { ok: false, stage: "compact", reason: `prior-${prior.status.toLowerCase()}` };
     }
-    let reusedCompact = Boolean(prior);
-    if (!prior) {
+    const compactExact = async () => {
       beginContextCompact(state, name, pane, identity, { source: "model switch", compactCause: "model switch: context size unavailable" });
       const receipt = await compact({ agent, agentName: name, pane, paneDir,
         latestIdentity: identityFor, sendSlash });
@@ -120,10 +128,24 @@ export async function runLockedClaudeModelChange({
         return { ok: false, stage: "compact", reason: receipt?.reason || "compact-boundary-unverified" };
       }
       rememberContextCompact(state, name, pane, receipt);
-      reusedCompact = false;
-    }
-    const kept = await keepDefault((keep) => switchVerified({ agent, state, name, pane, from: previousModel, model,
+      return { ok: true };
+    };
+    const switchModel = () => keepDefault((keep) => switchVerified({ agent, state, name, pane, from: previousModel, model,
       keep, current, sendSlash, wait }));
+    if (aroundLimit) {
+      const kept = await switchModel();
+      if (kept.busy) return { ok: false, stage: "default", reason: "default-model-busy" };
+      if (!kept.result.ok) return { ...kept.result, defaultModel: kept.defaults };
+      const compacted = await compactExact();
+      return compacted.ok ? { ...kept.result, reusedCompact: false, compactedAfter: true, defaultModel: kept.defaults }
+        : { ...compacted, switched: kept.result.model, defaultModel: kept.defaults };
+    }
+    const reusedCompact = Boolean(prior);
+    if (!prior) {
+      const compacted = await compactExact();
+      if (!compacted.ok) return compacted;
+    }
+    const kept = await switchModel();
     if (kept.busy) return { ok: false, stage: "default", reason: "default-model-busy" };
     return { ...kept.result, ...(kept.result.ok ? { reusedCompact } : {}), defaultModel: kept.defaults };
   } finally { lease.release(); }

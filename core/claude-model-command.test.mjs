@@ -14,13 +14,15 @@ const FRESH_FOOTER = "❯ \n────\n  ⬆ /gsd-update │ Opus 5.5 │ 2\n
 const SETTINGS = `${JSON.stringify({ model: "opus[1m]", theme: "dark" }, null, 2)}\n`;
 
 function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5", running = true,
-  screen = null, compactResult = null, footerFor = {}, recordsAfterMs = null } = {}) {
+  screen = null, compactResult = null, footerFor = {}, recordsAfterMs = null, limit = null, prior = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-claude-model-change-"));
   const path = join(root, "session.jsonl");
   writeFileSync(path, "");
   const settingsPath = join(root, "settings.json");
   writeFileSync(settingsPath, SETTINGS);
-  const data = { watcher_last_model: { "claw:0": { model: "claude-opus-5", effort: "high" } } };
+  const data = { watcher_last_model: { "claw:0": { model: "claude-opus-5", effort: "high" } },
+    ...(prior && { context_maintenance_by_pane_v1: { "claw:0": { sessionId: "11111111-1111-4111-8111-111111111111",
+      cursor: { positions: { [path]: 0 } }, ...prior } } }) };
   const state = { get: (key, fallback) => data[key] ?? fallback, set: (key, value) => { data[key] = value; } };
   const calls = [];
   let model = liveModel;
@@ -75,6 +77,7 @@ function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5
   const change = targetModel => runLockedClaudeModelChange({
     agent, state, queue, name: "claw", pane: 0, paneDir: root, targetModel,
     identityFor, compact, sendSlash: recordsAfterMs == null ? sendSlash : sendSlashVerified, wait: async () => {}, keepDefault,
+    limitFor: () => limit,
   });
   return { change, calls, state, settings: () => readFileSync(settingsPath, "utf-8"),
     cleanup: () => rmSync(root, { recursive: true, force: true }) };
@@ -98,6 +101,19 @@ feature("Claude model changes are compact-first and pane-local", () => {
     when: ["requesting Opus 5.5", fx => fx.change("claude-opus-5-5")],
     then: ["the verified compact precedes the switch", (result, fx) => {
       try { expect(result.ok).toBe(true); expect(fx.calls).toEqual(["compact", "/model claude-opus-5-5", "release"]); }
+      finally { fx.cleanup(); }
+    }],
+  });
+  // deep:4 19 Nov 2026 02:37Z: Fable spent, the compact before the switch ran on Fable and was refused, and the
+  // Fleet's nudge parked by that limit then held every retry; the pane stood at 368k with work left.
+  component("a pane stopped on one model's limit switches first and compacts on the new model", {
+    given: ["a Fable pane stopped on its Fable limit, a nudge parked by it and the refused compact before", () => fixture({
+      liveModel: "claude-fable-5-2", pending: true,
+      limit: { limitKind: "model", limitModel: "fable", observedAt: Date.parse("2026-11-19T02:37:41Z") },
+      prior: { status: "UNKNOWN", reason: "compact-attempt-timeout", at: Date.parse("2026-11-19T02:37:49Z") } })],
+    when: ["requesting Opus 5.5", fx => fx.change("claude-opus-5-5")],
+    then: ["the switch precedes the compact", (result, fx) => {
+      try { expect(result.ok).toBe(true); expect(fx.calls).toEqual(["/model claude-opus-5-5", "compact", "release"]); }
       finally { fx.cleanup(); }
     }],
   });

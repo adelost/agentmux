@@ -2,7 +2,7 @@
 
 import { join } from "node:path";
 import { getAgent } from "../cli/config.mjs";
-import { claudePaneSelection } from "./claude-model.mjs";
+import { claudePaneSelection, resolveClaudeModel } from "./claude-model.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { runtimeAgentsPath } from "./runtime-defaults.mjs";
 import {
@@ -97,6 +97,16 @@ export function isClaudeQuotaContinuationAuthorized(agentName, pane, receipt, pr
 }
 
 /**
+ * WHAT: Tells whether a prompt is a /model to another model than the one whose own limit stopped the pane.
+ * WHY: /model is Claude Code's own way out of one model's limit and reaches no model (deep:4, 19 Nov 2026).
+ */
+export function switchesAroundModelLimit(receipt, prompt) {
+  const requested = /^\/model\s+(\S+)$/u.exec(String(prompt ?? "").trim())?.[1];
+  return Boolean(requested && receipt?.limitKind === "model" && receipt.limitModel
+    && !resolveClaudeModel(requested).toLowerCase().includes(receipt.limitModel));
+}
+
+/**
  * WHAT: Checks pane writes against the newest Claude limit receipt.
  * WHY: Prevents direct and queued send paths from typing into a non-ingesting composer.
  */
@@ -109,6 +119,7 @@ export function assertClaudeQuotaAvailable(agentName, pane = 0, options = {}) {
   // A verified exact-session restart already qualified quota for this same limit.
   // Its old banner persists until the first command or prompt is journaled.
   if (isClaudeQuotaContinuationAuthorized(agentName, pane, receipt, quotaRecoveryContinuation(), options)) return receipt;
+  if (switchesAroundModelLimit(receipt, options.prompt)) return receipt;
   const error = new Error(
     `Claude quota is exhausted for ${agentName}:${Number(pane) || 0}; automatic exact-session recovery is pending`,
   );
