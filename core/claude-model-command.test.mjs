@@ -14,7 +14,7 @@ const FRESH_FOOTER = "❯ \n────\n  ⬆ /gsd-update │ Opus 5.5 │ 2\n
 const SETTINGS = `${JSON.stringify({ model: "opus[1m]", theme: "dark" }, null, 2)}\n`;
 
 function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5", running = true,
-  screen = null, compactResult = null, footerFor = {}, recordsAfterMs = null, limit = null, prior = null } = {}) {
+  screen = null, compactResult = null, footerFor = {}, recordsAfterMs = null, limit = null, prior = null, confirms = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-claude-model-change-"));
   const path = join(root, "session.jsonl");
   writeFileSync(path, "");
@@ -53,8 +53,15 @@ function fixture({ compactOk = true, pending = false, liveModel = "claude-opus-5
     const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
     writeFileSync(settingsPath, `${JSON.stringify({ ...settings, model: picked }, null, 2)}\n`);
   };
+  // Claude Code 2.1.x asks before a cached conversation is re-read on another model; Enter takes "Yes".
+  let asking = null;
+  if (confirms) Object.assign(agent, {
+    captureScreen: async () => asking ? `❯ \n───\n   Switch model?\n   ❯ 1. Yes, switch to Opus 5.5\n     2. No, go back` : null,
+    sendEnter: async () => { calls.push("Enter"); if (asking) { pick(asking); asking = null; } },
+  });
   const sendSlash = async (_agent, _name, _pane, command) => {
     calls.push(command);
+    if (confirms && command.startsWith("/model ")) { asking = command; return { delivered: false }; }
     pick(command);
     return { delivered: true, via: "command-receipt" };
   };
@@ -108,12 +115,12 @@ feature("Claude model changes are compact-first and pane-local", () => {
   // Fleet's nudge parked by that limit then held every retry; the pane stood at 368k with work left.
   component("a pane stopped on one model's limit switches first and compacts on the new model", {
     given: ["a Fable pane stopped on its Fable limit, a nudge parked by it and the refused compact before", () => fixture({
-      liveModel: "claude-fable-5-2", pending: true,
+      liveModel: "claude-fable-5-2", pending: true, confirms: true,
       limit: { limitKind: "model", limitModel: "fable", observedAt: Date.parse("2026-11-19T02:37:41Z") },
       prior: { status: "UNKNOWN", reason: "compact-attempt-timeout", at: Date.parse("2026-11-19T02:37:49Z") } })],
     when: ["requesting Opus 5.5", fx => fx.change("claude-opus-5-5")],
-    then: ["the switch precedes the compact", (result, fx) => {
-      try { expect(result.ok).toBe(true); expect(fx.calls).toEqual(["/model claude-opus-5-5", "compact", "release"]); }
+    then: ["the switch, its re-read confirmed, precedes the compact", (result, fx) => {
+      try { expect(result.ok).toBe(true); expect(fx.calls).toEqual(["/model claude-opus-5-5", "Enter", "compact", "release"]); }
       finally { fx.cleanup(); }
     }],
   });

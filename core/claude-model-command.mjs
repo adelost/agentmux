@@ -20,6 +20,11 @@ const observedModelId = raw => {
   return normalized.ok ? resolveClaudeModel(normalized.model) : null;
 };
 
+// Claude Code asks before it re-reads a cached conversation on another model; amux asked for this pick (deep:4, 19 Nov 2026).
+const REREAD_QUESTION = /Switch model\?[\s\S]*❯\s*1\.\s*Yes, switch to /u;
+const asksToReread = async (agent, name, pane) => typeof agent.captureScreen === "function"
+  && REREAD_QUESTION.test(String(await agent.captureScreen(name, pane).catch(() => "")).split("\n").slice(-12).join("\n"));
+
 /**
  * WHAT: Sends /model and saves the full id once the pane shows the requested model.
  * WHY: The model-watch reads an unsaved switch to a cheaper model as a downgrade
@@ -32,7 +37,12 @@ async function switchVerified({ agent, state, name, pane, from, model, keep, cur
   const sent = await sendSlash(agent, name, pane, `/model ${model}`, { suppressReceipt: true,
     settleMs: 200, maxRescues: 0, receiptTimeoutMs: MODEL_RECEIPT_MS });
   // The footer proves the switch even when its record is missing.
+  let confirmed = false;
   for (let attempt = 0; attempt < 10; attempt++) {
+    if (!confirmed && await asksToReread(agent, name, pane)) {
+      await agent.sendEnter(name, pane);
+      confirmed = true;
+    }
     const actual = await current();
     const running = observedModelId(actual?.model);
     if (isRequestedClaudeModel(running, model)) {
