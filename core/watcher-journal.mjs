@@ -58,7 +58,7 @@ function createJournal(state, maxBytes, log) {
     for (const raw of text.split("\n")) {
       if (!raw.trim()) continue;
       try { apply(JSON.parse(raw)); }
-      catch { log(`watcher journal ${path}: skipped an unreadable line (${raw.length} chars)`); }
+      catch { log(`WARN watcher journal ${path}: skipped an unreadable line (${raw.length} chars)`); }
     }
   }
   // A record still in the state file moves here once, filling only what the journal lacks.

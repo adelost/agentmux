@@ -9,18 +9,28 @@ import { resolveConfiguredInboundTarget } from "./core/inbound-target.mjs";
 import { createUnmappedChannelAnswer } from "./core/unmapped-channel.mjs";
 import { FLEET_RESTART_RESULT_KEY, formatFleetRestartResult } from "./core/fleet-restart.mjs";
 import { warnQuotaOnHumanMessage, createQuotaLimitPoll } from "./channels/quota-warning-runtime.mjs";
+import { tmuxServerUnavailable } from "./core/tmux.mjs";
+import { isEngineProcess } from "./core/tui-stall-recovery.mjs";
 
 const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
 const READY_FILE = process.env.READY_FILE || "/tmp/agentmux.ready";
 
-/** WHAT: Checks configured channels and summarizes stopped panes. WHY: Keeps startup errors readable when many panes are stopped. */
-export async function preflightAgentChannels({ channelMap, agent, log = console.log, warn = console.warn }) {
-  const stopped = [];
-  for (const [channelId, { name, pane = 0 }] of channelMap) {
-    try { await agent.checkAgent(name); log(`  ${name} -> #${channelId} [ok]`); }
-    catch { stopped.push(`${name}:${pane}`); }
+/** WHAT: Checks mapped tmux targets from one listing. WHY: Prevents a session's first pane from standing in for its other panes. */
+export async function preflightAgentChannels({ channelMap, fleetPanes, log = console.log, warn = console.warn }) {
+  const targets = new Set(Array.from(channelMap.values(), ({ name, pane = 0 }) => `${name}:${pane}`));
+  if (!targets.size) return;
+  let rows;
+  try { rows = await fleetPanes.panes(); }
+  catch (error) {
+    const reason = tmuxServerUnavailable(error) ? "tmux server unavailable" : String(error.stderr || error.message).trim();
+    warn(`WARN tmux | pane status unknown: ${reason}. See amux doctor`);
+    return;
   }
-  if (stopped.length) warn(`  ${stopped.length} stopped panes: ${stopped.join(", ")}`);
+  const active = [...targets].filter(key => {
+    const row = rows.get(key);
+    return row && !row.dead && isEngineProcess(row.command);
+  });
+  log(`INFO tmux | ${active.length} of ${targets.size} mapped targets have an agent process in tmux. See amux ps for details`);
 }
 
 /** WHAT: Tracks bridge shutdown by clearing its readiness sentinel. WHY: Keeps health checks from trusting a stopped process. */
@@ -64,12 +74,12 @@ export async function restartAfterDeliveries({
 }
 
 /**
- * @param {{ channels: import('./channels/channel.mjs').Channel[], agentsYaml, whisperUrl, agent, tts, state, onMessage }} config
+ * @param {{ channels: import('./channels/channel.mjs').Channel[], agentsYaml, fleetPanes, tts, state, onMessage }} config
  * WHAT: Schedules channel startup, reconciliation, health checks, and shutdown.
  * WHY: Keeps the bridge lifecycle under one owner.
  */
 export function startBot({
-  channels, agentsYaml, whisperUrl, agent, tts, state, onMessage, inboundStore = null,
+  channels, agentsYaml, fleetPanes, tts, state, onMessage, inboundStore = null,
   prepareMessage = null, onHumanMessage = warnQuotaOnHumanMessage,
   onClaimGuardHumanMessage = () => {}, settleDeliveries = async () => {}, mailboxes = null,
 }) {
@@ -92,7 +102,6 @@ export function startBot({
     channelMap = loadChannelMap(agentsYaml);
     overrides.clear();
     console.log(`Reloaded: ${channelMap.size} channel mapping(s)`);
-    for (const [chId, { name }] of channelMap) console.log(`  ${name} -> ${chId}`);
   }
 
   process.on("SIGHUP", reloadConfig);
@@ -109,18 +118,6 @@ export function startBot({
     state.set("restartChannel", null);
     void restart();
   });
-
-  // --- Preflight ---
-
-  async function preflight() {
-    await preflightAgentChannels({ channelMap, agent });
-    try {
-      await fetch(whisperUrl.replace("/transcriptions", ""));
-      console.log(`  whisper -> ${whisperUrl} [ok]`);
-    } catch {
-      console.warn(`  whisper -> not reachable (voice disabled)`);
-    }
-  }
 
   // --- Start channels ---
 
@@ -201,10 +198,9 @@ export function startBot({
       const userLabel = info?.user ? ` | ${info.user}` : "";
       console.log(`${channel.name} | ${channelMap.size} channel(s)${ttsLabel}${userLabel}`);
     }
-    for (const [chId, { name }] of channelMap) console.log(`  ${name} -> #${chId}`);
     mailboxes?.start();
     markReady();
-    await preflight();
+    await preflightAgentChannels({ channelMap, fleetPanes });
     await reconcileAllInbound();
     // Gateway delivery is normally immediate. This bounded repair loop is
     // deliberately slow enough to stay cheap across many mapped channels.

@@ -96,7 +96,6 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const AGENTS_YAML = runtimeAgentsPath();
 const AGENTMUX_YAML = configSources.agentmuxYaml.path;
 const TIMEOUT = parseInt(process.env.TIMEOUT_S || "600") * 1000;
-const WHISPER_URL = process.env.WHISPER_URL || "http://localhost:2022/v1/audio/transcriptions";
 const SHELL_PATH = process.env.SHELL_PATH
   || `${process.env.HOME}/bin:${process.env.HOME}/.local/bin:${process.env.PATH}`;
 // Keep the bridge on the same canonical server as the amux CLI. A divergent
@@ -264,23 +263,19 @@ const deliveryBroker = createDeliveryBroker({
 startBridgeMemoryGuard({ discord, alertChannel: process.env.AMUX_MEMORY_ALERT_CHANNEL || null, tmuxSocket: TMUX_SOCKET,
   sendSwapAgent: text => deliveryBroker.enqueue({ agentName: "sandman", pane: 0, source: "memory-guard", text }), sendSwapHuman: text => notifyUserDm(text, { title: "Swap pressure" }) });
 
+const botConfig = {
+  agentsYaml: AGENTS_YAML, fleetPanes, tts, state: appState, inboundStore,
+  settleDeliveries: () => deliveryBroker.stop(),
+};
+
 // Discord is an adapter, not the queue owner. Headless mode still drains CLI jobs.
 if (!TOKEN) {
-  const localBridge = startBot({
-    channels: [], agentsYaml: AGENTS_YAML, whisperUrl: WHISPER_URL, agent, tts, state: appState,
-    inboundStore, settleDeliveries: () => deliveryBroker.stop(),
-    onMessage: async () => {},
-  });
+  const localBridge = startBot({ ...botConfig, channels: [], onMessage: async () => {} });
   await localBridge.ready;
   deliveryBroker.start();
   console.log(`local bridge | Discord disabled (${configSources.envFile.path}) | queue broker ready`);
   await new Promise(() => {});
 }
-// Resume-hints moved to bin/amux-hook.mjs SessionStart context in 1.20.52 —
-// they no longer pass through the bridge, so the Discord mirror that used
-// to live here fell away with the typed delivery path. The session-start
-// itself still shows in `amux timeline` via the hook's ledger row.
-
 const claimGuard = createClaimGuardRuntime({ discord, broker: deliveryBroker, configPath: AGENTS_YAML });
 // --- Wire up ---
 
@@ -293,16 +288,10 @@ const mailboxes = mailboxConfig && createMailboxChannels({
 });
 
 const { getMapping, overrides, channelMap, reloadConfig, ready: bridgeReady, restart: restartBridge } = startBot({
+  ...botConfig,
   channels: [discord],
   mailboxes,
-  agentsYaml: AGENTS_YAML,
-  whisperUrl: WHISPER_URL,
-  agent,
-  tts,
-  state: appState,
-  inboundStore,
   onClaimGuardHumanMessage: message => claimGuard?.humanMessage(message),
-  settleDeliveries: () => deliveryBroker.stop(),
   prepareMessage: (msg) => attachments.transcribeAhead(msg),
   // onMessage is set below after handlers are created (circular dep)
   onMessage: (...args) => handlers.onMessage(...args),

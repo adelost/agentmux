@@ -94,5 +94,12 @@ export function formatStartupHousekeeping({ log, sessions, trim }) {
   const logSummary = log.rotated
     ? `bridge.log ${mib(log.beforeBytes)}→${mib(log.afterBytes)}MB`
     : `bridge.log ${mib(log.beforeBytes)}MB`;
-  return `storage: ${logSummary}; ${formatJanitorResult(sessions)}${trim ? `; ${formatTrimResult(trim)}` : ""}`;
+  const lines = [`storage: ${logSummary}`, formatJanitorResult(sessions)];
+  if (sessions.errors?.length) {
+    const first = sessions.errors[0].replace(/line-(\d+):jsonl-line-cannot-fit-(\d+)-bytes$/u,
+      "line $1 would still exceed $2 bytes after trimming");
+    lines.push(`WARN janitor | ${sessions.errors.length} problem(s). First: ${first}`);
+  }
+  if (trim) lines.push(formatTrimResult(trim));
+  return lines.join("\n");
 }

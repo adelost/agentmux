@@ -13,19 +13,32 @@ import * as botRuntime from "../bot.mjs";
 
 const tempRoot = () => join(tmpdir(), `amux-delivery-broker-${process.pid}-${Math.random().toString(36).slice(2)}`);
 
-feature("boot log for stopped panes", () => {
-  component("stopped panes produce one summary with names and count", {
-    when: ["preflighting one running and two stopped names", async () => {
-      const logs = [], warnings = [];
-      await botRuntime.preflightAgentChannels({ channelMap: new Map([["1", { name: "claw", pane: 0 }], ["2", { name: "deep", pane: 1 }], ["3", { name: "ai", pane: 2 }]]),
-        agent: { checkAgent: async (name) => { if (name !== "claw") throw Error("stopped"); } },
-        log: (line) => logs.push(line), warn: (line) => warnings.push(line) });
-      return { logs, warnings };
+feature("bridge startup checks the mapped tmux targets", () => {
+  const channelMap = new Map([["1", { name: "next", pane: 0 }], ["2", { name: "next", pane: 1 }]]);
+  component("a shell in pane zero and Codex in pane one", {
+    when: ["reading their shared listing", async () => {
+      const lines = [];
+      const rows = new Map([["next:0", { command: "bash" }], ["next:1", { command: "codex" }]]);
+      await botRuntime.preflightAgentChannels({ channelMap, fleetPanes: { panes: async () => rows },
+        log: line => lines.push(line), warn: line => lines.push(line) });
+      return lines;
     }],
-    then: ["one warning names both stopped panes", ({ logs, warnings }) => {
-      expect(logs).toHaveLength(1);
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toMatch(/2.*deep:1.*ai:2/u);
+    then: ["the one-line summary counts the engine in its actual pane", lines => {
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("1 of 2");
+    }],
+  });
+  component("a missing server leaves pane status unknown", {
+    when: ["the listing cannot connect", async () => {
+      const lines = [];
+      const panes = async () => { throw Error("no server running on /tmp/test.sock"); };
+      await botRuntime.preflightAgentChannels({ channelMap, fleetPanes: { panes },
+        log: line => lines.push(line), warn: line => lines.push(line) });
+      return lines;
+    }],
+    then: ["the warning explains why the panes could not be checked", lines => {
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("tmux server unavailable");
     }],
   });
 });

@@ -169,7 +169,7 @@ export function formatJanitorResult(r) {
     return `janitor: nothing older than ${r.retentionDays}d (${r.scanned} files scanned)${oversized}`;
   }
   if (r.dryRun) {
-    return `janitor (dry): would trim ${r.candidates - r.unchanged} aged file(s), reclaiming ${mb(r.reclaimedBytes)}MB; ${r.unchanged} already bounded${oversized}`;
+    return `janitor (dry): would trim ${r.candidates - r.unchanged - r.failed} aged file(s), reclaiming ${mb(r.reclaimedBytes)}MB; ${r.unchanged} already bounded${r.failed ? `, ${r.failed} failed` : ""}${oversized}`;
   }
   const tail = r.failed ? `, ${r.failed} failed` : "";
   return `janitor: trimmed ${r.trimmed}/${r.candidates} aged file(s), reclaimed ${mb(r.reclaimedBytes)}MB; ${r.unchanged} already bounded${tail}${oversized}`;

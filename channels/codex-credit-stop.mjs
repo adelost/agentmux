@@ -5,6 +5,7 @@
 // lsrc:0 for api:0, 2026-10-27: Mattias's own turn is never stopped. Every case, stopped or left running, goes to the credit
 // log with its credits before and after, and `amux quota` reads the week's sum.
 
+import { tmuxServerUnavailable } from "../core/tmux.mjs";
 import { join } from "node:path";
 import { listAgents } from "../cli/config.mjs";
 import { switchCodexAccounts } from "../cli/codex-account-switch.mjs";
@@ -176,18 +177,29 @@ export function createCodexCreditStop({ panes, agent, readEvents, readEventsDeep
     return "held-work-moves";
   }
 
+  let waitingForTmux = false;
   // The panes are read together: one slow tmux read must not delay the stop of another pane's turn.
   async function tick() {
     if (creditsAllowed || mode === "off") return [];
+    let unavailable = 0;
     const outcomes = await Promise.all(panes().map(async info => {
       const paneInfo = { ...info, paneKey: `${info.name}:${info.pane}` };
       try {
-        const busy = await agent.isBusy(info.name, info.pane);
+        let busy;
+        try { busy = await agent.isBusy(info.name, info.pane); }
+        catch (error) {
+          if (!tmuxServerUnavailable(error)) throw error;
+          unavailable++;
+          return null;
+        }
         if (!busy) { await settle(paneInfo); for (const key of longTurns.keys()) if (key.startsWith(`${paneInfo.paneKey}|`)) longTurns.delete(key); }
         const outcome = busy ? await working(paneInfo) : await heldWork(paneInfo);
         return outcome ? { pane: paneInfo.paneKey, outcome } : null;
-      } catch (error) { log(`${paneInfo.paneKey} credit stop failed: ${error.message}`); return null; }
+      } catch (error) { log(`ERROR ${paneInfo.paneKey} credit stop failed: ${error.message}`); return null; }
     }));
+    if (unavailable && !waitingForTmux) log(`WARN tmux server unavailable, ${unavailable} pane check(s) deferred this poll. Retrying automatically`);
+    if (!unavailable && waitingForTmux) log("INFO pane polling resumed without a tmux connection error");
+    waitingForTmux = unavailable > 0;
     return outcomes.filter(Boolean);
   }
   return { tick };

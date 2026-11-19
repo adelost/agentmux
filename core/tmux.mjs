@@ -51,6 +51,12 @@ export function parseFleetRows(stdout) {
   return rows;
 }
 
+/** WHAT: Checks tmux's absent-server diagnostics. WHY: Keeps permission and command failures visible. */
+export function tmuxServerUnavailable(error) {
+  return /^(?:no server running on .+|error connecting to .+ \((?:No such file or directory|Connection refused)\))$/imu
+    .test(String(error.stderr || error.message).trim());
+}
+
 export function createTmuxAdapter({ socket, exec }) {
   const raw = (cmd) => { assertDeliveryPreparation(); return exec(`tmux -S '${esc(socket)}' ${cmd}`); };
   const q = (s) => `'${esc(String(s))}'`;

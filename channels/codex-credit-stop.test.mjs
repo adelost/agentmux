@@ -1,4 +1,4 @@
-import { afterEach } from "vitest";
+import { afterEach, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -282,4 +282,25 @@ feature("the interrupted work continues instead of being lost", () => {
     when: ["the guard ticks", async fx => { await fx.tick(); return fx; }],
     then: ["no move", fx => { expect(fx.moves).toEqual([]); }],
   });
+});
+
+it("reports one tmux outage across panes and polls, and keeps other probe failures visible", async () => {
+  const logs = [];
+  let error = Error("error connecting to /tmp/test.sock (No such file or directory)");
+  const stop = createCodexCreditStop({
+    panes: () => [0, 1].map(pane => ({ name: "next", pane })),
+    agent: { isBusy: async () => { if (error) throw error; return false; } },
+    queue: { list: () => [] }, log: line => logs.push(line),
+  });
+  await stop.tick();
+  await stop.tick();
+  expect(logs).toHaveLength(1);
+  expect(logs[0]).toMatch(/tmux server unavailable.*2 pane/u);
+  error = null;
+  await stop.tick();
+  expect(logs[1]).toContain("resumed");
+  error = Error("permission denied");
+  await stop.tick();
+  expect(logs.slice(2)).toHaveLength(2);
+  expect(logs.slice(2).every(line => line.includes("permission denied"))).toBe(true);
 });
