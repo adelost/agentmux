@@ -93,11 +93,11 @@ feature("Claude pane model pin", () => {
 
   unit("a persisted Fable statusline id resumes as the same launch model", {
     when: ["building after a Fable pane crash", () => buildClaudeLaunchCommand({
-      model: "claude-fable-5[1m]",
+      model: "fable[1m]",
       resumeSessionId: "11111111-1111-4111-8111-111111111111",
     })],
     then: ["display metadata is stripped while Fable and the exact session stay pinned", (command) => {
-      expect(command).toContain("--model 'claude-fable-5'");
+      expect(command).toContain("--model 'claude-fable-5-2'");
       expect(command).toContain("--resume '11111111-1111-4111-8111-111111111111'");
       expect(command).not.toContain("claude-opus-5");
       expect(command).not.toContain("[1m]");

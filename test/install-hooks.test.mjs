@@ -199,6 +199,7 @@ feature("agentmux hook installer", () => {
       // 2026-10-10: forks are banned (Mattias: "vi borde väl förbjuda det helt"), by Claude Code's own switch and
       // by a guard that names the fresh-subagent alternative, once per install
       expect(settings.env.CLAUDE_CODE_FORK_SUBAGENT).toBe("0");
+      expect(settings.env.ANTHROPIC_DEFAULT_FABLE_MODEL).toBe("claude-fable-5-2");
       const forkGuards = settings.hooks.PreToolUse.filter((row) => row.hooks.some(
         (hook) => hook.command.includes("fork-guard.mjs"),
       ));

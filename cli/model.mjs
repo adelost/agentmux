@@ -32,7 +32,7 @@ export async function cmdModel(args, ctx, { claudeModelChanger = runLockedClaude
     if (!result.ok) throw new Error(`model change blocked: ${result.reason || result.stage}`);
     if (readParkState(name, pane)) unparkPane({ session: name, pane, detail: `verified Claude model: ${result.model}` });
     console.log(result.unchanged ? `${name}:${pane}: already using ${result.model}; no compact`
-      : result.compactedAfter ? `${name}:${pane}: selected ${result.model} past the spent model's limit; compact verified on it; effort unchanged`
+      : result.compactedAfter ? `${name}:${pane}: selected ${result.model}; compact verified on the selected model; effort unchanged`
       : `${name}:${pane}: compact verified; selected ${result.model}; effort unchanged`);
     return;
   }

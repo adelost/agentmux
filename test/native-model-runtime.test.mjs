@@ -220,6 +220,15 @@ async function waitFor(url, projectId, agentId, predicate) {
 }
 
 describe("native runtime model truth", () => {
+  it("refuses an explicit Fable 5.1 request before creating the agent", async () => {
+    const { url, project } = await setup();
+    const result = await post(`${url}/api/projects/${project.id}/agents`, {
+      name: "Old Fable", engine: "claude", model: "claude-fable-5-1", idempotencyKey: "retired-fable",
+    });
+    expect(result.status).toBe(400);
+    expect(result.body.error).toMatch(/claude-fable-5-1.*not allowed.*claude-fable-5-2/);
+  });
+
   it("keeps the Claude session, records the actual fallback and gates later work", async () => {
     const { url, project } = await setup();
     const created = (await post(`${url}/api/projects/${project.id}/agents`, {
@@ -238,8 +247,8 @@ describe("native runtime model truth", () => {
     const stopped = await waitFor(url, project.id, created.id,
       (agent) => !agent.running && agent.modelGuard?.blocked);
     expect(stopped).toMatchObject({
-      model: "fable",
-      requestedModel: "fable",
+      model: "claude-fable-5-2",
+      requestedModel: "claude-fable-5-2",
       observedModel: "claude-sonnet-4-6",
       sessionId: CLAUDE_SESSION,
       modelGuard: { blocked: true },
@@ -290,12 +299,12 @@ describe("native runtime model truth", () => {
       body: JSON.stringify({ model: "fable", idempotencyKey: "claude-rearm-clear" }),
     });
     expect(retried.body).toMatchObject({
-      model: "fable",
+      model: "claude-fable-5-2",
       modelGuard: null,
       observedModel: "claude-sonnet-4-6",
       modelObservation: {
         model: "claude-sonnet-4-6",
-        requestedModel: "fable",
+        requestedModel: "claude-fable-5-2",
       },
     });
 
@@ -307,11 +316,11 @@ describe("native runtime model truth", () => {
     const stoppedAgain = await waitFor(url, project.id, created.id,
       (agent) => !agent.running && agent.modelGuard?.blocked);
     expect(stoppedAgain).toMatchObject({
-      model: "fable",
+      model: "claude-fable-5-2",
       observedModel: "claude-sonnet-4-6",
       modelGuard: {
         blocked: true,
-        requestedModel: "fable",
+        requestedModel: "claude-fable-5-2",
         observedModel: "claude-sonnet-4-6",
       },
     });

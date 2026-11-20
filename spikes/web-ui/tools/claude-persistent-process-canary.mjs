@@ -4,6 +4,7 @@
 // one process kept alive across turns, and today's spawn + --resume per turn.
 // This is deliberately opt-in because it consumes real subscription quota.
 
+import { resolveClaudeModel } from "../../../core/claude-model.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -32,6 +33,7 @@ function parseArgs(argv) {
     index += 1;
   }
   assert.match(options.model, /^[a-zA-Z0-9._-]{1,80}$/, "invalid --model");
+  options.model = resolveClaudeModel(options.model);
   assert(Number.isSafeInteger(options.corpusLines) && options.corpusLines >= 20
     && options.corpusLines <= 1_000, "--corpus-lines must be 20..1000");
   assert(Number.isSafeInteger(options.timeoutMs) && options.timeoutMs >= 10_000

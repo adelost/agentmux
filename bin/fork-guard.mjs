@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { detectSenderFromEnv } from "../core/sender-detect.mjs";
+import { pinnedClaudeModel, refusedClaudeModel } from "../core/claude-model.mjs";
 import { claudeSubagentHook } from "../core/claude-subagent-cap.mjs";
 
 /** Its own failures never stop a call: Claude Code's switch still refuses the fork behind it. */
@@ -30,6 +31,19 @@ try {
   payload = JSON.parse(readFileSync(0, "utf8") || "{}");
 } catch (error) {
   allowWithWarning(`unreadable hook payload: ${error.message}`);
+}
+
+if (payload.hook_event_name === "PreToolUse" && ["Agent", "Task"].includes(payload.tool_name)) {
+  const model = payload.tool_input?.model;
+  const reason = refusedClaudeModel(model);
+  if (reason) {
+    console.error(reason);
+    process.exit(2);
+  }
+  if (String(model).toLowerCase() === "fable" && process.env.ANTHROPIC_DEFAULT_FABLE_MODEL !== pinnedClaudeModel(model)) {
+    console.error(`The Fable alias is unpinned in this process. Use ${pinnedClaudeModel(model)}.`);
+    process.exit(2);
+  }
 }
 
 try {

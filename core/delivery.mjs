@@ -51,10 +51,9 @@ function recordReceipt(agentName, pane, kind, text, result) {
  * verification, prompts get jsonl echo verification.
  */
 export async function deliverToPane(agent, agentName, pane, text, opts = {}) {
-  const resolved = rewriteModelSlash(text);
-  return isSlashCommand(resolved)
-    ? sendSlashVerified(agent, agentName, pane, resolved.trim(), opts)
-    : sendPromptVerified(agent, agentName, pane, resolved, opts);
+  return isSlashCommand(text)
+    ? sendSlashVerified(agent, agentName, pane, text.trim(), opts)
+    : sendPromptVerified(agent, agentName, pane, text, opts);
 }
 
 // Prefixes of ENGINE_START_REFUSED and PANE_LAYOUT_UNSAFE behind a broker wake refusal.
@@ -206,6 +205,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
  * Returns { delivered, rescues }.
  */
 export async function sendSlashVerified(agent, agentName, pane, claudeCmd, opts = {}) {
+  claudeCmd = rewriteModelSlash(claudeCmd);
   const result = await slashDeliveryAttempts(agent, agentName, pane, claudeCmd, opts);
   if (!opts.suppressReceipt) recordReceipt(agentName, pane, "slash", claudeCmd, result);
   return result;

@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { normalizeClaudeModelName, resolveClaudeModel, rewriteModelSlash } from "../core/claude-model.mjs";
+import { isRequestedClaudeModel, normalizeClaudeModelName, resolveClaudeModel, rewriteModelSlash } from "../core/claude-model.mjs";
 
 feature("an explicit Opus alias cannot downgrade the current fleet", () => {
   unit("Opus names the pinned 5.5 release", {
@@ -8,6 +8,22 @@ feature("an explicit Opus alias cannot downgrade the current fleet", () => {
     })],
     then: ["both command routes select Opus 5.5", result => {
       expect(result).toEqual({ model: "claude-opus-5-5", slash: "/model claude-opus-5-5" });
+    }],
+  });
+});
+
+feature("only Fable 5.2 can be selected", () => {
+  unit("launch, slash and model verification all require the same exact pin", {
+    when: ["selecting Fable with context metadata", () => "Fable[1m]"],
+    then: ["only the pinned model can satisfy the request", alias => {
+      expect(resolveClaudeModel(alias)).toBe("claude-fable-5-2");
+      expect(rewriteModelSlash(`/model ${alias}`)).toBe("/model claude-fable-5-2");
+      expect(isRequestedClaudeModel("claude-fable-5-1", alias)).toBe(false);
+      expect(isRequestedClaudeModel("claude-fable-5-2", alias)).toBe(true);
+      for (const old of ["claude-fable-5-1", "Fable 5.1 [1m]"]) {
+        expect(() => resolveClaudeModel(old)).toThrow(/not allowed.*claude-fable-5-2/);
+        expect(() => rewriteModelSlash(`/model ${old}`)).toThrow(/not allowed.*claude-fable-5-2/);
+      }
     }],
   });
 });

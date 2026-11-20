@@ -10,6 +10,7 @@
 // SessionStart. Existing non-amux hooks are preserved; a timestamped
 // backup of settings.json is written before any change.
 
+import { resolveClaudeModel } from "../core/claude-model.mjs";
 import {
   chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync,
   readlinkSync, realpathSync, symlinkSync, unlinkSync, writeFileSync,
@@ -172,7 +173,7 @@ function main() {
     preToolUse.push({ matcher: FORK_GUARD_MATCHER, hooks: [{
       type: "command", command: FORK_GUARD_CMD, timeout: 10,
     }] });
-    settings.env = { ...settings.env, [FORK_SWITCH]: "0" };
+    settings.env = { ...settings.env, [FORK_SWITCH]: "0", ANTHROPIC_DEFAULT_FABLE_MODEL: resolveClaudeModel("fable") };
   }
   if (preToolUse.length) hooks.PreToolUse = preToolUse;
   else delete hooks.PreToolUse;

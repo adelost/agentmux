@@ -1,7 +1,7 @@
 // Conservative recovery for coding-agent panes whose live TUI stops rendering.
 
 import { buildClaudeLaunchCommand } from "./agent-launch-command.mjs";
-import { claudePaneSelection } from "./claude-model.mjs";
+import { claudePaneSelection, resolveClaudeModel } from "./claude-model.mjs";
 import { getContextPercent } from "./context.mjs";
 import { codexModelOverride, selectedCodexProfile } from "./codex-profiles.mjs";
 import { findBlockingPrompt, hasEmptyClaudeComposer } from "./dismiss.mjs";
@@ -80,21 +80,27 @@ export function createTuiStallRecovery({
       || null;
     await assertEngineStartAllowed({ session: name, pane, dir, sessionId: resumeSessionId, engine: "claude" });
     const sessionFlag = resumeSessionId ? "" : await resolveSessionFlag(dir, name, pane);
+    const command = buildClaudeLaunchCommand({
+      resume: !resumeSessionId && sessionFlag === "--continue",
+      resumeSessionId,
+      ...launchSelection(name, pane, dir, paneConfig, launch),
+      profileHome: runtimeProfileLaunchHome(profile),
+    });
+    await tmux.runShell(target, `cd ${esc(dir)} && ${command}`);
+    await delay(2000);
+  }
+
+  function launchSelection(name, pane, dir, paneConfig, launch) {
     const selected = paneModelSelection(state, name, pane);
     const observed = selected?.model ? null : getContextPercent(dir, "claude");
     if (!selected?.model && observed?.model && state) {
       setPaneModelSelection(state, name, pane, observed.model, observed.effort ?? null);
     }
     const configured = claudePaneSelection(paneConfig);
-    const command = buildClaudeLaunchCommand({
-      resume: !resumeSessionId && sessionFlag === "--continue",
-      resumeSessionId,
-      model: launch?.model || selected?.model || observed?.model || configured.model || undefined,
+    return {
+      model: resolveClaudeModel(launch?.model || selected?.model || observed?.model || configured.model || undefined),
       effort: launch?.effort || selected?.effort || observed?.effort || configured.effort || null,
-      profileHome: runtimeProfileLaunchHome(profile),
-    });
-    await tmux.runShell(target, `cd ${esc(dir)} && ${command}`);
-    await delay(2000);
+    };
   }
 
   /** WHAT: Restarts one idle Claude pane under an explicit account. WHY: Keeps account rotation exact and rollbackable. */
@@ -121,6 +127,7 @@ export function createTuiStallRecovery({
       throw new Error(`Claude continuity blocked for ${agentName}:${pane}: persisted session changed`);
     }
     if (launch.continuity) assertRotationContinuity(launch.continuity, identity);
+    const selection = launchSelection(agentName, pane, dir, config.panes[pane], launch);
     const target = `${agentName}:.${pane}`;
     await tmux.respawnPane(target, { kill: true, cwd: dir });
     const shellDeadline = now() + 5_000;
@@ -129,7 +136,7 @@ export function createTuiStallRecovery({
       await delay(100);
     }
     await startClaude(agentName, target, config.dir, pane, {
-      ...launch,
+      ...launch, ...selection,
       resumeSessionId,
     });
     if (!await waitForClaudeReady(target, agentName, pane)) {

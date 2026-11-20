@@ -18,9 +18,10 @@ export function claudePaneSelection(paneConfig = {}) {
   return { model: model ? resolveClaudeModel(model) : null, effort: resolveClaudeEffort(effort) };
 }
 
-const MODEL_ALIASES = {
-  opus: "claude-opus-5-5",
-};
+const MODEL_ALIASES = new Map([
+  ["opus", "claude-opus-5-5"],
+  ["fable", "claude-fable-5-2"],
+]);
 
 /** Families whose spoken form (`opus 4.8`) has to become a wire id (`claude-opus-4-8`). */
 const SPOKEN_MODEL = /^(?:claude[\s-]+)?(opus|sonnet|haiku|fable)[\s-]*(\d[\d.\s-]*)$/iu;
@@ -34,16 +35,17 @@ export const MODEL_NAME_HINT =
 const spokenAsWireId = (family, version) =>
   `claude-${family.toLowerCase()}-${version.trim().replace(/[.\s-]+/gu, "-").replace(/-$/u, "")}`;
 
-/** Claude Code's family aliases, the families SPOKEN_MODEL knows. Each picks its family's newest model. */
-const FAMILY_ALIASES = new Set(["opus", "sonnet", "haiku", "fable"]);
+/** Unpinned aliases follow Claude Code's current version of that family. */
+const FAMILY_ALIASES = new Set(["sonnet", "haiku"]);
 
 /**
  * WHAT: Checks whether the model a pane runs is the one that was asked for.
  * WHY: Keeps the alias sonnet from leaving a switch to claude-sonnet-5-5 unsaved (claw:0, 2026-10-19).
  */
 export function isRequestedClaudeModel(running, requested) {
-  const id = String(running || "").toLowerCase();
-  const asked = String(requested || "").toLowerCase();
+  const id = String(running || "").toLowerCase().replace(CONTEXT_SUFFIX, "");
+  const asked = String(requested || "").toLowerCase().replace(CONTEXT_SUFFIX, "");
+  if (MODEL_ALIASES.has(asked)) return id === MODEL_ALIASES.get(asked);
   return Boolean(id) && (id === asked || (FAMILY_ALIASES.has(asked) && id.startsWith(`claude-${asked}-`)));
 }
 
@@ -72,13 +74,32 @@ export function normalizeClaudeModelName(raw) {
   };
 }
 
+const fableName = /^(?:claude[- ]+)?fable(?:$|[. _0-9-])/iu;
+const modelBase = name => String(name).trim().replace(CONTEXT_SUFFIX, "").trim().toLowerCase();
+
+/** WHAT: Checks whether a Fable selection is allowed. WHY: Prevents launch and compact from running a retired model. */
+export function refusedClaudeModel(name) {
+  const base = modelBase(name);
+  if (!fableName.test(base) || base === "fable") return null;
+  const pin = MODEL_ALIASES.get("fable");
+  return normalizeClaudeModelName(base).model === pin ? null : `Fable model "${name}" is not allowed. Use ${pin}.`;
+}
+
+/** WHAT: Resolves a fleet pin for a Claude name. WHY: Keeps native and tmux selections on the same model. */
+export function pinnedClaudeModel(name) {
+  const reason = refusedClaudeModel(name);
+  if (reason) throw Object.assign(new Error(reason), { code: "FABLE_MODEL_REFUSED" });
+  const base = modelBase(name);
+  return fableName.test(base) ? MODEL_ALIASES.get("fable") : MODEL_ALIASES.get(base);
+}
+
 /** WHAT: Resolves one Claude launch model. WHY: Keeps aliases and status metadata from changing recovery identity. */
 export function resolveClaudeModel(value = process.env.AMUX_CLAUDE_MODEL) {
   const requested = String(value || DEFAULT_CLAUDE_MODEL).trim();
   // The custom statusline may append a context annotation to the actual
   // model id. It is display metadata, not accepted by Claude's --model flag.
   const withoutContextSuffix = requested.replace(/\[1m\]$/iu, "");
-  const model = MODEL_ALIASES[withoutContextSuffix.toLowerCase()] || withoutContextSuffix;
+  const model = pinnedClaudeModel(withoutContextSuffix) || withoutContextSuffix;
   if (!/^[a-z0-9._-]+$/i.test(model)) {
     throw new Error(`invalid Claude model: ${model}`);
   }
@@ -86,14 +107,12 @@ export function resolveClaudeModel(value = process.env.AMUX_CLAUDE_MODEL) {
 }
 
 /**
- * Rewrite `/model <alias>` slash commands so the fleet-pinned model
- * is what Claude Code receives, not its own (stale) alias resolution.
- * Returns the text unchanged if no rewrite applies.
+ * WHAT: Resolves a pinned model in a slash command.
+ * WHY: Prevents Claude Code from selecting its own stale alias.
  */
 export function rewriteModelSlash(text) {
-  const m = /^(\/model\s+)(\S+)(\s*)$/i.exec(String(text).trim());
+  const m = /^(\/model\s+)(.+)$/iu.exec(String(text).trim());
   if (!m) return text;
-  const alias = m[2].toLowerCase();
-  const pinned = MODEL_ALIASES[alias];
-  return pinned ? `${m[1]}${pinned}${m[3]}` : text;
+  const pinned = pinnedClaudeModel(m[2]);
+  return pinned ? `${m[1]}${pinned}` : text;
 }

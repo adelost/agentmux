@@ -1,6 +1,10 @@
 // Pure prompt and launch shapes shared by native Claude/Codex turns.
 
+import { pinnedClaudeModel } from "../../core/claude-model.mjs";
 import { CLAUDE_AUTONOMOUS_ARGS } from "../../core/execution-safety.mjs";
+
+/** WHAT: Resolves a native launch model. WHY: Keeps restored Claude agents on the same pin as new agents. */
+export const nativeLaunchModel = (engine, model) => engine === "claude" ? pinnedClaudeModel(model) ?? model : model;
 
 /** WHAT: Formats local attachment paths into one engine prompt. WHY: Keeps upload references explicit across engines. */
 export const attachmentPrompt = (prompt, attachments) => attachments.reduce((text, attachment) => {
@@ -19,7 +23,7 @@ export function buildNativeClaudeLaunch({ command, agent, rawPrompt, attachments
     "--output-format", "stream-json",
     "--verbose",
     "--include-partial-messages",
-    "--model", settings.model,
+    "--model", nativeLaunchModel("claude", settings.model),
     "--effort", settings.effort,
     "--name", agent.name,
   ];

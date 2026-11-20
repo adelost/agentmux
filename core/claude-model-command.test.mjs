@@ -103,6 +103,17 @@ feature("Claude model changes are compact-first and pane-local", () => {
       } finally { fx.cleanup(); }
     }],
   });
+  component("a Fable 5.1 pane switches before compacting on 5.2 and keeps its effort", {
+    given: ["a pane still showing Fable 5.1", () => fixture({ liveModel: "Fable 5.1" })],
+    when: ["requesting the family alias", fx => fx.change("fable")],
+    then: ["the old model receives no work", (result, fx) => {
+      try {
+        expect(result.ok).toBe(true);
+        expect(fx.calls).toEqual(["/model claude-fable-5-2", "compact", "release"]);
+        expect(paneModelSelection(fx.state, "claw", 0)).toEqual({ model: "claude-fable-5-2", effort: "high" });
+      } finally { fx.cleanup(); }
+    }],
+  });
   component("Claude's older display name still compacts before a new model", {
     given: ["the real footer spelling Opus 5", () => fixture({ liveModel: "Opus 5" })],
     when: ["requesting Opus 5.5", fx => fx.change("claude-opus-5-5")],

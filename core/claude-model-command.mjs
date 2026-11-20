@@ -1,4 +1,4 @@
-import { isRequestedClaudeModel, normalizeClaudeModelName, resolveClaudeModel } from "./claude-model.mjs";
+import { isRequestedClaudeModel, normalizeClaudeModelName, refusedClaudeModel, resolveClaudeModel } from "./claude-model.mjs";
 import { keepClaudeDefaultModel, putBackLandedDefault } from "./claude-default-model.mjs";
 import { activeClaudeLimitForTarget, switchesAroundModelLimit } from "./claude-quota-target.mjs";
 import { readClaudeFooterModel } from "./claude-statusline.mjs";
@@ -17,7 +17,7 @@ const UNVERIFIED_SWITCH_MS = 30 * 60_000;
 const observedModelId = raw => {
   // The footer's "Opus 5.5 (1M context)" is the 1M-context variant of the same model id.
   const normalized = normalizeClaudeModelName(String(raw ?? "").replace(/\s*\(1M context\)\s*$/iu, "[1m]"));
-  return normalized.ok ? resolveClaudeModel(normalized.model) : null;
+  return normalized.ok ? normalized.model.replace(/\[1m\]$/iu, "") : null;
 };
 
 // Claude Code asks before it re-reads a cached conversation on another model; amux asked for this pick (deep:4, 19 Nov 2026).
@@ -142,7 +142,7 @@ export async function runLockedClaudeModelChange({
     };
     const switchModel = () => keepDefault((keep) => switchVerified({ agent, state, name, pane, from: previousModel, model,
       keep, current, sendSlash, wait }));
-    if (aroundLimit) {
+    if (aroundLimit || refusedClaudeModel(previousModel)) {
       const kept = await switchModel();
       if (kept.busy) return { ok: false, stage: "default", reason: "default-model-busy" };
       if (!kept.result.ok) return { ...kept.result, defaultModel: kept.defaults };

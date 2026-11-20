@@ -245,14 +245,14 @@ export function createClaudeQuotaLifecycle({
     const model = selected?.model || observed?.model || targetConfig.selection.model || undefined;
     const effort = selected?.effort || (observed?.model === model ? observed?.effort : null)
       || targetConfig.selection.effort || null;
-    await tmux.respawnPane(target, { kill: true, cwd: targetConfig.cwd });
-    if (!await waitForShell(target)) return { ok: false, reason: "replacement-shell-not-ready" };
     const launch = buildClaudeLaunchCommand({
       resumeSessionId: expectedReceipt.sessionId,
       model,
       effort,
       profileHome: runtimeProfileLaunchHome(profile),
     });
+    await tmux.respawnPane(target, { kill: true, cwd: targetConfig.cwd });
+    if (!await waitForShell(target)) return { ok: false, reason: "replacement-shell-not-ready" };
     await tmux.runShell(target, `cd '${targetConfig.cwd.replaceAll("'", "'\\''")}' && ${launch}`);
     if (!await waitForComposer(target)) return { ok: false, reason: "resumed-composer-not-ready" };
 

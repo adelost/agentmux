@@ -5,7 +5,7 @@ import { component, expect, feature } from "bdd-vitest";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { createTuiStallRecovery } from "./tui-stall-recovery.mjs";
 
-function fixture({ selected = { model: "claude-fable-5[1m]", effort: null }, command = "claude" } = {}) {
+function fixture({ selected = { model: "fable[1m]", effort: null }, command = "claude" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "agentmux-tui-recovery-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
@@ -119,7 +119,7 @@ feature("exact TUI crash recovery", () => {
     then: ["the launch and continuation stay bound to the same pane", ({ ready, targets }, ctx) => {
       expect(ctx.commands).toHaveLength(1);
       expect(ctx.commands[0]).not.toContain("CLAUDE_CONFIG_DIR=");
-      expect(ctx.commands[0]).toContain("--model 'claude-fable-5'");
+      expect(ctx.commands[0]).toContain("--model 'claude-fable-5-2'");
       expect(ctx.commands[0]).toContain(`--resume '${ctx.sessionId}'`);
       expect(ctx.commands[0]).not.toContain("claude-opus-4-8");
       expect(ctx.keys).toEqual(["Enter"]);
@@ -153,7 +153,7 @@ feature("exact TUI crash recovery", () => {
 
   component("a saved Claude selection survives a different project default", {
     given: ["an exact Fable xhigh session with an Opus high project default", () => fixture({
-      selected: { model: "claude-fable-5[1m]", effort: "xhigh" },
+      selected: { model: "fable[1m]", effort: "xhigh" },
       command: "claude --continue --model claude-opus-5-5 --effort high",
     })],
     when: ["resuming the pane", async ctx => {
@@ -161,7 +161,7 @@ feature("exact TUI crash recovery", () => {
       return ctx.commands[0];
     }],
     then: ["the saved model and effort win", (command, ctx) => {
-      expect(command).toContain("--model 'claude-fable-5'");
+      expect(command).toContain("--model 'claude-fable-5-2'");
       expect(command).toContain("--effort 'xhigh'");
       if (ctx.oldHome === undefined) delete process.env.HOME;
       else process.env.HOME = ctx.oldHome;

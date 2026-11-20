@@ -124,7 +124,7 @@ function fakeSlashAgent(captures) {
 }
 
 const IDLE_COMPOSER = "⏺ Set model to fable\n\n❯ \n";
-const STUCK_COMPOSER = "some scrollback\n\n❯ /model fable\n";
+const STUCK_COMPOSER = "some scrollback\n\n❯ /model claude-fable-5-2\n";
 const noSleep = { settleMs: 0, sleep: async () => {} };
 
 feature("deliverSlashCommand", () => {
@@ -137,7 +137,7 @@ feature("deliverSlashCommand", () => {
     })],
     then: ["delivered without rescues, dismiss ran first", ({ result, agent }) => {
       expect(result).toEqual({ delivered: true, rescues: 0 });
-      expect(agent.calls.filter((call) => call.startsWith("send:"))).toEqual(["send:/model fable"]);
+      expect(agent.calls.filter((call) => call.startsWith("send:"))).toEqual(["send:/model claude-fable-5-2"]);
       expect(agent.calls).not.toContain("enter");
     }],
   });

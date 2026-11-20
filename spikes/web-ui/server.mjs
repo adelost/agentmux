@@ -50,7 +50,7 @@ import {
   claudeUserMessage,
   openCodexRpc,
 } from "./runtime-control.mjs";
-import { attachmentPrompt, buildNativeClaudeLaunch, buildNativeCodexInput } from "./runtime-prompt.mjs";
+import { attachmentPrompt, buildNativeClaudeLaunch, buildNativeCodexInput, nativeLaunchModel } from "./runtime-prompt.mjs";
 import { openPersistentClaudeRuntime } from "./persistent-claude-runtime.mjs";
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -1644,7 +1644,7 @@ export function createWebUi(options = {}) {
 
   const runClaudeOperation = async (agent, rawPrompt, attachments, operation, operationKey = null, quotaRetry = false) => {
     const cwd = workingDirectoryFor(agent);
-    const settings = { model: agent.model, effort: agent.effort };
+    const settings = { model: nativeLaunchModel("claude", agent.model), effort: agent.effort };
     const launch = buildNativeClaudeLaunch({
       command: commands.claude, agent, rawPrompt, attachments, settings,
     });
@@ -2123,7 +2123,7 @@ export function createWebUi(options = {}) {
         const key = cleanName(body?.idempotencyKey, 160);
         const name = cleanName(body?.name);
         const engine = body?.engine === "codex" ? "codex" : body?.engine === "claude" ? "claude" : "";
-        const model = cleanName(body?.model, 120) || models[engine]?.[0] || "";
+        const model = nativeLaunchModel(engine, cleanName(body?.model, 120) || models[engine]?.[0] || "");
         const address = cleanAddress(body?.address);
         const permissionMode = cleanPermissionMode(body?.permissionMode);
         if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
@@ -2178,7 +2178,7 @@ export function createWebUi(options = {}) {
         const key = cleanName(body?.idempotencyKey, 160);
         const name = cleanName(body?.name);
         const engine = body?.engine === "codex" ? "codex" : body?.engine === "claude" ? "claude" : "";
-        const model = cleanName(body?.model, 120) || models[engine]?.[0] || "";
+        const model = nativeLaunchModel(engine, cleanName(body?.model, 120) || models[engine]?.[0] || "");
         const sessionId = cleanName(body?.sessionId, 80);
         const sourceCwd = expandDirectory(body?.sourceCwd, homeDir);
         const address = cleanAddress(body?.address);
@@ -2357,7 +2357,7 @@ export function createWebUi(options = {}) {
         if (hasEffort && !DEFAULT_EFFORTS[agent.engine].includes(body.effort)) {
           json(response, 400, { error: "unknown-effort", allowed: DEFAULT_EFFORTS[agent.engine] }); return;
         }
-        const model = hasModel ? cleanName(body.model, 120) : agent.model;
+        const model = hasModel ? nativeLaunchModel(agent.engine, cleanName(body.model, 120)) : agent.model;
         if (!model) { json(response, 400, { error: "model-required" }); return; }
         const effort = hasEffort ? body.effort : agent.effort;
         const address = hasAddress ? cleanAddress(body.address) : agent.address;
@@ -2634,13 +2634,13 @@ export function createWebUi(options = {}) {
 
     json(response, 404, { error: "route-not-found" });
   };
-
   const server = createServer((request, response) => {
     handler(request, response).catch((error) => {
       if (response.headersSent) {
         response.destroy(error);
         return;
       }
+      if (error.code === "FABLE_MODEL_REFUSED") return json(response, 400, { error: error.message });
       json(response, error.status ?? 500, {
         error: error.message === "body-too-large" ? "body-too-large" : "internal-error",
       });
