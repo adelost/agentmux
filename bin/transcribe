@@ -19,11 +19,11 @@
 # OPTIONS
 #   --backend <b>        whisper1 | gemini | local | v1d  (default: whisper1)
 #                        Pick by use case (benchmark 2026-05-27):
-#                          v1d:      api.v1d.io transcribe on Gemini 3.1 Flash-Lite,
-#                                    tidy off, filler words taken out here,
-#                                    WAV parts of 19 s (V1D_DICTATION=1: WebM, 590 s). V1D_WORD_TIMES=1 gives
-#                                    word times + proofread (Gemini 3.5 Transcribe,
-#                                    then Haiku). DEFAULT for amux voice
+#                          v1d:      api.v1d.io hearing on Gemini 3.5 Transcribe
+#                                    (words, 240 s parts), filler words taken out
+#                                    here (row 225). V1D_WORD_TIMES=0: Gemini 3.1
+#                                    Flash-Lite, tidy off, WAV parts of 19 s
+#                                    (V1D_DICTATION=1: WebM, 590 s). DEFAULT for amux voice
 #                                    (Mattias 2026-10-30). Key file:
 #                                    $V1D_TRANSCRIBE_KEY_FILE, default
 #                                    ~/.config/v1d-api/amux-voice-key.
@@ -442,19 +442,21 @@ PY
   python3 -c "import json; json.load(open('$out'))" 2>/dev/null
 }
 
-# api.v1d.io's transcribe (Mattias 2026-10-30): the heard text on the default route
-# (Gemini 3.1 Flash-Lite) with tidy off, filler words taken out here (row 224), a
+# api.v1d.io (Mattias 2026-10-30). The hearing is Gemini 3.5 Transcribe, the words call (word_times), 300 s per call,
+# 240 s parts (row 225, plan:3 20 Nov): on deep:8's 20 messages it heard more than Flash-Lite (about 12 wrong words
+# against 18 where the two differ, the #13 phrase both times against once in two) and added 0.75 s in the median at
+# his usual length (under 20 s, 20 timings), about 2.9 times the cost. Its words call takes no hints; the pane's
+# context still spells the names. V1D_WORD_TIMES=0 keeps the transcribe call on Flash-Lite with tidy off (row 224), a
 # bare 16 kHz mono 16-bit WAV of at most 30 s and 2 MB per call (catalog
-# transcribe.yaml, held to 20 s for WAV on the default route), so 19 s parts. V1D_WORD_TIMES=1 keeps the
-# older word_times + proofread flow (Gemini 3.5 Transcribe, then Haiku), 300 s
-# per call, 240 s parts. A POST is never resent: an unknown outcome may already
+# transcribe.yaml, held to 20 s for WAV on the default route), so 19 s parts. Filler words go here on both.
+# A POST is never resent: an unknown outcome may already
 # be billed, so it fails loud and the caller decides.
 # The names and terms Mattias says to the agents: products, panels and models (skyvw:0 30 Oct; row 224 added the
 # names misheard in deep:8's 20 messages, Fable, Astra, resets, World, Wispr). The gateway takes at most 40 terms
 # and 300 bytes (14m6); this is 40 and 288. V1D_HINTS replaces the list; an empty V1D_HINTS sends none.
 V1D_GLOSSARY="AMUX,amux,Cut,Cutkit,Haunt,Huset,Skyvw,skyvw,World,Wispr,v1d,api.v1d.io,Resolve,CapCut,Modal,Worker,gateway,TASKS,release,merge,master,resets,Claude,Fable,Opus,Sonnet,Haiku,Codex,Astra,Sol,Terra,Gemini,deep,next,plan,sandman,claw,lsrc,skybar,skydive"
 call_v1d() {  # $1=input-file $2=output-json
-  V1D_KEY_FILE="$V1D_KEY_FILE" LANG="$LANG" WORK="$WORK" V1D_WORD_TIMES="${V1D_WORD_TIMES:-0}" V1D_DICTATION="${V1D_DICTATION:-0}" V1D_HINTS="${V1D_HINTS:-$V1D_GLOSSARY}" V1D_CONTEXT="${V1D_CONTEXT:-}" python3 -I - "$1" "$2" >&2 <<'PY'
+  V1D_KEY_FILE="$V1D_KEY_FILE" LANG="$LANG" WORK="$WORK" V1D_WORD_TIMES="${V1D_WORD_TIMES:-1}" V1D_DICTATION="${V1D_DICTATION:-0}" V1D_HINTS="${V1D_HINTS:-$V1D_GLOSSARY}" V1D_CONTEXT="${V1D_CONTEXT:-}" python3 -I - "$1" "$2" >&2 <<'PY'
 import base64, concurrent.futures, glob, hashlib, json, math, os, subprocess, sys, time, urllib.error, urllib.request, wave
 
 src, out = sys.argv[1], sys.argv[2]
@@ -640,7 +642,7 @@ for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
     if not output.get('silence'):
         texts.append((output.get('text') or '').strip())
 final = without_fillers(' '.join(t for t in texts if t))
-if context and final and not word_times:
+if context and final:
     final = spell_with_context(final, whole.hexdigest(), heard_seconds)
 json.dump({"text": final, "segments": [], "duration": 0, "language": lang}, open(out, 'w'))
 PY
@@ -649,7 +651,7 @@ PY
 if $LOCAL_MODE; then
   : # response.json already produced by local pipeline above
 elif [[ "$BACKEND" == "v1d" ]]; then
-  log "api.v1d.io transcribe (lang=$LANG, word times ${V1D_WORD_TIMES:-0})..."
+  log "api.v1d.io transcribe (lang=$LANG, word times ${V1D_WORD_TIMES:-1})..."
   call_v1d "$SRC" "$WORK/response.json" || exit $?  # call_v1d already printed why
 elif [[ "$BACKEND" == "gemini" ]] && $TIMESTAMPS; then
   call_gemini_timestamped "$UPLOAD" "$WORK/response.json" || {
