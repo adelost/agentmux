@@ -6,7 +6,7 @@ import { deliveryHead, isQuotaFloorHeldJob, deliveryFloorRefusal } from "./deliv
 import { reportBlockedHandoffs } from "./delivery-handoff.mjs";
 import { withDeliveryPreparation } from "./delivery-preparation.mjs";
 import { createBuilderCap } from "./delivery-builder-cap.mjs";
-import { isBusyFromCodexJsonl } from "./codex-jsonl-reader.mjs";
+import { isBusyFromCodexJsonl, latestCodexSessionFor } from "./codex-jsonl-reader.mjs";
 import { panePathFor } from "./jsonl-reader.mjs";
 import { runtimeAgentsPath } from "./runtime-defaults.mjs";
 import { getAgent } from "../cli/config.mjs";
@@ -21,7 +21,7 @@ const unsentPrompt = job => job.kind === "prompt" && job.status === "pending" &&
  */
 export function createFloorHold({ queue, quotaFloor, now, preparationTimeoutMs, queueEvent, maybeNotifyBlocked, exactEcho, acknowledge, log, agent, configured = false }) {
   if (quotaFloor && configured && !quotaFloor.builderCap) quotaFloor.builderCap = createBuilderCap({ factsFor: createBuilderCapFacts({ factsFor: quotaFloor.windowsFor, queue }), isCodexTarget: isConfiguredCodex, now,
-    isBusy: (name, pane) => { try { return isBusyFromCodexJsonl(panePathFor(getAgent(runtimeAgentsPath(), name), pane)); } catch { return null; } },
+    isBusy: (name, pane) => { try { return capBusyState(panePathFor(getAgent(runtimeAgentsPath(), name), pane)); } catch { return null; } },
     jobs: () => queue.targets().flatMap(({ agentName, pane }) => queue.list(agentName, pane)) });
   return async function floorHold(agentName, pane) {
     if (!quotaFloor) return false;
@@ -56,3 +56,7 @@ export function createFloorHold({ queue, quotaFloor, now, preparationTimeoutMs, 
     return true;
   };
 }
+
+// A Codex pane that never wrote a session has never run a turn, so it is idle, not unknown.
+// 20 Nov 2026 (plan:0): next:8-16 counted as busy with no session file and their first prompt waited forever at the builder cap.
+const capBusyState = paneDir => latestCodexSessionFor(paneDir) ? isBusyFromCodexJsonl(paneDir) : false;
