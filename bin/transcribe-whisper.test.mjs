@@ -347,7 +347,7 @@ describe("151 terminal speech outcomes", () => {
 describe("151 gateway adapter contract, real codec and stubbed HTTP only", () => {
   for (const [scenario, expected, text] of [
     ["no_speech", 0, ""], ["too_short", 0, ""], ["unknown", 22, null],
-    ["outage", 21, null], ["content", 23, null], ["auth", 23, null], ["quota", 23, null], ["outage_run", 22, null], ["http_unknown", 22, null], ["proofread", 0, "ja"],
+    ["outage", 21, null], ["content", 23, null], ["auth", 23, null], ["quota", 23, null], ["outage_run", 22, null], ["http_unknown", 22, null], ["proofread", 0, "Ja"],   // row 224: tidy is off, and the client writes the capital that starts a sentence
     // 14 Nov 19:14Z: the day's speech calls were spent, the gateway answered this body, and five voice messages reached no pane.
     ["rate_limited", 21, null],
     // The day's audio time refuses before a run too (ai-gateway src/journal/speech/allowance.ts), so the reserve takes it.
@@ -390,7 +390,7 @@ describe("207 v1d parts are equal, never a trailing sliver", () => {
         env: { ...process.env, WORK: root, V1D_KEY_FILE: key, LANG: "sv", V1D_CONTEXT: "", V1D_HINTS: "" },
       });
       expect(result.status, result.stderr).toBe(0);
-      expect(JSON.parse(readFileSync(out)).text).toBe("ja ja");
+      expect(JSON.parse(readFileSync(out)).text).toBe("Ja ja");
       const parts = JSON.parse(result.stdout.trim().split("\n").at(-1)).parts;
       expect(parts).toHaveLength(2);
       for (const seconds of parts) expect(seconds).toBeCloseTo(9.8, 0);

@@ -19,9 +19,9 @@
 # OPTIONS
 #   --backend <b>        whisper1 | gemini | local | v1d  (default: whisper1)
 #                        Pick by use case (benchmark 2026-05-27):
-#                          v1d:      api.v1d.io transcribe, the same flow as Cut's
-#                                    voice button: text with tidy on Gemini 3.1
-#                                    Flash-Lite, WAV parts of 19 s (V1D_DICTATION=1: WebM, 590 s). V1D_WORD_TIMES=1 gives
+#                          v1d:      api.v1d.io transcribe on Gemini 3.1 Flash-Lite,
+#                                    tidy off, filler words taken out here,
+#                                    WAV parts of 19 s (V1D_DICTATION=1: WebM, 590 s). V1D_WORD_TIMES=1 gives
 #                                    word times + proofread (Gemini 3.5 Transcribe,
 #                                    then Haiku). DEFAULT for amux voice
 #                                    (Mattias 2026-10-30). Key file:
@@ -442,16 +442,17 @@ PY
   python3 -c "import json; json.load(open('$out'))" 2>/dev/null
 }
 
-# api.v1d.io's transcribe, the same flow as Cut's voice button (Mattias
-# 2026-10-30): text with tidy on the default route (Gemini 3.1 Flash-Lite), a
+# api.v1d.io's transcribe (Mattias 2026-10-30): the heard text on the default route
+# (Gemini 3.1 Flash-Lite) with tidy off, filler words taken out here (row 224), a
 # bare 16 kHz mono 16-bit WAV of at most 30 s and 2 MB per call (catalog
 # transcribe.yaml, held to 20 s for WAV on the default route), so 19 s parts. V1D_WORD_TIMES=1 keeps the
 # older word_times + proofread flow (Gemini 3.5 Transcribe, then Haiku), 300 s
 # per call, 240 s parts. A POST is never resent: an unknown outcome may already
 # be billed, so it fails loud and the caller decides.
-# The names and terms Mattias says to the agents (skyvw:0 30 Oct, transcribe hints, gateway 14m6:
-# at most 40 terms and 300 bytes). V1D_HINTS replaces the list; an empty V1D_HINTS sends none.
-V1D_GLOSSARY="AMUX,amux,Cut,Cutkit,Haunt,Huset,Skyvw,skyvw,lsrc,claw,skybar,skydive,Codex,Opus,Sonnet,Haiku,Claude,v1d,api.v1d.io,Resolve,CapCut,Modal,Worker,gateway,TASKS,release,merge,master"
+# The names and terms Mattias says to the agents: products, panels and models (skyvw:0 30 Oct; row 224 added the
+# names misheard in deep:8's 20 messages, Fable, Astra, resets, World, Wispr). The gateway takes at most 40 terms
+# and 300 bytes (14m6); this is 40 and 288. V1D_HINTS replaces the list; an empty V1D_HINTS sends none.
+V1D_GLOSSARY="AMUX,amux,Cut,Cutkit,Haunt,Huset,Skyvw,skyvw,World,Wispr,v1d,api.v1d.io,Resolve,CapCut,Modal,Worker,gateway,TASKS,release,merge,master,resets,Claude,Fable,Opus,Sonnet,Haiku,Codex,Astra,Sol,Terra,Gemini,deep,next,plan,sandman,claw,lsrc,skybar,skydive"
 call_v1d() {  # $1=input-file $2=output-json
   V1D_KEY_FILE="$V1D_KEY_FILE" LANG="$LANG" WORK="$WORK" V1D_WORD_TIMES="${V1D_WORD_TIMES:-0}" V1D_DICTATION="${V1D_DICTATION:-0}" V1D_HINTS="${V1D_HINTS:-$V1D_GLOSSARY}" V1D_CONTEXT="${V1D_CONTEXT:-}" python3 -I - "$1" "$2" >&2 <<'PY'
 import base64, concurrent.futures, glob, hashlib, json, math, os, subprocess, sys, time, urllib.error, urllib.request, wave
@@ -544,6 +545,31 @@ def spell_with_context(text, sha, seconds):
         print(f"[v1d] spelling with context changed {changed} in {len(runs)} calls, {usd:.6f} USD", file=sys.stderr)
     return ' '.join(w for d in done for w in d[0])
 
+# Row 224: the gateway's tidy dropped whole clauses he said (5 places in 4 of deep:8's 20 messages, 20 Nov), most often
+# at the start of a part that begins mid-sentence, so tidy is off and only its own filler words go, here, word by word
+# (its Swedish list, ai-gateway src/adapters/google/voice/gemini.ts). No other word can go; "typ av" is a word, not a filler.
+FILLERS = {'eh', 'ehm', 'öh', 'öhm', 'äh', 'ähm', 'hm', 'hmm', 'mm', 'mmm', 'alltså', 'liksom', 'typ'}
+HINTS = {h.strip() for h in os.environ['V1D_HINTS'].split(',') if h.strip()}
+
+def without_fillers(text):
+    """The heard text without filler words. A filler's mark moves to the word before it. A sentence starts with a capital, also when a filler or a
+    part's seam began it (tidy wrote those capitals before), except a name from the hints (lsrc) or a word that is not letters (api.v1d.io);
+    a word with a dot inside (t.ex.) ends no sentence."""
+    words, kept, capital = text.split(), [], True
+    for i, word in enumerate(words):
+        bare = word.rstrip('.,?!…')
+        after = words[i + 1].rstrip('.,?!…').lower() if i + 1 < len(words) else ''
+        if bare.lower() not in FILLERS or (bare.lower() == 'typ' and after == 'av'):
+            kept.append(word[0].upper() + word[1:] if capital and bare.isalpha() and bare not in HINTS else word)
+            capital = word[-1] in '.?!…' and '.' not in word.rstrip('.?!…')
+            continue
+        mark = word[len(bare):]
+        if mark and kept and kept[-1][-1] not in '.?!…':
+            kept[-1] = kept[-1].rstrip(',') + mark
+            capital = mark[-1] in '.?!…'
+        capital = capital or not kept or word[0].isupper()
+    return ' '.join(kept)
+
 texts = []
 whole, heard_seconds = hashlib.sha256(), 0.0
 for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
@@ -559,7 +585,7 @@ for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
         body.update({'word_times': True, 'proofread': True,
                      'clip': {'source_identity': 'sha256:' + hashlib.sha256(data).hexdigest(), 'start': 0, 'end': round(seconds, 3)}})
     else:  # transcribe's audio port takes {type, data}; words takes {media, data}
-        body.update({'tidy': True, 'file': {'type': 'audio/' + ext, 'data': body['file']['data']},
+        body.update({'tidy': False, 'file': {'type': 'audio/' + ext, 'data': body['file']['data']},
                      'hints': [h.strip() for h in os.environ['V1D_HINTS'].split(',') if h.strip()]})
         if not dictation:
             body['preset'] = 'standard-guard-1'
@@ -613,7 +639,7 @@ for part in sorted(glob.glob(os.path.join(parts_dir, 'part-*.' + ext))):
              if word_times else f"route {run.get('route') or output.get('route')}"))
     if not output.get('silence'):
         texts.append((output.get('text') or '').strip())
-final = ' '.join(t for t in texts if t)
+final = without_fillers(' '.join(t for t in texts if t))
 if context and final and not word_times:
     final = spell_with_context(final, whole.hexdigest(), heard_seconds)
 json.dump({"text": final, "segments": [], "duration": 0, "language": lang}, open(out, 'w'))
