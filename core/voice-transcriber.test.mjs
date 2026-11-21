@@ -2,6 +2,7 @@ import { component, expect, feature } from "bdd-vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { vi } from "vitest";
 import {
   createVoiceBufferTranscriber,
   transcribeVoiceBuffer,
@@ -82,9 +83,11 @@ feature("shared voice transcriber", () => {
       rmSync(ctx.tempDir, { recursive: true, force: true });
     }],
   });
-  for (const [pane, expected] of [[3, "Är det en porslinshand?"], [4, undefined]]) {
-    component(`the buffer transcriber for lsrc:${pane} ${expected ? "passes that pane's latest reply" : "passes no V1D_CONTEXT, since the pane has no reply"}`, {
+  for (const [pane, spell, expected] of [[3, "on", "Är det en porslinshand?"], [4, "on", undefined], [3, undefined, undefined]]) {
+    component(`the buffer transcriber for lsrc:${pane} with spelling context ${spell || "off"} ${expected ? "passes that pane's latest reply" : "passes no V1D_CONTEXT"}`, {
       given: ["a reader where only lsrc:3 has replied", () => {
+        vi.unstubAllEnvs();
+        if (spell) vi.stubEnv("AMUX_VOICE_SPELL_CONTEXT", spell); else vi.stubEnv("AMUX_VOICE_SPELL_CONTEXT", "");
         const tempDir = mkdtempSync(join(tmpdir(), "amux-transcriber-context-"));
         const envs = [];
         const transcribe = createVoiceBufferTranscriber({
@@ -102,6 +105,7 @@ feature("shared voice transcriber", () => {
         expect(ctx.envs[0].V1D_CONTEXT).toBe(expected);
         if (!expected) expect(Object.hasOwn(ctx.envs[0], "V1D_CONTEXT")).toBe(false);
         rmSync(ctx.tempDir, { recursive: true, force: true });
+        vi.unstubAllEnvs();
       }],
     });
   }

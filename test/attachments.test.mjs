@@ -407,10 +407,12 @@ function paneReplies() {
   });
 }
 
-feature("Discord voice is transcribed with its pane's latest reply as context", () => {
-  for (const [pane, expected] of [[1, "Är det en porslinshand från Rörstrand?"], [2, undefined]]) {
-    unit(`a note to sandman:${pane} ${expected ? "carries that pane's reply" : "has no V1D_CONTEXT, since the pane has no reply"}`, {
+feature("Discord voice carries its pane's latest reply as context only when spelling context is on", () => {
+  for (const [pane, spell, expected] of [[1, "on", "Är det en porslinshand från Rörstrand?"], [2, "on", undefined], [1, undefined, undefined]]) {
+    unit(`a note to sandman:${pane} with spelling context ${spell || "off"} ${expected ? "carries that pane's reply" : "has no V1D_CONTEXT"}`, {
       given: ["a journaled note routed to the pane", () => {
+        vi.unstubAllEnvs();
+        vi.stubEnv("AMUX_VOICE_SPELL_CONTEXT", spell || "");
         const run = vi.fn(async () => ({ stdout: "porslinshand", stderr: "" }));
         const handler = createAttachmentHandler({
           run, transcribeScript: "/fake/transcribe.sh", downloadBuffer: vi.fn(), writeTmp: vi.fn(),
@@ -424,6 +426,7 @@ feature("Discord voice is transcribed with its pane's latest reply as context", 
         const env = ctx.run.mock.calls[0][2] || {};
         expect(env.V1D_CONTEXT).toBe(expected);
         if (!expected) expect(Object.hasOwn(env, "V1D_CONTEXT")).toBe(false);
+        vi.unstubAllEnvs();
       }],
     });
   }

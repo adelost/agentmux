@@ -40,8 +40,9 @@ export function createPaneReplyReader(agentsYamlPath, { loadAgents = listAgents,
 }
 
 // ~/bin/transcribe spells the heard words against V1D_CONTEXT through /v1/proofread and cuts it to the gateway's
-// limit (ai:1 1 Nov: "porslinshand" with the pane's reply, "pusslinhand" without).
-/** WHAT: Builds the transcriber environment for one voice message. WHY: Keeps a pane without a reply from sending any context. */
-export function voiceContextEnv(reply) {
-  return reply ? { V1D_CONTEXT: reply } : {};
+// limit (ai:1 1 Nov: "porslinshand" with the pane's reply, "pusslinhand" without). Off unless AMUX_VOICE_SPELL_CONTEXT=on:
+// the pane's own reply rewrote his words toward its own terms (21 Nov, plan:0; he asked for it off).
+/** WHAT: Builds the transcriber environment for one voice message. WHY: Sends a pane's reply as spelling context only when switched on. */
+export function voiceContextEnv(reply, env = process.env) {
+  return reply && env.AMUX_VOICE_SPELL_CONTEXT === "on" ? { V1D_CONTEXT: reply } : {};
 }
